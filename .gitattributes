@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.mp3 binary
+*.png binary
+*.eps binary
+tools/bin/abcm2ps binary

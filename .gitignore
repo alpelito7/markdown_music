@@ -1,0 +1,11 @@
+# Render output
+mdm_cache/
+example.html
+example.pdf
+example_files/
+/example.qmd
+
+# Dependencies and test scratch
+node_modules/
+tests/tmp/
+
