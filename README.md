@@ -95,58 +95,82 @@ they would with no label at all.
 ## Visual editor for VS Code (`vscode-mdm/`)
 
 A VS Code extension that opens `.mdm` files as a rendered, editable
-document (in the manner of Typora or Office Viewer): text, KaTeX equations
-and scores are shown rendered; clicking a block reveals its source, and the
-rendering follows every keystroke. It uses the Custom Editors API with
-[Vditor](https://github.com/Vanessa219/vditor) in IR mode (vendored,
-v3.11.3, works with no network); the ` ```abc ` blocks are engraved by the
-abcjs that ships inside Vditor, called from the webview.
+document: text, KaTeX equations and scores are shown rendered, and the
+source of each shows where a caret is, so the document edits like prose in
+Typora or in Obsidian's live preview and like code wherever the caret
+stands. It uses the Custom Editors API over a [CodeMirror 6](https://codemirror.net)
+view of the Markdown text (vendored, works with no network); the scores are
+engraved and played by the vendored abcjs 6.7.0, the same engine the Quarto
+HTML output uses, and the equations by KaTeX 0.18.
 
 Installation: symlink the directory into
 `~/.vscode/extensions/alpelito7.mdm-editor-0.1.0` and reload the window
 (`Developer: Reload Window`). To go back to the plain text editor: right
-click the file, `Open With...`.
+click the file, `Open With...`. Both can be open at once on the same file
+(Reopen Editor With... in a second group): they share the document.
 
-Ergonomics (verified with an automated suite in Chrome):
+How the editing works:
 
-- **Leaving a code block**: `Ctrl+Enter` inserts a paragraph below the
-  current block from any position; `Enter` on an empty last line with the
-  caret at the end leaves the block and removes that line (the Typora
-  gesture). Arrow-down on the last line (Vditor's own) and the "insert
-  before/after" toolbar buttons work too.
-- **Clicking a score** opens its ABC source with the caret at the end; the
-  score is redrawn as you type. abcjs, on its own, paints the note you
-  clicked red (`fill="#ff0000"` plus the class `abcjs-note_selected`): that
-  is its internal selection, which here was never undone because nothing
-  calls its `unhighlight`. The webview clears it, since the click means
-  something else here and no function of ours reads that selection. If note
-  dragging is ever wired up, that is the hook.
-- **Clicking the empty area below the end** of the document adds a
-  paragraph and keeps writing.
-- **Deleting against an equation or a code block enters it** instead of
-  wrecking it. Vditor does not handle forward Delete: with the caret at the
-  end of the paragraph above, the browser's native deletion melted the
-  source into the paragraph, left the drawing (KaTeX or score) orphaned on
-  screen, and the next serialization wrote the text of the glyphs into the
-  file. Checked against a bare Vditor 3.11.3, and the same in equations,
-  code and scores. That key now opens the block with the caret at the start
-  of its source, symmetric to the Backspace from the paragraph below, which
-  already entered it (that one is Vditor's and has been left alone, as have
-  the arrow keys). Inside an open source, Backspace at the start and Delete
-  at the end leave the block rather than dissolving it into a paragraph of
-  raw code. Once the source is empty, the next keystroke removes the whole
-  block and `Ctrl+Z` brings it back. And a selection covering the whole
-  source is deleted by hand, because the native one wrecked it the same way
-  Delete did (the comparison is by range positions and not by drawn text:
-  `Selection.toString()` comes out empty while the block is shut, measured).
-
-  The `$$` themselves still cannot be edited character by character: lute
-  derives the fences again from the structure of the block on every key, so
-  the broken-fence state a plain text editor would show simply does not
-  exist. To write a new formula, empty the block and type inside it.
-  Reaching Obsidian's level there means changing the block editing engine
-  (CodeMirror per block, the way the Office Viewer fork does it, or a full
-  migration).
+- **The text is the file.** The editor holds the Markdown of the document
+  and nothing else, so every character of it, the `$$` of an equation, the
+  backticks of a fence, the `#` of a heading, is an ordinary character:
+  delete one `$` of a closing `$$` and the block is no longer an equation,
+  it is a paragraph with three dollar signs in it, shown as such, and
+  nothing regenerates the fourth; type it back and the equation renders
+  again. There is no serialization step between what is typed and what is
+  saved (the one exception is the YAML header while it is hidden, below).
+- **Rendering follows the carets.** What is drawn where depends on the
+  Markdown structure (the Lezer tree CodeMirror keeps) and on where the
+  selection is. A block no selection range touches is drawn: an equation
+  as KaTeX, a score as its engraving, a fenced block as a card of
+  highlighted code with its fences hidden, bold as bold with the `**`
+  hidden, a `- ` as a bullet, a link as its text. A block a caret is in
+  shows its source: the equation's `$$` lines on a monospace card with the
+  rendered equation right under them as a live preview, the score's ABC
+  with the score and its player under it, the fences of a code block,
+  the `**` of the bold span. Every selection range counts, not just the
+  main one, so each of several carets opens the thing it edits; the edges
+  count too, so arriving at a block from outside opens it before the next
+  keystroke lands in it. An equation whose source KaTeX refuses stays as
+  source with a red edge while no caret is in it, and shows KaTeX's message
+  under the source while one is; the moment it compiles, it renders.
+  Inline maths and inline marks show only their source while the caret is
+  in them, there being no room for two copies in a line.
+- **Getting in and out.** A click on a rendered equation or score puts the
+  caret at the start of its source. The arrow keys walk into a rendered
+  block from the line above or below (Down into its first line, Up into
+  its last), and out again past its last line. `Ctrl+Enter` leaves the
+  block the caret is in (a fence, an equation, a list, a quote, a callout,
+  a heading line) into a fresh paragraph below it; inside a code block
+  plain `Enter` is a newline, as in any code editor, since the closing
+  fence is a line of text the caret can walk past.
+- **Multicursor**, as in VS Code's own editor: `Alt+click` adds a caret
+  (or `Ctrl+click`, following the `editor.multiCursorModifier` setting),
+  `Shift+Alt+drag` selects a column, `Ctrl+D` selects the next occurrence
+  of the selection, `Ctrl+Shift+L` every occurrence, `Ctrl+Alt+Up/Down`
+  adds a caret on the line above or below, `Escape` goes back to one.
+  Typing, the formatting commands and undo act at every caret at once (one
+  `Ctrl+Z` takes back a multi-caret insert). This is what moved the editor
+  off its previous engine: a `contenteditable` in Chromium keeps a single
+  selection range (measured: after adding three, `rangeCount` is still 1),
+  so a multicursor there could only have been an emulation, redone after
+  every keystroke.
+- **Formatting**: `Ctrl+B`, `Ctrl+I` and `Ctrl+E` wrap (or unwrap) each
+  selection in `**`, `*` or backticks; `Ctrl+K` makes a link with the caret
+  in the address; the toolbar has the same three, a link, a heading button
+  that takes each selected line one level up (and a level-six heading back
+  to a paragraph), and bulleted and numbered lists that toggle their
+  markers on the selected lines. The bar leads with export, then undo and
+  redo (rotating arrows, grey when there is nothing to do), and ends with
+  the editor's own buttons: theme, score fill, staff lines, score
+  alignment and the YAML header.
+- **Undo inside VS Code, once.** The webview host replays the workbench's
+  `undo` command into the page as `document.execCommand("undo")` after the
+  keystroke has already reached the editor, which ran its own undo; the
+  replay would run the browser's native undo over CodeMirror's DOM on top
+  of it (measured: it ate the end of the line). Undo and redo are taken
+  off `execCommand` in the page; copy, cut, paste and select-all keep
+  theirs, which CodeMirror answers through the events they fire.
 - **Export from the toolbar**: the first button opens HTML / PDF / HTML +
   PDF. Each entry saves the document first (which makes export a save as
   well: what reaches the HTML and the PDF is always what is on screen) and
@@ -155,51 +179,6 @@ Ergonomics (verified with an automated suite in Chrome):
   any VS Code editor; "save as" is VS Code's own (File > Save As). The
   renderer is looked up in the `bin/mdm` of the document's workspace and,
   failing that, next to the extension.
-- **Undo and redo sit at the head of the toolbar**, after export, as in any
-  editor, and with rotating arrows drawn for them (Vditor's were bent
-  arrows); the wiring and the disabled state are still Vditor's.
-- **Resuming after a pause keeps the beat**: the resuming play restarts the
-  sound exactly where it stopped but MUTED, what was left of the cut note
-  passes in real silence with the clock running, and the gain comes back a
-  hair before the next note attacks, scheduled on the AudioContext's own
-  clock (sample accurate): the note that is due lands on its beat, in ink
-  and in sound together, the way a conductor counts you in. Nothing of the
-  past is heard again (the cut tail stays silenced) and nothing jumps
-  ahead. How the design got there: stock abcjs replayed the tail with no
-  attack and its cursor painted the NEXT note at once (it restarts its
-  clock by advancing the event pointer); the first attempt at a fix jumped
-  straight to the following onset, and near a barline the drift between the
-  visual clock and the audio could skip a whole bar, besides not waiting
-  for the beat. The held ink and the silence share one teardown: pausing
-  again, stop, a drag of the bar or closing the player lift it at once (a
-  scrub has to sound where it lands).
-- **A click outside a block that is open for editing closes it**, at the
-  sides too. Above and below already worked, but only because the click
-  lands on another block there and the caret goes with it; at the sides
-  there is no block to land on, since a block spans the whole width and the
-  page has margins of its own (measured: 50 px), so the click landed on the
-  editable root and the source stayed open. The webview takes the focus off
-  that root, which is the gesture Vditor itself closes an open block with,
-  rather than undoing its work from outside. That rule holds for a real
-  click only: selecting a long line of ABC with the mouse runs out of the
-  block and the button comes up in the margin, and the `click` that arrives
-  there has the editable root as its target, exactly like a click beside
-  the block. Read as a click, it closed the block and threw away the
-  selection just made (the caret jumped to the top of the collapsed score),
-  which is what made a whole line impossible to select. The webview
-  compares where the button went down with where it came up: if they differ,
-  or the pointer moved more than 3 px, the gesture is a drag and is let
-  through.
-- **Nothing is written in the margins, so nothing is offered there**: in
-  the two strips beside the blocks (the padding of the editable root, 50 px
-  a side) the pointer stops being a text beam and goes back to the arrow, a
-  press does not place the caret, and a click does not open the source of
-  the block beside it. It used to: a click 20 px from the left edge took
-  the caret to the nearest line and Vditor opened the ABC of the score
-  (measured). The one thing that click still does is close a block that was
-  open. The strip is told apart from the gap between two blocks, which is
-  the root as well and where placing the caret in the line beside it is the
-  ordinary thing to do: only a pointer outside the content box counts.
 - **Playback**: beside the copy button of every score (both appear on
   hover) there is a pair of headphones that unfolds a player bar under the
   score, with play/pause, stop, repeat, a draggable progress bar and
@@ -209,21 +188,33 @@ Ergonomics (verified with an automated suite in Chrome):
   rewinds the clock and the sound to the top. The headphones have a single
   face, and the lit disc behind them says that this score's player is open,
   the way the repeat button does; the tooltip still names the destination
-  of the click ("Show player", "Hide player"). They were a speaker until
-  the bar got a mute of its own: a struck-through cone in the corner
-  meaning "click to hide", beside another struck-through cone in the bar
-  meaning "no sound is coming out", are two readings of one drawing.
-  Headphones say sound without being a loudspeaker, so the family of the
-  cone is left to the mute alone. A real piano sounds without touching the
-  network: the 88 notes of the Musyng Kite soundfont (CC BY-SA 3.0) are
-  vendored in `media/vendor/soundfont/`, and the synthesis is the vendored
-  abcjs 6.7.0, the same engine as the Quarto HTML output. That abcjs is
-  fetched by XHR and evaluated with its module/exports pair so that it does
-  not overwrite `window.ABCJS`, where the 5.10.3 that engraves the scores
-  lives. One player at a time: opening another score's closes the previous
-  one. The bar survives edits of its own block and external updates,
-  rebuilt paused and on the new source. Only the piano is vendored: a
-  different `%%MIDI program` will not find its notes.
+  of the click ("Show player", "Hide player"). A real piano sounds without
+  touching the network: the 88 notes of the Musyng Kite soundfont (CC BY-SA
+  3.0) are vendored in `media/vendor/soundfont/`, and the synthesis is the
+  vendored abcjs 6.7.0. One player at a time: opening another score's
+  closes the previous one. The bar lives in the score's widget, which
+  CodeMirror keeps while the ABC source is the same: a caret going into
+  the block and out again, or the block scrolling off screen and back,
+  leaves the player where it was, sounding. An edit of the ABC rebuilds
+  the widget and the player reopens on it, paused and on the new source.
+  Only the piano is vendored: a different `%%MIDI program` will not find
+  its notes.
+  - **Resuming after a pause keeps the beat**: the resuming play restarts
+    the sound exactly where it stopped but MUTED, what was left of the cut
+    note passes in real silence with the clock running, and the gain comes
+    back a hair before the next note attacks, scheduled on the
+    AudioContext's own clock (sample accurate): the note that is due lands
+    on its beat, in ink and in sound together, the way a conductor counts
+    you in. Nothing of the past is heard again (the cut tail stays
+    silenced) and nothing jumps ahead. How the design got there: stock
+    abcjs replayed the tail with no attack and its cursor painted the NEXT
+    note at once (it restarts its clock by advancing the event pointer);
+    the first attempt at a fix jumped straight to the following onset, and
+    near a barline the drift between the visual clock and the audio could
+    skip a whole bar, besides not waiting for the beat. The held ink and
+    the silence share one teardown: pausing again, stop, a drag of the bar
+    or closing the player lift it at once (a scrub has to sound where it
+    lands).
   - **The first note of the first play was sometimes not heard** (and it
     sounded whole once the tune went back to the top). The note is
     synthesized correctly from millisecond zero, measured by taking the
@@ -249,10 +240,10 @@ Ergonomics (verified with an automated suite in Chrome):
   - While a tune plays, the notes light up on the score: the synth reports
     the characters of the source that are sounding and the engraving on
     screen lights the elements over that same range, which is where the two
-    engines meet. The colour is brass, the one on the note of the
-    extension's icon, and it lives in `--mdm-play-accent` with one value
-    per side (`#a0740f` light, `#d9a94f` dark, as the score backgrounds
-    do): it paints the class `.abcjs-note_selected` from the stylesheet, so
+    meet. The colour is brass, the one on the note of the extension's
+    icon, and it lives in `--mdm-play-accent` with one value per side
+    (`#a0740f` light, `#d9a94f` dark, as the score backgrounds do): it
+    paints the class `.abcjs-note_selected` from the stylesheet, so
     changing it is two lines. That brass belongs to the score and to
     nothing else: the bar carries no colour of its own.
   - The volume is one for the whole session: set it on one score and the
@@ -273,10 +264,9 @@ Ergonomics (verified with an automated suite in Chrome):
     the destination of the click, which is how everybody reads a volume
     control; the tooltip does name the destination ("Mute", "Unmute"), the
     pairing of every player. The ones that still name the destination with
-    their face are the toolbar buttons (the theme with its sun and moon,
-    the staff lines with "Ink staff lines" and "Gray staff lines"), which
-    sit far from what they govern and cannot show their state any other
-    way.
+    their face are the toolbar buttons (the staff lines with "Ink staff
+    lines" and "Gray staff lines"), which sit far from what they govern and
+    cannot show their state any other way.
   - **The whole bar is drawn in the ink of the editor, at four weights**:
     the hairline of a track (18 %), what has been played (52 %), the disc
     under a button beneath the pointer (10 %) and the disc of a button that
@@ -327,21 +317,13 @@ Ergonomics (verified with an automated suite in Chrome):
     that, abcjs turned them into a strummed accompaniment of its own, four
     crotchets filling the bar under a written semibreve. Same rule in the
     Quarto HTML output (`resources/mdm.js`).
-  - **The caret does not move while the player is used**, and whether it
-    sounds at all depends on that: a `<button>` is focusable, so its
-    `mousedown` took the focus off the editable root, Vditor answers that
-    `blur` by collapsing the open block (and reassigning the range, which
-    is what moved the document), and in rebuilding the preview the button
-    disappeared between the `mousedown` and the `click`, which never
-    reached the synthesizer. That is why the first play after looking at a
-    score's source did nothing. The default of `mousedown` inside the bar
-    is prevented, except on the form controls, which need the native drag,
-    and on the progress bar, which answers the arrow keys once it has been
-    clicked. Measured before the fix: no playback and the document shifted
-    by 258 px. The volume slider, which does need the focus, goes another
-    way: its `blur` is stopped in the capture phase before it reaches
-    Vditor's listener (`blur` does not bubble and Vditor listens on the root
-    itself, so capture is the only place it can be caught).
+  - **The caret does not move while the player is used**: a `<button>` is
+    focusable, so its `mousedown` would take the focus off the editor; the
+    default of `mousedown` inside the bar is prevented, except on the form
+    controls, which need the native drag, and on the progress bar, which
+    answers the arrow keys once it has been clicked. The widget the bar
+    lives in tells CodeMirror to ignore every event inside it, so a click
+    on play never becomes a caret placement.
   - The cursor is told 16 times a beat (`beatSubdivisions`). abcjs reports
     once a beat by default, and that same number is where its cursor
     resumes from after a pause, while the sound goes on exactly where it
@@ -355,26 +337,22 @@ Ergonomics (verified with an automated suite in Chrome):
     its buttons, so any background of ours has to be marked the same or it
     is not painted (that was why the repeat button looked dead), and its
     tooltips live in `title`, which inside a VS Code webview is never
-    shown; the CSS tooltip of Vditor is used instead, the same one the copy
-    button has. The volume slider carries `outline: none`: VS Code injects
-    a sheet of its own into every webview with `a:focus, input:focus,
-    select:focus, textarea:focus { outline: 1px solid
-    -webkit-focus-ring-color }` (it is in the preload of the installed
-    build), and that system colour is amber in Chromium, so setting the
-    volume drew a yellow box. Keyboard focus keeps a mark, in the ink of
-    the bar. And the bar stops the propagation of `keyup` as well: it is
-    inserted inside the score's `<pre>`, and Vditor keeps a listener there
-    that puts the focus back on the editable root, so the first arrow key
-    pressed on the progress bar was answered and the focus was lost on the
-    release of that same key.
+    shown; the CSS tooltip of the editor (`.mdm-tip`, drawn from
+    `aria-label`) is used instead, the same one the copy button has. The
+    volume slider carries `outline: none`: VS Code injects a sheet of its
+    own into every webview with `a:focus, input:focus, select:focus,
+    textarea:focus { outline: 1px solid -webkit-focus-ring-color }` (it is
+    in the preload of the installed build), and that system colour is
+    amber in Chromium, so setting the volume drew a yellow box. Keyboard
+    focus keeps a mark, in the ink of the bar.
 - **Theme menu**: a toolbar button opens, in this order, *Follow VS Code*
   (the default), *Light*, *Dark*, *White* and every colour theme installed
   in VS Code (Monokai, Solarized Light, Abyss and whatever the user
   installs). A named theme brings a syntax palette of its own and a side of
   its own: choosing Monokai leaves the editor dark and Solarized Light
-  leaves it light. The setting is still `mdm.theme`, which now takes theme
-  names besides `auto`/`light`/`dark`/`white`; the webview does not repaint
-  by itself, it asks the host to write the setting, so the choice persists
+  leaves it light. The setting is `mdm.theme`, which takes theme names
+  besides `auto`/`light`/`dark`/`white`; the webview does not repaint by
+  itself, it asks the host to write the setting, so the choice persists
   and every open `.mdm` editor shares it. The list is read when the editor
   opens: a theme installed with the editor already open shows up after
   reloading the window. A name no extension provides is discarded and falls
@@ -400,10 +378,6 @@ Ergonomics (verified with an automated suite in Chrome):
     the theme says and the code with its slate. A score with no background
     of its own (`mdm.scoreFill` at `none`) is drawn on the page, so there
     it comes out on white.
-
-  The ground of the document used to come from Vditor's content theme
-  (`#24292e` on the dark side) rather than from the theme, so the code card
-  and the ground were two greys from different families.
 - **Syntax colours inherited from VS Code**: the code of the document (the
   YAML header and the code blocks) is painted with the colours of the theme
   chosen in the menu above, which by default is the one the user has set in
@@ -416,131 +390,90 @@ Ergonomics (verified with an automated suite in Chrome):
   its JSON (with comments, and following the `include` chain), applies
   `editor.tokenColorCustomizations` on top and sends the webview a palette
   of ten colours, which `main.js` sets as `--mdm-syn-*` properties on
-  `#app`. Only hex colours get through the filter: those values end up
-  inside the HTML of the webview. With no usable palette (a theme in
-  `.tmTheme`, which is not parsed, or the editor forced to the opposite
-  side of the VS Code theme with `mdm.theme`) the fallback palettes of
-  `style.css` come in: Monokai on the dark side and stackoverflow-light on
-  the light one.
+  `#app` and spends through a CodeMirror highlight style over the tokens
+  of each fenced language (Python, JavaScript, JSON, YAML, HTML, CSS, C++
+  with full parsers; R, Julia, shell, LaTeX, Lua, Ruby, Octave, Haskell,
+  C, Java, C#, SQL, TOML, XML and diffs with the lighter stream modes).
+  Only hex colours get through the filter: those values end up inside the
+  HTML of the webview. With no usable palette (a theme in `.tmTheme`, which
+  is not parsed, or the editor forced to the opposite side of the VS Code
+  theme with `mdm.theme`) the fallback palettes of `style.css` come in:
+  Monokai on the dark side and stackoverflow-light on the light one.
 - **Score background**: none by default, so that the score reads as part of
-  the document the way an equation does. Vditor's content theme paints
-  every `<code>` with a wash (a blue box on the dark side) that framed it;
-  the extension's stylesheet cancels that. The second to last toolbar
-  button, **Score fill**, opens the options (`none`, `paper`, `slate`,
-  `brass`, setting `mdm.scoreFill`); each carries a light value and a dark
-  one, and the one for the active theme is applied. The other background
-  that crept behind the score was the card of code blocks: Vditor puts the
-  class `hljs` on the `<code>` of every block it renders again, scores
-  included, so from the first edit inside a music block the score sat on
-  the card (invisible in a light theme, obvious in a dark one: card
-  rgb(52,52,46) on a rgb(36,41,46) ground, measured). The card rule excludes
-  `.language-abc` by name, and that also leaves out the `color`, which the
-  score does read: the dark content theme paints the shapes inside
-  `.language-abc` with `currentColor`.
+  the document the way an equation does. The **Score fill** toolbar button
+  opens the options (`none`, `paper`, `slate`, `brass`, setting
+  `mdm.scoreFill`); each carries a light value and a dark one, and the one
+  for the active theme is applied.
 - **The score fits the width of the panel**: abcjs draws it at a fixed size
   with `width`/`height` attributes and no `viewBox`, so narrowing the
   window shrank the element but not the drawing, and it was cut off at the
   bottom and on the right. The webview adds the `viewBox` and then it
-  scales whole. It does not come from those two attributes alone, because
-  the abcjs embedded in Vditor (5.10.3) measures the SVG by the engraved
-  music only and centres the title above it: with a narrow staff
-  (`%%staffwidth 200pt`) the title ran out of the box and lost its first
-  and last letter (measured: a box of 266 units, ink from −6 to 272). The
-  `viewBox` is the union of the declared box and the real `getBBox()`, so
-  nothing is cut and a score that already fitted does not change size. The
-  abcjs 6.7.0 on the Quarto side does count the title, checked with the
-  same block: this is the editor's business only.
+  scales whole, as the union of the declared box and the real `getBBox()`,
+  so nothing is cut and a score that already fitted does not change size.
 - **Score centred or left aligned**: centred by default, like a display
   equation; the alignment button on the toolbar takes it to the left margin
   and back (setting `mdm.scoreAlign`, `center`/`left`). The icon and the
-  tooltip name the destination of the click, as on the theme button. Only
-  scores narrower than the panel move: one that takes the whole width looks
-  the same either way.
-- **Scores set into the text**: spacing identical to a paragraph's
-  (verified to the pixel), no red flash when a note is clicked (the SVG is
-  transparent to the pointer, the click means "open the source"), and
-  narrow ones (`%%staffwidth`) centred like an equation.
+  tooltip name the destination of the click. Only scores narrower than the
+  panel move: one that takes the whole width looks the same either way.
+- **Scores set into the text**: spacing identical to a paragraph's, no red
+  flash when a note is clicked (the SVG is transparent to the pointer, the
+  click means "open the source"), and narrow ones (`%%staffwidth`) centred
+  like an equation.
 - **Staff lines in grey**, Guitar Pro style, which is how they are drawn by
   default: a button of its own on the toolbar (a staff icon, unlit while
   the default holds and lit when the lines go to ink, with a tooltip naming
   the destination of the click) or the setting `mdm.staffLines`
   (`gray`/`ink`); notes, clefs and barlines stay in ink.
-- **Copying a block flashes the block, not the page**: Vditor's mechanism
-  selects a hidden textarea holding the whole source, and that lights up
-  the selection of the entire page for an instant. The webview intercepts
-  the click on the copy button of any code block: the source goes to the
-  clipboard through the API, nothing is selected, and the confirmation is a
-  brief pulse of the block's own background (the code card rises towards
-  the text colour and comes back; a score, which has no background, takes
-  the accent tint and fades). A score is also copied without its layout
+- **Copying a block flashes the block, not the page**: the copy button in
+  the corner of any code block or score puts the source on the clipboard
+  through the API, nothing is selected, and the confirmation is a brief
+  pulse of the block's own background (the code card rises towards the
+  text colour and comes back; a score, which has no background, takes the
+  accent tint and fades). A score is also copied without its layout
   directives (`%%staffwidth` and the like), which size it for this document
   and mean nothing pasted somewhere else.
-- **Quarto callouts decorated**: `::: {.callout-note title="..."}` is no
-  longer shown as raw text; the range carries an accent bar and a tint by
-  type (note/tip/warning/important/caution) and the `:::` lines are drawn
-  small and faint (they stay editable; with the caret inside the paragraph
-  they go back to full size).
+- **Quarto callouts decorated**: `::: {.callout-note title="..."}` is
+  parsed as a block of its own (a Lezer extension in `vendor-src/`); the
+  range carries an accent bar and a tint by type
+  (note/tip/warning/important/caution) and the `:::` lines are drawn small
+  and faint until the caret is on them. An unclosed `:::` stays plain text.
 - **English interface**, tooltips included, drawn downwards.
 - **YAML header, shown and editable**: the last toolbar button shows and
   hides it (setting `mdm.frontMatter`, hidden by default; the button is
-  disabled if the file has no header). Shown, it is one more block of the
-  document: lute parses it as a node of its own (`yaml-front-matter`, the
-  YAML in an editable `<code>` between two `---`) and whatever is typed
-  there goes to the file. Hidden, the header is kept intact outside the
-  editor's model and the host splices it back on save. In both cases the
-  host restores the blank line after the closing `---`, which lute removes
-  and Pandoc wants; without restoring it, every edit came back one
-  character shorter than what was sent and the document and the editor were
-  permanently out of sync. The header is shown **coloured**, with the same
-  palette as the rest of the code: the editable `<code>` cannot be touched
-  (lute reads the content of the block from the first child of that
-  `<code>`, so splitting it into highlight spans serializes the first span
-  alone and the whole header is lost on the next keystroke, anywhere in the
-  document), so the webview gives the block the shape Vditor uses for code
-  blocks: the source marked as a *marker*, of zero size while the caret is
-  outside, and beside it a read-only `.vditor-ir__preview` with the painted
-  copy. When the caret enters, the two swap and the header is edited plain.
-  Turning the button on also takes the editor to the top of the file, which
-  is where what has just been shown lives. The block is added and removed
-  **on its own**, not by rebuilding the document: a full `setValue`
-  repaints every block (a blank frame) and engraves every score again, so
-  the webview builds the node lute would have produced and inserts it, or
-  deletes the one that is there. Only when the incoming text differs in
-  more than the header is a full render used.
+  disabled if the file has no header). Shown, it is the first lines of the
+  text, `---` fences included, on a card and highlighted as YAML, and
+  whatever is typed there goes to the file. Hidden, the header and the
+  blank lines under it are kept outside the editor's text and the host
+  splices them back on every save (`transforms.js`), so the file is
+  byte-identical around whatever was edited; blank lines typed at the very
+  top of the body in that mode join the gap under the header. Turning the
+  button on also takes the editor to the top of the file, which is where
+  what has just been shown lives. Verified: editing `example.mdm` in the
+  editor and saving leaves the file byte-identical apart from what was
+  edited, in both modes.
 
-Round-trip armour (`transforms.js`): Vditor's lute engine truncates the
-info-string of a fence at the first space, which destroyed the
-` ```{.abc .play} ` blocks. The host translates those fences into one-word
-tokens before they enter the editor (`mdm-abc-play`, or `mdm-attr-…` in
-base64url for generic Pandoc attributes) and restores them on save; it also
-restores the blank line after the front matter that lute removes. Verified:
-editing `example.mdm` in the editor and saving leaves the file
-byte-identical (apart from what was edited).
+What is in the bundle: `vscode-mdm/media/vendor/cm6/cm6.bundle.js` is built
+by `vscode-mdm/vendor-src/` (`npm install && npm run vendor`, the one place
+that needs the network) from CodeMirror 6, its Markdown and language
+packages, KaTeX and the three Lezer extensions of this project, maths
+(`$…$`, `$$…$$` inline and as a block, Pandoc's rules for the dollars, an
+unterminated pair stays text), the YAML header and the callouts; the
+bundle, KaTeX's stylesheet and fonts are committed, and the extension at
+run time is plain JS with no build step. `VERSIONS.json` beside the bundle
+says what went in. The decisions behind the engine change, and the ones
+still open for review, are in `vscode-mdm/docs/cm6-migration.md`.
 
-The ` ```abc ` blocks with no attributes travel the same way, as
-`mdm-abc`, for a second reason: Vditor renders any `.language-abc` block by
-itself with an `ABCJS.renderAbc` and no options, and that render would get
-ahead of the webview's, which is the one that trims the paddings to
-paragraph spacing and asks for the semantic classes the grey staff lines
-depend on. Under the token Vditor leaves them alone and `main.js` relabels
-them to `.language-abc` when it engraves them. Side effect: a block written
-by hand as ` ```mdm-abc ` is saved as ` ```abc `.
-
-Editor limitations: no multicursor, and not for want of wiring it up:
-Chromium keeps a single Range per selection in a `contenteditable`
-(measured: after adding three, `rangeCount` is still 1 and typing changes
-the first one only), so the webview would have to emulate the whole thing;
-the way round it meanwhile is Reopen Editor With… → Text Editor, where VS
-Code's multicursor works. No editing notes by dragging them with the mouse
-(the dragging API of abcjs is the identified route; untested); footnote
-definitions are moved to the end of the document on save (semantics
-intact); hard line breaks made of two trailing spaces do not survive lute's
-round trip; CRLF files are converted to LF on the first save (the fence
-armour does work over CRLF); fences with Pandoc attributes inside
-blockquotes or deeply indented lists are not armoured (the scanner is
-linear): avoid attributes there; if the file changes from outside (git, a
-search and replace) while you are typing in the visual editor, what was
-typed wins (last writer).
+Editor limitations: no editing notes by dragging them with the mouse (the
+dragging API of abcjs is the identified route; untested); tables are edited
+as their source in a monospace grid (no rendered widget yet); images are
+shown for paths relative to the document and for `https:` addresses, not
+for arbitrary local paths outside the document's folder; CodeMirror draws
+only the part of the document in view, so a player whose score scrolls far
+off screen keeps sounding and its bar comes back with the score; if the
+file changes from outside (git, a search and replace) while you are typing
+in the visual editor, what was typed wins (last writer), and an outside
+change that arrives between keystrokes is merged at the stretch that
+differs, carets and undo history kept.
 
 ## Known limitations (prototype)
 
@@ -579,9 +512,10 @@ text. Three routes, with the work each one takes:
   `"activationEvents": ["onLanguage:markdown"]`, since today the extension
   is only activated by opening the custom editor. The ceiling of this
   route: it matches the scores, not the rest of the Quarto syntax (callouts,
-  cross-refs and shortcodes would stay raw) nor Vditor's typography.
+  cross-refs and shortcodes would stay raw) nor the editor's typography.
 - **A webview of our own in preview mode** (a "MDM: Open Preview" command)
-  loading Vditor with `style.css` and the editor's own `renderScores()`.
+  loading the same CodeMirror view read-only, with `style.css` and the
+  editor's own score rendering.
   It is the only route that gives pixel for pixel equality with the editor
   without duplicating the render pipeline, and it inherits the decorated
   callouts.
