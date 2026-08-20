@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!--
+  The webview page as extension.js builds it (getHtml), with three differences:
+  the resources are loaded over file:// instead of the webview scheme, there is
+  no CSP (nothing here is remote anyway), and acquireVsCodeApi is a shim that
+  records what the webview posts to the host in window.__posts.
+
+  The values the host interpolates are read from window.__settings, __palette,
+  __side and __themes, which the test seeds with evaluateOnNewDocument before
+  the page loads.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../../vscode-mdm/media/vendor/vditor/dist/index.css">
+<link rel="stylesheet" href="../../vscode-mdm/media/vendor/abcjs/abcjs-audio.css">
+<link rel="stylesheet" href="../../vscode-mdm/media/style.css">
+<script>
+window.MDM_VDITOR_CDN = "../../vscode-mdm/media/vendor/vditor";
+window.MDM_ABCJS6 = "../../vscode-mdm/media/vendor/abcjs/abcjs-basic-min.js";
+window.MDM_SOUNDFONT = "../../vscode-mdm/media/vendor/soundfont/";
+window.MDM_SETTINGS = Object.assign(
+  {
+    theme: "light",
+    scoreFill: "none",
+    staffLines: "gray",
+    scoreAlign: "center",
+    frontMatter: "shown",
+  },
+  window.__settings || {}
+);
+window.MDM_PALETTE = { palette: window.__palette || null, side: window.__side || null };
+window.MDM_THEMES = window.__themes || [];
+window.__posts = [];
+window.acquireVsCodeApi = function () {
+  return {
+    postMessage: function (m) {
+      window.__posts.push(m);
+      // A test that wants the real round trip runs extension.js in node and
+      // exposes __toHost; the messages the host posts back come in through
+      // window.postMessage, exactly as they do inside VS Code.
+      if (window.__toHost) window.__toHost(m);
+    },
+  };
+};
+</script>
+<script src="../../vscode-mdm/media/vendor/vditor/dist/index.min.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script src="../../vscode-mdm/media/vendor/vditor/dist/js/icons/ant.js" id="vditorIconScript"></script>
+<script src="../../vscode-mdm/media/main.js"></script>
+</body>
+</html>
