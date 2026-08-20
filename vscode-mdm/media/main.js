@@ -1,15 +1,18 @@
-// main.js: webview for the MDM editor. Mounts Vditor in IR mode (instant
-// rendering, Typora style) and keeps it in sync both ways with the VS Code
-// TextDocument. On top of Vditor it adds: a comfortable way out of code blocks
-// (Ctrl+Enter, and Enter on a trailing empty line), click on a score to edit
-// its source, click below the last block to keep writing, and a light/dark
-// theme synced with VS Code.
+// main.js: webview for the MDM editor. A CodeMirror 6 view over the Markdown
+// text of the document (the text IS the file text, save for the YAML header
+// while it is hidden), decorated Typora style: equations, scores, code, marks
+// and fences render in place and show their source where a caret is. Every
+// selection range counts, so each of several carets reveals what it edits.
+// Kept in sync both ways with the VS Code TextDocument through the host.
+//
+// CodeMirror, KaTeX and the MDM Lezer extensions come from
+// vendor/cm6/cm6.bundle.js (built by vendor-src/, exposed as window.CM); the
+// scores are engraved and played by the abcjs in vendor/abcjs.
 (function () {
   const vscode = acquireVsCodeApi();
-  const CDN = window.MDM_VDITOR_CDN;
-  const CONTENT_THEME_PATH = CDN + "/dist/css/content-theme";
+  const CM = window.CM;
 
-  let vditor = null;
+  let view = null; // the EditorView, once the first document arrives
   let applying = false; // applying an incoming update; do not send it back as an edit
   let pending = null; // debounce for outgoing edits
   let scrollToTop = false; // the next update goes to the top of the document
@@ -19,12 +22,19 @@
   let staffLines = SETTINGS.staffLines || "gray";
   let scoreAlign = SETTINGS.scoreAlign || "center";
   let frontMatter = SETTINGS.frontMatter || "hidden";
+  // VS Code's own editor.multiCursorModifier ("alt" or "ctrlCmd"): the click
+  // that adds a caret here is the one the user already makes in text editors.
+  let multiCursorModifier = SETTINGS.multiCursorModifier || "alt";
 
   // The webview never writes a setting itself: it asks the host, which stores
   // it and echoes the stored value back as a "settings" message. That keeps
   // every open .mdm editor in step and makes a choice survive a reload.
   function askSetting(key, value) {
     vscode.postMessage({ type: "setSetting", key: key, value: value });
+  }
+
+  function app() {
+    return document.getElementById("app");
   }
 
   // ---------- Theme ----------
@@ -43,24 +53,10 @@
     );
   }
 
-  // The side the editor was last painted for, so that setTheme is called only
-  // when it has something to change. It swaps the content stylesheet, and it
-  // used to run on every message that touched a setting: pressing the YAML
-  // button, which changes no colour at all, went through it too.
-  let appliedSide = null;
-
   function applyTheme() {
-    if (!vditor) return;
-    const dark = isDark();
-    if (appliedSide !== dark) {
-      appliedSide = dark;
-      vditor.setTheme(
-        dark ? "dark" : "classic",
-        dark ? "dark" : "light",
-        dark ? "github-dark" : "github",
-        CONTENT_THEME_PATH
-      );
-    }
+    const root = app();
+    if (!root) return;
+    root.classList.toggle("mdm--dark", isDark());
     // The toolbar renders in terms of the effective theme, so it follows every
     // path that can change it: the mdm.theme setting, the VS Code theme while
     // on "auto", and the OS preference.
@@ -135,147 +131,6 @@
     });
   }
 
-  // ---------- YAML header highlighting ----------
-
-  // lute gives the header a block of its own, with the YAML in an editable
-  // <code> inside a pre.vditor-ir__marker--pre, and Vditor's own highlighter
-  // skips exactly those (it paints the read-only previews and leaves editable
-  // sources alone), so the header showed as one flat run of monospace. It is
-  // painted here with the same highlight.js Vditor loads for the previews, so
-  // both go through one palette.
-  //
-  // The colours CANNOT go into that editable <code>: lute reads the block's
-  // content from the first child of the code element, so a text node broken
-  // into highlight.js spans serializes as the first span alone. Measured: the
-  // whole header collapsed to `title:` on the next keystroke ANYWHERE in the
-  // document, since every edit serializes the whole DOM. What the block gets
-  // instead is the second half of the shape Vditor gives a code block: the
-  // source pre marked as a marker, so it is zero-sized while the caret is
-  // elsewhere, and a read-only .vditor-ir__preview beside it carrying the
-  // painted copy. Extra elements in the block are ignored by lute (checked),
-  // and the source keeps the single text node it needs to serialize.
-  let hljsLoaded = false;
-  function ensureHljs() {
-    if (window.hljs) return true;
-    // Vditor loads highlight.js under this id for the code previews; whichever
-    // of the two gets there first, the file is fetched once.
-    let script = document.getElementById("vditorHljsScript");
-    if (!script) {
-      script = document.createElement("script");
-      script.id = "vditorHljsScript";
-      script.src = CDN + "/dist/js/highlight.js/highlight.min.js";
-      document.head.appendChild(script);
-    }
-    if (!hljsLoaded) {
-      hljsLoaded = true;
-      script.addEventListener("load", function () {
-        highlightFrontMatter();
-      });
-    }
-    return false;
-  }
-
-  // The header as one block of text, `---` fences and all, at the very start
-  // of the document.
-  const FRONT_MATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n/;
-
-  // The block lute writes for a header, built here so that showing or hiding
-  // the header costs one node instead of a whole re-render. The shape is the
-  // one lute produces (checked against its own output); the YAML goes in as
-  // text, so nothing in it can be read as markup.
-  function frontMatterBlock(header) {
-    const yaml = header.replace(FRONT_MATTER, function (whole) {
-      return whole.replace(/^---\r?\n/, "").replace(/\r?\n---\r?\n$/, "");
-    });
-    const block = document.createElement("div");
-    block.setAttribute("data-block", "0");
-    block.setAttribute("data-type", "yaml-front-matter");
-    block.className = "vditor-ir__node";
-    const open = document.createElement("span");
-    open.setAttribute("data-type", "yaml-front-matter-open-marker");
-    open.textContent = "---";
-    const pre = document.createElement("pre");
-    pre.className = "vditor-ir__marker--pre";
-    const code = document.createElement("code");
-    code.setAttribute("data-type", "yaml-front-matter");
-    code.className = "language-yaml";
-    code.textContent = yaml;
-    pre.appendChild(code);
-    const close = document.createElement("span");
-    close.setAttribute("data-type", "yaml-front-matter-close-marker");
-    close.textContent = "---";
-    block.appendChild(open);
-    block.appendChild(pre);
-    block.appendChild(close);
-    return block;
-  }
-
-  // True when the incoming text is the one in the editor with the header put
-  // on or taken off, and the DOM has been patched to match. Anything else is
-  // left to the caller.
-  function patchFrontMatter(current, next) {
-    const root = contentRoot();
-    if (!root) return false;
-    const added = FRONT_MATTER.exec(next);
-    if (added && next.slice(added[0].length) === current) {
-      root.insertBefore(frontMatterBlock(added[0]), root.firstChild);
-      return true;
-    }
-    const removed = FRONT_MATTER.exec(current);
-    if (removed && current.slice(removed[0].length) === next) {
-      const first = root.firstElementChild;
-      if (!first || first.getAttribute("data-type") !== "yaml-front-matter") {
-        return false;
-      }
-      root.removeChild(first);
-      return true;
-    }
-    return false;
-  }
-
-  function highlightFrontMatter() {
-    try {
-      const block = document.querySelector(
-        '#app div[data-type="yaml-front-matter"]'
-      );
-      if (!block) return;
-      const pre = block.querySelector("pre.vditor-ir__marker--pre");
-      const code = pre && pre.querySelector("code");
-      if (!code) return;
-      const source = code.textContent;
-      let preview = block.querySelector("pre.mdm-fm-preview");
-      // Already painted for this text: leave it alone, or the pass that this
-      // very rewrite triggers in the observer would loop.
-      if (preview && preview.getAttribute("data-mdm-hl") === source) return;
-      if (!ensureHljs()) return;
-      if (!preview) {
-        preview = document.createElement("pre");
-        preview.className = "vditor-ir__preview mdm-fm-preview";
-        preview.setAttribute("data-render", "1");
-        // language-yaml and not a name of our own: Vditor's highlighter walks
-        // every pre > code outside the editable sources, and under an unknown
-        // language it would repaint this one as plain text. Under this one it
-        // reaches the very markup written here.
-        preview.appendChild(document.createElement("code"));
-        preview.firstChild.className = "language-yaml";
-      }
-      preview.firstChild.innerHTML = window.hljs.highlight(source, {
-        language: "yaml",
-        ignoreIllegals: true,
-      }).value;
-      preview.setAttribute("data-mdm-hl", source);
-      // Marked like the source of a code block: Vditor's own rules then shrink
-      // it to nothing while the caret is elsewhere and give it back its size
-      // the moment the block opens for editing.
-      pre.classList.add("vditor-ir__marker");
-      if (preview.parentElement !== block) {
-        block.insertBefore(preview, pre.nextSibling);
-      }
-    } catch (e) {
-      // Highlighting must never break editing.
-    }
-  }
-
   // ---------- Theme menu ----------
 
   // One menu for the whole look of the editor. The first three entries are
@@ -345,13 +200,12 @@
 
   // The entries are numbered rather than named after the theme: the name goes
   // into a data-type attribute and then into a selector, and theme names carry
-  // spaces and punctuation.
+  // spaces and punctuation. Entries of the drop-down panel: see toolbarButton.
   function themeMenuItems() {
     return themeEntries().map(function (entry, i) {
       return {
         name: "mdm-theme-" + i,
-        tip: entry.label,
-        icon: themeMenuLabel(entry),
+        label: themeMenuLabel(entry),
         click: function () {
           askSetting("theme", entry.value);
         },
@@ -415,8 +269,8 @@
 
   // Top-level toolbar toggle for the Guitar-Pro-style gray staff lines scores
   // are drawn with by default. Following the theme button convention, the
-  // tooltip names what the click switches to, not the state in use. Vditor's
-  // active-button class marks ink, not gray: the button stays quiet for as
+  // tooltip names what the click switches to, not the state in use. The
+  // lit state marks ink, not gray: the button stays quiet for as
   // long as the default holds, and lights up only once the lines have been
   // put back in ink.
   //
@@ -438,7 +292,7 @@
     );
     if (!btn) return;
     btn.setAttribute("aria-label", staffTip());
-    btn.classList.toggle("vditor-menu--current", staffLines === "ink");
+    btn.classList.toggle("mdm-btn--on", staffLines === "ink");
   }
 
   // ---------- Score alignment button ----------
@@ -482,11 +336,10 @@
 
   // ---------- Front matter button ----------
 
-  // Whether the YAML header is part of the document in the editor. lute parses
-  // it into a block of its own (data-type="yaml-front-matter", the YAML in an
-  // editable <code> between two --- markers), so shown it is one more block to
-  // write in. What the host has to undo on the way to disk is the blank line
-  // after the closing ---, which lute drops and Pandoc wants (transforms.js).
+  // Whether the YAML header is part of the document in the editor. Shown, it
+  // is the first lines of the text, --- fences included, painted as a card and
+  // highlighted as YAML; hidden, the host keeps it out of the text and splices
+  // it back on every edit (transforms.js).
   //
   // The glyph is the header as typed: a --- fence, a line of YAML, and the
   // closing --- fence.
@@ -507,11 +360,11 @@
     if (!btn) return;
     btn.setAttribute("aria-label", fmTip());
     btn.classList.toggle(
-      "vditor-menu--current",
+      "mdm-btn--on",
       frontMatter === "shown" && headerText !== ""
     );
     // Nothing to show for a file without a header, so the button greys out.
-    btn.classList.toggle("vditor-menu--disabled", headerText === "");
+    btn.classList.toggle("mdm-btn--off", headerText === "");
   }
 
   function updateFillMenu() {
@@ -534,52 +387,11 @@
     updateFillMenu();
   }
 
-  // A clicked toolbar button keeps the DOM focus, and Vditor styles :focus the
-  // same as :hover: the tooltip stays up and the icon stays in the hover
-  // colour (blue under the light theme). Both outlived the click, so a button
-  // read as pressed long after it had been let go, and the tooltip covered the
-  // panel the click had just opened. Dropping the focus settles both. Only
-  // for pointer clicks: a click from the keyboard reports detail 0, and taking
-  // the focus away from someone tabbing through the toolbar would send them
-  // back to the top of the document.
-  //
-  // The class is the other half: with the pointer still resting on the button,
-  // :hover alone would raise the tooltip over the panel again. It holds until
-  // the pointer leaves.
-  function dismissTooltipOnClick() {
-    const bar = document.querySelector("#app .vditor-toolbar");
-    if (!bar) return;
-    // Capture phase on purpose: the handler that opens a drop-down panel calls
-    // stopPropagation, so a bubbling listener would never see those clicks,
-    // which are exactly the ones that need the tooltip out of the way.
-    bar.addEventListener(
-      "click",
-      function (e) {
-        const btn = e.target.closest && e.target.closest(".vditor-tooltipped");
-        if (!btn) return;
-        btn.classList.add("mdm-tip--off");
-        const restore = function () {
-          btn.classList.remove("mdm-tip--off");
-          btn.removeEventListener("mouseleave", restore);
-        };
-        btn.addEventListener("mouseleave", restore);
-        // After the button's own handler, which may well put the focus back in
-        // the editor itself; by then this is a no-op.
-        if (e.detail > 0)
-          setTimeout(function () {
-            btn.blur();
-          }, 0);
-      },
-      true
-    );
-  }
-
   function fillMenuItems() {
     const items = Object.keys(SCORE_FILL).map(function (key) {
       return {
         name: "mdm-score-" + key,
-        tip: FILL_LABEL[key],
-        icon: fillMenuLabel(key),
+        label: fillMenuLabel(key),
         click: function () {
           askSetting("scoreFill", key);
         },
@@ -595,6 +407,10 @@
   // the host reads an edit in the mode it was written in even if the setting
   // changed in between (see transforms.js).
   let editorFrontMatter = false;
+
+  function editorText() {
+    return view ? view.state.doc.toString() : "";
+  }
 
   function sendEdit(value) {
     vscode.postMessage({
@@ -616,89 +432,46 @@
   // away: otherwise closing the tab just after typing would lose the last
   // ~300 ms of writing.
   function flushEdit() {
-    if (!pending || !vditor) return;
+    if (!pending || !view) return;
     clearTimeout(pending);
     pending = null;
-    sendEdit(vditor.getValue());
+    sendEdit(editorText());
   }
   window.addEventListener("blur", flushEdit);
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") flushEdit();
   });
 
-  // ---------- Scores ----------
-
-  // The ```abc blocks of an .mdm file reach the editor under the internal
-  // tokens mdm-abc and mdm-abc-play (see transforms.js). Here they are
-  // relabelled to .language-abc and engraved with the abcjs that ships inside
-  // Vditor, but through our own renderAbc call instead of Vditor's abcRender
-  // wrapper. Owning the call buys: trimmed paddings (the defaults padded every
-  // score with a gap far wider than a paragraph break), add_classes (semantic
-  // classes like .abcjs-staff, which the gray staff lines option colours), and
-  // the same lazy loading of the abcjs script that Vditor would do.
-  // data-processed, written the moment the node is relabelled, is what keeps
-  // Vditor's own abcRender off it in the window before abcjs has loaded.
-  let abcjsLoading = false;
-  function ensureAbcjs() {
-    if (window.ABCJS) return true;
-    if (!abcjsLoading) {
-      abcjsLoading = true;
-      const s = document.createElement("script");
-      s.src = CDN + "/dist/js/abcjs/abcjs_basic.min.js";
-      s.onload = function () {
-        renderScores();
-      };
-      document.head.appendChild(s);
+  // An incoming text replaces only the stretch that differs: the common head
+  // and tail are left alone, so the carets, the undo history and the rendered
+  // widgets outside the change all survive an external edit (the text editor
+  // open beside this one, a formatter, the header button).
+  function replaceText(next) {
+    const current = editorText();
+    if (next === current) return;
+    let head = 0;
+    const max = Math.min(current.length, next.length);
+    while (head < max && current.charCodeAt(head) === next.charCodeAt(head)) head++;
+    let tail = 0;
+    while (
+      tail < max - head &&
+      current.charCodeAt(current.length - 1 - tail) ===
+        next.charCodeAt(next.length - 1 - tail)
+    ) {
+      tail++;
     }
-    return false;
-  }
-
-  function renderScores() {
+    applying = true;
     try {
-      document
-        .querySelectorAll(
-          ".vditor-ir__preview code.language-mdm-abc, .vditor-ir__preview code.language-mdm-abc-play, .vditor-preview code.language-mdm-abc, .vditor-preview code.language-mdm-abc-play"
-        )
-        .forEach(function (el) {
-          el.classList.remove("language-mdm-abc", "language-mdm-abc-play");
-          el.classList.add("language-abc");
-          el.setAttribute("data-processed", "true");
-        });
-      const fresh = document.querySelectorAll(
-        ".vditor-ir__preview code.language-abc:not([data-mdm-abc]), .vditor-preview code.language-abc:not([data-mdm-abc])"
-      );
-      if (fresh.length && ensureAbcjs()) {
-        fresh.forEach(function (el) {
-          const parent = el.parentElement;
-          if (
-            parent.classList.contains("vditor-ir__marker--pre") ||
-            parent.classList.contains("vditor-wysiwyg__pre")
-          ) {
-            return; // editable source, not a preview
-          }
-          const source = el.textContent;
-          el.setAttribute("data-mdm-abc", "1");
-          el.setAttribute("data-processed", "true");
-          el.innerHTML = "";
-          const visual = ABCJS.renderAbc(el, source, {
-            add_classes: true,
-            paddingtop: 2,
-            paddingbottom: 2,
-            paddingleft: 0,
-            paddingright: 0,
-          })[0];
-          // Kept for the player: its engraved elements remember the source
-          // chars they came from, which is how the notes light up while the
-          // synth plays them (see highlightPlaying below).
-          if (visual) SCORE_VISUALS.set(el, visual);
-          el.style.overflowX = "auto";
-        });
-      }
-      fitScores();
-      ensureAudioToggles();
-      syncPlayer();
-    } catch (e) {
-      // Score rendering must never break editing.
+      view.dispatch({
+        changes: {
+          from: head,
+          to: current.length - tail,
+          insert: next.slice(head, next.length - tail),
+        },
+        annotations: CM.Transaction.remote.of(true),
+      });
+    } finally {
+      applying = false;
     }
   }
 
@@ -709,17 +482,13 @@
   // attributes makes the whole thing scale down instead. Runs on every render
   // pass, so scores that appear later are covered as well.
   //
-  // Those attributes are not the whole drawing either. The abcjs bundled with
-  // Vditor (5.10.3) sizes the SVG from the engraved music alone and centres the
-  // title over it, so a title wider than the staff hangs outside the viewport
-  // and is cut off at both ends: with %%staffwidth 200pt the box came out 266
-  // units wide while the ink ran from -6 to 272 (measured). getBBox() gives
-  // that real extent, and the box written here is the union of the two, so
-  // nothing is ever cropped and a score that already fits keeps its size. The
-  // width/height attributes grow with it: leaving them at the declared value
-  // would squeeze the union into a narrower viewport, scaling the score down.
-  // (abcjs 6.7.0, the one the Quarto side uses, already accounts for the title,
-  // checked on the same block.)
+  // Those attributes are not always the whole drawing either: an older abcjs
+  // (5.10.3) sized the SVG from the engraved music alone and a title wider
+  // than the staff hung outside the viewport. getBBox() gives the real extent,
+  // and the box written here is the union of the two, so nothing is ever
+  // cropped and a score that already fits keeps its size. The width/height
+  // attributes grow with it: leaving them at the declared value would squeeze
+  // the union into a narrower viewport, scaling the score down.
   function fitScores() {
     document
       .querySelectorAll("code.language-abc svg:not([data-mdm-fit])")
@@ -748,12 +517,10 @@
   }
 
   // Clicking a note makes abcjs highlight it: it writes fill="#ff0000" on the
-  // shape and tags it abcjs-note_selected. The engine has the matching
-  // unhighlight (it puts the fill back to #000000), but nothing calls it here,
-  // because Vditor renders the score for display and never wires abcjs's
-  // selection controller, so the red stays for good. In this editor a click on
-  // a score already means something else, open its ABC source, and nothing
-  // reads the selection, so it is undone right after abcjs writes it. Restore
+  // shape and tags it abcjs-note_selected, and nothing here wires its
+  // selection controller, so the red would stay for good. In this editor a
+  // click on a score already means something else, open its ABC source, and
+  // nothing reads the selection, so it is undone right after abcjs writes it. Restore
   // black rather than clearing the attribute: that is the value abcjs itself
   // returns to, and the one the dark recolouring looks for.
   function clearScoreSelection() {
@@ -770,8 +537,8 @@
       });
   }
 
-  // The highlight is an attribute change, which the render observer below does
-  // not watch, and abcjs writes it from its own handler on the shape. Hence a
+  // The highlight is an attribute change, which the content observer does not
+  // watch, and abcjs writes it from its own handler on the shape. Hence a
   // listener of our own, and a timeout so the undo lands after the event has
   // been dispatched.
   function watchScoreSelection() {
@@ -787,13 +554,10 @@
 
   // ---------- Copy ----------
 
-  // Vditor's copy button pushes the raw source into a hidden textarea and
-  // copies it with select() + execCommand, which flashes a page-wide
-  // selection: the whole document lights up for an instant. The click is
-  // intercepted in capture phase before the inline handler, for every code
-  // block and not only the scores: the source goes to the clipboard through
-  // the clipboard API, nothing is selected, and the block that was copied
-  // gives a brief pulse of its own background as the feedback.
+  // The copy button in the corner of a code block or a score (widget chrome,
+  // see handleChromeClick): the source goes to the clipboard through the
+  // clipboard API, nothing is selected, and the block that was copied gives a
+  // brief pulse of its own background as the feedback.
   //
   // A score also loses its layout directives (%%staffwidth and friends) on
   // the way out: they size the block for this document and mean nothing
@@ -806,16 +570,9 @@
   }
 
   // The element carrying the background of the block: the score itself, or
-  // the rendered code the card is painted on.
-  function copiedCard(block) {
-    return (
-      block.querySelector("code.language-abc") ||
-      block.querySelector(".vditor-ir__preview code")
-    );
-  }
-
-  function pulseBlock(block) {
-    const code = copiedCard(block);
+  // the first line of the rendered code.
+  function pulseBlock(el) {
+    const code = el && el.querySelector ? el.querySelector("code.language-abc") || el : el;
     if (!code) return;
     code.classList.remove("mdm-copy-pulse");
     void code.offsetWidth; // restart the animation
@@ -834,8 +591,8 @@
     copyFallback(text);
   }
 
-  // Off-screen textarea fallback: same mechanism Vditor uses, but the
-  // element sits outside the viewport, so nothing visible gets selected.
+  // Off-screen textarea fallback: the element sits outside the viewport, so
+  // nothing visible gets selected.
   function copyFallback(text) {
     const ta = document.createElement("textarea");
     ta.value = text;
@@ -851,88 +608,36 @@
     document.body.removeChild(ta);
   }
 
-  function handleCopyClick(e) {
-    if (!e.target.closest) return;
-    const span = e.target.closest(".vditor-copy span");
-    if (!span) return;
-    const block = span.closest('[data-type="code-block"]');
-    if (!block) return;
-    const codeEl = block.querySelector("pre.vditor-ir__marker--pre > code");
-    if (!codeEl) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    const source = codeEl.textContent;
-    copyPlain(
-      block.querySelector("code.language-abc")
-        ? stripLayoutDirectives(source)
-        : source
-    );
-    span.setAttribute(
-      "aria-label",
-      (window.VditorI18n && window.VditorI18n.copied) || "Copied"
-    );
-    pulseBlock(block);
-  }
-
   // ---------- Audio ----------
 
   // Each score gets a small button beside the copy button that opens a player
   // bar under the score; play sounds the tune. The synthesizer is the abcjs
   // 6.7.0 vendored in media/vendor/abcjs (the same engine the Quarto HTML
-  // uses), NOT the 5.10.3 bundled with Vditor that engraves the scores: the
-  // 6.x synth is the one maintained, and its tune objects must come from the
-  // engine that plays them, so the tune is engraved again invisibly at mount.
-  // The soundfont is a piano vendored in media/vendor/soundfont, so playback
-  // needs no network at all.
+  // uses, and the one that engraves the scores on screen). The soundfont is a
+  // piano vendored in media/vendor/soundfont, so playback needs no network at
+  // all. The tune the synth plays is engraved again invisibly at mount, so
+  // that its object comes from the same call that will play it.
   //
-  // Loaded over XHR and evaluated with the module/exports pair the UMD wrapper
-  // looks for, instead of a <script> tag: the tag would assign window.ABCJS,
-  // the global the 5.10.3 engraver lives in, and every score rendered from
-  // that moment on would silently change engine. The webview CSP already
-  // carries 'unsafe-eval' (Vditor wants it), so Function() is available.
-  let abcjs6 = null;
-  let abcjs6Loading = null;
-
+  // The engine is loaded by the page before this script; the promise shape
+  // stays so the mount reads the same whether or not it ever has to wait.
   function loadAbcjs6() {
-    if (abcjs6) return Promise.resolve(abcjs6);
-    if (!abcjs6Loading) {
-      abcjs6Loading = new Promise(function (resolve, reject) {
-        const xhr = new XMLHttpRequest();
-        xhr.open("GET", window.MDM_ABCJS6, true);
-        xhr.onload = function () {
-          try {
-            const module = { exports: {} };
-            new Function("module", "exports", xhr.responseText)(
-              module,
-              module.exports
-            );
-            abcjs6 = module.exports;
-            resolve(abcjs6);
-          } catch (e) {
-            reject(e);
-          }
-        };
-        xhr.onerror = function () {
-          reject(new Error("abcjs unreachable"));
-        };
-        xhr.send();
-      });
-    }
-    return abcjs6Loading;
+    return window.ABCJS
+      ? Promise.resolve(window.ABCJS)
+      : Promise.reject(new Error("abcjs unreachable"));
   }
 
   // The one open player: { index, bar, controller, source }. One at a time on
   // purpose, two tunes sounding over each other serve nobody; opening a second
   // score closes the first. `index` is the block's position among the score
-  // blocks, the identity that survives Vditor rebuilding the block's DOM.
+  // blocks, the identity that survives CodeMirror rebuilding the widget when
+  // the source is edited.
   let player = null;
 
   // The on-screen engraving of each score, keyed by its <code>. The player
   // needs it to light up the notes as they sound: the engraved elements
   // remember the chars of source they came from, and so do the synth's
-  // events, so the two engravings (5.10.3 on screen, 6.7.0 in the synth)
-  // meet on the source text.
+  // events, so the two engravings (on screen and in the synth) meet on the
+  // source text.
   const SCORE_VISUALS = new WeakMap();
 
   // One volume for the whole webview: set it on one score and every player
@@ -1168,7 +873,7 @@
     // the session, like the level, so it holds across the players opened
     // after it.
     const mute = document.createElement("span");
-    mute.className = "mdm-audio-mute vditor-tooltipped vditor-tooltipped__n";
+    mute.className = "mdm-audio-mute mdm-tip mdm-tip--n";
     mute.setAttribute("role", "button");
     const slider = document.createElement("input");
     slider.type = "range";
@@ -1422,8 +1127,9 @@
   //  - Tooltips. It labels its buttons with the `title` attribute, and a
   //    native tooltip never appears inside the VS Code webview, so the two
   //    buttons went unlabelled. They get the CSS tooltip the rest of this
-  //    editor uses (the copy button included), which is drawn from
-  //    aria-label; the title is dropped so that nothing shows it twice.
+  //    editor uses (the copy button included), drawn from aria-label
+  //    (.mdm-tip in style.css); the title is dropped so that nothing shows
+  //    it twice.
   //    Drawn north: the bar sits at the bottom of the block, and a tooltip
   //    below it would fall outside the score.
   //  - Labels that follow the state. As everywhere in this editor, they name
@@ -1447,8 +1153,7 @@
   function stopButton(bar) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className =
-      "abcjs-btn mdm-audio-stop vditor-tooltipped vditor-tooltipped__n";
+    button.className = "abcjs-btn mdm-audio-stop mdm-tip mdm-tip--n";
     button.setAttribute("aria-label", "Stop");
     button.innerHTML = STOP_ICON;
     button.addEventListener("click", function () {
@@ -1476,7 +1181,7 @@
     if (start) start.insertAdjacentElement("afterend", stopButton(bar));
     [start, loop].forEach(function (button) {
       if (!button) return;
-      button.classList.add("vditor-tooltipped", "vditor-tooltipped__n");
+      button.classList.add("mdm-tip", "mdm-tip--n");
       button.removeAttribute("title");
     });
     widget.appendChild(volumeControl());
@@ -1520,11 +1225,30 @@
 
   function playerDisplayEngraver() {
     const block = playerBlock();
-    const code =
-      block && block.querySelector(".vditor-ir__preview code.language-abc");
+    const code = block && block.querySelector("code.language-abc");
     const visual = code && SCORE_VISUALS.get(code);
     const engraver = visual && visual.engraver;
     return engraver && engraver.staffgroups ? engraver : null;
+  }
+
+  // The engraver keeps the elements it has lit in `selected`; this puts
+  // their ink back. abcjs 6 has no clearSelection on the controller (5.x
+  // had), only the per-element unhighlight its own rangeHighlight uses.
+  function clearEngraverSelection(engraver) {
+    if (typeof engraver.clearSelection === "function") {
+      engraver.clearSelection();
+      return;
+    }
+    const color =
+      (engraver.renderer && engraver.renderer.foregroundColor) || "#000000";
+    (engraver.selected || []).forEach(function (el) {
+      try {
+        el.unhighlight(undefined, color);
+      } catch (e) {
+        // an element re-engraved out from under the selection
+      }
+    });
+    engraver.selected = [];
   }
 
   // What the engraver's own rangeHighlight does (walk the engraved elements,
@@ -1533,7 +1257,7 @@
   function highlightPlaying(start, end) {
     const engraver = playerDisplayEngraver();
     if (!engraver) return;
-    engraver.clearSelection();
+    clearEngraverSelection(engraver);
     let root = null;
     engraver.staffgroups.forEach(function (group) {
       group.voices.forEach(function (voice) {
@@ -1563,40 +1287,48 @@
     }
   }
 
-  // clearSelection puts the fill back to the black abcjs draws with, which is
-  // also what the dark-side repaint keys on.
+  // The fill goes back to the black abcjs draws with, which is also what
+  // the dark-side repaint keys on.
   function clearPlayingHighlight() {
     const engraver = playerDisplayEngraver();
-    if (engraver) engraver.clearSelection();
+    if (engraver) clearEngraverSelection(engraver);
   }
 
+  // The score widgets on screen, in document order (ScoreWidget above).
   function scoreBlocks() {
-    return Array.prototype.filter.call(
-      document.querySelectorAll('#app div[data-type="code-block"]'),
-      function (block) {
-        return block.querySelector(".vditor-ir__preview code.language-abc");
-      }
+    return Array.prototype.slice.call(
+      document.querySelectorAll("#app .mdm-score")
     );
   }
 
-  // The tune as it stands in the editable source, which is ahead of the
-  // rendered SVG while an edit is being typed.
+  // The tune a widget was engraved from. The widget is rebuilt from the new
+  // source the moment an edit inside the block settles, so this is what the
+  // block holds.
   function scoreSource(block) {
-    const code = block.querySelector("pre.vditor-ir__marker--pre > code");
-    return code ? code.textContent : "";
+    return block.getAttribute("data-mdm-source") || "";
+  }
+
+  // Where a score widget sits in the document: the end of its block, which
+  // is the position CodeMirror hangs the widget on.
+  function blockPos(block) {
+    return view ? view.posAtDOM(block) : -1;
   }
 
   // The block the player is open on. While its bar is in the document the bar
-  // itself says which block, which follows the score around edits that insert
-  // or remove blocks above it; the stored index is the fallback for the moment
-  // just after Vditor wiped the preview, when the bar is gone and the position
-  // is all there is.
+  // itself says which block; otherwise the block is the widget at the
+  // position the player remembers, kept mapped through every edit (see the
+  // update listener), for the moment just after CodeMirror replaced the
+  // widget or brought it back into the viewport.
   function playerBlock() {
     if (!player) return null;
     if (player.bar && document.contains(player.bar)) {
-      return player.bar.closest('[data-type="code-block"]');
+      return player.bar.closest(".mdm-score");
     }
-    return scoreBlocks()[player.index] || null;
+    const blocks = scoreBlocks();
+    for (let i = 0; i < blocks.length; i++) {
+      if (blockPos(blocks[i]) === player.pos) return blocks[i];
+    }
+    return null;
   }
 
   function closePlayer() {
@@ -1626,8 +1358,7 @@
 
   function openPlayer(block) {
     closePlayer();
-    const preview = block.querySelector(".vditor-ir__preview");
-    const code = preview && preview.querySelector("code.language-abc");
+    const code = block.querySelector("code.language-abc");
     if (!code) return;
     // First thing, inside the click: the output starts waking now, and the
     // engine that loads afterwards finds the context made.
@@ -1635,20 +1366,12 @@
     const bar = document.createElement("div");
     bar.className = "mdm-audio";
     bar.setAttribute("contenteditable", "false");
-    // The player's events are its own: without this, Vditor's handlers on the
-    // editable root expand the block and move the caret the moment play is
-    // pressed, and the volume slider's input events would go through its
-    // serialize-on-input path. Bubble phase, so the widget's own listeners,
-    // which sit on the buttons and on the progress bar themselves, have all
-    // run by then.
-    //
-    // keyup is on the list for a reason of its own. The bar is inserted inside
-    // the score's <pre>, and Vditor keeps a listener there that puts the focus
-    // back on the editable root; keydown never reaches it, so the first arrow
-    // key pressed on the progress bar was answered and the bar then lost the
-    // focus on the release of that same key, leaving every arrow after it with
-    // nowhere to land (traced to vditor's index.min.js from a focus() the
-    // <pre> listener calls).
+    // The player's events are its own: the widget tells CodeMirror to ignore
+    // what happens in the bar (ScoreWidget.ignoreEvent), and stopping them
+    // here keeps the document's own listeners (the chrome click handler, the
+    // toolbar's menu closer) out of it as well. Bubble phase, so the widget's
+    // own listeners, which sit on the buttons and on the progress bar
+    // themselves, have all run by then.
     [
       "click",
       "mousedown",
@@ -1663,18 +1386,12 @@
       });
     });
     // The caret stays where it is while the player is used. A <button> is
-    // focusable, so its mousedown pulls the focus out of the editable root,
-    // and with the score's block open for editing Vditor answers that by
-    // collapsing the block, which rebuilds the preview this bar lives in: the
-    // button was destroyed between mousedown and click and the click never
-    // reached the synth, so the first play after looking at a score's source
-    // did nothing at all. Preventing the default of mousedown keeps the focus
-    // (and the click, which fires regardless). Two controls keep theirs: the
-    // volume slider, a form control that needs the browser's own drag, and
-    // the progress bar, which answers the arrow keys once it has been clicked
-    // just as the volume does. Neither closes the block, since a blur that
-    // lands anywhere inside the bar is stopped before Vditor hears it (see
-    // guardBlur), and neither takes a text selection with it (the two carry
+    // focusable, so its mousedown would pull the focus out of the editor;
+    // preventing the default of mousedown keeps the focus (and the click,
+    // which fires regardless). Two controls keep theirs: the volume slider, a
+    // form control that needs the browser's own drag, and the progress bar,
+    // which answers the arrow keys once it has been clicked just as the
+    // volume does. Neither takes a text selection with it (the two carry
     // user-select: none).
     //
     // The gesture is also one more place the output is woken (the click that
@@ -1698,7 +1415,7 @@
     code.insertAdjacentElement("afterend", bar);
     block.setAttribute("data-mdm-audio", "1"); // keeps the toggle shown
     player = {
-      index: scoreBlocks().indexOf(block),
+      pos: blockPos(block),
       bar: bar,
       controller: null,
       source: scoreSource(block),
@@ -1820,31 +1537,50 @@
       });
   }
 
-  // After every render pass: the bar is carried over Vditor's DOM rebuilds.
-  // An edit inside the open block (or a full setValue) wipes the preview and
-  // the bar with it; the player reopens on the block in the same position,
-  // with the current source, stopped. A tune edited under a sounding player
-  // should not keep playing the old notes.
+  // After every change of the content DOM: the bar is carried over widget
+  // rebuilds. An edit inside the open block replaces its widget and the bar
+  // with it; the player reopens on the block in the same position, with the
+  // current source, stopped. A tune edited under a sounding player should not
+  // keep playing the old notes. A caret going in and out of the block does
+  // not rebuild the widget (ScoreWidget compares by source), so a player
+  // plays on while its source is open beside it.
   function syncPlayer() {
     if (player) {
       const block = playerBlock();
       if (!block) {
-        closePlayer();
-      } else if (
-        !document.contains(player.bar) ||
-        scoreSource(block) !== player.source
-      ) {
+        // Scrolled out of the viewport, where CodeMirror keeps no widget:
+        // the tune plays on, and the bar waits for the block to come back.
+        // Gone for good (the block deleted) is told apart by the text: no
+        // score source at the remembered position.
+        if (!scoreAt(player.pos)) closePlayer();
+      } else if (scoreSource(block) !== player.source) {
         openPlayer(block);
+      } else if (!document.contains(player.bar)) {
+        // The widget was built again (back into view, or a caret went in
+        // and out): the same bar, with its controller and whatever is
+        // sounding, goes back under the new engraving.
+        const code = block.querySelector("code.language-abc");
+        if (code) code.insertAdjacentElement("afterend", player.bar);
+        block.setAttribute("data-mdm-audio", "1");
       } else {
-        player.index = scoreBlocks().indexOf(block);
         block.setAttribute("data-mdm-audio", "1");
       }
     }
     syncToggleLabels();
   }
 
-  // The face of the toggle, drawn like the toolbar icons: fill only, since the
-  // stylesheet zeroes strokes and a stroked shape would come out invisible.
+  // Whether a ```abc block still ends at this document position.
+  function scoreAt(pos) {
+    if (!view || pos < 0 || pos > view.state.doc.length) return false;
+    const tree = CM.syntaxTree(view.state);
+    let node = tree.resolveInner(Math.max(0, pos - 1), -1);
+    while (node && node.name !== "FencedCode") node = node.parent;
+    if (!node) return false;
+    const info = node.getChild("CodeInfo");
+    return !!info && isAbcInfo(view.state.sliceDoc(info.from, info.to)) && view.state.doc.lineAt(node.to).to === pos;
+  }
+
+  // The face of the toggle, drawn like the toolbar icons: fill only.
   //
   // Headphones, and not the speaker it used to be: the player carries a
   // speaker of its own for the mute, and a struck-through cone in the corner
@@ -1864,26 +1600,6 @@
     '<rect x="1.1" y="9.9" width="3" height="4.6" rx="1.3"/>' +
     '<rect x="11.9" y="9.9" width="3" height="4.6" rx="1.3"/></svg>';
 
-  // The little button beside the copy button, on every score. Same manners as
-  // Vditor's copy widget: absolute against the preview <pre>, shown on hover
-  // (and while its player is open), tooltip drawn to the west.
-  function ensureAudioToggles() {
-    scoreBlocks().forEach(function (block) {
-      const preview = block.querySelector(".vditor-ir__preview");
-      if (!preview || preview.querySelector(".mdm-audio-toggle")) return;
-      const code = preview.querySelector("code.language-abc");
-      const toggle = document.createElement("div");
-      toggle.className = "mdm-audio-toggle";
-      toggle.setAttribute("contenteditable", "false");
-      const span = document.createElement("span");
-      span.setAttribute("role", "button");
-      span.className = "vditor-tooltipped vditor-tooltipped__w";
-      toggle.appendChild(span);
-      preview.insertBefore(toggle, code);
-    });
-    syncToggleLabels();
-  }
-
   // Tooltips name the destination of the click, as everywhere in this editor.
   // The drawing does not: there is only one of it (see HEADPHONES_ICON), and
   // what says whether this block's player is open is the lit disc the
@@ -1891,7 +1607,7 @@
   function syncToggleLabels() {
     const open = player ? playerBlock() : null;
     scoreBlocks().forEach(function (block) {
-      const span = block.querySelector(".mdm-audio-toggle span");
+      const span = block.querySelector(".mdm-audio-toggle");
       if (!span) return;
       span.setAttribute(
         "aria-label",
@@ -2003,786 +1719,1239 @@
     inkHoldUntil = performance.now() + remaining * 1000;
   }
 
-  // Vditor collapses whatever block is open for editing as soon as the
-  // editable root loses the focus, and rebuilds its preview: that is what
-  // used to swallow the first press of play, and the buttons of the bar are
-  // kept off it by preventing the default of their mousedown. The volume
-  // slider cannot be treated that way, since a form control needs the focus
-  // for the browser's own drag, so its blur is stopped instead, before it
-  // reaches Vditor's listener. Capture phase on the document is the only
-  // place it can be caught: blur does not bubble, and Vditor listens on the
-  // root itself, which the capture phase reaches first.
-  function guardBlur(e) {
-    if (!player || !player.bar || !e.relatedTarget) return;
-    if (player.bar.contains(e.relatedTarget)) e.stopPropagation();
-  }
+  // ---------- Rendering: decorations over the syntax tree ----------
 
-  // In capture phase before the copy interceptor and the click-to-edit
-  // handler, the same arrangement the copy button has: the toggle's clicks
-  // belong to the toggle alone.
-  function handleAudioToggle(e) {
-    if (!e.target.closest) return;
-    const span = e.target.closest(".mdm-audio-toggle span");
-    if (!span) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    const block = span.closest('[data-type="code-block"]');
-    if (!block) return;
-    if (player && playerBlock() === block) {
-      closePlayer();
-    } else {
-      openPlayer(block);
+  // What shows where depends on two things: the Markdown structure, read from
+  // the Lezer tree CodeMirror keeps, and where the carets are. Everything is
+  // computed in one StateField, recomputed on every change of text, selection
+  // or tree, over the whole document: a chapter is small, the tree walk is a
+  // few milliseconds, and the expensive part (KaTeX, abcjs) happens only in
+  // widget DOM, which CodeMirror reuses while the widget compares equal.
+
+  const { Decoration, WidgetType, StateField, EditorView } = CM;
+
+  // A range is touched when any selection range overlaps it or sits at either
+  // edge. Every range, not just the main one, so each caret reveals the source
+  // it is in; the edges count so that the caret arriving from outside sees the
+  // marks before its next keystroke lands in them.
+  function touchedBy(ranges, from, to) {
+    for (let i = 0; i < ranges.length; i++) {
+      const r = ranges[i];
+      if (r.from <= to && r.to >= from) return true;
     }
+    return false;
   }
 
-  // ---------- Pandoc callouts ----------
+  // ---- KaTeX ----
 
-  // Quarto callouts (::: {.callout-note} … :::) reach the editor as plain
-  // text. The ::: lines are NOT standalone paragraphs: with no blank line in
-  // between, lute keeps them as the first/last line of a paragraph (soft
-  // break), so the detection is line-level. The paragraphs in the range are
-  // classed (accent bar and tint via CSS), and the fence text itself is
-  // wrapped in a small faint span. lute serializes a span by its text, so the
-  // round-trip is untouched (checked in the battery); it also wipes all of
-  // this while re-rendering a block, and the MutationObserver re-applies it.
-  // A paragraph holding the caret is left unwrapped so typing is undisturbed.
-  const CALLOUT_OPEN_LINE = /^(:{3,}[ \t]*\{([^}\n]*)\}[ \t]*)(?=\n|$)/;
-  const CALLOUT_CLOSE_LINE = /(^|\n):{3,}[ \t]*$/;
+  // Rendered HTML per source, kept for the session: the same equation is
+  // asked for on every rebuild and the render is the costly step. `error` is
+  // the message KaTeX gave, when it refused the source.
+  const KATEX_CACHE = new Map();
 
-  function calloutNorm(el) {
-    return el.textContent.replace(/\u200B/g, "").replace(/\s+$/, "");
-  }
-
-  // Both wrappers want the whole fence line in one text node, and after an edit
-  // it is not: Vditor marks the caret with a <wbr>, spins the block through
-  // lute, and setRangeByWbr removes that element again without merging its
-  // neighbours, so an edited fence comes back split in two or three nodes
-  // ("::: {.callout-" + "" + "warning …}\n…"). firstChild/lastChild then held a
-  // fragment, the marker stopped matching, and the fence kept its full size for
-  // good, since Vditor only re-renders that block on a further edit inside it.
-  // normalize() merges the pieces back and drops the empty ones; adjacent text
-  // nodes serialize the same, so the round-trip is untouched. Only a paragraph
-  // without the caret gets here, so there is no live range to disturb.
-  function wrapFenceStart(p) {
-    if (p.querySelector(".mdm-co-fence--open")) return;
-    p.normalize();
-    const n = p.firstChild;
-    if (!n || n.nodeType !== 3) return; // marker not in a bare text node
-    const m = /^(\u200B*:{3,}[ \t]*\{[^}\n]*\}[ \t]*)(\n|$)/.exec(n.textContent);
-    if (!m) return;
-    const rest = n.textContent.slice(m[1].length);
-    const span = document.createElement("span");
-    span.className = "mdm-co-fence mdm-co-fence--open";
-    span.textContent = m[1];
-    p.replaceChild(span, n);
-    if (rest) p.insertBefore(document.createTextNode(rest), span.nextSibling);
-  }
-
-  function wrapFenceEnd(p) {
-    if (p.querySelector(".mdm-co-fence--close")) return;
-    p.normalize();
-    const n = p.lastChild;
-    if (!n || n.nodeType !== 3) return;
-    const m = /(^|\n)(:{3,}[ \t]*\u200B*)$/.exec(n.textContent);
-    if (!m) return;
-    const before = n.textContent.slice(0, n.textContent.length - m[2].length);
-    const span = document.createElement("span");
-    span.className = "mdm-co-fence mdm-co-fence--close";
-    span.textContent = m[2];
-    p.replaceChild(span, n);
-    if (before) p.insertBefore(document.createTextNode(before), span);
-  }
-
-  function decorateCallouts() {
+  function renderTex(tex, display) {
+    const key = (display ? "D" : "I") + tex;
+    let hit = KATEX_CACHE.get(key);
+    if (hit) return hit;
     try {
-      const root = contentRoot();
-      if (!root) return;
-      const kids = Array.prototype.slice.call(root.children);
-      kids.forEach(function (el) {
-        el.classList.remove("mdm-co-open", "mdm-co-close", "mdm-co-body");
-      });
-      const sel = window.getSelection();
-      const anchor =
-        sel && sel.rangeCount
-          ? sel.anchorNode.nodeType === 1
-            ? sel.anchorNode
-            : sel.anchorNode.parentElement
-          : null;
-
-      let i = 0;
-      while (i < kids.length) {
-        const open =
-          kids[i].tagName === "P"
-            ? CALLOUT_OPEN_LINE.exec(calloutNorm(kids[i]))
-            : null;
-        if (!open) {
-          i++;
-          continue;
-        }
-        let j = i;
-        while (
-          j < kids.length &&
-          !(
-            kids[j].tagName === "P" &&
-            CALLOUT_CLOSE_LINE.test(calloutNorm(kids[j]))
-          )
-        ) {
-          j++;
-        }
-        if (j >= kids.length) {
-          i++;
-          continue; // unclosed: leave as plain text
-        }
-        const type = (open[2].match(/\.callout-([a-z]+)/) || [])[1] || "note";
-        for (let k = i; k <= j; k++) {
-          if (k === i) kids[k].classList.add("mdm-co-open");
-          if (k === j) kids[k].classList.add("mdm-co-close");
-          if (k !== i && k !== j) kids[k].classList.add("mdm-co-body");
-          kids[k].setAttribute("data-mdm-co", type);
-        }
-        if (!anchor || !kids[i].contains(anchor)) wrapFenceStart(kids[i]);
-        if (!anchor || !kids[j].contains(anchor)) wrapFenceEnd(kids[j]);
-        i = j + 1;
-      }
+      hit = {
+        html: CM.katex.renderToString(tex, {
+          displayMode: display,
+          throwOnError: true,
+        }),
+        error: null,
+      };
     } catch (e) {
-      // Decoration must never break editing.
+      hit = { html: null, error: (e && e.message) || "KaTeX error" };
+    }
+    KATEX_CACHE.set(key, hit);
+    return hit;
+  }
+
+  // A rendered equation. Inline ones replace their source; a display one is a
+  // block widget that sits under the source lines, which are hidden while no
+  // caret is in them (the live preview of the block that is being edited).
+  class MathWidget extends WidgetType {
+    constructor(tex, display, block) {
+      super();
+      this.tex = tex;
+      this.display = display;
+      this.block = block; // block widget (after the source) or inline replace
+    }
+    eq(other) {
+      return (
+        other.tex === this.tex &&
+        other.display === this.display &&
+        other.block === this.block
+      );
+    }
+    toDOM() {
+      const el = document.createElement(this.block ? "div" : "span");
+      el.className = this.block ? "mdm-math mdm-math--block" : "mdm-math";
+      const out = renderTex(this.tex, this.display);
+      if (out.html) {
+        el.innerHTML = out.html;
+      } else {
+        // Only a block in the middle of an edit gets here (an inline or an
+        // untouched block that does not compile keeps its source instead):
+        // the message tells what is still missing.
+        el.className += " mdm-math--error";
+        el.textContent = out.error;
+      }
+      return el;
+    }
+    // A click on the drawing puts the caret at its source, which is what
+    // opens it; the editor's own click handler does that (revealBlock), so
+    // CodeMirror leaves the event alone.
+    ignoreEvent() {
+      return true;
     }
   }
 
-  // The fence of the paragraph holding the caret is left unwrapped so it can be
-  // edited at full size, and Vditor wipes the wrapping itself while re-rendering
-  // the block on every keystroke. Putting the caret back elsewhere is a
-  // selection change and not a DOM mutation, so the observer below never saw it
-  // and an edited fence kept its full size for good. Watched here, and only
-  // when the caret crosses into or out of a callout, since selectionchange
-  // fires on every cursor move.
-  let calloutAnchor = null;
-  function watchCallouts() {
-    let scheduled = false;
-    document.addEventListener("selectionchange", function () {
-      const sel = window.getSelection();
-      const node = sel && sel.anchorNode;
-      const el = node
-        ? node.nodeType === 1
-          ? node
-          : node.parentElement
-        : null;
-      const p = el && el.closest ? el.closest("[data-mdm-co]") : null;
-      if (p === calloutAnchor) return;
-      calloutAnchor = p;
-      if (scheduled) return;
-      scheduled = true;
-      requestAnimationFrame(function () {
-        scheduled = false;
-        decorateCallouts();
-      });
+  // ---- Scores ----
+
+  // The engraving of a ```abc block, with its chrome: the copy button, the
+  // player toggle and, while the player is open on it, the player bar. A
+  // block widget after the source lines, which are hidden while no caret is
+  // in them. It compares equal while the source is the same, so CodeMirror
+  // keeps its DOM across carets going in and out of the block, and with it
+  // the player that may be sounding.
+  class ScoreWidget extends WidgetType {
+    constructor(source) {
+      super();
+      this.source = source;
+    }
+    eq(other) {
+      return other.source === this.source;
+    }
+    toDOM() {
+      const block = document.createElement("div");
+      block.className = "mdm-score";
+      block.setAttribute("data-mdm-source", this.source);
+      const chrome = document.createElement("div");
+      chrome.className = "mdm-chrome";
+      chrome.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
+      chrome.appendChild(chromeButton("mdm-audio-toggle", "Show player", HEADPHONES_ICON, "w"));
+      block.appendChild(chrome);
+      const code = document.createElement("code");
+      code.className = "language-abc";
+      block.appendChild(code);
+      renderScore(code, this.source);
+      return block;
+    }
+    // The chrome and the player are theirs, and a click on the score itself
+    // is answered by the editor's click handler (revealBlock), so CodeMirror
+    // leaves every event alone.
+    ignoreEvent() {
+      return true;
+    }
+    destroy(dom) {
+      // A player open on this block goes with it; syncPlayer reopens it on
+      // the block that takes its place, if one does.
+      releaseScore(dom);
+    }
+  }
+
+  // The corner of a code block: the language, and the copy button. An inline
+  // widget of no size at the start of the first line of code, whose buttons
+  // are positioned against that line, so they overlay the card's top right
+  // corner.
+  class CodeChromeWidget extends WidgetType {
+    constructor(lang) {
+      super();
+      this.lang = lang;
+    }
+    eq(other) {
+      return other.lang === this.lang;
+    }
+    toDOM() {
+      const el = document.createElement("span");
+      el.className = "mdm-chrome mdm-chrome--code";
+      if (this.lang) {
+        const tag = document.createElement("span");
+        tag.className = "mdm-lang";
+        tag.textContent = this.lang;
+        el.appendChild(tag);
+      }
+      el.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
+      return el;
+    }
+    ignoreEvent() {
+      return true;
+    }
+  }
+
+  function chromeButton(cls, label, icon, tipSide) {
+    const btn = document.createElement("span");
+    btn.setAttribute("role", "button");
+    btn.className = cls + " mdm-tip mdm-tip--" + tipSide;
+    btn.setAttribute("aria-label", label);
+    btn.innerHTML = icon;
+    return btn;
+  }
+
+  // Two sheets of paper, the copy glyph of every editor, fill only.
+  const COPY_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M5.5 2A1.5 1.5 0 0 0 4 3.5v7A1.5 1.5 0 0 0 5.5 12h6a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 11.5 2Zm0 1.2h6q.3 0 .3.3v7q0 .3-.3.3h-6q-.3 0-.3-.3v-7q0-.3.3-.3ZM2.6 5.2v7.3q0 1.5 1.5 1.5h5.6v-1.2H4.1q-.3 0-.3-.3V5.2Z"/></svg>';
+
+  // ---- Small inline widgets ----
+
+  class BulletWidget extends WidgetType {
+    eq() {
+      return true;
+    }
+    toDOM() {
+      const el = document.createElement("span");
+      el.className = "mdm-bullet";
+      el.textContent = "•";
+      return el;
+    }
+    ignoreEvent() {
+      return false;
+    }
+  }
+  const BULLET = new BulletWidget();
+
+  class CheckboxWidget extends WidgetType {
+    constructor(checked) {
+      super();
+      this.checked = checked;
+    }
+    eq(other) {
+      return other.checked === this.checked;
+    }
+    toDOM() {
+      const el = document.createElement("input");
+      el.type = "checkbox";
+      el.className = "mdm-task";
+      el.checked = this.checked;
+      el.setAttribute("aria-label", this.checked ? "Done" : "To do");
+      return el;
+    }
+    // The click is answered in the editor's own mousedown handler, which
+    // flips the text; CodeMirror must not move the caret for it.
+    ignoreEvent() {
+      return true;
+    }
+  }
+
+  class RuleWidget extends WidgetType {
+    eq() {
+      return true;
+    }
+    toDOM() {
+      const el = document.createElement("div");
+      el.className = "mdm-hr";
+      return el;
+    }
+    ignoreEvent() {
+      return false;
+    }
+  }
+  const RULE = new RuleWidget();
+
+  class ImageWidget extends WidgetType {
+    constructor(src, alt) {
+      super();
+      this.src = src;
+      this.alt = alt;
+    }
+    eq(other) {
+      return other.src === this.src && other.alt === this.alt;
+    }
+    toDOM() {
+      const img = document.createElement("img");
+      img.className = "mdm-image";
+      img.src = this.src;
+      img.alt = this.alt;
+      img.title = this.alt;
+      return img;
+    }
+    ignoreEvent() {
+      return false;
+    }
+  }
+
+  // An image path as written in the file, resolved against the folder of the
+  // document (the host hands it over as a webview URI) or left as is when it
+  // is already absolute.
+  function imageSource(src) {
+    if (/^(https?:|data:|vscode-)/i.test(src)) return src;
+    const base = window.MDM_DOC_BASE || "";
+    if (!base) return null;
+    return base.replace(/\/?$/, "/") + src.replace(/^\.\//, "");
+  }
+
+  // ---- The walk ----
+
+  // Line-level classes are gathered per line and emitted once: a line can be
+  // in a callout, in a list and in a quote at the same time.
+  function lineClassCollector(doc) {
+    const lines = new Map(); // line number -> Set of classes
+    return {
+      add: function (from, to, cls) {
+        const first = doc.lineAt(from).number;
+        const last = doc.lineAt(Math.max(from, to)).number;
+        for (let n = first; n <= last; n++) {
+          let set = lines.get(n);
+          if (!set) lines.set(n, (set = new Set()));
+          cls.split(" ").forEach(function (c) {
+            if (c) set.add(c);
+          });
+        }
+      },
+      decorations: function () {
+        const out = [];
+        lines.forEach(function (set, n) {
+          out.push(
+            Decoration.line({ class: Array.from(set).join(" ") }).range(
+              doc.line(n).from
+            )
+          );
+        });
+        return out;
+      },
+    };
+  }
+
+  // Which fence info strings are scores: ```abc and Pandoc's ```{.abc .play}.
+  function isAbcInfo(info) {
+    return /^(abc\b|\{\s*\.abc\b)/.test(info.trim());
+  }
+
+  // The language a ```lang fence names, with Pandoc's {.lang attrs} form.
+  function fenceLanguage(info) {
+    const m = /^\{\s*\.([A-Za-z0-9_+#-]+)/.exec(info.trim()) || /^([A-Za-z0-9_+#-]+)/.exec(info.trim());
+    return m ? m[1] : "";
+  }
+
+  // Marks hidden while their node is not touched: the node name and the names
+  // of its marker children.
+  const INLINE_MARKS = {
+    Emphasis: ["EmphasisMark"],
+    StrongEmphasis: ["EmphasisMark"],
+    Strikethrough: ["StrikethroughMark"],
+    InlineCode: ["CodeMark"],
+    Subscript: ["SubscriptMark"],
+    Superscript: ["SuperscriptMark"],
+  };
+
+  function buildDecorations(state) {
+    const doc = state.doc;
+    const ranges = state.selection.ranges;
+    const tree = CM.syntaxTree(state);
+    const decos = [];
+    const lines = lineClassCollector(doc);
+    const touched = function (from, to) {
+      return touchedBy(ranges, from, to);
+    };
+    const text = function (from, to) {
+      return doc.sliceString(from, to);
+    };
+    const hide = function (from, to) {
+      if (to > from) decos.push(Decoration.replace({}).range(from, to));
+    };
+    // Whole lines taken out of the flow (a fence, the source of a rendered
+    // block). Block replace decorations cover whole lines.
+    const hideLines = function (from, to) {
+      const a = doc.lineAt(from).from;
+      const b = doc.lineAt(to).to;
+      decos.push(Decoration.replace({ block: true }).range(a, b));
+    };
+    // The mark plus the single space after it, the way `# `, `> ` and `- `
+    // are written.
+    const markWithSpace = function (node) {
+      const to = node.to < doc.length && text(node.to, node.to + 1) === " " ? node.to + 1 : node.to;
+      return { from: node.from, to: to };
+    };
+
+    tree.iterate({
+      enter: function (n) {
+        const name = n.name;
+        const node = n.node;
+
+        if (name === "FrontMatter") {
+          lines.add(n.from, n.to, "mdm-fm-line");
+          lines.add(n.from, n.from, "mdm-fm-first");
+          lines.add(n.to, n.to, "mdm-fm-last");
+          node.getChildren("FrontMatterMark").forEach(function (m) {
+            lines.add(m.from, m.to, "mdm-fm-mark");
+          });
+          return false;
+        }
+
+        if (name === "FencedCode") {
+          const marks = node.getChildren("CodeMark");
+          const info = node.getChild("CodeInfo");
+          const body = node.getChild("CodeText");
+          const infoText = info ? text(info.from, info.to) : "";
+          const source = body ? text(body.from, body.to) : "";
+          const openLine = doc.lineAt(n.from);
+          const closeLine = marks.length > 1 ? doc.lineAt(marks[1].from) : null;
+          const blockFrom = openLine.from;
+          const blockTo = closeLine ? closeLine.to : doc.lineAt(n.to).to;
+          const open = touched(blockFrom, blockTo);
+          if (isAbcInfo(infoText)) {
+            decos.push(
+              Decoration.widget({
+                widget: new ScoreWidget(source),
+                block: true,
+                side: 1,
+              }).range(blockTo)
+            );
+            if (!open) {
+              hideLines(blockFrom, blockTo);
+              return false;
+            }
+            lines.add(blockFrom, blockTo, "mdm-code-line mdm-src-line");
+            lines.add(openLine.from, openLine.from, "mdm-code-first mdm-fence-line");
+            if (closeLine) lines.add(closeLine.from, closeLine.from, "mdm-code-last mdm-fence-line");
+            return false;
+          }
+          // The chrome rides the first line of the code as an inline widget of
+          // no size (a block widget at the fence would go with the fence when
+          // that line is hidden).
+          decos.push(
+            Decoration.widget({
+              widget: new CodeChromeWidget(fenceLanguage(infoText)),
+              side: -1,
+            }).range(body ? body.from : openLine.to)
+          );
+          lines.add(blockFrom, blockTo, "mdm-code-line");
+          if (open) {
+            lines.add(openLine.from, openLine.from, "mdm-code-first mdm-fence-line");
+            if (closeLine) lines.add(closeLine.from, closeLine.from, "mdm-code-last mdm-fence-line");
+          } else {
+            hideLines(openLine.from, openLine.to);
+            if (closeLine) hideLines(closeLine.from, closeLine.to);
+            if (body) {
+              lines.add(body.from, body.from, "mdm-code-first");
+              lines.add(body.to, body.to, "mdm-code-last");
+            }
+          }
+          return false;
+        }
+
+        if (name === "CodeBlock") {
+          // Indented code: no fences to hide, the card alone.
+          lines.add(n.from, n.to, "mdm-code-line");
+          lines.add(n.from, n.from, "mdm-code-first");
+          lines.add(n.to, n.to, "mdm-code-last");
+          return false;
+        }
+
+        if (name === "BlockMath") {
+          const content = node.getChild("BlockMathContent");
+          const tex = content ? text(content.from, content.to) : "";
+          const blockFrom = doc.lineAt(n.from).from;
+          const blockTo = doc.lineAt(n.to).to;
+          const out = renderTex(tex, true);
+          const open = touched(blockFrom, blockTo);
+          if (open || out.html) {
+            decos.push(
+              Decoration.widget({
+                widget: new MathWidget(tex, true, true),
+                block: true,
+                side: 1,
+              }).range(blockTo)
+            );
+          }
+          if (!open && out.html) {
+            hideLines(blockFrom, blockTo);
+            return false;
+          }
+          lines.add(blockFrom, blockTo, "mdm-math-line mdm-src-line" + (out.html ? "" : " mdm-math--broken"));
+          lines.add(blockFrom, blockFrom, "mdm-math-first");
+          lines.add(blockTo, blockTo, "mdm-math-last");
+          return false;
+        }
+
+        if (name === "InlineMath" || name === "InlineBlockMath") {
+          const display = name === "InlineBlockMath";
+          const content = node.getChild(display ? "InlineBlockMathContent" : "InlineMathContent");
+          const tex = content ? text(content.from, content.to) : "";
+          const out = renderTex(tex, display);
+          if (!touched(n.from, n.to) && out.html) {
+            decos.push(
+              Decoration.replace({ widget: new MathWidget(tex, display, false) }).range(n.from, n.to)
+            );
+          } else {
+            decos.push(
+              Decoration.mark({ class: "mdm-math-src" + (out.html ? "" : " mdm-math--broken") }).range(n.from, n.to)
+            );
+          }
+          return false;
+        }
+
+        if (name === "Callout") {
+          const marks = node.getChildren("CalloutMark");
+          const kind = marks.length ? CM.calloutKind(text(marks[0].from, marks[0].to)) || "note" : "note";
+          lines.add(n.from, n.to, "mdm-co-line mdm-co--" + kind);
+          lines.add(n.from, n.from, "mdm-co-first");
+          lines.add(n.to, n.to, "mdm-co-last");
+          marks.forEach(function (m) {
+            const line = doc.lineAt(m.from);
+            if (!touched(line.from, line.to)) lines.add(m.from, m.from, "mdm-co-fence");
+          });
+          return true;
+        }
+
+        if (/^ATXHeading[1-6]$/.test(name)) {
+          const level = name.slice(-1);
+          lines.add(n.from, n.to, "mdm-h mdm-h" + level);
+          if (!touched(n.from, n.to)) {
+            node.getChildren("HeaderMark").forEach(function (m) {
+              const r = markWithSpace(m);
+              // A closing run of #: the space before it goes too.
+              const from = m.from > n.from && text(m.from - 1, m.from) === " " ? m.from - 1 : r.from;
+              hide(from, r.to);
+            });
+          }
+          return true;
+        }
+
+        if (/^SetextHeading[12]$/.test(name)) {
+          const level = name.slice(-1);
+          const mark = node.getChild("HeaderMark");
+          lines.add(n.from, mark ? mark.from - 1 : n.to, "mdm-h mdm-h" + level);
+          if (mark) {
+            if (!touched(n.from, n.to)) hideLines(mark.from, mark.to);
+            else lines.add(mark.from, mark.to, "mdm-mark-line");
+          }
+          return true;
+        }
+
+        if (name === "Blockquote") {
+          lines.add(n.from, n.to, "mdm-quote");
+          return true;
+        }
+
+        // The > of every quoted line, wherever the tree hangs it (the first
+        // under the Blockquote, the continuation lines under the paragraph
+        // inside): hidden unless a caret is on that line.
+        if (name === "QuoteMark") {
+          const line = doc.lineAt(n.from);
+          if (!touched(line.from, line.to)) {
+            const r = markWithSpace(node);
+            hide(r.from, r.to);
+          }
+          return false;
+        }
+
+        if (name === "ListItem") {
+          lines.add(n.from, n.to, "mdm-li");
+          const mark = node.getChild("ListMark");
+          if (mark) {
+            const line = doc.lineAt(mark.from);
+            const bullet = /^[-*+]$/.test(text(mark.from, mark.to));
+            if (bullet && !touched(line.from, line.to)) {
+              decos.push(Decoration.replace({ widget: BULLET }).range(mark.from, mark.to));
+            }
+            const task = node.getChild("Task");
+            const marker = task && task.getChild("TaskMarker");
+            if (marker && !touched(line.from, line.to)) {
+              const checked = /x/i.test(text(marker.from, marker.to));
+              decos.push(Decoration.replace({ widget: new CheckboxWidget(checked) }).range(marker.from, marker.to));
+            }
+          }
+          return true;
+        }
+
+        if (name === "HorizontalRule") {
+          const line = doc.lineAt(n.from);
+          if (!touched(line.from, line.to)) {
+            decos.push(Decoration.replace({ widget: RULE, block: true }).range(line.from, line.to));
+          } else {
+            lines.add(n.from, n.to, "mdm-mark-line");
+          }
+          return false;
+        }
+
+        if (name === "Table") {
+          lines.add(n.from, n.to, "mdm-table-line");
+          return false;
+        }
+
+        if (name === "HTMLBlock" || name === "CommentBlock") {
+          lines.add(n.from, n.to, "mdm-html-line");
+          return false;
+        }
+
+        if (name === "Link") {
+          const url = node.getChild("URL");
+          decos.push(
+            Decoration.mark({
+              class: "mdm-link",
+              attributes: url ? { title: text(url.from, url.to) } : undefined,
+            }).range(n.from, n.to)
+          );
+          if (!touched(n.from, n.to)) {
+            node.getChildren("LinkMark").forEach(function (m) {
+              hide(m.from, m.to);
+            });
+            if (url) hide(url.from, url.to);
+            const title = node.getChild("LinkTitle");
+            if (title) hide(title.from - 1, title.to);
+          }
+          return true;
+        }
+
+        if (name === "Autolink" || name === "URL") {
+          decos.push(Decoration.mark({ class: "mdm-link" }).range(n.from, n.to));
+          if (name === "Autolink" && !touched(n.from, n.to)) {
+            node.getChildren("LinkMark").forEach(function (m) {
+              hide(m.from, m.to);
+            });
+          }
+          return false;
+        }
+
+        if (name === "Image") {
+          const url = node.getChild("URL");
+          const src = url ? imageSource(text(url.from, url.to)) : null;
+          if (src && !touched(n.from, n.to)) {
+            const marks = node.getChildren("LinkMark");
+            const alt = marks.length > 1 ? text(marks[0].to, marks[1].from) : "";
+            decos.push(Decoration.replace({ widget: new ImageWidget(src, alt) }).range(n.from, n.to));
+            return false;
+          }
+          return true;
+        }
+
+        const marks = INLINE_MARKS[name];
+        if (marks) {
+          if (name === "InlineCode") {
+            decos.push(Decoration.mark({ class: "mdm-inline-code" }).range(n.from, n.to));
+          }
+          if (!touched(n.from, n.to)) {
+            marks.forEach(function (kind) {
+              node.getChildren(kind).forEach(function (m) {
+                hide(m.from, m.to);
+              });
+            });
+          }
+          return true;
+        }
+        return true;
+      },
     });
+
+    return Decoration.set(decos.concat(lines.decorations()), true);
   }
 
-  let observer = null;
-  function watchDocument() {
-    const root = document.getElementById("app");
-    if (!root || observer) return;
-    let scheduled = false;
-    observer = new MutationObserver(function () {
-      if (scheduled) return;
-      scheduled = true;
-      requestAnimationFrame(function () {
-        scheduled = false;
-        renderScores();
-        decorateCallouts();
-        highlightFrontMatter();
-      });
-    });
-    observer.observe(root, { childList: true, subtree: true });
-  }
-
-  // ---------- Code block ergonomics ----------
-
-  function contentRoot() {
-    return document.querySelector("#app .vditor-ir .vditor-reset");
-  }
-
-  // The element that scrolls. Vditor puts the scrollbar on .vditor-ir, but with
-  // this stylesheet (the editable area stretched to the bottom of the pane) the
-  // one that overflows is the .vditor-reset inside it, so reading .vditor-ir
-  // gave a scrollTop stuck at 0 and restoring it after an update did nothing.
-  function scroller() {
-    const root = contentRoot();
-    if (root && root.scrollHeight > root.clientHeight + 1) return root;
-    return document.querySelector("#app .vditor-ir");
-  }
-
-  function caretInfo() {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return null;
-    const range = sel.getRangeAt(0);
-    const node =
-      range.startContainer.nodeType === 1
-        ? range.startContainer
-        : range.startContainer.parentElement;
-    if (!node || !node.closest) return null;
-    return { sel: sel, range: range, node: node };
-  }
-
-  function placeCaretAtEnd(el) {
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-
-  // Ctrl+Enter: leave the current block, inserting a paragraph below it.
-  // Enter with the last line empty and the caret at the end of a code block:
-  // drop that empty line and leave the block (Typora behaviour).
-  function handleKeydown(e) {
-    if (!vditor || e.key !== "Enter" || e.altKey || e.shiftKey) return;
-    const info = caretInfo();
-    if (!info || !info.node.closest(".vditor-ir")) return;
-    // With an extended selection, Enter must replace it (normal behaviour);
-    // these shortcuts only apply with a collapsed caret.
-    if (!info.sel.isCollapsed) return;
-
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      vditor.insertEmptyBlock("afterend");
-      return;
-    }
-
-    const pre = info.node.closest("pre.vditor-ir__marker--pre");
-    if (!pre) return;
-    const codeEl = pre.querySelector("code") || pre;
-    const tail = document.createRange();
-    tail.setStart(info.range.endContainer, info.range.endOffset);
-    tail.setEnd(
-      codeEl,
-      codeEl.childNodes.length
-    );
-    const remaining = tail.toString();
-    const text = codeEl.textContent;
-    if ((remaining === "" || remaining === "\n") && /\n\n$/.test(text)) {
-      e.preventDefault();
-      e.stopPropagation();
-      // Drop the tail of empty lines used to escape (Vditor may leave more
-      // than one when inserting the line break). Accepted trade-off:
-      // intentional trailing blank lines would also be dropped, the same way
-      // Typora does when escaping with a double Enter.
-      codeEl.textContent = text.replace(/\n\n+$/, "\n");
-      placeCaretAtEnd(codeEl);
-      vditor.insertEmptyBlock("afterend");
-    }
-  }
-
-  // Where the button went down, so the end of a drag can be told from a plain
-  // click: a click goes down and up on the same spot, a selection made with
-  // the mouse does not.
-  let mouseDownAt = null;
-  function recordMouseDown(e) {
-    mouseDownAt = { x: e.clientX, y: e.clientY, target: e.target };
-    // A press in the gutter puts the caret in the nearest block, and Vditor
-    // answers that by opening its source: a click 20px from the left edge
-    // opened the ABC of the score beside it (measured). Preventing the
-    // default leaves the caret where it was; the click still fires, and what
-    // it does is below, in handleClick.
-    if (inGutter(e)) e.preventDefault();
-  }
-
-  // The gutters: the strips of the editable root left and right of the
-  // blocks, which are its own padding (measured: 50px a side). Nothing is
-  // written there, so nothing is offered there. Told apart from the gaps
-  // between blocks, which are the root as well and where placing the caret in
-  // the nearest line is the ordinary thing to do: only a pointer outside the
-  // content box counts.
-  function inGutter(e) {
-    const root = contentRoot();
-    if (!root || e.target !== root) return false;
-    const box = root.getBoundingClientRect();
-    const style = window.getComputedStyle(root);
-    const left = box.left + (parseFloat(style.paddingLeft) || 0);
-    const right = box.right - (parseFloat(style.paddingRight) || 0);
-    return e.clientX < left || e.clientX > right;
-  }
-
-  // The pointer keeps the arrow it has over any other chrome while it is out
-  // there: the beam of an editable area would promise text where there is
-  // none. A class on the root, since only the pointer knows which strip it is
-  // over; the document observer watches childList and never sees it.
-  let overGutter = false;
-  function watchGutter() {
-    document.addEventListener("mousemove", function (e) {
-      const on = inGutter(e);
-      if (on === overGutter) return;
-      overGutter = on;
-      const root = contentRoot();
-      if (root) root.classList.toggle("mdm-gutter", on);
-    });
-  }
-
-  // True when this click is the tail of a drag. The click event fires on the
-  // common ancestor of the two endpoints, so a selection that starts inside a
-  // block and ends outside it reports the editable root as its target, exactly
-  // like a click on the empty area beside the block.
-  function endsADrag(e) {
-    if (!mouseDownAt) return false;
-    if (mouseDownAt.target !== e.target) return true;
-    return (
-      Math.abs(e.clientX - mouseDownAt.x) > 3 ||
-      Math.abs(e.clientY - mouseDownAt.y) > 3
-    );
-  }
-
-  // Click on the rendered view of a code block (e.g. the score SVG): place the
-  // caret at the end of its source so it can be edited. Without this, the
-  // score is only reachable with the arrow keys.
-  function handleClick(e) {
-    if (!vditor || !e.target || !e.target.closest) return;
-    if (e.target.closest(".vditor-copy")) return; // copy widget owns its clicks
-    if (e.target.closest(".mdm-audio") || e.target.closest(".mdm-audio-toggle")) {
-      return; // so do the player and its toggle
-    }
-    const preview = e.target.closest(".vditor-ir__preview");
-    if (preview) {
-      const block = preview.closest('[data-type="code-block"]');
-      if (!block) return;
-      const codeEl = block.querySelector("pre.vditor-ir__marker--pre > code");
-      if (!codeEl) return;
-      const root = contentRoot();
-      if (root) root.focus({ preventScroll: true });
-      placeCaretAtEnd(codeEl);
-      // The event is not cancelled: Vditor's own click handler runs afterwards
-      // and expands the block from the selection we just set (but moves the
-      // caret back to the start of the source). For drawn views (SVG, with no
-      // clickable text) we push it back to the end, which is where writing
-      // usually continues.
-      if (preview.querySelector("svg")) {
-        setTimeout(function () {
-          placeCaretAtEnd(codeEl);
-        }, 50);
+  // The tree is built in the background for a long document; when a later
+  // piece of it lands, the language plugin dispatches a transaction, and the
+  // field sees a different tree and rebuilds.
+  const renderField = StateField.define({
+    create: buildDecorations,
+    update: function (value, tr) {
+      if (
+        tr.docChanged ||
+        tr.selection ||
+        CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState)
+      ) {
+        return buildDecorations(tr.state);
       }
-      return;
-    }
-    // Click on the empty area below the last block: keep writing. Any empty
-    // container counts (the editable area only extends a few px below the
-    // content; the rest of the gap is the .vditor wrapper).
-    const root = contentRoot();
-    if (!root) return;
-    const t = e.target;
-    const isContainer =
-      t === root ||
-      t.id === "app" ||
-      (t.classList &&
-        ["vditor", "vditor-content", "vditor-ir"].some(function (c) {
-          return t.classList.contains(c);
-        }));
-    if (!isContainer) return;
-    // Selecting a whole line of a score runs past the edge of the block (the
-    // page has gutters of its own), and the mouse comes up on the editable
-    // root. Treated as a click, that closed the block and dropped the caret at
-    // the top of the collapsed score, throwing away the selection just made;
-    // below the last block it opened a paragraph instead. Neither is what the
-    // drag asked for, so a drag ends here.
-    if (endsADrag(e)) return;
-    const last = root.lastElementChild;
-    const belowLast =
-      last && e.clientY >= last.getBoundingClientRect().bottom - 1;
-    // A click beside a block that is open for editing closes it, the way one
-    // above or below it already did. Those two worked only because they land
-    // on another block and carry the caret out; to the sides there is no
-    // block to land on, since a block spans the whole width and the page has
-    // gutters of its own (measured: 50px), so the click fell on the editable
-    // root and the source stayed open. Blurring hands it to Vditor, whose own
-    // blur handler is what closes an open block, rather than undoing its
-    // work from outside.
-    if (!belowLast) {
-      // Taken over whole in the gutter, open block or not: Vditor's own
-      // handler would take the click to the nearest text and open the block
-      // beside it, which is the thing the press just refused to do.
-      const gutter = inGutter(e);
-      const open = root.querySelector(".vditor-ir__node--expand");
-      if (gutter || (open && !open.contains(e.target))) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-      if (open && !open.contains(e.target)) root.blur();
-      return;
-    }
-    if (!last) return;
-    // We take over the click completely: otherwise Vditor's own handler moves
-    // the caret to the pointer position and undoes this.
-    e.preventDefault();
-    e.stopPropagation();
-    root.focus({ preventScroll: true });
-    const isEmptyP =
-      last.tagName === "P" &&
-      last.textContent.replace(/\u200B/g, "").trim() === "";
-    placeCaretAtEnd(last);
-    if (!isEmptyP) {
-      vditor.insertEmptyBlock("afterend");
-    }
+      return value;
+    },
+    provide: function (f) {
+      return EditorView.decorations.from(f);
+    },
+  });
+
+  // ---------- Syntax colours in the editor ----------
+
+  // Code inside fences and the YAML header are painted from the ten slots of
+  // the palette (--mdm-syn-*, set on #app by applyPalette); the inline marks
+  // of Markdown, bold and the rest, take the styles Typora gives them. The
+  // heading sizes and the block grounds are line classes in style.css.
+  const tags = CM.tags;
+  const mdmHighlight = CM.HighlightStyle.define([
+    { tag: tags.strong, fontWeight: "bold" },
+    { tag: tags.emphasis, fontStyle: "italic" },
+    { tag: tags.strikethrough, textDecoration: "line-through" },
+    { tag: tags.monospace, fontFamily: "var(--vscode-editor-font-family, monospace)" },
+    { tag: tags.processingInstruction, class: "mdm-mark" },
+    { tag: tags.escape, class: "mdm-mark" },
+    { tag: tags.comment, color: "var(--mdm-syn-comment)" },
+    { tag: tags.lineComment, color: "var(--mdm-syn-comment)" },
+    { tag: tags.blockComment, color: "var(--mdm-syn-comment)" },
+    { tag: tags.docComment, color: "var(--mdm-syn-comment)" },
+    { tag: tags.meta, color: "var(--mdm-syn-comment)" },
+    { tag: tags.string, color: "var(--mdm-syn-string)" },
+    { tag: tags.special(tags.string), color: "var(--mdm-syn-string)" },
+    { tag: tags.regexp, color: "var(--mdm-syn-string)" },
+    { tag: tags.character, color: "var(--mdm-syn-string)" },
+    { tag: tags.number, color: "var(--mdm-syn-number)" },
+    { tag: tags.integer, color: "var(--mdm-syn-number)" },
+    { tag: tags.float, color: "var(--mdm-syn-number)" },
+    { tag: tags.bool, color: "var(--mdm-syn-number)" },
+    { tag: tags.null, color: "var(--mdm-syn-number)" },
+    { tag: tags.atom, color: "var(--mdm-syn-number)" },
+    { tag: tags.literal, color: "var(--mdm-syn-number)" },
+    { tag: tags.keyword, color: "var(--mdm-syn-keyword)" },
+    { tag: tags.controlKeyword, color: "var(--mdm-syn-keyword)" },
+    { tag: tags.operatorKeyword, color: "var(--mdm-syn-keyword)" },
+    { tag: tags.definitionKeyword, color: "var(--mdm-syn-keyword)" },
+    { tag: tags.moduleKeyword, color: "var(--mdm-syn-keyword)" },
+    { tag: tags.modifier, color: "var(--mdm-syn-keyword)" },
+    { tag: tags.self, color: "var(--mdm-syn-keyword)" },
+    { tag: tags.tagName, color: "var(--mdm-syn-keyword)" },
+    { tag: tags.attributeName, color: "var(--mdm-syn-attr)" },
+    { tag: tags.propertyName, color: "var(--mdm-syn-attr)" },
+    { tag: tags.attributeValue, color: "var(--mdm-syn-string)" },
+    { tag: tags.function(tags.variableName), color: "var(--mdm-syn-name)" },
+    { tag: tags.function(tags.propertyName), color: "var(--mdm-syn-name)" },
+    { tag: tags.definition(tags.variableName), color: "var(--mdm-syn-name)" },
+    { tag: tags.macroName, color: "var(--mdm-syn-name)" },
+    { tag: tags.labelName, color: "var(--mdm-syn-name)" },
+    { tag: tags.namespace, color: "var(--mdm-syn-name)" },
+    { tag: tags.className, color: "var(--mdm-syn-type)" },
+    { tag: tags.typeName, color: "var(--mdm-syn-type)" },
+    { tag: tags.standard(tags.variableName), color: "var(--mdm-syn-type)" },
+    { tag: tags.variableName, color: "var(--mdm-syn-variable)" },
+    { tag: tags.special(tags.variableName), color: "var(--mdm-syn-variable)" },
+    { tag: tags.operator, color: "var(--mdm-syn-base)" },
+    { tag: tags.punctuation, color: "var(--mdm-syn-base)" },
+    { tag: tags.bracket, color: "var(--mdm-syn-base)" },
+  ]);
+
+  // ---------- Commands ----------
+
+  // Every command maps over all the selection ranges, so with several carets
+  // it does its thing at each of them.
+
+  // Wrap each range in a pair of marks, or unwrap it if it is already wrapped
+  // (bold, italic, inline code). A collapsed caret gets the pair around it and
+  // lands in the middle.
+  function toggleInline(mark) {
+    return function (v) {
+      const len = mark.length;
+      v.dispatch(
+        v.state.changeByRange(function (range) {
+          const from = range.from;
+          const to = range.to;
+          const before = v.state.sliceDoc(Math.max(0, from - len), from);
+          const after = v.state.sliceDoc(to, Math.min(v.state.doc.length, to + len));
+          if (before === mark && after === mark) {
+            return {
+              changes: [
+                { from: from - len, to: from },
+                { from: to, to: to + len },
+              ],
+              range: CM.EditorSelection.range(from - len, to - len),
+            };
+          }
+          const inner = v.state.sliceDoc(from, to);
+          if (inner.startsWith(mark) && inner.endsWith(mark) && inner.length >= 2 * len) {
+            return {
+              changes: { from: from, to: to, insert: inner.slice(len, inner.length - len) },
+              range: CM.EditorSelection.range(from, to - 2 * len),
+            };
+          }
+          return {
+            changes: [
+              { from: from, insert: mark },
+              { from: to, insert: mark },
+            ],
+            range: CM.EditorSelection.range(from + len, to + len),
+          };
+        })
+      );
+      return true;
+    };
   }
 
-  // ---------- Cut ----------
-
-  // Ctrl+X copied but removed nothing. The key press never runs the browser's
-  // own cut here: inside a webview on desktop VS Code the preload cancels it
-  // (isCopyPasteOrCut -> preventDefault under Electron, see
-  // resources/app/out/vs/workbench/contrib/webview/browser/pre/index.html) and
-  // the workbench replays it by asking the frame to run
-  // document.execCommand("cut"). Vditor answers the cut event by writing the
-  // markdown to the clipboard itself and deleting the selection with
-  // document.execCommand("delete"), and Blink refuses an execCommand called
-  // from inside another one, so the deletion is dropped and the text stays.
-  // Measured in headless Chrome: from a real key press that nested delete
-  // returns true, from a cut started by execCommand it returns false.
-  //
-  // The deletion is repeated once the outer command has finished, and only
-  // while the selection is still standing, which is precisely the case where
-  // Vditor's own delete was the one refused. After a cut that did go through,
-  // the selection is collapsed and this does nothing.
-  function handleCut() {
-    setTimeout(function () {
-      const sel = window.getSelection();
-      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
-      const node = sel.anchorNode;
-      const el = node && (node.nodeType === 1 ? node : node.parentElement);
-      if (!el || !el.closest || !el.closest(".vditor-ir")) return;
-      document.execCommand("delete");
-    }, 0);
-  }
-
-
-  // ---------- Rendered block edges ----------
-
-  // Vditor's IR has no handling at all for a forward Delete at the edge of a
-  // rendered block: the browser's raw delete merges the block's hidden source
-  // into the paragraph above, the drawn view (KaTeX, or a score) stays on
-  // screen orphaned, and the next serialization emits the rendered glyph text
-  // as document content, which reaches the file. Measured on stock Vditor
-  // 3.11.3, the same on math-block and code-block. A selection covering the
-  // whole source of an open block mangles it the same way.
-  //
-  // These guards give the gesture Obsidian's reading instead: deleting into a
-  // rendered block ENTERS it (the source opens with the caret at its start),
-  // deleting at the inner edges of an open source STEPS OUT (Vditor's own
-  // Backspace there dissolves the block into a paragraph of raw source), and
-  // once the source has been emptied the next such key removes the block
-  // whole. Entry from below (Backspace at the start of the next block) and
-  // the arrow keys already do the right thing upstream and are left alone.
-  // The $$ fences themselves stay out of reach: lute re-derives them from the
-  // block structure on every keystroke, so there is no "broken fence" state
-  // to edit; emptying the block is the way to type them anew.
-
-  const EDGE_BLOCKS =
-    'div[data-type="math-block"].vditor-ir__node, ' +
-    'div[data-type="code-block"].vditor-ir__node';
-
-  function sourceOf(block) {
-    return block.querySelector("pre.vditor-ir__marker--pre > code");
-  }
-
-  // A caret put where the Range API says expands nothing on its own: Vditor
-  // re-decides the --expand class only on a click or on the keyup of an
-  // arrow or IME key. This is the IME branch, borrowed as a public door to
-  // its expandMarker: it expands the node holding the caret and collapses
-  // every other, which is the reconciliation wanted after every move made
-  // here.
-  function settleExpansion() {
-    const root = contentRoot();
-    if (!root) return;
-    root.dispatchEvent(
-      new KeyboardEvent("keyup", {
-        key: "Unidentified",
-        code: "",
-        keyCode: 229,
-        bubbles: true,
-      })
-    );
-  }
-
-  function caretTo(el, atStart) {
-    const root = contentRoot();
-    if (root) root.focus({ preventScroll: true });
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(atStart === true);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    settleExpansion();
-  }
-
-  // Land beside a removed or stepped-over block: in a neighbour paragraph's
-  // text, or in the source of a neighbouring rendered block. Never on such a
-  // block's outer edge: lute throws an equation away when the caret token
-  // lands there (measured: SpinVditorIRDOM returns a bare paragraph).
-  function landOn(el, atStart) {
-    const code = el.matches && el.matches(EDGE_BLOCKS) ? sourceOf(el) : null;
-    caretTo(code || el, atStart);
-  }
-
-  // Serialize a change made outside Vditor's own editing path: its input()
-  // re-spins the block that holds the caret, re-renders the previews, and
-  // the `input` option above posts the edit to the host.
-  function syncEdit() {
-    const root = contentRoot();
-    if (!root) return;
-    root.dispatchEvent(
-      new InputEvent("input", {
-        bubbles: true,
-        inputType: "insertText",
-        data: "",
-      })
-    );
-  }
-
-  // The neighbour of a block, at whatever depth: a rendered block can sit
-  // inside a blockquote or a list item, where the thing before or after it is
-  // not a child of the editable root.
-  function neighbour(el, forward) {
-    const root = contentRoot();
-    let node = el;
-    while (node && node !== root) {
-      const sib = forward ? node.nextElementSibling : node.previousElementSibling;
-      if (sib) return sib;
-      node = node.parentElement;
-    }
-    return null;
-  }
-
-  function dropBlock(block) {
-    const next = neighbour(block, true);
-    const prev = neighbour(block, false);
-    // Nothing beside it: the caret would be left in a detached node and the
-    // document with no block at all, so a paragraph takes its place.
-    let empty = null;
-    if (!next && !prev) {
-      empty = document.createElement("p");
-      empty.setAttribute("data-block", "0");
-      empty.appendChild(document.createElement("br"));
-      block.parentElement.insertBefore(empty, block);
-    }
-    block.remove();
-    if (empty) landOn(empty, true);
-    else if (next) landOn(next, true);
-    else landOn(prev, false);
-    syncEdit();
-  }
-
-  function handleBlockEdges(e) {
-    if (!vditor) return;
-    if (e.key !== "Delete" && e.key !== "Backspace") return;
-    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-    // The player bar and its track sit outside the editable tree and own
-    // their keys.
-    if (!e.target || !e.target.isContentEditable) return;
-    const info = caretInfo();
-    if (!info || !info.node.closest(".vditor-ir")) return;
-
-    const code = info.node.closest("pre.vditor-ir__marker--pre > code");
-    const block = code ? code.closest(EDGE_BLOCKS) : null;
-
-    if (!info.sel.isCollapsed) {
-      // Only the selection that covers the whole source is taken over (a
-      // partial one deletes cleanly on its own): both ends inside the same
-      // source, selected text equal to it.
-      if (!block) return;
-      const end =
-        info.range.endContainer.nodeType === 1
-          ? info.range.endContainer
-          : info.range.endContainer.parentElement;
-      if (!end || (end !== code && !code.contains(end))) return;
-      // Structural, not by text: Selection.toString() reports what is drawn,
-      // and a collapsed block draws its source in a 10x5px box, so it reads
-      // empty there (measured). Boundary points do not depend on layout.
-      const whole = document.createRange();
-      whole.selectNodeContents(code);
-      const head =
-        info.range.compareBoundaryPoints(Range.START_TO_START, whole) <= 0;
-      const tailEnd =
-        info.range.compareBoundaryPoints(Range.END_TO_END, whole) >= 0 ||
-        info.range.toString().replace(/[\u200B\n\r]/g, "") ===
-          code.textContent.replace(/[\u200B\n\r]/g, "");
-      if (!head || !tailEnd) return;
-      e.preventDefault();
-      e.stopPropagation();
-      code.textContent = "\n";
-      caretTo(code, true);
-      syncEdit();
-      return;
-    }
-
-    if (block) {
-      const bare = code.textContent.replace(/[\u200B\n\r]/g, "");
-      if (bare === "") {
-        e.preventDefault();
-        e.stopPropagation();
-        dropBlock(block);
-        return;
-      }
-      const side = document.createRange();
-      side.selectNodeContents(code);
-      if (e.key === "Backspace") {
-        side.setEnd(info.range.startContainer, info.range.startOffset);
-        if (side.toString().replace(/\u200B/g, "") !== "") return;
-        e.preventDefault();
-        e.stopPropagation();
-        const prev = neighbour(block, false);
-        if (prev) landOn(prev, false);
-        return;
-      }
-      side.setStart(info.range.startContainer, info.range.startOffset);
-      const tail = side.toString().replace(/\u200B/g, "");
-      if (tail !== "" && tail !== "\n") return;
-      e.preventDefault();
-      e.stopPropagation();
-      const next = neighbour(block, true);
-      if (next) landOn(next, true);
-      return;
-    }
-
-    // Forward Delete at the very end of the block before a rendered one:
-    // enter it. Backspace from below is upstream's and already enters.
-    if (e.key !== "Delete") return;
-    const root = contentRoot();
-    if (!root || !root.contains(info.node)) return;
-    // Climb to the level that has a next sibling: inside a blockquote or a
-    // list item that level is not a child of the root. The first sibling
-    // found decides, and anything that is not a rendered block means an
-    // ordinary delete.
-    let level = info.node;
-    let next = null;
-    while (level && level !== root) {
-      const sib = level.nextElementSibling;
-      if (sib) {
-        if (sib.matches(EDGE_BLOCKS)) next = sib;
-        break;
-      }
-      level = level.parentElement;
-    }
-    if (!next) return;
-    // Nothing of the caret's own block may be left after the caret.
-    const tail = document.createRange();
-    tail.selectNodeContents(level);
-    tail.setStart(info.range.startContainer, info.range.startOffset);
-    if (tail.toString().replace(/[\u200B\n\r]/g, "") !== "") return;
-    const target = sourceOf(next);
-    if (!target) return;
-    e.preventDefault();
-    e.stopPropagation();
-    caretTo(target, true);
-  }
-
-  // ---------- Initialization ----------
-
-  function toolbarItems() {
-    const names = [
-      // The file actions lead the bar, the way editors have always laid
-      // them out: export (unshifted below), then undo and redo. Outline
-      // follows; it used to lead for sitting on the side its panel appears,
-      // and that still reads from third place.
-      "undo",
-      "redo",
-      "|",
-      "outline",
-      "|",
-      "headings",
-      "bold",
-      "italic",
-      "|",
-      "list",
-      "ordered-list",
-      "|",
-      "code",
-      "inline-code",
-      "|",
-      "insert-before",
-      "insert-after",
-      "|",
-      "table",
-      "link",
-      "|",
-    ];
-    // The toolbar sits against the top edge of the webview: the default
-    // tooltips are drawn upwards and end up out of view. Draw them downwards.
-    const items = names.map(function (n) {
-      return n === "|" ? n : { name: n, tipPosition: "s" };
-    });
-    // The export menu goes in front of everything: it is the one button
-    // that leaves the editor. Each entry saves the document first, then runs
-    // the same bin/mdm the command line uses (both on the host side).
-    items.unshift("|");
-    items.unshift({
-      name: "mdm-export",
-      icon: EXPORT_ICON,
-      tip: "Export",
-      tipPosition: "s",
-      click: function () {}, // opening the panel is Vditor's job
-      toolbar: EXPORT_FORMATS.map(function (format) {
+  // A link around the selection, or an empty one at the caret, with the
+  // caret left where the address goes.
+  function insertLink(v) {
+    v.dispatch(
+      v.state.changeByRange(function (range) {
+        const label = v.state.sliceDoc(range.from, range.to);
+        const insert = "[" + label + "]()";
         return {
-          name: "mdm-export-" + format.to,
-          tip: format.label,
-          icon: format.label,
-          click: function () {
-            vscode.postMessage({ type: "export", to: format.to });
-          },
+          changes: { from: range.from, to: range.to, insert: insert },
+          range: CM.EditorSelection.cursor(range.from + insert.length - 1),
         };
-      }),
-    });
-    // Unknown names fall through to Vditor's Custom item, which renders `icon`
-    // and calls `click`. An item carrying `toolbar` also gets a drop-down
-    // panel, which is where the score fills are listed.
-    // Theme first: the fill colours are defined per theme, so the wider switch
-    // reads before the one that depends on it.
-    items.push({
-      name: "mdm-theme",
-      icon: THEME_ICON,
-      tip: "Theme",
-      tipPosition: "s",
-      click: function () {}, // opening the panel is Vditor's job
-      toolbar: themeMenuItems(),
-    });
-    items.push({
-      name: "mdm-score-fill",
-      icon: SCORE_ICON,
-      tip: "Score fill",
-      tipPosition: "s",
-      click: function () {}, // opening the panel is Vditor's job
-      toolbar: fillMenuItems(),
-    });
-    items.push({
-      name: "mdm-staff-lines",
-      icon: STAFF_ICON,
-      tip: staffTip(),
-      tipPosition: "s",
-      click: function () {
-        askSetting("staffLines", staffLines === "gray" ? "ink" : "gray");
-      },
-    });
-    items.push({
-      name: "mdm-score-align",
-      icon: ALIGN_ICON[alignTarget()],
-      tip: alignTip(),
-      tipPosition: "s",
-      click: function () {
-        askSetting("scoreAlign", alignTarget());
-      },
-    });
-    items.push({
-      name: "mdm-front-matter",
-      icon: FM_ICON,
-      tip: fmTip(),
-      tipPosition: "s",
-      click: function () {
-        if (headerText === "") return;
-        askSetting("frontMatter", frontMatter === "shown" ? "hidden" : "shown");
-      },
-    });
-    return items;
+      })
+    );
+    return true;
   }
+
+  // The heading level of each selected line goes up one, and a level-six
+  // line goes back to a paragraph; a paragraph becomes a first-level heading.
+  function cycleHeading(v) {
+    const changes = [];
+    const seen = new Set();
+    v.state.selection.ranges.forEach(function (range) {
+      const first = v.state.doc.lineAt(range.from).number;
+      const last = v.state.doc.lineAt(range.to).number;
+      for (let n = first; n <= last; n++) {
+        if (seen.has(n)) continue;
+        seen.add(n);
+        const line = v.state.doc.line(n);
+        const m = /^(#{1,6})\s+/.exec(line.text);
+        if (!m) {
+          changes.push({ from: line.from, insert: "# " });
+        } else if (m[1].length === 6) {
+          changes.push({ from: line.from, to: line.from + m[0].length });
+        } else {
+          changes.push({ from: line.from, insert: "#" });
+        }
+      }
+    });
+    if (changes.length) v.dispatch({ changes: changes });
+    return true;
+  }
+
+  // A list marker in front of each selected line, or off again if every one
+  // of them already carries one of that kind.
+  function toggleList(ordered) {
+    return function (v) {
+      const linesSeen = [];
+      const seen = new Set();
+      v.state.selection.ranges.forEach(function (range) {
+        const first = v.state.doc.lineAt(range.from).number;
+        const last = v.state.doc.lineAt(range.to).number;
+        for (let n = first; n <= last; n++) {
+          if (!seen.has(n)) {
+            seen.add(n);
+            linesSeen.push(v.state.doc.line(n));
+          }
+        }
+      });
+      const re = ordered ? /^(\s*)\d+\.\s+/ : /^(\s*)[-*+]\s+/;
+      const all = linesSeen.every(function (line) {
+        return re.test(line.text);
+      });
+      const changes = [];
+      linesSeen.forEach(function (line, i) {
+        const m = re.exec(line.text);
+        if (all && m) {
+          changes.push({ from: line.from + m[1].length, to: line.from + m[0].length });
+        } else if (!m) {
+          const indent = /^\s*/.exec(line.text)[0];
+          changes.push({
+            from: line.from + indent.length,
+            insert: ordered ? i + 1 + ". " : "- ",
+          });
+        }
+      });
+      if (changes.length) v.dispatch({ changes: changes });
+      return true;
+    };
+  }
+
+  // Ctrl+Enter: out of the block the caret is in (a fence, an equation, a
+  // list, a quote, a callout, a heading line), into a fresh paragraph below
+  // it. Plain Enter inside a code block is a newline, as in any code editor:
+  // the closing fence is a line of text the caret can walk past.
+  const LEAVABLE = /^(FencedCode|CodeBlock|BlockMath|Callout|Blockquote|BulletList|OrderedList|Table|ATXHeading[1-6]|SetextHeading[12]|HTMLBlock|FrontMatter)$/;
+  function leaveBlock(v) {
+    const state = v.state;
+    const tree = CM.syntaxTree(state);
+    const changes = [];
+    const cursors = [];
+    let offset = 0;
+    state.selection.ranges.forEach(function (range) {
+      let node = tree.resolveInner(range.head, -1);
+      let block = null;
+      while (node) {
+        if (LEAVABLE.test(node.name)) block = node;
+        node = node.parent;
+      }
+      const at = block ? state.doc.lineAt(block.to).to : state.doc.lineAt(range.head).to;
+      const insert = "\n\n";
+      changes.push({ from: at, insert: insert });
+      cursors.push(at + insert.length + offset);
+      offset += insert.length;
+    });
+    v.dispatch({
+      changes: changes,
+      selection: CM.EditorSelection.create(
+        cursors.map(function (p) {
+          return CM.EditorSelection.cursor(p);
+        }),
+        0
+      ),
+      scrollIntoView: true,
+    });
+    return true;
+  }
+
+  // A rendered block is out of the flow, so the arrow keys walk past it as
+  // if it were not there; clicking is one way in, this is the other. Up or
+  // Down onto a hidden block puts the caret inside it, which opens it: Down
+  // into its first line, Up into its last. Only for a single collapsed caret:
+  // with several, or a selection being extended, the editor's own motion is
+  // what is wanted.
+  function hiddenBlockAt(state, pos) {
+    const field = state.field(renderField, false);
+    if (!field) return null;
+    let found = null;
+    field.between(pos, pos, function (from, to, deco) {
+      if (deco.spec.block && !deco.spec.widget && from <= pos && pos <= to) found = { from: from, to: to };
+    });
+    return found;
+  }
+  function stepIntoBlock(dir) {
+    return function (v) {
+      const sel = v.state.selection;
+      if (sel.ranges.length !== 1 || !sel.main.empty) return false;
+      const line = v.state.doc.lineAt(sel.main.head);
+      const n = line.number + dir;
+      if (n < 1 || n > v.state.doc.lines) return false;
+      const target = v.state.doc.line(n);
+      const block = hiddenBlockAt(v.state, dir > 0 ? target.from : target.to);
+      if (!block) return false;
+      const col = sel.main.head - line.from;
+      const into = dir > 0 ? v.state.doc.lineAt(block.from) : v.state.doc.lineAt(block.to);
+      const pos = Math.min(into.from + col, into.to);
+      v.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+      return true;
+    };
+  }
+
+  // Ctrl+Alt+Up/Down: a caret on the line above or below every caret there
+  // is, in the same column, the way VS Code adds them. The new carets join
+  // the selection rather than replace it.
+  function addCaretVertically(dir) {
+    return function (v) {
+      const sel = v.state.selection;
+      const added = [];
+      sel.ranges.forEach(function (range) {
+        const moved = v.moveVertically(range, dir > 0);
+        if (moved.head !== range.head) added.push(CM.EditorSelection.cursor(moved.head));
+      });
+      if (!added.length) return true;
+      v.dispatch({
+        selection: CM.EditorSelection.create(sel.ranges.concat(added), sel.mainIndex),
+        scrollIntoView: true,
+      });
+      return true;
+    };
+  }
+
+  // ---------- Mouse ----------
+
+  // The click that adds a caret follows VS Code's editor.multiCursorModifier.
+  // With "alt", Alt+click adds one and Shift+Alt+drag selects a column; with
+  // "ctrlCmd", Ctrl+click adds one and Shift+Alt+drag still does the column
+  // (CodeMirror's own, which is Alt+drag, would fight the column with the
+  // caret under "alt").
+  function addsCaret(e) {
+    if (e.shiftKey) return false;
+    return multiCursorModifier === "ctrlCmd" ? e.ctrlKey || e.metaKey : e.altKey;
+  }
+
+  // Inside VS Code, Ctrl+Z reaches this editor twice: once as the keydown,
+  // which the keymap answers with CodeMirror's own undo, and once more as the
+  // workbench's `undo` command, which the webview host replays into the page
+  // as document.execCommand("undo") (the same for redo). The replay would run
+  // the browser's native undo over CodeMirror's DOM, a second, blind undo on
+  // top of the first (measured: it ate the end of the line). The two commands
+  // are taken off execCommand; copy, paste, cut and selectAll keep theirs,
+  // which CodeMirror answers through the events they fire.
+  function disarmNativeHistory() {
+    const native = document.execCommand.bind(document);
+    document.execCommand = function (command) {
+      if (command === "undo" || command === "redo") return true;
+      return native.apply(document, arguments);
+    };
+  }
+
+  // Mousedown on the chrome of a block (copy, player toggle) and on a task
+  // checkbox. Caught on the content DOM in the capture phase: CodeMirror
+  // ignores events inside these widgets (ignoreEvent), but the browser would
+  // still move the native selection to the click, which CodeMirror then
+  // reads back as a caret landing in the block; preventing the default keeps
+  // the caret where it was. The checkbox flips the text it stands for.
+  function handleMouseDown(e) {
+    if (!e.target.closest) return;
+    if (e.target.closest(".mdm-chrome")) {
+      e.preventDefault();
+      return;
+    }
+    const box = e.target.closest("input.mdm-task");
+    if (!box || !view) return;
+    e.preventDefault();
+    const pos = view.posAtDOM(box);
+    const line = view.state.doc.lineAt(pos);
+    const m = /^(\s*(?:[-*+]|\d+\.)\s+)\[([ xX])\]/.exec(line.text);
+    if (!m) return;
+    const at = line.from + m[1].length + 1;
+    view.dispatch({ changes: { from: at, to: at + 1, insert: m[2] === " " ? "x" : " " } });
+  }
+
+  // ---------- Scores in widgets ----------
+
+  // A score widget leaving the document (its source changed, or the block
+  // went): the player that may be open on it follows the block by position,
+  // from the observer below.
+  function releaseScore(dom) {
+    if (player && player.bar && dom.contains(player.bar)) scheduleAfterRender();
+  }
+
+  // Engraves one score into its <code>. abcjs is loaded by the page before
+  // this script (vendor/abcjs), so the engraving is synchronous; what needs
+  // the block to be on screen (fitScores measures it) runs afterwards, from
+  // the observer below.
+  function renderScore(code, source) {
+    try {
+      if (!window.ABCJS) return;
+      code.innerHTML = "";
+      const visual = ABCJS.renderAbc(code, source, {
+        add_classes: true,
+        paddingtop: 2,
+        paddingbottom: 2,
+        paddingleft: 0,
+        paddingright: 0,
+      })[0];
+      if (visual) SCORE_VISUALS.set(code, visual);
+      code.style.overflowX = "auto";
+    } catch (e) {
+      // Score rendering must never break editing.
+    }
+  }
+
+  // After every change of the content DOM: scores that just appeared are
+  // fitted and the player follows its block.
+  let renderScheduled = false;
+  function scheduleAfterRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(function () {
+      renderScheduled = false;
+      afterRender();
+    });
+  }
+  function afterRender() {
+    try {
+      fitScores();
+      syncPlayer();
+    } catch (e) {
+      // never break editing
+    }
+  }
+  function watchContent() {
+    new MutationObserver(scheduleAfterRender).observe(view.contentDOM, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  // The copy button and the player toggle live in widget chrome, which
+  // CodeMirror leaves alone (ignoreEvent); their clicks are answered here.
+  function handleChromeClick(e) {
+    if (!e.target.closest) return;
+    const copy = e.target.closest(".mdm-copy");
+    if (copy) {
+      e.preventDefault();
+      e.stopPropagation();
+      copyBlock(copy);
+      return;
+    }
+    const toggle = e.target.closest(".mdm-audio-toggle");
+    if (toggle) {
+      e.preventDefault();
+      e.stopPropagation();
+      const block = toggle.closest(".mdm-score");
+      if (!block) return;
+      if (player && playerBlock() === block) closePlayer();
+      else openPlayer(block);
+      return;
+    }
+    if (e.target.closest(".mdm-audio")) return; // the player bar's own
+    const drawing = e.target.closest(".mdm-score, .mdm-math");
+    if (drawing) {
+      e.preventDefault();
+      revealBlock(drawing);
+    }
+  }
+
+  // A click on a rendered equation or score puts the caret at the start of
+  // its source, which shows it (the block is touched from then on). For a
+  // score and a display equation the source opens above the drawing, which
+  // stays as the live preview.
+  function revealBlock(el) {
+    if (!view) return;
+    const pos = view.posAtDOM(el);
+    const tree = CM.syntaxTree(view.state);
+    // A block widget sits at the end of its block; the node is the one that
+    // ends there. An inline widget sits in its own range.
+    const block = el.classList.contains("mdm-score") || el.classList.contains("mdm-math--block");
+    let node = tree.resolveInner(block ? Math.max(0, pos - 1) : pos, block ? -1 : 1);
+    while (node && !/^(FencedCode|BlockMath|InlineMath|InlineBlockMath)$/.test(node.name)) node = node.parent;
+    let at = pos;
+    if (node) {
+      const content = node.getChild("CodeText") || node.getChild("BlockMathContent") || node.getChild("InlineMathContent") || node.getChild("InlineBlockMathContent");
+      at = content ? content.from : node.from;
+    }
+    view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+    view.focus();
+  }
+
+  // The copy button of a code block shows while the pointer is on the block:
+  // the chrome is a zero-height row before the first line, so the hover is
+  // read off the lines and written onto the chrome as a class.
+  let shownChrome = null;
+  function handleMouseOver(e) {
+    const line = e.target.closest && e.target.closest(".cm-line");
+    let chrome = null;
+    if (line && line.classList.contains("mdm-code-line")) {
+      // Back over the lines of this block (and the hidden fence between
+      // them, a div with no class) to the one the chrome rides.
+      let el = line;
+      while (el) {
+        if (el.classList && el.classList.contains("cm-line")) {
+          if (!el.classList.contains("mdm-code-line")) break;
+          const c = el.querySelector(".mdm-chrome--code");
+          if (c) {
+            chrome = c;
+            break;
+          }
+        }
+        el = el.previousSibling;
+      }
+    } else if (e.target.closest && e.target.closest(".mdm-chrome--code")) {
+      chrome = e.target.closest(".mdm-chrome--code");
+    }
+    if (chrome === shownChrome) return;
+    if (shownChrome) shownChrome.classList.remove("mdm-chrome--show");
+    shownChrome = chrome;
+    if (chrome) chrome.classList.add("mdm-chrome--show");
+  }
+
+  // The source of the block a piece of chrome belongs to: a score carries it
+  // on its widget; a code block's chrome sits right before its first line,
+  // and the text is read back from the editor at that position.
+  function chromeSource(el) {
+    const score = el.closest(".mdm-score");
+    if (score) return { source: score.getAttribute("data-mdm-source") || "", score: score };
+    const chrome = el.closest(".mdm-chrome--code");
+    if (!chrome || !view) return null;
+    const pos = view.posAtDOM(chrome);
+    const tree = CM.syntaxTree(view.state);
+    let node = tree.resolveInner(pos, 1);
+    while (node && node.name !== "FencedCode") node = node.parent;
+    if (!node) return null;
+    const body = node.getChild("CodeText");
+    // The DOM lines of the block, for the pulse.
+    const lines = [];
+    if (body) {
+      const doc = view.state.doc;
+      for (let n = doc.lineAt(body.from).number; n <= doc.lineAt(body.to).number; n++) {
+        const dom = view.domAtPos(doc.line(n).from).node;
+        const line = dom && (dom.nodeType === 1 ? dom : dom.parentElement);
+        const el = line && line.closest ? line.closest(".cm-line") : null;
+        if (el) lines.push(el);
+      }
+    }
+    return { source: body ? view.state.sliceDoc(body.from, body.to) : "", lines: lines };
+  }
+
+  function copyBlock(button) {
+    const found = chromeSource(button);
+    if (!found) return;
+    copyPlain(found.score ? stripLayoutDirectives(found.source) : found.source);
+    button.setAttribute("aria-label", "Copied");
+    setTimeout(function () {
+      button.setAttribute("aria-label", "Copy");
+    }, 1200);
+    if (found.score) {
+      pulseBlock(found.score);
+    } else if (found.lines) {
+      found.lines.forEach(pulseBlock);
+    }
+  }
+
+  // ---------- The editor ----------
+
+  // Reading the modifier setting once at build time would pin it: the click
+  // facet is a Compartment so a change from the host reconfigures it live.
+  const gestures = new CM.Compartment();
+  function gestureExtensions() {
+    return [
+      EditorView.clickAddsSelectionRange.of(addsCaret),
+      CM.rectangularSelection({
+        eventFilter: function (e) {
+          return e.altKey && e.shiftKey;
+        },
+      }),
+    ];
+  }
+
+  function buildEditor(text) {
+    const mdmKeymap = [
+      { key: "Mod-Enter", run: leaveBlock },
+      { key: "Mod-b", run: toggleInline("**") },
+      { key: "Mod-i", run: toggleInline("*") },
+      { key: "Mod-e", run: toggleInline("`") },
+      { key: "Mod-k", run: insertLink },
+      { key: "ArrowDown", run: stepIntoBlock(1) },
+      { key: "ArrowUp", run: stepIntoBlock(-1) },
+      { key: "Ctrl-Alt-ArrowDown", mac: "Cmd-Alt-ArrowDown", run: addCaretVertically(1) },
+      { key: "Ctrl-Alt-ArrowUp", mac: "Cmd-Alt-ArrowUp", run: addCaretVertically(-1) },
+    ];
+    const state = CM.EditorState.create({
+      doc: text,
+      extensions: [
+        CM.EditorState.allowMultipleSelections.of(true),
+        CM.drawSelection(),
+        CM.dropCursor(),
+        CM.history(),
+        gestures.of(gestureExtensions()),
+        CM.highlightSelectionMatches(),
+        CM.keymap.of(
+          mdmKeymap.concat(
+            CM.markdownKeymap,
+            CM.defaultKeymap,
+            CM.historyKeymap,
+            CM.searchKeymap,
+            [CM.indentWithTab]
+          )
+        ),
+        CM.markdown({
+          base: CM.markdownLanguage,
+          codeLanguages: CM.codeLanguages,
+          extensions: CM.mdmMarkdownExtensions,
+        }),
+        CM.syntaxHighlighting(mdmHighlight),
+        renderField,
+        EditorView.lineWrapping,
+        EditorView.updateListener.of(function (update) {
+          if (update.docChanged) {
+            if (!applying) queueEdit(update.state.doc.toString());
+            if (player) player.pos = update.changes.mapPos(player.pos, 1);
+          }
+          if (update.docChanged || update.selectionSet) updateUndoButtons();
+        }),
+      ],
+    });
+    view = new EditorView({
+      state: state,
+      parent: document.querySelector("#app .mdm-editor"),
+    });
+    // For the test harness and for poking at a live editor: the view itself.
+    window.__mdm = { view: view, CM: CM };
+    watchContent();
+    disarmNativeHistory();
+    view.contentDOM.addEventListener("mousedown", handleMouseDown, true);
+    view.contentDOM.addEventListener("click", handleChromeClick, true);
+    view.contentDOM.addEventListener("mouseover", handleMouseOver);
+  }
+
+  // The element that scrolls.
+  function scroller() {
+    return view ? view.scrollDOM : null;
+  }
+
+  // ---------- Toolbar ----------
+
+  // The bar is ours: a row of buttons, some with a drop-down panel. Each
+  // button carries a data-type (what the stylesheet, the tests and the update
+  // functions above look it up by), an aria-label the CSS tooltip is drawn
+  // from, and a fill-only SVG.
 
   // An arrow leaving an open tray, drawn like the other icons: fill only.
   const EXPORT_ICON =
@@ -2796,83 +2965,199 @@
   ];
 
   // Undo and redo as rotating arrows, a thick open ring with a fat
-  // tangential head, in place of the bent arrows Vditor ships. Same 16-unit
-  // grid and fill-only rules as every other icon here; redo mirrors undo.
+  // tangential head. Same 16-unit grid and fill-only rules as every other
+  // icon here; redo mirrors undo.
   const UNDO_ICON =
     '<svg viewBox="0 0 16 16"><path d="M3.32 12.22A6.3 6.3 0 1 0 3.32 3.78L4.99 5.29A4.05 4.05 0 1 1 4.99 10.71Z"/><path d="M6.14 6.33L2.17 2.75L1.28 7.73Z"/></svg>';
   const REDO_ICON =
     '<svg viewBox="0 0 16 16"><path d="M12.68 12.22A6.3 6.3 0 1 1 12.68 3.78L11.01 5.29A4.05 4.05 0 1 0 11.01 10.71Z"/><path d="M9.86 6.33L13.83 2.75L14.72 7.73Z"/></svg>';
 
-  // Vditor draws its built-in buttons from its icon sprite; these two get
-  // the drawings above instead. The swap touches only the button's markup,
-  // so the wiring and the disabled state Vditor manages stay its own.
-  function replaceBuiltinIcons() {
-    const faces = { undo: UNDO_ICON, redo: REDO_ICON };
-    Object.keys(faces).forEach(function (name) {
-      const button = document.querySelector(
-        '#app .vditor-toolbar button[data-type="' + name + '"]'
-      );
-      if (button) button.innerHTML = faces[name];
+  // Formatting glyphs, fill only: a bold B, a slanted I, a code chevron pair,
+  // a chain link, an H with a small 1, a bulleted list, a numbered list.
+  const BOLD_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M4 2h4.6q1.7 0 2.6.8t.9 2.1q0 .9-.5 1.6t-1.3.9v.1q1.1.2 1.7 1t.6 1.9q0 1.6-1.1 2.6T8.6 14H4Zm2.3 4.9h2q.8 0 1.2-.4t.4-1-.4-1-1.2-.4h-2Zm0 5.1h2.3q.9 0 1.4-.4t.5-1.1-.5-1.1-1.4-.4H6.3Z"/></svg>';
+  const ITALIC_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M6.5 2h5.5l-.4 1.9H9.8L7.6 12.1h1.8L9 14H3.5l.4-1.9h1.8L7.9 3.9H6.1Z"/></svg>';
+  const CODE_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M5.2 3.6 6.4 4.8 3.3 8l3.1 3.2-1.2 1.2L.9 8Zm5.6 0L15.1 8l-4.3 4.4-1.2-1.2L12.7 8 9.6 4.8Z"/></svg>';
+  const LINK_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M6.6 9.4a3 3 0 0 1 0-4.2l2-2a3 3 0 0 1 4.2 4.2l-1 1-1.1-1.1 1-1a1.5 1.5 0 0 0-2.1-2.1l-2 2a1.5 1.5 0 0 0 0 2.1ZM9.4 6.6a3 3 0 0 1 0 4.2l-2 2a3 3 0 0 1-4.2-4.2l1-1 1.1 1.1-1 1a1.5 1.5 0 0 0 2.1 2.1l2-2a1.5 1.5 0 0 0 0-2.1Z"/></svg>';
+  const HEADING_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M2 2.5h2.1v4.3h4.3V2.5h2.1v11h-2.1V8.8H4.1v4.7H2Z"/><path d="M12.3 8.2h1.3v5.3h-1.3V9.6l-1 .6-.5-1Z"/></svg>';
+  const LIST_ICON =
+    '<svg viewBox="0 0 16 16"><circle cx="3" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><rect x="6" y="3.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="7.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="11.3" width="8.5" height="1.4" rx=".7"/></svg>';
+  const OLIST_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M2.2 2.4h1v3.1h-1V3.4l-.7.4-.4-.8Z"/><path d="M1.3 7.2q.2-.9 1.3-.9.6 0 .9.3t.3.8q0 .5-.5 1l-.9.9h1.5v.8H1.2v-.7l1.5-1.5q.3-.3.3-.5 0-.3-.4-.3-.4 0-.5.4Z"/><path d="M1.2 12.7q.2-.8 1.3-.8.6 0 1 .3t.3.7q0 .5-.5.7.6.2.6.8 0 .5-.4.8t-1 .3q-1.1 0-1.3-.9l.8-.2q.1.4.5.4.4 0 .4-.3t-.5-.3h-.3v-.7h.3q.4 0 .4-.3t-.4-.3q-.3 0-.4.3Z"/><rect x="6" y="3.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="7.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="11.3" width="8.5" height="1.4" rx=".7"/></svg>';
+
+  // A button of the bar. `menu` is a list of entries for a drop-down panel:
+  // {name, label (HTML), click}; the panel opens on click and closes on a
+  // click anywhere else or on Escape.
+  function toolbarButton(spec) {
+    const item = document.createElement("div");
+    item.className = "mdm-toolbar__item";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mdm-btn mdm-tip mdm-tip--s";
+    btn.setAttribute("data-type", spec.name);
+    btn.setAttribute("aria-label", spec.tip);
+    btn.innerHTML = spec.icon;
+    item.appendChild(btn);
+    if (spec.menu) {
+      const panel = document.createElement("div");
+      panel.className = "mdm-menu";
+      spec.menu.forEach(function (entry) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "mdm-menu__item";
+        row.setAttribute("data-type", entry.name);
+        row.innerHTML = entry.label;
+        row.addEventListener("click", function (e) {
+          e.stopPropagation();
+          closeMenus();
+          entry.click();
+        });
+        panel.appendChild(row);
+      });
+      item.appendChild(panel);
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        const open = item.classList.contains("mdm-toolbar__item--open");
+        closeMenus();
+        if (!open) item.classList.add("mdm-toolbar__item--open");
+      });
+    } else {
+      btn.addEventListener("click", function () {
+        closeMenus();
+        spec.click();
+        if (view) view.focus();
+      });
+    }
+    // A pointer click leaves the button focused, and a focused button keeps
+    // its tooltip up; the focus goes back to the text. Keyboard users (detail
+    // 0) keep theirs.
+    btn.addEventListener("mouseup", function (e) {
+      if (e.detail > 0) setTimeout(function () { btn.blur(); }, 0);
+    });
+    return item;
+  }
+
+  function closeMenus() {
+    document.querySelectorAll("#app .mdm-toolbar__item--open").forEach(function (el) {
+      el.classList.remove("mdm-toolbar__item--open");
     });
   }
 
-  function init(text) {
-    const dark = isDark();
-    vditor = new Vditor("app", {
-      cdn: CDN,
-      mode: "ir",
-      lang: "en_US",
-      value: text,
-      height: "100%",
-      // Vditor waits this long after a keystroke before firing `input` (its
-      // default is 800 ms); together with our own 300 ms debounce that read as
-      // a very laggy dirty marker.
-      undoDelay: 300,
-      cache: { enable: false },
-      theme: dark ? "dark" : "classic",
-      toolbar: toolbarItems(),
-      preview: {
-        theme: {
-          current: dark ? "dark" : "light",
-          path: CONTENT_THEME_PATH,
+  function separator() {
+    const el = document.createElement("span");
+    el.className = "mdm-toolbar__sep";
+    return el;
+  }
+
+  function buildToolbar() {
+    const bar = document.createElement("div");
+    bar.className = "mdm-toolbar";
+    const run = function (cmd) {
+      return function () {
+        if (view) cmd(view);
+      };
+    };
+    const specs = [
+      // The export menu goes in front of everything: it is the one button
+      // that leaves the editor. Each entry saves the document first, then
+      // runs the same bin/mdm the command line uses (both on the host side).
+      {
+        name: "mdm-export",
+        icon: EXPORT_ICON,
+        tip: "Export",
+        menu: EXPORT_FORMATS.map(function (format) {
+          return {
+            name: "mdm-export-" + format.to,
+            label: format.label,
+            click: function () {
+              vscode.postMessage({ type: "export", to: format.to });
+            },
+          };
+        }),
+      },
+      "|",
+      { name: "undo", icon: UNDO_ICON, tip: "Undo", click: run(CM.undo) },
+      { name: "redo", icon: REDO_ICON, tip: "Redo", click: run(CM.redo) },
+      "|",
+      { name: "headings", icon: HEADING_ICON, tip: "Heading", click: run(cycleHeading) },
+      { name: "bold", icon: BOLD_ICON, tip: "Bold", click: run(toggleInline("**")) },
+      { name: "italic", icon: ITALIC_ICON, tip: "Italic", click: run(toggleInline("*")) },
+      { name: "inline-code", icon: CODE_ICON, tip: "Inline code", click: run(toggleInline("`")) },
+      { name: "link", icon: LINK_ICON, tip: "Link", click: run(insertLink) },
+      "|",
+      { name: "list", icon: LIST_ICON, tip: "Bulleted list", click: run(toggleList(false)) },
+      { name: "ordered-list", icon: OLIST_ICON, tip: "Numbered list", click: run(toggleList(true)) },
+      "|",
+      // Theme first: the fill colours are defined per theme, so the wider
+      // switch reads before the one that depends on it.
+      { name: "mdm-theme", icon: THEME_ICON, tip: "Theme", menu: themeMenuItems() },
+      { name: "mdm-score-fill", icon: SCORE_ICON, tip: "Score fill", menu: fillMenuItems() },
+      {
+        name: "mdm-staff-lines",
+        icon: STAFF_ICON,
+        tip: staffTip(),
+        click: function () {
+          askSetting("staffLines", staffLines === "gray" ? "ink" : "gray");
         },
-        hljs: { lineNumber: false, style: dark ? "github-dark" : "github" },
-        math: { engine: "KaTeX", inlineDigit: true },
-        markdown: {
-          autoSpace: false,
-          fixTermTypo: false,
-          paragraphBeginningSpace: false,
+      },
+      {
+        name: "mdm-score-align",
+        icon: ALIGN_ICON[alignTarget()],
+        tip: alignTip(),
+        click: function () {
+          askSetting("scoreAlign", alignTarget());
         },
       },
-      input: function (value) {
-        if (!applying) queueEdit(value);
+      {
+        name: "mdm-front-matter",
+        icon: FM_ICON,
+        tip: fmTip(),
+        click: function () {
+          if (headerText === "") return;
+          askSetting("frontMatter", frontMatter === "shown" ? "hidden" : "shown");
+        },
       },
-      after: function () {
-        replaceBuiltinIcons();
-        watchDocument();
-        renderScores();
-        decorateCallouts();
-        highlightFrontMatter();
-        watchCallouts();
-        // The first update lands before the toolbar exists, so the button state
-        // is set once here, when there is a button to set it on.
-        updateFrontMatter();
-        watchGutter();
-        watchTheme();
-        applyTheme();
-        applyScoreAlign();
-        dismissTooltipOnClick();
-        watchScoreSelection();
-        document.addEventListener("keydown", handleKeydown, true);
-        document.addEventListener("keydown", handleBlockEdges, true);
-        document.addEventListener("cut", handleCut, true);
-        document.addEventListener("blur", guardBlur, true);
-        document.addEventListener("mousedown", recordMouseDown, true);
-        document.addEventListener("click", handleAudioToggle, true);
-        document.addEventListener("click", handleCopyClick, true);
-        document.addEventListener("click", handleClick, true);
-      },
+    ];
+    specs.forEach(function (spec) {
+      bar.appendChild(spec === "|" ? separator() : toolbarButton(spec));
     });
+    document.addEventListener("click", closeMenus);
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeMenus();
+    });
+    return bar;
+  }
+
+  // Undo and redo grey out when there is nothing to do, the way they did.
+  function updateUndoButtons() {
+    if (!view) return;
+    const undoBtn = document.querySelector('#app button[data-type="undo"]');
+    const redoBtn = document.querySelector('#app button[data-type="redo"]');
+    if (undoBtn) undoBtn.classList.toggle("mdm-btn--off", CM.undoDepth(view.state) === 0);
+    if (redoBtn) redoBtn.classList.toggle("mdm-btn--off", CM.redoDepth(view.state) === 0);
+  }
+
+  // ---------- Initialization ----------
+
+  function init(text) {
+    const root = app();
+    root.innerHTML = "";
+    root.appendChild(buildToolbar());
+    const host = document.createElement("div");
+    host.className = "mdm-editor";
+    root.appendChild(host);
+    buildEditor(text);
+    updateFrontMatter();
+    updateUndoButtons();
+    watchTheme();
+    applyTheme();
+    applyScoreAlign();
+    watchScoreSelection();
+    afterRender();
   }
 
   window.addEventListener("message", function (e) {
@@ -2884,26 +3169,28 @@
       scoreFill = next.scoreFill || "none";
       staffLines = next.staffLines || "gray";
       scoreAlign = next.scoreAlign || "center";
+      const nextModifier = next.multiCursorModifier || "alt";
+      if (nextModifier !== multiCursorModifier) {
+        multiCursorModifier = nextModifier;
+        if (view) view.dispatch({ effects: gestures.reconfigure(gestureExtensions()) });
+      }
       const nextFm = next.frontMatter || "hidden";
       if (nextFm !== frontMatter) {
-        // The update that follows this message carries the document in the mode
-        // just chosen, and it is dropped while an edit is still debounced. Send
-        // that edit now so the toggle is never swallowed by a keystroke made a
-        // moment earlier.
+        // The update that follows this message carries the document in the
+        // mode just chosen, and it is dropped while an edit is still
+        // debounced. Send that edit now so the toggle is never swallowed by
+        // a keystroke made a moment earlier.
         flushEdit();
-        // The button adds or removes a block at the very top of the document,
-        // and what was pressed is a button about the header, so the update right
-        // behind this message takes the editor there instead of holding the
-        // scroll where it was. Both ways round: hiding the header from halfway
-        // down the document used to leave the reader where they stood, looking
-        // at the one part of the page the button had not touched.
+        // The button adds or removes the header at the very top of the
+        // document, and what was pressed is a button about the header, so
+        // the update right behind this message takes the editor there.
         scrollToTop = true;
       }
       frontMatter = nextFm;
       // applyTheme repaints the toolbar and the score styling, whose colours
-      // are picked from the effective theme. A theme chosen from the menu also
-      // brings a palette message right behind this one, which repaints again
-      // with the colours and the side of the theme that was picked.
+      // are picked from the effective theme. A theme chosen from the menu
+      // also brings a palette message right behind this one, which repaints
+      // again with the colours and the side of the theme that was picked.
       applyTheme();
       applyScoreAlign();
       updateFrontMatter();
@@ -2912,45 +3199,27 @@
     if (msg.type === "palette") {
       palette = msg.palette || null;
       themeSide = msg.side || null;
-      // The side may have changed with the palette (a theme picked from the
-      // menu brings its own), so the whole look is repainted, not just the
-      // colours of the code.
       applyTheme();
       return;
     }
     if (msg.type !== "update") return;
     headerText = msg.frontMatter || "";
-    // Adopted even when the text below turns out to be the one already in the
-    // editor: for a file with no header both modes produce the same text, and
-    // the flag still has to follow the setting.
+    // Adopted even when the text below turns out to be the one already in
+    // the editor: for a file with no header both modes produce the same
+    // text, and the flag still has to follow the setting.
     editorFrontMatter = !!msg.withFrontMatter;
     updateFrontMatter();
-    if (!vditor) {
+    if (!view) {
       init(msg.text);
       return;
     }
     if (pending) return;
-    const current = vditor.getValue();
-    if (msg.text === current) return;
-    const ir = scroller();
-    const scrollTop = scrollToTop ? 0 : ir ? ir.scrollTop : 0;
-    // The YAML button adds or removes one block at the top and leaves the rest
-    // of the document alone, so that one block is what changes hands. A full
-    // setValue would repaint every block instead: the editor blanks for a
-    // frame and every score is engraved again.
-    if (patchFrontMatter(current, msg.text)) {
-      highlightFrontMatter();
-    } else {
-      // An external update re-renders the whole document; at least the scroll
-      // position is preserved (the caret position is lost: known limitation,
-      // same as in Office Viewer).
-      applying = true;
-      vditor.setValue(msg.text);
-      applying = false;
-      renderScores();
+    replaceText(msg.text);
+    if (scrollToTop) {
+      scrollToTop = false;
+      const s = scroller();
+      if (s) s.scrollTop = 0;
     }
-    scrollToTop = false;
-    if (ir) ir.scrollTop = scrollTop;
   });
 
   vscode.postMessage({ type: "ready" });

@@ -9,194 +9,548 @@ body {
   display: flex;
   flex-direction: column;
 }
-/* Vditor mounts ONTO #app: #app is the root .vditor element, and it takes the
-   whole body. */
+/* The editor takes the whole body: the toolbar on top, the CodeMirror view
+   filling the rest (main.js builds both inside #app). */
 #app {
   flex: 1 1 auto;
   min-height: 0;
-  border: none;
-  border-radius: 0;
   display: flex;
   flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  color: var(--mdm-ink);
+}
+#app .mdm-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+#app .cm-editor {
+  height: 100%;
+  /* The page the document is written on; see --mdm-syn-page below. */
+  background: var(--mdm-syn-page);
+  color: var(--mdm-ink);
+}
+#app .cm-editor.cm-focused {
+  outline: none;
+}
+#app .cm-scroller {
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.65;
+  overflow: auto;
+}
+#app .cm-content {
+  padding: 18px 50px 40vh;
+  max-width: 920px;
+  margin: 0 auto;
+  caret-color: var(--mdm-ink);
+}
+#app .cm-line {
+  padding: 0;
+}
+/* The selection in the colours of the VS Code theme, so several carets and
+   their ranges read as they do in the text editor beside this one. */
+#app .cm-cursor,
+#app .cm-dropCursor {
+  border-left: 1.5px solid var(--mdm-ink);
+}
+#app .cm-selectionBackground,
+#app .cm-content ::selection {
+  background: var(--vscode-editor-inactiveSelectionBackground, rgba(100, 100, 100, 0.25));
+}
+#app .cm-focused .cm-selectionBackground {
+  background: var(--vscode-editor-selectionBackground, rgba(0, 120, 215, 0.3));
+}
+#app .cm-selectionMatch {
+  background: color-mix(in srgb, var(--mdm-ink) 12%, transparent);
+}
+/* The ink of the prose, on either side. */
+#app {
+  --mdm-ink: #24292e;
+}
+#app.mdm--dark {
+  --mdm-ink: #d4d4d4;
+}
+
+/* ---------- Toolbar ---------- */
+
+#app .mdm-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1px;
+  padding: 3px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
+  background: var(--mdm-syn-page);
+  position: relative;
+  z-index: 2;
+}
+#app .mdm-toolbar__item {
+  position: relative;
+}
+#app .mdm-toolbar__sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: color-mix(in srgb, var(--mdm-ink) 18%, transparent);
+}
+#app .mdm-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
+  cursor: pointer;
+}
+#app .mdm-btn:hover {
+  background: color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+  color: var(--mdm-ink);
+}
+#app .mdm-btn:focus {
+  outline: none;
+}
+#app .mdm-btn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-ink) 30%, transparent);
+}
+/* A button that holds a state (ink staff lines, header shown) sits on a
+   disc, the way the repeat button of the player does. */
+#app .mdm-btn--on {
+  background: color-mix(in srgb, var(--mdm-ink) 16%, transparent);
+  color: var(--mdm-ink);
+}
+/* Nothing to do: undo with no history, the header button of a file without
+   one. */
+#app .mdm-btn--off {
+  opacity: 0.35;
+  pointer-events: none;
+}
+#app .mdm-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  stroke-width: 0;
+}
+/* Drop-down panels (export, theme, score fill). */
+#app .mdm-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 150px;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-top: 2px;
+  padding: 4px 0;
+  border: 1px solid color-mix(in srgb, var(--mdm-ink) 16%, transparent);
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, var(--mdm-syn-page));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  z-index: 5;
+}
+#app .mdm-toolbar__item--open .mdm-menu {
+  display: block;
+}
+#app .mdm-menu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 5px 14px;
+  border: none;
+  background: none;
+  color: var(--mdm-ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#app .mdm-menu__item:hover {
+  background: color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+}
+
+/* ---------- Tooltips ----------
+
+   Drawn from aria-label on anything carrying .mdm-tip: the toolbar (south),
+   the block chrome (west) and the player bar (north). A native title never
+   shows inside the VS Code webview. */
+#app .mdm-tip {
+  position: relative;
+}
+#app .mdm-tip::after {
+  content: attr(aria-label);
+  position: absolute;
+  z-index: 10;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #1f2328;
+  color: #fff;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  font-weight: normal;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease 0.2s;
+}
+#app .mdm-tip:hover::after {
+  opacity: 1;
+}
+#app .mdm-tip--s::after {
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, 6px);
+}
+#app .mdm-tip--n::after {
+  bottom: 100%;
+  left: 50%;
+  transform: translate(-50%, -6px);
+}
+#app .mdm-tip--w::after {
+  right: 100%;
+  top: 50%;
+  transform: translate(-6px, -50%);
+}
+
+/* ---------- Headings, marks, inline ---------- */
+
+#app .cm-line.mdm-h {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 0.6em;
+}
+#app .cm-line.mdm-h1 {
+  font-size: 2em;
+  margin-top: 0.4em;
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
+}
+#app .cm-line.mdm-h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.15em;
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
+}
+#app .cm-line.mdm-h3 {
+  font-size: 1.25em;
+}
+#app .cm-line.mdm-h4 {
+  font-size: 1.1em;
+}
+#app .cm-line.mdm-h5,
+#app .cm-line.mdm-h6 {
+  font-size: 1em;
+}
+/* Paragraph spacing: a blank line is the Markdown gap, and the line boxes
+   are given a little air so the text reads as prose rather than as code. */
+#app .cm-line {
+  padding: 0.1em 0;
+}
+/* A mark that is showing (the caret is on its node): quiet, so the text
+   keeps the eye. */
+#app .mdm-mark {
+  color: color-mix(in srgb, var(--mdm-ink) 45%, transparent);
+}
+#app .mdm-mark-line {
+  color: color-mix(in srgb, var(--mdm-ink) 45%, transparent);
+}
+#app .mdm-link {
+  color: #0969da;
+  text-decoration: none;
+}
+#app.mdm--dark .mdm-link {
+  color: #58a6ff;
+}
+#app .mdm-link:hover {
+  text-decoration: underline;
+}
+#app .mdm-bullet {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
+}
+#app .mdm-task {
+  margin: 0 0.35em 0 0;
+  vertical-align: -2px;
+  cursor: pointer;
+}
+#app .mdm-hr {
+  height: 0;
+  margin: 0;
+  padding: 0.6em 0;
+  border-bottom: 2px solid color-mix(in srgb, var(--mdm-ink) 16%, transparent);
+}
+#app .mdm-image {
+  max-width: 100%;
+  vertical-align: middle;
+  border-radius: 3px;
+}
+#app .cm-line.mdm-quote {
+  border-left: 3px solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
+  padding-left: 14px;
+  color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
+}
+#app .cm-line.mdm-table-line,
+#app .cm-line.mdm-html-line {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+}
+#app .cm-line.mdm-html-line {
+  color: color-mix(in srgb, var(--mdm-ink) 60%, transparent);
+}
+
+/* Inline code, the `like this` inside a sentence: a chip of the card
+   material, carried by its hairline edge (card and page are only a few
+   levels apart by design, see the grounds below). */
+#app {
+  --mdm-syn-edge: color-mix(in srgb, var(--mdm-syn-base) 20%, var(--mdm-syn-bg));
+}
+#app .mdm-inline-code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  color: var(--mdm-syn-base);
+  background: var(--mdm-syn-card);
+  border: 1px solid var(--mdm-syn-edge);
+  border-radius: 3px;
+  padding: 0.05em 0.3em;
+}
+
+/* ---------- Source cards: code, equations, the header ----------
+
+   The lines of a code block, of an equation being edited and of the YAML
+   header sit on a card of the code ground, in the editor's monospace. The
+   first and last lines carry the padding and the corners, so the card reads
+   as one box whether its fences are showing or not. */
+#app .cm-line.mdm-code-line,
+#app .cm-line.mdm-math-line,
+#app .cm-line.mdm-fm-line {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  line-height: 1.5;
+  color: var(--mdm-syn-base);
+  background: var(--mdm-syn-card);
+  padding: 0 0.9em;
+}
+#app .cm-line.mdm-code-first,
+#app .cm-line.mdm-math-first,
+#app .cm-line.mdm-fm-first {
+  padding-top: 0.55em;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+}
+#app .cm-line.mdm-code-last,
+#app .cm-line.mdm-math-last,
+#app .cm-line.mdm-fm-last {
+  padding-bottom: 0.55em;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+/* The fences and the --- of the header, when they show: small and quiet. */
+#app .cm-line.mdm-fence-line,
+#app .cm-line.mdm-fm-mark {
+  color: color-mix(in srgb, var(--mdm-syn-base) 45%, transparent);
+}
+/* An equation that does not compile, with no caret in it: the source stays
+   on its card and says what it is. */
+#app .cm-line.mdm-math--broken {
+  box-shadow: inset 3px 0 0 #c94f4f;
+}
+#app .mdm-math-src {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  color: var(--mdm-syn-base);
+}
+#app .mdm-math-src.mdm-math--broken {
+  text-decoration: underline wavy #c94f4f;
+}
+/* The equation drawn under its source (or in its place while no caret is in
+   it). KaTeX gives a display equation a margin of 1em of its own; the block
+   carries the spacing of a paragraph, so the equation keeps none. */
+/* No margins on widgets, here or on the scores: the blank line of the
+   Markdown under a block is the gap, the same one a paragraph gets, and
+   CodeMirror's height map does not see a widget's margin, which put the
+   carets moving vertically a line off (measured). */
+#app .mdm-math--block {
+  margin: 0;
+  padding: 0.2em 0;
+  cursor: pointer;
+}
+/* A wide equation scrolls sideways inside its own box. Only sideways: with
+   `overflow-x: auto` alone the vertical axis computes to auto as well, and
+   the fraction of a pixel KaTeX overflows by grew a vertical scrollbar
+   beside every equation inside VS Code (its webview draws classic
+   scrollbars; measured). */
+#app .mdm-math--block .katex-display {
+  margin: 0;
+  padding: 0.25em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#app .mdm-math:not(.mdm-math--block) {
+  cursor: pointer;
+}
+#app .mdm-math--error {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.8em;
+  color: #c94f4f;
+  padding: 0.2em 0.9em 0.6em;
+}
+/* The language tag and the copy button in the corner of a code block. The
+   chrome is a zero-height row before the first line; its buttons overlay the
+   card and show on hover (main.js marks the chrome while the pointer is on
+   the block). */
+#app .mdm-chrome {
+  position: relative;
+  height: 0;
+  z-index: 1;
+}
+/* The code chrome is an inline widget inside the first line of the block;
+   its buttons are placed against that line. */
+#app .cm-line.mdm-code-line {
+  position: relative;
+}
+#app .mdm-chrome--code {
+  position: static;
+}
+#app .mdm-chrome--code {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+#app .mdm-chrome--code.mdm-chrome--show,
+#app .mdm-chrome--code:hover,
+#app .mdm-score:hover .mdm-chrome,
+#app .mdm-score[data-mdm-audio] .mdm-chrome {
+  opacity: 1;
+}
+#app .mdm-score .mdm-chrome {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+#app .mdm-chrome .mdm-copy,
+#app .mdm-chrome .mdm-audio-toggle {
+  position: absolute;
+  top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #586069;
+  cursor: pointer;
+}
+#app .mdm-chrome .mdm-copy {
+  right: 8px;
+}
+#app .mdm-chrome .mdm-audio-toggle {
+  right: 32px;
+}
+#app .mdm-chrome .mdm-lang {
+  position: absolute;
+  top: 6px;
+  right: 36px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--mdm-syn-base) 45%, transparent);
+  pointer-events: none;
+}
+#app .mdm-chrome svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  fill: currentColor;
+}
+#app .mdm-chrome .mdm-audio-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+#app .mdm-chrome .mdm-copy:hover,
+#app .mdm-chrome .mdm-audio-toggle:hover {
+  color: var(--mdm-ink);
+  background-color: color-mix(in srgb, currentColor 12%, transparent);
+}
+#app.mdm--dark .mdm-chrome .mdm-copy,
+#app.mdm--dark .mdm-chrome .mdm-audio-toggle {
+  color: #9aa2aa;
+}
+/* The lit disc under the headphones while this block's player is open. */
+#app .mdm-score[data-mdm-audio] .mdm-audio-toggle {
+  background-color: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+/* ---------- Scores ---------- */
+
+/* The widget: the engraving, its chrome and, under it, the player bar. */
+#app .mdm-score {
+  position: relative;
+  margin: 0;
+}
+/* The score is engraved inside a <code> (what the stylesheet and the tests
+   key on), and abcjs draws it in currentColor. VS Code hands every webview
+   a default sheet with `code { color: var(--vscode-textPreformat-foreground)
+   }`, which painted the whole score in Monokai's gold inside VS Code while
+   the harness showed it in ink (measured): the ink is inherited back. */
+#app .mdm-score code.language-abc {
+  display: block;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
 }
 /* A score wider than the pane is scaled down whole. This needs the viewBox
    that fitScores() adds in main.js: abcjs sizes the SVG with width/height
    attributes only, and without a viewBox shrinking the element crops the
-   drawing instead of scaling it.
-
-   Aimed at the score SVG alone, never at every SVG in the block. Written as
-   `.vditor-ir__preview svg` it also caught the copy button icon, whose 14px
-   height Vditor sets at the same weight and this sheet loads later, so
-   `height: auto` won: the width stayed pinned by Vditor's !important and the
-   icon stretched to 150px tall, which is what moved it around from block to
-   block. */
-#app code.language-abc svg,
-.vditor-preview code.language-abc svg {
+   drawing instead of scaling it. */
+#app code.language-abc svg {
   max-width: 100%;
   height: auto;
 }
-
-/* Let the editable area reach the bottom, so that a click on the empty zone
-   below the last block (handled in main.js) always lands inside it. */
-#app .vditor-content {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-#app .vditor-ir {
-  height: 100%;
-}
-/* The page the document is written on. Vditor's content theme brings a ground
-   of its own (#24292e in dark), which came from neither the VS Code theme nor
-   the palette the code is painted with, so the code card and the page around it
-   were two greys from different families. Both come from the theme now; see
-   --mdm-syn-page below. */
-#app .vditor-ir .vditor-reset {
-  min-height: 100%;
-  box-sizing: border-box;
-  background: var(--mdm-syn-page);
-}
-/* The margins to either side of the blocks hold no text, so the pointer says
-   so: the beam an editable area shows by default offered a line to write on
-   where there is none, and a press there used to drop the caret in the
-   nearest block and open its source. The class is set from the pointer
-   (watchGutter in main.js), since CSS cannot tell the padding of an element
-   from its content box. */
-#app .vditor-ir .vditor-reset.mdm-gutter {
-  cursor: default;
-}
-
-/* abcjs marks a spot above the staff with a shape it declares transparent.
-   Vditor's dark content theme forces `fill: currentColor` on every path inside
-   .language-abc, which overrides that transparency and draws it as a stray
-   horizontal line. Declared transparency is honoured back, in both themes. */
+/* abcjs marks a spot above the staff with a shape it declares transparent;
+   declared transparency is honoured back, in both themes. */
 #app code.language-abc svg [fill="none"],
 #app code.language-abc svg [fill="transparent"],
 #app code.language-abc svg [fill="rgba(0,0,0,0)"] {
   fill: none;
 }
-
-/* The abcjs bundled with Vditor (5.10.3) paints scores in hardcoded black.
-   The dark content theme does recolour them, but it only reaches `svg` and
-   `path`, so the <rect> shapes of a score would stay black on a dark ground;
-   these rules take the lot to one colour. Only the black is repainted, and
-   only where it is declared: a blanket rule over `svg *` looked simpler and
-   was wrong twice over, it painted the transparent marker above and it gave a
-   stroke to the 26 shapes carrying stroke="none", which came out heavier than
-   the same score in light mode. Anything with no fill of its own, the title
-   and the lyrics among it, inherits from the root. */
-#app.vditor--dark code.language-abc svg,
-#app.vditor--dark code.language-abc svg [fill="#000000"] {
+/* abcjs paints scores in hardcoded black. On the dark side the black, and
+   only the black, is repainted: a blanket rule over `svg *` painted the
+   transparent marker above and gave a stroke to the shapes carrying
+   stroke="none". Anything with no fill of its own, the title and the lyrics
+   among it, inherits from the root. */
+#app.mdm--dark code.language-abc svg,
+#app.mdm--dark code.language-abc svg [fill="#000000"] {
   fill: #d4d4d4;
 }
-#app.vditor--dark code.language-abc svg [stroke="#000000"] {
+#app.mdm--dark code.language-abc svg [stroke="#000000"] {
   stroke: #d4d4d4;
 }
-
 /* The note sounding under the player. abcjs marks it with a class and a fill
    attribute (highlightPlaying in main.js); the colour comes from here, so it
    can carry one value per side, as the score fills do. Brass, the colour of
-   the note in the extension's own icon: warm against ink on either ground,
-   and no relation to the blue of a selection or the red of an error.
-
-   Both sides are spelled out because the mark would otherwise be swallowed:
-   the dark content theme declares `fill: currentColor` over the shapes of a
-   score, and a declaration outranks a presentation attribute, so the notehead
-   came back grey while only its label stayed accented. */
+   the note in the extension's own icon. */
 #app {
   --mdm-play-accent: #a0740f;
 }
-#app.vditor--dark {
+#app.mdm--dark {
   --mdm-play-accent: #d9a94f;
 }
 #app code.language-abc svg .abcjs-note_selected,
-#app.vditor--dark code.language-abc svg .abcjs-note_selected,
+#app.mdm--dark code.language-abc svg .abcjs-note_selected,
 #app.mdm-staff--gray code.language-abc svg .abcjs-note_selected {
   fill: var(--mdm-play-accent);
 }
-
-/* Visible cursor over the rendered views: they are clickable to edit. */
-.vditor-ir__preview {
-  cursor: pointer;
-}
-
 /* No pointer events inside a score: a click means "open the ABC source"
-   (handled on the preview container), and letting it reach the SVG fired
-   abcjs's own note-selection handler, which flashed the note red before the
-   cleanup in main.js undid it. With the SVG transparent to the pointer the
-   engraver handler never runs and the flash is gone at the root. */
+   (the widget hands it to the editor), and letting it reach the SVG fired
+   abcjs's own note-selection handler, which flashed the note red. */
 #app code.language-abc svg {
   pointer-events: none;
-}
-
-/* A score, a code block and a display equation are blocks like a paragraph, so
-   they get a paragraph's spacing. What made those gaps two or three times
-   wider was inside the block, not around it: a collapsed block still holds its
-   marker spans (the ``` or $$ fences, with their newlines) and its zero-sized
-   source pre, and each of them mounts an anonymous line box of a full
-   line-height above the visible card and another below. Measured before this
-   ran: 24px of air above a score, 40px above an equation, with the same again
-   underneath. Collapsing those line boxes leaves the block's own margin as the
-   only gap, which is the paragraph's.
-
-   While a block is expanded (the caret is inside it) none of this applies, so
-   the fence and the source lines show at their normal height. */
-#app .vditor-reset div[data-type="code-block"],
-#app .vditor-reset div[data-type="math-block"] {
-  margin: 0 0 1em;
-}
-#app .vditor-reset div[data-type="code-block"]:not(.vditor-ir__node--expand),
-#app .vditor-reset div[data-type="math-block"]:not(.vditor-ir__node--expand) {
-  line-height: 0;
-}
-/* The struts of those marker spans still leave a few px even at line-height
-   zero; while the block is collapsed they serve nothing, out they go. Only the
-   spans carrying a data-type, which are the markers: KaTeX renders a display
-   equation into a span of its own, a direct child of the block like they are,
-   and a blanket `> span` took the equation off the page with them. */
-#app
-  .vditor-reset
-  div[data-type="code-block"]:not(.vditor-ir__node--expand)
-  > span[data-type],
-#app
-  .vditor-reset
-  div[data-type="math-block"]:not(.vditor-ir__node--expand)
-  > span[data-type] {
-  display: none;
-}
-/* The hidden source pre is an inline-block of height 0 and still mounts a
-   line box ~5px tall above the preview. It cannot be display:none, click-to-
-   edit places the caret inside it and selection needs a rendered node, so it
-   is lifted out of the flow instead while the block is collapsed. */
-#app
-  .vditor-reset
-  div[data-type="code-block"]:not(.vditor-ir__node--expand)
-  > pre.vditor-ir__marker--pre,
-#app
-  .vditor-reset
-  div[data-type="math-block"]:not(.vditor-ir__node--expand)
-  > pre.vditor-ir__marker--pre {
-  position: absolute;
-}
-#app
-  .vditor-reset
-  div[data-type="code-block"]:not(.vditor-ir__node--expand)
-  .vditor-ir__preview,
-#app
-  .vditor-reset
-  div[data-type="math-block"]:not(.vditor-ir__node--expand)
-  .vditor-ir__preview {
-  line-height: normal;
-}
-/* KaTeX gives a display equation a margin of 1em top and bottom of its own,
-   which lands inside the block and adds to the block's. The block already
-   carries the spacing of a paragraph, so the equation keeps none. */
-#app .vditor-reset .katex-display {
-  margin: 0;
-}
-#app .vditor-ir__preview:has(> code.language-abc) {
-  margin: 0;
-  padding: 0;
-  background: transparent;
 }
 /* Centred by default, like display maths. An SVG lays out inline, and auto
    margins do nothing on an inline box, hence the `display: block`. */
@@ -205,82 +559,22 @@ body {
   margin: 0 auto;
 }
 /* mdm.scoreAlign = "left": scores line up with the left edge of the text
-   (toolbar button, see applyScoreAlign in main.js). Only a score narrower than
-   the pane moves; a full-width one fills the line either way. */
+   (toolbar button, see applyScoreAlign in main.js). Only a score narrower
+   than the pane moves; a full-width one fills the line either way. */
 #app.mdm-score--left code.language-abc svg {
   margin: 0;
 }
-
 /* Guitar-Pro-style gray staff lines (mdm.staffLines = "gray"): add_classes in
-   renderScores tags the five lines .abcjs-staff; only those are recoloured, so
-   notes, clefs and bar lines keep the ink colour. The dark variant carries
-   more selector weight than the dark repaint rules above, so it wins there
-   too. */
+   renderScore tags the five lines .abcjs-staff; only those are recoloured, so
+   notes, clefs and bar lines keep the ink colour. */
 #app.mdm-staff--gray code.language-abc svg .abcjs-staff {
   fill: #a3a3a3;
 }
-#app.vditor--dark.mdm-staff--gray code.language-abc svg .abcjs-staff {
+#app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-staff {
   fill: #6f6f6f;
 }
-
-/* Quarto callouts (::: {.callout-*} … :::), decorated by decorateCallouts()
-   in main.js: the ::: fence lines are shown small and faint (still there,
-   still editable), and the whole range sits on an accent bar with a light
-   tint, per callout type. */
-#app .vditor-reset [data-mdm-co] {
-  --mdm-co-color: #4c7bd0;
-}
-#app .vditor-reset [data-mdm-co="tip"] {
-  --mdm-co-color: #3e9d63;
-}
-#app .vditor-reset [data-mdm-co="warning"] {
-  --mdm-co-color: #cf9236;
-}
-#app .vditor-reset [data-mdm-co="important"] {
-  --mdm-co-color: #c94f4f;
-}
-#app .vditor-reset [data-mdm-co="caution"] {
-  --mdm-co-color: #b0682f;
-}
-#app .vditor-reset .mdm-co-open,
-#app .vditor-reset .mdm-co-body,
-#app .vditor-reset .mdm-co-close {
-  border-left: 3px solid var(--mdm-co-color);
-  padding-left: 14px;
-  padding-right: 10px;
-  background: color-mix(in srgb, var(--mdm-co-color) 5%, transparent);
-}
-/* Only the ::: fence text itself is small and faint; the rest of a mixed
-   open/close paragraph is body text and keeps its size. While the caret is
-   inside that paragraph the span is not applied (see decorateCallouts) and
-   the fence shows at normal size for editing. */
-#app .vditor-reset .mdm-co-fence {
-  font-size: 0.72em;
-  font-family: var(--vscode-editor-font-family, monospace);
-  opacity: 0.5;
-}
-#app .vditor-reset .mdm-co-open {
-  margin-bottom: 0;
-  padding-top: 0.4em;
-  border-top-right-radius: 4px;
-}
-#app .vditor-reset .mdm-co-body {
-  margin-top: 0;
-  margin-bottom: 0;
-  padding-top: 0.4em;
-  padding-bottom: 0.4em;
-}
-#app .vditor-reset .mdm-co-close {
-  margin-top: 0;
-  padding-bottom: 0.4em;
-  border-bottom-right-radius: 4px;
-}
-
-/* A score renders as an SVG inside a <code>, so the content theme washes it
-   with the code background and frames it like a card. Cleared by default, so
-   the score reads as part of the document the way an equation does. Both rules
-   go through the #app id to outrank the content theme, which is loaded after
-   this stylesheet and whose selector already carries three classes. */
+/* A score sits in the text the way an equation does. These are the
+   backgrounds available if one is wanted (mdm.scoreFill). */
 #app code.language-abc {
   background: transparent;
   padding: 0;
@@ -292,10 +586,9 @@ body {
   border-radius: 4px;
 }
 
-/* Feedback when a score is copied: a brief pulse on the card only (the
-   page-wide selection flash of Vditor's own copy path is bypassed for score
-   blocks in main.js). A cleared card has no colour to pulse, so it borrows the
-   accent tint and fades it out. */
+/* Feedback when a block is copied: a brief pulse on the card only. A
+   cleared score card has no colour to pulse, so it borrows the accent tint
+   and fades it out. */
 @keyframes mdm-copy-pulse {
   0% {
     background-color: rgba(76, 123, 208, 0.28);
@@ -304,11 +597,8 @@ body {
     background-color: transparent;
   }
 }
-/* A filled card already carries a colour of its own, so its pulse is that same
-   colour going off and easing back in, the inverse of the one above. The tint
-   keyframes cannot serve here: they end on `transparent`, which held the fill
-   off for the whole animation and then snapped it back the moment it ended.
-   Only the name is overridden, so both pulses share the timing. */
+/* A filled card already carries a colour of its own, so its pulse is that
+   same colour going off and easing back in. */
 @keyframes mdm-copy-pulse-filled {
   0% {
     background-color: transparent;
@@ -317,9 +607,8 @@ body {
     background-color: var(--mdm-score-fill);
   }
 }
-/* A block of code is copied the same way, and it already sits on a card: its
-   pulse is that card brightened towards the text colour and settling back, so
-   what lights up is the code and nothing else on the page. */
+/* A block of code already sits on a card: its pulse is that card brightened
+   towards the text colour and settling back. */
 @keyframes mdm-copy-pulse-code {
   0% {
     background-color: color-mix(in srgb, var(--mdm-syn-base) 22%, var(--mdm-syn-bg));
@@ -334,86 +623,63 @@ body {
 #app.mdm-score--filled code.language-abc.mdm-copy-pulse {
   animation-name: mdm-copy-pulse-filled;
 }
-/* Scores are left out: theirs is the pulse above, and this card colour is not
-   the one they sit on. */
-#app .vditor-ir__preview > code.mdm-copy-pulse:not(.language-abc) {
+#app .cm-line.mdm-code-line.mdm-copy-pulse {
   animation: mdm-copy-pulse-code 0.5s ease-out;
 }
 
-/* Tooltip suppressed after a click; see dismissTooltipOnClick in main.js. The
-   #app id outranks the :hover/:focus rules that raise it. */
-#app .vditor-tooltipped.mdm-tip--off::after,
-#app .vditor-tooltipped.mdm-tip--off::before {
-  display: none;
+/* ---------- Quarto callouts ----------
+
+   ::: {.callout-*} … ::: as parsed by the Lezer extension (vendor-src): the
+   whole range sits on an accent bar with a light tint, per callout type, and
+   the ::: fence lines are shown small and faint (still there, still
+   editable) until the caret is on them. */
+#app .cm-line.mdm-co-line {
+  --mdm-co-color: #4c7bd0;
+  border-left: 3px solid var(--mdm-co-color);
+  padding-left: 14px;
+  padding-right: 10px;
+  background: color-mix(in srgb, var(--mdm-co-color) 5%, transparent);
+}
+#app .cm-line.mdm-co--tip {
+  --mdm-co-color: #3e9d63;
+}
+#app .cm-line.mdm-co--warning {
+  --mdm-co-color: #cf9236;
+}
+#app .cm-line.mdm-co--important {
+  --mdm-co-color: #c94f4f;
+}
+#app .cm-line.mdm-co--caution {
+  --mdm-co-color: #b0682f;
+}
+#app .cm-line.mdm-co-first {
+  padding-top: 0.4em;
+  border-top-right-radius: 4px;
+}
+#app .cm-line.mdm-co-last {
+  padding-bottom: 0.4em;
+  border-bottom-right-radius: 4px;
+}
+#app .cm-line.mdm-co-fence {
+  font-size: 0.72em;
+  font-family: var(--vscode-editor-font-family, monospace);
+  opacity: 0.5;
 }
 
-/* The copy button is an absolute span inside a div.vditor-copy that Vditor
-   drops into the flow of the <pre>, and that div is what anchors it. Its box
-   follows the content, so the icon shifts with the block it belongs to, which
-   is plain to see once scores of different widths are centred by the rule
-   above. Anchored to the corner of the block itself instead, the same offset
-   for every block whatever it holds. */
-#app .vditor-reset pre {
-  position: relative;
-}
-#app .vditor-copy {
-  position: static;
-}
-#app .vditor-copy span {
-  top: 6px;
-  right: 10px;
-}
+/* ---------- Swatches ---------- */
 
-/* The player toggle, a small speaker beside the copy button on every score:
-   same anchoring (absolute against the block's pre), same show-on-hover
-   manners, and it stays put while its player is open so the way to close it
-   never has to be hunted for. */
-#app .mdm-audio-toggle {
-  position: static;
-  display: none;
-  z-index: 1;
+.mdm-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 7px;
+  vertical-align: -2px;
+  border: 1px solid rgba(127, 127, 127, 0.5);
+  border-radius: 2px;
 }
-#app .vditor-reset pre:hover .mdm-audio-toggle,
-#app div[data-mdm-audio] .mdm-audio-toggle {
-  display: block;
-}
-/* A round target of its own: the drawing sits in the middle of it, and the
-   disc is only painted while this block's player is open (below), which is
-   what tells the two states apart now that the icon has one face. */
-#app .mdm-audio-toggle span {
-  cursor: pointer;
-  position: absolute;
-  top: 2px;
-  right: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-}
-#app div[data-mdm-audio] .mdm-audio-toggle span {
-  background-color: color-mix(in srgb, currentColor 20%, transparent);
-}
-/* 16px, a shade larger than the copy button beside it: headphones carry more
-   drawing than two sheets of paper and read worse at the same size. The ink
-   is set on the button and not on the drawing, so the disc behind it can be
-   mixed from that same currentColor. */
-#app .mdm-audio-toggle span {
-  color: #586069;
-}
-#app .mdm-audio-toggle svg {
-  height: 16px;
-  width: 16px;
-  display: block;
-  fill: currentColor;
-}
-/* Vditor's stylesheet never adjusts the copy icon for its dark theme, and
-   #586069 sinks into a dark ground; both little buttons take a lighter gray
-   there, together. */
-#app.vditor--dark .mdm-audio-toggle span,
-#app.vditor--dark .vditor-copy svg {
-  color: #9aa2aa;
+.mdm-swatch__tick {
+  margin-left: 8px;
+  opacity: 0.7;
 }
 
 /* The player bar under a score. It lives inside the preview <pre>, so the
@@ -699,12 +965,10 @@ body {
 #app .mdm-audio .abcjs-loading-svg circle {
   stroke: var(--mdm-syn-base);
 }
-/* The tooltips of the two buttons, drawn north: the bar sits at the foot of
-   the block and a tooltip below it would hang under the score. Vditor draws
-   them from aria-label (see decorateWidget in main.js), and its own rules
-   already cover the shape; what they need here is room to be seen, since a
-   score is engraved into a <code> that clips what overflows it. */
-#app .mdm-audio .vditor-tooltipped::after {
+/* The tooltips of the bar's buttons, drawn north: the bar sits at the foot of
+   the block and a tooltip below it would hang under the score. They are the
+   .mdm-tip tooltips of the rest of the editor, a size smaller. */
+#app .mdm-audio .mdm-tip::after {
   font-size: 11px;
 }
 /* The fallback notes the player can show (audio unsupported, synth failed to
@@ -726,10 +990,9 @@ body {
    (a theme that cannot be read, or an editor held to the side opposite the VS
    Code theme by mdm.theme): Monokai in dark, stackoverflow-light in light,
    the two the user asked for. The dark values are Monokai's own, taken from
-   the theme VS Code ships, not from the loose highlight.js imitation of it.
-
-   Every rule below goes through #app so that it outranks the highlight.js
-   stylesheet Vditor loads at runtime, which lands later in the document. */
+   the theme VS Code ships. The colours reach the code through the
+   CodeMirror highlight style in main.js, which spends these same
+   properties. */
 #app {
   --mdm-syn-base: #2f3337;
   --mdm-syn-bg: #f6f6f6;
@@ -742,7 +1005,7 @@ body {
   --mdm-syn-type: #b75501;
   --mdm-syn-variable: #54790d;
 }
-#app.vditor--dark {
+#app.mdm--dark {
   --mdm-syn-base: #f8f8f2;
   --mdm-syn-bg: #272822;
   --mdm-syn-comment: #88846f;
@@ -780,7 +1043,7 @@ body {
   --mdm-syn-card: var(--mdm-syn-tint);
   --mdm-syn-page: var(--mdm-syn-wash);
 }
-#app.vditor--dark {
+#app.mdm--dark {
   --mdm-syn-card: var(--mdm-syn-bg);
   --mdm-syn-page: var(--mdm-syn-tint);
 }
@@ -789,181 +1052,4 @@ body {
 #app.mdm-page--white {
   --mdm-syn-card: var(--mdm-syn-tint);
   --mdm-syn-page: #fff;
-}
-
-/* Inline code, the `like this` inside a sentence. The content themes paint it
-   with a wash of their own and neither belongs here: 5% black in light, which
-   on a page that is already off white barely shows, and 36% of a blue that
-   appears nowhere else in the editor in dark. It takes the card ground
-   instead, so a run of code inside a paragraph is a chip of the same material
-   as a block of code, on whichever side is in force. Card and page are only a
-   few levels apart by design (see above), so what carries the shape at this
-   size is the hairline edge, not the fill. One edge colour serves both sides:
-   the mix is against the theme's own foreground and background, which trade
-   places from light to dark.
-
-   Inline code alone, hence the two exclusions the content theme has no reason
-   to make. Vditor writes several other things as a <code>, and none of them is
-   a chip: the editable source of a block, kept in a <pre> of its own (the YAML
-   header, and any code block while the caret is inside it); the source of a
-   run of inline maths, a marker shrunk to nothing until the caret goes in, and
-   a box drawn around $f_n = n f_1$ the moment it is edited; and the scores,
-   left out by name here as they are everywhere else. */
-#app {
-  --mdm-syn-edge: color-mix(in srgb, var(--mdm-syn-base) 20%, var(--mdm-syn-bg));
-}
-#app
-  .vditor-reset
-  :not(pre)
-  > code:not(.hljs):not(.highlight-chroma):not(.language-abc):not(.vditor-ir__marker) {
-  color: var(--mdm-syn-base);
-  background: var(--mdm-syn-card);
-  border: 1px solid var(--mdm-syn-edge);
-}
-
-/* The rendered code blocks, which Vditor paints with highlight.js. Scores are
-   left out by name: Vditor stamps `hljs` on the <code> of every block it
-   re-renders, ours included, so from the first edit inside a score block the
-   score sat on a code card (invisible under a light theme, plainly there under
-   a dark one: card rgb(52,52,46) on a ground of rgb(36,41,46), measured). A
-   score is not shown as code, and a ground behind it is what the score fill
-   option is for. The exclusion also keeps `color` off the block, which the
-   engraving does read: the dark content theme paints the shapes inside
-   .language-abc with currentColor. */
-#app .vditor-reset pre > code.hljs:not(.language-abc) {
-  color: var(--mdm-syn-base);
-  background: var(--mdm-syn-card);
-}
-
-#app .hljs-comment,
-#app .hljs-quote,
-#app .hljs-meta {
-  color: var(--mdm-syn-comment);
-}
-#app .hljs-string,
-#app .hljs-regexp,
-#app .hljs-char,
-#app .hljs-addition {
-  color: var(--mdm-syn-string);
-}
-#app .hljs-number,
-#app .hljs-literal,
-#app .hljs-symbol {
-  color: var(--mdm-syn-number);
-}
-#app .hljs-keyword,
-#app .hljs-doctag,
-#app .hljs-tag,
-#app .hljs-selector-tag,
-#app .hljs-deletion {
-  color: var(--mdm-syn-keyword);
-}
-#app .hljs-attr,
-#app .hljs-attribute,
-#app .hljs-property {
-  color: var(--mdm-syn-attr);
-}
-#app .hljs-title,
-#app .hljs-name,
-#app .hljs-section,
-#app .hljs-built_in,
-#app .hljs-selector-class,
-#app .hljs-selector-id,
-#app .hljs-template-tag,
-#app .hljs-link {
-  color: var(--mdm-syn-name);
-}
-#app .hljs-type,
-#app .hljs-title.class_ {
-  color: var(--mdm-syn-type);
-}
-#app .hljs-variable,
-#app .hljs-template-variable,
-#app .hljs-params,
-#app .hljs-subst {
-  color: var(--mdm-syn-variable);
-}
-/* Punctuation and the like: plain text, and named so that the highlight.js
-   stylesheet does not colour them from a palette of its own. */
-#app .hljs-bullet,
-#app .hljs-code,
-#app .hljs-operator,
-#app .hljs-punctuation {
-  color: var(--mdm-syn-base);
-}
-
-/* The YAML header, painted by highlightFrontMatter() in main.js: lute leaves
-   its source editable, and Vditor's highlighter skips editable sources, so it
-   used to show as one flat run of monospace. The block reads as a card in the
-   same colours as a code block; its own <pre> and <code> are cleared, since
-   the content theme washes them with a background of its own (a blue box in
-   dark). The --- markers stay hidden, as Vditor hides them. */
-#app .vditor-reset div[data-type="yaml-front-matter"] {
-  background: var(--mdm-syn-card);
-  color: var(--mdm-syn-base);
-  border-radius: 4px;
-  padding: 0.6em 0.8em;
-  margin-bottom: 1em;
-}
-/* Vditor draws the --- fences as :before/:after pseudo-elements, holding
-   their place with a space while the caret is elsewhere. That space is a line
-   box of its own above and below the header, a whole line-height of air at
-   each end of the card (measured: 24px). Gone while collapsed; the moment the
-   caret goes in, the block expands and the fences come back as text. */
-#app
-  .vditor-reset
-  div[data-type="yaml-front-matter"]:not(.vditor-ir__node--expand)::before,
-#app
-  .vditor-reset
-  div[data-type="yaml-front-matter"]:not(.vditor-ir__node--expand)::after {
-  display: none;
-}
-#app .vditor-reset div[data-type="yaml-front-matter"] pre,
-#app .vditor-reset div[data-type="yaml-front-matter"] code {
-  background: transparent;
-  color: inherit;
-  padding: 0;
-  margin: 0;
-}
-/* The painted copy and the source it was painted from take turns: the source
-   is a marker, which Vditor shrinks to nothing until the caret goes in, and
-   the copy steps aside as soon as it does, so the text is edited plain. */
-#app
-  .vditor-reset
-  div[data-type="yaml-front-matter"].vditor-ir__node--expand
-  > pre.mdm-fm-preview {
-  display: none;
-}
-/* Shrunk to nothing, the source is still an inline-block mounting a line box
-   of its own: 24px of air above the header, measured. Out of the flow while
-   it is collapsed. Not display:none, since a click on the copy puts the caret
-   inside it and a selection needs a rendered node. */
-#app
-  .vditor-reset
-  div[data-type="yaml-front-matter"]:not(.vditor-ir__node--expand)
-  > pre.vditor-ir__marker--pre {
-  position: absolute;
-}
-
-/* The theme menu lists every colour theme installed in VS Code, which on a
-   plain install is around twenty entries: taller than a short editor pane,
-   and Vditor's drop-down does not scroll on its own. */
-#app .vditor-toolbar__item:has(> button[data-type="mdm-theme"]) .vditor-hint {
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-/* Colour chips in the score fill menu. */
-.mdm-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 7px;
-  vertical-align: -2px;
-  border: 1px solid rgba(127, 127, 127, 0.5);
-  border-radius: 2px;
-}
-.mdm-swatch__tick {
-  margin-left: 8px;
-  opacity: 0.7;
 }

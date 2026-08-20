@@ -56,6 +56,13 @@ function readSettings(installed) {
     const value = config.get(key);
     out[key] = allowed.indexOf(value) !== -1 ? value : allowed[0];
   });
+  // VS Code's own choice of the click that adds a caret (Alt or Ctrl/Cmd),
+  // so the gesture is the same here as in the text editors beside this one.
+  // Not an mdm setting: read-only here, never written by writeSetting.
+  const modifier = vscode.workspace
+    .getConfiguration("editor")
+    .get("multiCursorModifier");
+  out.multiCursorModifier = modifier === "ctrlCmd" ? "ctrlCmd" : "alt";
   return out;
 }
 
@@ -222,13 +229,17 @@ class MdmEditorProvider {
 
   resolveCustomTextEditor(document, webviewPanel) {
     const webview = webviewPanel.webview;
+    // The folder of the document is a resource root too: images the text
+    // refers to by a relative path are shown from there.
+    const docDir = vscode.Uri.joinPath(document.uri, "..");
     webview.options = {
       enableScripts: true,
       localResourceRoots: [
         vscode.Uri.joinPath(this.context.extensionUri, "media"),
+        docDir,
       ],
     };
-    webview.html = this.getHtml(webview);
+    webview.html = this.getHtml(webview, docDir);
 
     // >0 while we apply changes that came from the webview to the
     // TextDocument, so we do not send them back (infinite echo). A counter and
@@ -261,7 +272,10 @@ class MdmEditorProvider {
       Object.assign({ type: "palette" }, readPalette());
 
     const configSub = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("mdm")) {
+      if (
+        e.affectsConfiguration("mdm") ||
+        e.affectsConfiguration("editor.multiCursorModifier")
+      ) {
         webview.postMessage({ type: "settings", settings: readSettings() });
         // mdm.frontMatter decides what the editor text holds, so the document
         // is re-sent in whichever mode is now in force. The other settings only
@@ -340,16 +354,17 @@ class MdmEditorProvider {
     });
   }
 
-  getHtml(webview) {
+  getHtml(webview, docDir) {
     const mediaUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, "media")
     );
-    const vditorBase = `${mediaUri}/vendor/vditor`;
+    const docBase = docDir ? webview.asWebviewUri(docDir).toString() : "";
+    // No 'unsafe-eval': CodeMirror, KaTeX and abcjs run without it.
     const csp = [
       "default-src 'none'",
       `img-src ${webview.cspSource} https: data:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
-      `script-src ${webview.cspSource} 'unsafe-inline' 'unsafe-eval'`,
+      `script-src ${webview.cspSource} 'unsafe-inline'`,
       `font-src ${webview.cspSource} data:`,
       `connect-src ${webview.cspSource} https:`,
       "media-src https: data:",
@@ -360,26 +375,21 @@ class MdmEditorProvider {
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="${vditorBase}/dist/index.css">
+<link rel="stylesheet" href="${mediaUri}/vendor/cm6/katex.min.css">
 <link rel="stylesheet" href="${mediaUri}/vendor/abcjs/abcjs-audio.css">
 <link rel="stylesheet" href="${mediaUri}/style.css">
 <script>
-window.MDM_VDITOR_CDN = "${vditorBase}";
-window.MDM_ABCJS6 = "${mediaUri}/vendor/abcjs/abcjs-basic-min.js";
+window.MDM_DOC_BASE = ${inlineJson(docBase)};
 window.MDM_SOUNDFONT = "${mediaUri}/vendor/soundfont/";
 window.MDM_SETTINGS = ${inlineJson(readSettings())};
 window.MDM_THEMES = ${inlineJson(themes())};
 window.MDM_PALETTE = ${inlineJson(readPalette())};
 </script>
-<script src="${vditorBase}/dist/index.min.js"></script>
+<script src="${mediaUri}/vendor/cm6/cm6.bundle.js"></script>
+<script src="${mediaUri}/vendor/abcjs/abcjs-basic-min.js"></script>
 </head>
 <body>
 <div id="app"></div>
-<!-- Icon sprite preloaded under the id Vditor looks for: otherwise the constructor
-     requests it over synchronous XHR and inside the webview that request never
-     lands, leaving the toolbar with empty buttons. It must go in the body: ant.js
-     writes to document.body. -->
-<script src="${vditorBase}/dist/js/icons/ant.js" id="vditorIconScript"></script>
 <script src="${mediaUri}/main.js"></script>
 </body>
 </html>`;
