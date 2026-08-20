@@ -1,0 +1,91 @@
+{
+  "name": "mdm-editor",
+  "displayName": "Markdown Music",
+  "description": "Editor for .mdm files: Markdown, equations and music scores in one rendered, editable document.",
+  "version": "0.1.0",
+  "publisher": "alpelito7",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "configuration": {
+      "title": "MDM",
+      "properties": {
+        "mdm.theme": {
+          "type": "string",
+          "default": "auto",
+          "description": "MDM editor theme. 'auto' follows the VS Code theme; 'light' and 'dark' force the side and read the syntax colours from the VS Code theme when it is on that side; 'white' is the light side on a sheet of white paper, with the code keeping its slate. The name of any installed colour theme ('Monokai', 'Solarized Light', ...) picks that theme's syntax colours and its side. A name nobody contributes falls back to 'auto'. The toolbar lists them all."
+        },
+        "mdm.staffLines": {
+          "type": "string",
+          "enum": ["gray", "ink"],
+          "default": "gray",
+          "enumDescriptions": [
+            "Staff lines in gray, Guitar Pro style, so the notes stand out.",
+            "Staff lines in the same colour as the notes."
+          ],
+          "description": "Colour of the five staff lines in rendered scores."
+        },
+        "mdm.scoreFill": {
+          "type": "string",
+          "enum": ["none", "paper", "slate", "brass"],
+          "enumDescriptions": [
+            "No background: the score blends into the document, the way an equation does.",
+            "Warm paper tint.",
+            "Neutral slate tint.",
+            "Brass tint, matching the MDM icon."
+          ],
+          "default": "none",
+          "description": "Fill drawn behind rendered scores. Every option carries a light and a dark value, and the one matching the active theme is used."
+        },
+        "mdm.scoreAlign": {
+          "type": "string",
+          "enum": ["center", "left"],
+          "enumDescriptions": [
+            "Scores are centred across the pane, the way display maths is.",
+            "Scores start at the left edge of the text."
+          ],
+          "default": "center",
+          "description": "Where a rendered score sits across the pane. Only scores narrower than the pane are affected; a full-width one fills the line either way."
+        },
+        "mdm.frontMatter": {
+          "type": "string",
+          "enum": ["hidden", "shown"],
+          "enumDescriptions": [
+            "The YAML header is not shown. It stays on the file and is spliced back on every save.",
+            "The YAML header is the first block of the document and is edited in place."
+          ],
+          "default": "hidden",
+          "description": "Whether the YAML header is part of the document in the editor. Shown, it is an ordinary block: what is typed in it goes to the file, and deleting it deletes it from the file."
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "markdown",
+        "extensions": [
+          ".mdm"
+        ]
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "mdm.editor",
+        "displayName": "MDM Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.mdm"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
+  }
+}

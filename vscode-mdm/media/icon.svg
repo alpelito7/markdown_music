@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- MDM icon: monoline "mdm" wordmark, the d as a brass quarter note, slur underneath -->
+  <rect x="1" y="1" width="126" height="126" rx="28" fill="#26241E" stroke="#F0EBDD" stroke-opacity=".14" stroke-width="1.5"/>
+  <g fill="none" stroke="#F0EBDD" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16,84 L16,60 C16,53 27,53 27,60 L27,84 M27,60 C27,53 38,53 38,60 L38,84"/>
+    <path d="M89,84 L89,60 C89,53 100,53 100,60 L100,84 M100,60 C100,53 111,53 111,60 L111,84"/>
+  </g>
+  <ellipse cx="63" cy="75" rx="15" ry="10.5" fill="#C7A96A" transform="rotate(-20 63 75)"/>
+  <path d="M74.3,36 L74.3,72" fill="none" stroke="#C7A96A" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M22,95 C45,107.5 83,107.5 106,95" fill="none" stroke="#C7A96A" stroke-width="4" stroke-linecap="round"/>
+</svg>
