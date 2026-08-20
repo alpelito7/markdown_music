@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# mdm: renders .mdm (Markdown Music) files with Quarto.
+# Usage: ./mdm render file.mdm [extra quarto options, e.g. --to pdf]
+set -euo pipefail
+
+cmd="${1:-}"
+file="${2:-}"
+if [[ "$cmd" != "render" || -z "$file" ]]; then
+  echo "usage: mdm render file.mdm [quarto options]" >&2
+  exit 1
+fi
+if [[ "$file" != *.mdm ]]; then
+  echo "error: expected a .mdm file" >&2
+  exit 1
+fi
+shift 2
+
+base="${file%.mdm}"
+tmp="${base}.qmd"
+if [[ -e "$tmp" ]]; then
+  echo "error: $tmp already exists; refusing to overwrite it" >&2
+  exit 1
+fi
+cp "$file" "$tmp"
+trap 'rm -f "$tmp"' EXIT
+quarto render "$tmp" "$@"
