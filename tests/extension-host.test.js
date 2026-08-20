@@ -97,6 +97,7 @@ test("hostile setting values never reach the webview HTML", () => {
     staffLines: "gray",
     scoreAlign: "center",
     frontMatter: "hidden",
+    multiCursorModifier: "alt",
   });
 });
 
@@ -115,17 +116,33 @@ test("valid setting values pass through to the webview HTML", () => {
     staffLines: "ink",
     scoreAlign: "left",
     frontMatter: "shown",
+    multiCursorModifier: "alt",
   });
 });
 
-test("the webview HTML carries a CSP and the icon sprite preload", () => {
+test("the webview HTML carries a CSP without eval, and the editor bundle", () => {
   const h = boot("Body\n", {});
   assert.ok(h.html.includes("Content-Security-Policy"));
   assert.ok(h.html.includes("default-src 'none'"));
-  assert.ok(h.html.includes('id="vditorIconScript"'));
-  // The sprite must load inside <body> (ant.js writes to document.body).
-  const body = h.html.slice(h.html.indexOf("<body>"));
-  assert.ok(body.includes("vditorIconScript"));
+  const csp = /Content-Security-Policy" content="([^"]*)"/.exec(h.html)[1];
+  // CodeMirror, KaTeX and abcjs run without eval; the grant is gone.
+  assert.doesNotMatch(csp, /unsafe-eval/);
+  // The bundle and KaTeX's stylesheet come from the vendor folder; nothing
+  // of the old engine is left in the page.
+  assert.ok(h.html.includes("/vendor/cm6/cm6.bundle.js"));
+  assert.ok(h.html.includes("/vendor/cm6/katex.min.css"));
+  assert.ok(!/vditor/i.test(h.html));
+  // The folder of the document is handed over for relative images.
+  assert.match(h.html, /window\.MDM_DOC_BASE = "[^"]+"/);
+});
+
+test("VS Code's multiCursorModifier is passed along, ctrlCmd or alt", () => {
+  const h = boot("Body\n", { "editor.multiCursorModifier": "ctrlCmd" });
+  const m = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html);
+  assert.equal(JSON.parse(m[1]).multiCursorModifier, "ctrlCmd");
+  const h2 = boot("Body\n", { "editor.multiCursorModifier": "bogus" });
+  const m2 = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h2.html);
+  assert.equal(JSON.parse(m2[1]).multiCursorModifier, "alt");
 });
 
 // ---------- setSetting ----------
@@ -172,7 +189,7 @@ test("setSetting drops unknown keys and disallowed values", async () => {
 
 const DOC = "---\ntitle: t\n---\n\nIntro\n\n```{.abc .play}\nX:1\nK:C\nC\n```\n";
 
-test("ready is answered with tokenized text and the header kept aside", async () => {
+test("ready is answered with the text as written and the header kept aside", async () => {
   const h = boot(DOC, {});
   await h.receive({ type: "ready" });
   assert.equal(h.posted.length, 1);
@@ -180,7 +197,8 @@ test("ready is answered with tokenized text and the header kept aside", async ()
   assert.equal(msg.type, "update");
   assert.equal(msg.withFrontMatter, false);
   assert.equal(msg.frontMatter, "---\ntitle: t\n---\n");
-  assert.ok(msg.text.includes("```mdm-abc-play\n"));
+  // The fence info string is the file's own: nothing is tokenized.
+  assert.ok(msg.text.includes("```{.abc .play}\n"));
   assert.ok(!msg.text.includes("title:"));
 });
 
@@ -230,23 +248,20 @@ test("an edit that the host canonicalizes is echoed back once", async () => {
   const h = boot(DOC, {});
   await h.receive({ type: "ready" });
   const before = h.posted.length;
-  // A hand-typed ```{.abc} goes to disk verbatim (fromEditor only restores
-  // this editor's own tokens), but the host's re-tokenized view of that text
-  // (mdm-abc) differs from what was sent, so an echo must follow: it hands the
-  // editor the token, and the next save normalizes the file to ```abc.
+  // With the header hidden, blank lines typed at the very top of the body
+  // join the gap under the header on disk, and the host's view of that text
+  // (the body without them) differs from what was sent, so an echo must
+  // follow: it hands the editor the converged text.
   await h.receive({
     type: "edit",
-    text: "```{.abc}\nX:1\n```\n",
+    text: "\n\nBody\n",
     withFrontMatter: false,
   });
-  assert.equal(
-    h.document.getText(),
-    "---\ntitle: t\n---\n\n```{.abc}\nX:1\n```\n"
-  );
+  assert.equal(h.document.getText(), "---\ntitle: t\n---\n\n\n\nBody\n");
   assert.equal(h.posted.length, before + 1);
   const echo = h.posted[h.posted.length - 1];
   assert.equal(echo.type, "update");
-  assert.ok(echo.text.includes("```mdm-abc\n"));
+  assert.equal(echo.text, "Body\n");
 });
 
 test("an edit made in shown mode is honoured after a toggle to hidden", async () => {
@@ -485,19 +500,18 @@ test("a failing settings write surfaces as an error message", async () => {
 
 test("the webview HTML wires the synth engine, the soundfont and the widget stylesheet", () => {
   const h = boot("Body\n");
+  // abcjs is a plain script of the page now (it engraves and plays).
   assert.match(
     h.html,
-    /window\.MDM_ABCJS6 = "[^"]*\/vendor\/abcjs\/abcjs-basic-min\.js"/
+    /<script src="[^"]*\/vendor\/abcjs\/abcjs-basic-min\.js"><\/script>/
   );
   assert.match(
     h.html,
     /window\.MDM_SOUNDFONT = "[^"]*\/vendor\/soundfont\/"/
   );
   assert.ok(h.html.includes("/vendor/abcjs/abcjs-audio.css"));
-  // The loader in main.js evaluates abcjs 6 with Function(), and the soundfont
-  // arrives over XHR: both die without these two CSP grants.
+  // The soundfont arrives over XHR: it dies without this CSP grant.
   const csp = /Content-Security-Policy" content="([^"]*)"/.exec(h.html)[1];
-  assert.match(csp, /script-src [^;]*'unsafe-eval'/);
   assert.match(csp, /connect-src [^;]*vscode-resource:/);
 });
 

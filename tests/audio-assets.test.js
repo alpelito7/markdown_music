@@ -1,10 +1,8 @@
 // Tests for the vendored audio assets the editor's player depends on: the
-// abcjs 6.7.0 copy in vscode-mdm/media (the synth engine), the widget
-// stylesheet, and the 88 piano notes of the soundfont. They pin what the
-// webview battery cannot see from inside a page: that the files on disk are
-// whole, that the two abcjs copies never drift apart, and that the loader
-// mechanism main.js relies on (Function() with a module/exports pair, so
-// window.ABCJS stays 5.10.3) actually yields the synth.
+// abcjs 6.7.0 copy in vscode-mdm/media (the engraver and the synth engine),
+// the widget stylesheet, and the 88 piano notes of the soundfont. They pin
+// what the webview battery cannot see from inside a page: that the files on
+// disk are whole and that the two abcjs copies never drift apart.
 // Run with: node --test tests/audio-assets.test.js
 
 "use strict";
@@ -39,11 +37,13 @@ test("the vendored abcjs 6 is the same file the Quarto extension ships", () => {
   assert.ok(c.equals(d), "the two abcjs-audio.css copies drifted apart");
 });
 
-test("abcjs 6 evaluated the way main.js loads it exposes the synth, off the global", () => {
+test("the vendored abcjs 6 is whole: engraver and synth both there", () => {
   const code = fs.readFileSync(
     path.join(MEDIA, "vendor", "abcjs", "abcjs-basic-min.js"),
     "utf8"
   );
+  // The page loads it as a plain script (window.ABCJS); here the UMD
+  // wrapper is given its CommonJS pair to read the exports back.
   const module = { exports: {} };
   new Function("module", "exports", code)(module, module.exports);
   const A = module.exports;
@@ -51,9 +51,6 @@ test("abcjs 6 evaluated the way main.js loads it exposes the synth, off the glob
   assert.equal(typeof A.renderAbc, "function");
   assert.equal(typeof A.synth.SynthController, "function");
   assert.equal(typeof A.synth.supportsAudio, "function");
-  // The point of the loader: the UMD wrapper must have taken the CommonJS
-  // branch, leaving the global for the 5.10.3 that engraves the scores.
-  assert.equal(typeof globalThis.ABCJS, "undefined");
 });
 
 test("the piano carries all 88 keys, every one a real mp3", () => {
@@ -82,7 +79,8 @@ test("the harness mirrors the audio globals the real webview gets", () => {
     path.join(__dirname, "webview", "harness.html"),
     "utf8"
   );
-  assert.ok(harness.includes("window.MDM_ABCJS6"));
+  assert.match(harness, /<script src="[^"]*vendor\/abcjs\/abcjs-basic-min\.js"><\/script>/);
   assert.ok(harness.includes("window.MDM_SOUNDFONT"));
   assert.ok(harness.includes("abcjs-audio.css"));
+  assert.ok(harness.includes("vendor/cm6/cm6.bundle.js"));
 });

@@ -12,12 +12,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link rel="stylesheet" href="../../vscode-mdm/media/vendor/vditor/dist/index.css">
+<link rel="stylesheet" href="../../vscode-mdm/media/vendor/cm6/katex.min.css">
 <link rel="stylesheet" href="../../vscode-mdm/media/vendor/abcjs/abcjs-audio.css">
 <link rel="stylesheet" href="../../vscode-mdm/media/style.css">
 <script>
-window.MDM_VDITOR_CDN = "../../vscode-mdm/media/vendor/vditor";
-window.MDM_ABCJS6 = "../../vscode-mdm/media/vendor/abcjs/abcjs-basic-min.js";
+window.MDM_DOC_BASE = "";
 window.MDM_SOUNDFONT = "../../vscode-mdm/media/vendor/soundfont/";
 window.MDM_SETTINGS = Object.assign(
   {
@@ -26,6 +25,7 @@ window.MDM_SETTINGS = Object.assign(
     staffLines: "gray",
     scoreAlign: "center",
     frontMatter: "shown",
+    multiCursorModifier: "alt",
   },
   window.__settings || {}
 );
@@ -44,11 +44,11 @@ window.acquireVsCodeApi = function () {
   };
 };
 </script>
-<script src="../../vscode-mdm/media/vendor/vditor/dist/index.min.js"></script>
+<script src="../../vscode-mdm/media/vendor/cm6/cm6.bundle.js"></script>
+<script src="../../vscode-mdm/media/vendor/abcjs/abcjs-basic-min.js"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="../../vscode-mdm/media/vendor/vditor/dist/js/icons/ant.js" id="vditorIconScript"></script>
 <script src="../../vscode-mdm/media/main.js"></script>
 </body>
 </html>
