@@ -22,8 +22,101 @@ body {
 }
 #app .mdm-editor {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   position: relative;
+}
+/* The outline panel down the left edge, the way the Vditor version had it: a
+   250px column with a border, its own scroll, hidden until the button is
+   pressed (#app.mdm-outline--open). */
+#app .mdm-outline {
+  display: none;
+  flex: 0 0 var(--mdm-outline-width, 250px);
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
+  background: color-mix(in srgb, var(--mdm-ink) 4%, var(--mdm-syn-page));
+  padding: 6px 0 12px;
+}
+#app.mdm-outline--open .mdm-outline {
+  display: block;
+}
+/* The sash that sets the panel's width, dragged like any other. A flex item of
+   no width, so it takes nothing from the row, wearing a strip of its own over
+   the panel's border: the panel scrolls, and anything inside it would be
+   clipped by that. The width it sets lives on #app as a custom property and
+   for as long as the editor is open, the way the player's volume does. */
+#app .mdm-outline__grip {
+  display: none;
+  flex: 0 0 0;
+  position: relative;
+  z-index: 3;
+}
+#app.mdm-outline--open .mdm-outline__grip {
+  display: block;
+}
+#app .mdm-outline__grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  cursor: col-resize;
+}
+#app .mdm-outline__grip:hover::after,
+#app .mdm-outline__grip--held::after {
+  background: color-mix(in srgb, var(--mdm-ink) 16%, transparent);
+}
+/* While the sash is held: the drag must not take a selection with it. */
+#app.mdm-resizing {
+  user-select: none;
+}
+#app .mdm-outline__title {
+  padding: 4px 14px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+}
+#app .mdm-outline__row {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 12px 4px 8px;
+  border: none;
+  background: none;
+  color: color-mix(in srgb, var(--mdm-ink) 85%, transparent);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+#app .mdm-outline__row:hover {
+  background: color-mix(in srgb, var(--mdm-ink) 8%, transparent);
+  color: var(--mdm-ink);
+}
+/* The section the caret is in, marked with an accent bar and a touch of tint. */
+#app .mdm-outline__row--current {
+  color: var(--mdm-ink);
+  background: color-mix(in srgb, var(--mdm-ink) 6%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+}
+#app .mdm-outline__l1 {
+  font-weight: 600;
+}
+#app .mdm-outline__l2 {
+  font-weight: 500;
+}
+#app .mdm-outline__empty {
+  padding: 6px 14px;
+  color: color-mix(in srgb, var(--mdm-ink) 50%, transparent);
+  font-size: 13px;
 }
 #app .cm-editor {
   height: 100%;
@@ -173,6 +266,14 @@ body {
 }
 #app .mdm-menu__item:hover {
   background: color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+}
+/* An empty drop-down panel (currently only a placeholder; the outline is its
+   own side panel now, see .mdm-outline above). */
+#app .mdm-menu__empty {
+  padding: 6px 14px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 /* ---------- Tooltips ----------

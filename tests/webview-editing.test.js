@@ -651,3 +651,144 @@ test("a python block names its language and shows the copy button on hover", { s
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+// The outline is a panel down the left edge (as in the Vditor version, not a
+// drop-down): its button leads the bar and toggles the panel, which lists the
+// headings, marks the section the caret is in, jumps to the one picked and
+// stays open while the document is navigated.
+test("the outline panel lists the headings, marks the section and jumps", { skip }, async () => {
+  const h = await open({ seed: { settings: { theme: "light", frontMatter: "hidden" } } });
+  // The button leads the toolbar.
+  assert.equal(
+    await h.page.evaluate(() =>
+      document.querySelector("#app .mdm-toolbar__item button").getAttribute("data-type")
+    ),
+    "outline"
+  );
+  // Hidden until pressed.
+  assert.equal(
+    await h.page.evaluate(() =>
+      getComputedStyle(document.querySelector("#app .mdm-outline")).display
+    ),
+    "none"
+  );
+  await h.page.click('#app button[data-type="outline"]');
+  await sleep(150);
+  const panel = await h.page.evaluate(() => ({
+    open: document.getElementById("app").classList.contains("mdm-outline--open"),
+    display: getComputedStyle(document.querySelector("#app .mdm-outline")).display,
+    width: Math.round(document.querySelector("#app .mdm-outline").getBoundingClientRect().width),
+    btnOn: document.querySelector('#app button[data-type="outline"]').classList.contains("mdm-btn--on"),
+    rows: Array.from(document.querySelectorAll("#app .mdm-outline__row")).map((r) => r.textContent),
+  }));
+  assert.equal(panel.open, true);
+  assert.equal(panel.display, "block");
+  assert.ok(panel.width >= 240, "the panel is a side column, was " + panel.width + "px");
+  assert.equal(panel.btnOn, true);
+  assert.deepEqual(panel.rows, [
+    "From equations to score",
+    "From code to scores",
+    "From score to sound",
+  ]);
+  // The caret in the second section marks it.
+  await h.page.evaluate(() => {
+    const { view } = window.__mdm;
+    const at = view.state.doc.toString().indexOf("From code to scores");
+    view.dispatch({ selection: { anchor: at + 5 } });
+  });
+  await sleep(120);
+  assert.equal(
+    await h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-outline__row")).findIndex((r) =>
+        r.className.includes("current")
+      )
+    ),
+    1,
+    "the section in view is not marked"
+  );
+  // Picking the last heading jumps there and leaves the panel open.
+  await h.page.click("#app .mdm-outline__row:nth-child(3)");
+  await sleep(150);
+  const landed = await h.page.evaluate(() => ({
+    text: window.__mdm.view.state.doc.lineAt(window.__mdm.view.state.selection.main.head).text,
+    open: document.getElementById("app").classList.contains("mdm-outline--open"),
+  }));
+  assert.equal(landed.text, "## From score to sound");
+  assert.equal(landed.open, true, "the panel closed after a pick");
+  // A document with no headings shows the empty note.
+  await h.page.evaluate(() =>
+    window.__mdm.view.dispatch({
+      changes: { from: 0, to: window.__mdm.view.state.doc.length, insert: "no headings here\n" },
+    })
+  );
+  await sleep(120);
+  assert.equal(
+    await h.page.evaluate(() => {
+      const e = document.querySelector("#app .mdm-outline__empty");
+      return e ? e.textContent : null;
+    }),
+    "No headings"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The outline is as wide as the user drags it. The grip is a strip over the
+// panel's edge, a flex item of no width so it takes nothing from the row (a
+// child of the panel would be clipped by its own scroll), and what it sets is
+// a custom property on #app, in force for as long as the editor is open.
+test("the outline panel is as wide as the grip is dragged", { skip }, async () => {
+  const h = await open({ seed: { settings: { frontMatter: "hidden" } } });
+  await h.page.setViewport({ width: 1200, height: 900 });
+  await sleep(300);
+  const gripShown = () =>
+    h.page.evaluate(
+      () => getComputedStyle(document.querySelector("#app .mdm-outline__grip")).display
+    );
+  const panel = () =>
+    h.page.evaluate(() => {
+      const r = document.querySelector("#app .mdm-outline").getBoundingClientRect();
+      return { width: Math.round(r.width), edge: r.right };
+    });
+  // Closed, there is nothing to take hold of.
+  assert.equal(await gripShown(), "none", "the grip shows with the panel closed");
+  await h.page.click('#app button[data-type="outline"]');
+  await sleep(250);
+  assert.equal(await gripShown(), "block", "the grip did not come with the panel");
+  const open250 = await panel();
+  assert.ok(
+    Math.abs(open250.width - 250) <= 2,
+    "the panel did not open at its 250px: " + open250.width
+  );
+  const drag = async (from, to) => {
+    await h.page.mouse.move(from, 400);
+    await h.page.mouse.down();
+    await h.page.mouse.move(to, 400, { steps: 8 });
+    await h.page.mouse.up();
+    await sleep(150);
+  };
+  await drag(open250.edge, open250.edge + 120);
+  const wider = await panel();
+  assert.ok(
+    Math.abs(wider.width - (open250.width + 120)) <= 3,
+    "the panel did not follow the grip: " + wider.width
+  );
+  // Dragged past its floor it stops there, and the editor keeps a column of
+  // its own however far the grip is pushed the other way.
+  await drag(wider.edge, 10);
+  const narrow = await panel();
+  // A pixel of slack throughout: the box the test measures carries the
+  // panel's border, the width the grip sets does not.
+  assert.ok(
+    Math.abs(narrow.width - 140) <= 2,
+    "the panel went past its floor: " + narrow.width
+  );
+  await drag(narrow.edge, 1190);
+  const widest = await panel();
+  assert.ok(
+    widest.width <= 1200 - 200 + 2,
+    "the panel left the editor no room: " + widest.width
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+

@@ -1498,7 +1498,7 @@ test("the file actions lead the toolbar, and undo/redo wear the rotate arrows", 
       '#app .mdm-toolbar button[data-type="redo"] svg path'
     );
     return {
-      first: types.slice(0, 6),
+      first: types.slice(0, 7),
       // The rotate arrows: an open ring whose arc starts at these exact
       // coordinates.
       undoPath: undo ? undo.getAttribute("d").slice(0, 5) : null,
@@ -1509,8 +1509,10 @@ test("the file actions lead the toolbar, and undo/redo wear the rotate arrows", 
         .classList.contains("mdm-btn--off"),
     };
   });
-  // Export leads (its menu entries render right after it), then undo/redo.
+  // Outline leads (its panel opens down the left edge), then export with its
+  // menu entries, then undo/redo.
   assert.deepEqual(bar.first, [
+    "outline",
     "mdm-export",
     "mdm-export-html",
     "mdm-export-pdf",

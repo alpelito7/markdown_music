@@ -2924,7 +2924,11 @@
             if (!applying) queueEdit(update.state.doc.toString());
             if (player) player.pos = update.changes.mapPos(player.pos, 1);
           }
-          if (update.docChanged || update.selectionSet) updateUndoButtons();
+          if (update.docChanged || update.selectionSet) {
+            updateUndoButtons();
+            // The outline follows the document and the caret while it is open.
+            if (outlineOpen) refreshOutline();
+          }
         }),
       ],
     });
@@ -2988,6 +2992,147 @@
     '<svg viewBox="0 0 16 16"><circle cx="3" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><rect x="6" y="3.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="7.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="11.3" width="8.5" height="1.4" rx=".7"/></svg>';
   const OLIST_ICON =
     '<svg viewBox="0 0 16 16"><path d="M2.2 2.4h1v3.1h-1V3.4l-.7.4-.4-.8Z"/><path d="M1.3 7.2q.2-.9 1.3-.9.6 0 .9.3t.3.8q0 .5-.5 1l-.9.9h1.5v.8H1.2v-.7l1.5-1.5q.3-.3.3-.5 0-.3-.4-.3-.4 0-.5.4Z"/><path d="M1.2 12.7q.2-.8 1.3-.8.6 0 1 .3t.3.7q0 .5-.5.7.6.2.6.8 0 .5-.4.8t-1 .3q-1.1 0-1.3-.9l.8-.2q.1.4.5.4.4 0 .4-.3t-.5-.3h-.3v-.7h.3q.4 0 .4-.3t-.4-.3q-.3 0-.4.3Z"/><rect x="6" y="3.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="7.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="11.3" width="8.5" height="1.4" rx=".7"/></svg>';
+  // A stack of headings, longest at the top: the document's own table of
+  // contents, the glyph an outline has always carried.
+  const OUTLINE_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="1" y="2.4" width="10" height="1.6" rx=".8"/><rect x="3.5" y="6.2" width="9.5" height="1.6" rx=".8"/><rect x="3.5" y="10" width="6.5" height="1.6" rx=".8"/><circle cx="1.6" cy="7" r="1"/><circle cx="1.6" cy="10.8" r="1"/></svg>';
+
+  // The headings of the document, read from the Lezer tree so a `#` inside a
+  // code block or an equation is not mistaken for one. Both Markdown heading
+  // forms are covered: ATX (`## Title`) and Setext (a line underlined with
+  // `===` or `---`). Each entry carries the level, the text with its marks
+  // stripped, and the position to jump to (the start of the heading line).
+  function outlineHeadings(state) {
+    const tree = CM.syntaxTree(state);
+    const out = [];
+    tree.iterate({
+      enter: function (node) {
+        let level = 0;
+        const m = /^ATXHeading([1-6])$/.exec(node.name);
+        if (m) level = Number(m[1]);
+        else if (node.name === "SetextHeading1") level = 1;
+        else if (node.name === "SetextHeading2") level = 2;
+        if (!level) return;
+        const line = state.doc.lineAt(node.from);
+        let text = state.doc
+          .sliceString(node.from, Math.min(node.to, line.to))
+          .replace(/^#{1,6}\s*/, "")
+          .replace(/\s*#+\s*$/, "")
+          .trim();
+        out.push({ level: level, pos: line.from, text: text || "(untitled)" });
+      },
+    });
+    return out;
+  }
+
+  // One row per heading, indented by level, the current section (the last
+  // heading at or above the caret) marked. A click takes the caret to the top
+  // of that heading and scrolls it into view.
+  // The outline is a panel down the left edge of the editor, the way the
+  // Vditor version had it: a list of the headings, indented by level, the
+  // section the caret is in marked, each one a jump. It is a toggle, not a
+  // drop-down: it stays open while the document is navigated, and its button
+  // leads the toolbar, on the side the panel appears.
+  let outlineOpen = false;
+
+  function outlineList() {
+    return document.querySelector("#app .mdm-outline__list");
+  }
+
+  // Fills the panel from the current headings, only while it is open. Called
+  // when it opens and on every edit or caret move, so the list and the mark on
+  // the section in view stay current.
+  function refreshOutline() {
+    const list = outlineList();
+    if (!list || !outlineOpen || !view) return;
+    const heads = outlineHeadings(view.state);
+    const caret = view.state.selection.main.head;
+    let current = -1;
+    heads.forEach(function (h, i) {
+      if (h.pos <= caret) current = i;
+    });
+    list.innerHTML = "";
+    if (!heads.length) {
+      const empty = document.createElement("div");
+      empty.className = "mdm-outline__empty";
+      empty.textContent = "No headings";
+      list.appendChild(empty);
+      return;
+    }
+    heads.forEach(function (h, i) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className =
+        "mdm-outline__row mdm-outline__l" + h.level +
+        (i === current ? " mdm-outline__row--current" : "");
+      row.style.paddingLeft = 8 + (h.level - 1) * 14 + "px";
+      row.textContent = h.text;
+      row.title = h.text;
+      row.addEventListener("click", function () {
+        if (!view) return;
+        view.dispatch({ selection: { anchor: h.pos }, scrollIntoView: true });
+        view.focus();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  function updateOutlineButton() {
+    const btn = document.querySelector('#app button[data-type="outline"]');
+    if (btn) btn.classList.toggle("mdm-btn--on", outlineOpen);
+  }
+
+  // ---------- The width of the outline ----------
+
+  // The panel opens at 250px and the grip beside it sets it from there, the
+  // sash of a side panel. What it writes is a custom property on #app, in force
+  // for as long as the editor is open: not a setting, the way the player's
+  // volume is not one either.
+  const OUTLINE_MIN = 140;
+  const EDITOR_MIN = 200;
+
+  function makeOutlineGrip(grip, body) {
+    grip.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return;
+      const root = app();
+      const box = body.getBoundingClientRect();
+      // The editor keeps a column of its own wherever the sash is dragged to.
+      const most = Math.max(OUTLINE_MIN, box.width - EDITOR_MIN);
+      const drag = function (ev) {
+        const width = Math.min(most, Math.max(OUTLINE_MIN, ev.clientX - box.left));
+        root.style.setProperty("--mdm-outline-width", Math.round(width) + "px");
+      };
+      const drop = function () {
+        root.classList.remove("mdm-resizing");
+        grip.classList.remove("mdm-outline__grip--held");
+        grip.removeEventListener("pointermove", drag);
+        grip.removeEventListener("pointerup", drop);
+        grip.removeEventListener("pointercancel", drop);
+      };
+      // The press is not prevented, so the click still counts as one made
+      // outside the text (dismissFromOutside); what a drag would otherwise
+      // select on its way is held off by the class instead.
+      root.classList.add("mdm-resizing");
+      grip.classList.add("mdm-outline__grip--held");
+      try {
+        grip.setPointerCapture(e.pointerId);
+      } catch (err) {
+        // a pointer the browser has already let go of
+      }
+      grip.addEventListener("pointermove", drag);
+      grip.addEventListener("pointerup", drop);
+      grip.addEventListener("pointercancel", drop);
+    });
+  }
+
+  function toggleOutline() {
+    outlineOpen = !outlineOpen;
+    const root = app();
+    if (root) root.classList.toggle("mdm-outline--open", outlineOpen);
+    updateOutlineButton();
+    if (outlineOpen) refreshOutline();
+    if (view) view.focus();
+  }
 
   // A button of the bar. `menu` is a list of entries for a drop-down panel:
   // {name, label (HTML), click}; the panel opens on click and closes on a
@@ -3002,28 +3147,44 @@
     btn.setAttribute("aria-label", spec.tip);
     btn.innerHTML = spec.icon;
     item.appendChild(btn);
-    if (spec.menu) {
+    if (spec.menu || spec.build) {
       const panel = document.createElement("div");
       panel.className = "mdm-menu";
-      spec.menu.forEach(function (entry) {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "mdm-menu__item";
-        row.setAttribute("data-type", entry.name);
-        row.innerHTML = entry.label;
-        row.addEventListener("click", function (e) {
-          e.stopPropagation();
-          closeMenus();
-          entry.click();
-        });
-        panel.appendChild(row);
-      });
       item.appendChild(panel);
+      const fill = function (entries) {
+        panel.innerHTML = "";
+        (entries || []).forEach(function (entry) {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "mdm-menu__item" + (entry.className ? " " + entry.className : "");
+          row.setAttribute("data-type", entry.name);
+          row.innerHTML = entry.label;
+          row.addEventListener("click", function (e) {
+            e.stopPropagation();
+            closeMenus();
+            entry.click();
+          });
+          panel.appendChild(row);
+        });
+        if (!panel.children.length && spec.empty) {
+          const note = document.createElement("div");
+          note.className = "mdm-menu__empty";
+          note.textContent = spec.empty;
+          panel.appendChild(note);
+        }
+      };
+      // A fixed list is filled once; a `build` panel (the outline, whose
+      // headings change as the document is edited) is rebuilt each time it
+      // opens.
+      if (spec.menu) fill(spec.menu);
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
         const open = item.classList.contains("mdm-toolbar__item--open");
         closeMenus();
-        if (!open) item.classList.add("mdm-toolbar__item--open");
+        if (!open) {
+          if (spec.build) fill(spec.build());
+          item.classList.add("mdm-toolbar__item--open");
+        }
       });
     } else {
       btn.addEventListener("click", function () {
@@ -3062,9 +3223,18 @@
       };
     };
     const specs = [
-      // The export menu goes in front of everything: it is the one button
-      // that leaves the editor. Each entry saves the document first, then
-      // runs the same bin/mdm the command line uses (both on the host side).
+      // Outline leads the bar: its panel opens down the left edge, so the
+      // button sits on the side the panel appears (as in the Vditor version).
+      {
+        name: "outline",
+        icon: OUTLINE_ICON,
+        tip: "Outline",
+        click: toggleOutline,
+      },
+      "|",
+      // The export menu next: the one button that leaves the editor. Each
+      // entry saves the document first, then runs the same bin/mdm the command
+      // line uses (both on the host side).
       {
         name: "mdm-export",
         icon: EXPORT_ICON,
@@ -3147,9 +3317,32 @@
     const root = app();
     root.innerHTML = "";
     root.appendChild(buildToolbar());
+    // Below the bar, a row: the outline panel down the left edge and the
+    // editor beside it. The panel is empty and hidden until its button is
+    // pressed (#app carries mdm-outline--open).
+    const body = document.createElement("div");
+    body.className = "mdm-body";
+    const outline = document.createElement("div");
+    outline.className = "mdm-outline";
+    const otitle = document.createElement("div");
+    otitle.className = "mdm-outline__title";
+    otitle.textContent = "Outline";
+    const olist = document.createElement("div");
+    olist.className = "mdm-outline__list";
+    outline.appendChild(otitle);
+    outline.appendChild(olist);
+    body.appendChild(outline);
+    const grip = document.createElement("div");
+    grip.className = "mdm-outline__grip";
+    grip.setAttribute("role", "separator");
+    grip.setAttribute("aria-orientation", "vertical");
+    grip.setAttribute("aria-label", "Resize the outline");
+    body.appendChild(grip);
+    makeOutlineGrip(grip, body);
     const host = document.createElement("div");
     host.className = "mdm-editor";
-    root.appendChild(host);
+    body.appendChild(host);
+    root.appendChild(body);
     buildEditor(text);
     updateFrontMatter();
     updateUndoButtons();
