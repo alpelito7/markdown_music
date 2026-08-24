@@ -20,8 +20,19 @@
 // plain paragraph text; nothing is lenient on purpose.
 
 import {tags} from "@lezer/highlight"
+import {parseMixed} from "@lezer/common"
+import {StreamLanguage} from "@codemirror/language"
+import {stexMath} from "@codemirror/legacy-modes/mode/stex"
 
 const DOLLAR = 36, BACKSLASH = 92
+
+// The body of a `$...$`, `$$...$$` or block `$$` is LaTeX in math mode, so it
+// is highlighted with the stex math grammar (control sequences, braces,
+// numbers, comments). Mounted as an overlay, like the YAML of the header, so
+// the *MathContent node stays in the Markdown tree (the editor reads it by
+// name) while the LaTeX tree is reachable at its positions for highlighting.
+const texParser = StreamLanguage.define(stexMath).parser
+const MATH_CONTENT = /^(?:InlineMathContent|InlineBlockMathContent|BlockMathContent)$/
 
 function isSpace(ch) { return ch == 32 || ch == 9 || ch == 10 || ch == 13 }
 function isDigit(ch) { return ch >= 48 && ch <= 57 }
@@ -233,5 +244,8 @@ export const mdmMath = {
     // with the other fence-like blocks. Indented (4+) `$$` is left to
     // IndentedCode by the indent check above.
     before: "FencedCode"
-  }]
+  }],
+  wrap: parseMixed(node => MATH_CONTENT.test(node.type.name)
+    ? {parser: texParser, overlay: [{from: node.from, to: node.to}]}
+    : null)
 }

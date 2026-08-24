@@ -62,31 +62,40 @@ test("example.mdm: front matter spans lines 1-13 with YAML inside", () => {
   assert.equal(tree.resolveInner(lineStart(example, 15) + 1, 1).name, "Paragraph")
 })
 
-test("example.mdm: the $$ block at lines 21-25", () => {
+// Located by content, not by line number: example.mdm is a living document
+// and its blank lines move.
+test("example.mdm: the display $$ block", () => {
   const tree = parse(example)
-  const from = lineStart(example, 21), to = lineEnd(example, 25)
-  assert.equal(example.slice(from, from + 2), "$$")
+  let bmFrom = -1, bmTo = -1, contentFrom = -1, contentTo = -1
+  tree.iterate({enter(n) {
+    if (n.name == "BlockMath") { bmFrom = n.from; bmTo = n.to }
+    else if (n.name == "BlockMathContent") { contentFrom = n.from; contentTo = n.to }
+  }})
+  assert.ok(bmFrom >= 0, "no BlockMath node")
+  assert.equal(example.slice(bmFrom, bmFrom + 2), "$$")
+  assert.equal(example.slice(bmTo - 2, bmTo), "$$")
   assert.deepEqual(nodes(tree, /^BlockMath/), [
-    `BlockMath@${from}-${to}`,
-    `BlockMathMark@${from}-${from + 2}`,
-    `BlockMathContent@${lineStart(example, 22)}-${lineEnd(example, 24)}`,
-    `BlockMathMark@${to - 2}-${to}`
+    `BlockMath@${bmFrom}-${bmTo}`,
+    `BlockMathMark@${bmFrom}-${bmFrom + 2}`,
+    `BlockMathContent@${contentFrom}-${contentTo}`,
+    `BlockMathMark@${bmTo - 2}-${bmTo}`
   ])
-  assert.equal(from, 665)
-  assert.equal(to, 839)
-  // The content is not parsed as Markdown (it holds `_` and `\`).
-  const content = tree.resolveInner(lineStart(example, 22) + 5, 1)
-  assert.equal(content.name, "BlockMathContent")
-  assert.equal(content.firstChild, null)
+  // The content is LaTeX (the stex overlay), never Markdown: its `_` makes no
+  // emphasis, and resolving inside it lands in the mounted math tree.
+  let emph = 0
+  tree.iterate({from: contentFrom, to: contentTo, enter(n) { if (/Emphasis|Strong/.test(n.name)) emph++ }})
+  assert.equal(emph, 0)
+  const inner = tree.resolveInner(contentFrom + 1, 1)
+  assert.notEqual(inner.name, "BlockMathContent", "the LaTeX overlay is not mounted")
+  let top = inner; while (top.parent) top = top.parent
+  assert.equal(top.name, "Document")
 })
 
-test("example.mdm: inline math on line 19 and a digit-heavy one on line 29", () => {
+test("example.mdm: inline math, including a digit-heavy one", () => {
   const tree = parse(example)
-  const l19 = lineStart(example, 19)
-  const L = l19 + example.slice(l19).indexOf("$L$")
-  assert.equal(L, 412)
   const inline = nodes(tree, /^InlineMath/, example)
-  assert.deepEqual(inline.slice(0, 4), ["InlineMath[$L$]", "InlineMathMark[$]", "InlineMathContent[L]", "InlineMathMark[$]"])
+  assert.ok(inline.includes("InlineMath[$L$]"))
+  assert.ok(inline.includes("InlineMathContent[L]"))
   assert.ok(inline.includes("InlineMath[$y(0,t) = y(L,t) = 0$]"))
   assert.ok(inline.includes("InlineMath[$31$]"))
   assert.ok(inline.includes("InlineMath[$\\Delta_2 \\approx 702$]"))
@@ -116,11 +125,30 @@ test("inline math: basic, ranges and children", () => {
 
 test("inline math: content is not parsed as Markdown", () => {
   const tree = parse("x $a_b_c$ y and $*z*$")
+  // Neither the `_` nor the `*z*` becomes Markdown emphasis: the content is
+  // LaTeX, not Markdown.
   assert.deepEqual(nodes(tree, /Emphasis/), [])
   assert.equal(nodes(tree, /^InlineMath$/).length, 2)
-  const content = tree.resolveInner(4, 1)
-  assert.equal(content.name, "InlineMathContent")
-  assert.equal(content.firstChild, null)
+  assert.equal(nodes(tree, /^InlineMathContent$/).length, 2)
+  // The stex overlay is mounted: resolving inside the content lands in the
+  // math tree, not on the InlineMathContent node itself.
+  const inner = tree.resolveInner(4, 1)
+  assert.notEqual(inner.name, "InlineMathContent")
+  let top = inner; while (top.parent) top = top.parent
+  assert.equal(top.name, "Document")
+})
+
+test("inline math: the LaTeX overlay is mounted over a control sequence", () => {
+  // The stex tree is opaque to iterate() but reachable with resolveInner: a
+  // position on `\frac` resolves into the mounted math tree, which is what the
+  // editor highlights. (The colours themselves are checked in the webview.)
+  const tree = parse("see $\\frac{a}{b}$ here")
+  const at = "see $\\fr".length // inside \frac
+  const inner = tree.resolveInner(at, 1)
+  assert.notEqual(inner.name, "InlineMathContent", "no overlay over the command")
+  let top = inner; while (top.parent) top = top.parent
+  assert.equal(top.name, "Document")
+  assert.deepEqual(nodes(tree, /Emphasis/), [])
 })
 
 test("inline math: unterminated $ stays text", () => {
@@ -215,9 +243,14 @@ test("block math: a mid-line $$ on the opening line is not a block", () => {
 
 test("block math: content is not parsed as Markdown", () => {
   const tree = parse("$$\n- a_b\n# c\n$$\n")
+  // The `- `, the `#` and the `_` are LaTeX, not a list, a heading or emphasis.
   assert.deepEqual(nodes(tree, /List|Heading|Emphasis/), [])
   assert.deepEqual(nodes(tree, /^BlockMathContent$/), ["BlockMathContent@3-12"])
-  assert.equal(tree.resolveInner(5, 1).firstChild, null)
+  // The stex overlay is mounted inside the content, not a Markdown parse.
+  const inner = tree.resolveInner(5, 1)
+  assert.notEqual(inner.name, "BlockMathContent")
+  let top = inner; while (top.parent) top = top.parent
+  assert.equal(top.name, "Document")
 })
 
 test("block math: $$ after a paragraph line starts the block", () => {

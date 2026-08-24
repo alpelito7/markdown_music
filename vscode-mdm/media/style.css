@@ -498,6 +498,33 @@ body {
 #app .mdm-math:not(.mdm-math--block) {
   cursor: pointer;
 }
+/* The live preview beside an inline equation being edited: the rendered maths
+   drawn just after the source, on a faint chip so it reads as a preview and
+   not as part of the text, and appearing with a small unfold. It updates in
+   place as the source is typed (MathWidget.updateDOM), so the unfold plays
+   once, when the caret enters and the preview first shows. */
+#app .mdm-math--preview {
+  margin: 0 0.15em 0 0.5em;
+  padding: 0 0.4em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mdm-ink) 8%, transparent);
+  cursor: default;
+  animation: mdm-math-unfold 0.15s ease-out;
+}
+#app .mdm-math--preview.mdm-math--block {
+  display: inline-block;
+  vertical-align: middle;
+}
+@keyframes mdm-math-unfold {
+  from {
+    opacity: 0;
+    transform: translateX(-4px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 #app .mdm-math--error {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.8em;

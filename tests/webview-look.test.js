@@ -837,12 +837,30 @@ function inlineCodeColours(page) {
 test("inline code sits on the code ground, not the theme's own wash", { skip }, async () => {
   for (const side of ["light", "dark"]) {
     const h = await open({ seed: { settings: { theme: side } } });
-    // The source of a run of inline maths shows while the caret is in it.
-    await setSelection(h.page, await posOf(h.page, "$L$", 1));
+    // The source of a run of inline maths shows while the caret is in it. The
+    // run is found in the syntax tree rather than by its LaTeX: example.mdm is
+    // written and rewritten by hand and its wording drifts.
+    const inlineMath = await h.page.evaluate(() => {
+      const { view, CM } = window.__mdm;
+      let at = -1;
+      CM.syntaxTree(view.state).iterate({
+        enter(n) {
+          if (at < 0 && n.name === "InlineMath") at = n.from + 1;
+        },
+      });
+      return at;
+    });
+    assert.ok(inlineMath > 0, "the example has no inline maths");
+    await setSelection(h.page, inlineMath);
     await sleep(200);
     const c = await inlineCodeColours(h.page);
-    // The backticks are marks, hidden while no caret is on the run.
-    assert.equal(c.text, "d = (d + 3) % 7", "the inline code of the example");
+    // The backticks are marks, hidden while no caret is on the run: the chip
+    // shows the code alone, and the document holds it between backticks.
+    assert.ok(c.text && !c.text.includes("`"), "the chip kept its backticks: " + c.text);
+    assert.ok(
+      (await docText(h.page)).includes("`" + c.text + "`"),
+      "the chip is not a run of the document: " + c.text
+    );
     assert.equal(c.chipBg, c.cardBg, "chip and card on different grounds (" + side + ")");
     assert.equal(c.chipEdge, "1px", "the chip lost its edge (" + side + ")");
     // The blue the dark content theme painted it with, gone on both sides.
@@ -1107,6 +1125,56 @@ test("an ordinary delete inside a paragraph stays ordinary", { skip }, async () 
   assert.equal(s.expanded, false, "a mid-paragraph delete opened the equation");
   const disk = fromEditor(await lastEdit(h.page), EDGES, true);
   assert.equal(disk, EDGES.replace("Intro paragraph.", "Intro aragraph."));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+// The LaTeX inside inline and block maths is syntax-highlighted while its
+// source shows (a stex overlay on the math content, mounted in the Lezer tree
+// and coloured by the same palette as code). Regression guard: the content
+// used to be one flat monospace colour.
+test("the LaTeX of a shown equation is syntax-highlighted", { skip }, async () => {
+  const h = await open({
+    text: "Inline $\\frac{a}{b} = 3$ and\n\n$$\ny = \\sum_{n=1}^{10} A_n\n$$\n\nend.\n",
+    scores: 0,
+    seed: { settings: { theme: "light", frontMatter: "hidden" } },
+  });
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  // Caret in the inline maths: its source shows, with the control sequence
+  // coloured as a keyword and more than one colour in play.
+  await h.page.evaluate(() => {
+    const at = window.__mdm.view.state.doc.toString().indexOf("frac");
+    window.__mdm.view.dispatch({ selection: { anchor: at } });
+  });
+  await sleep(200);
+  const inline = await h.page.evaluate(() => {
+    const src = document.querySelector("#app .mdm-math-src");
+    const spans = Array.from(src.querySelectorAll("span"));
+    const cmd = spans.find((s) => s.textContent === "\\frac");
+    return {
+      cmdColor: cmd ? getComputedStyle(cmd).color : null,
+      colours: [...new Set(spans.map((s) => getComputedStyle(s).color))].length,
+    };
+  });
+  // #015692, the keyword colour of the light palette.
+  assert.equal(inline.cmdColor, "rgb(1, 86, 146)", "\\frac is not coloured as a keyword");
+  assert.ok(inline.colours >= 2, "the inline maths has only " + inline.colours + " colour");
+  // Caret in the block maths: the same, over its source lines.
+  await h.page.evaluate(() => {
+    const at = window.__mdm.view.state.doc.toString().indexOf("sum");
+    window.__mdm.view.dispatch({ selection: { anchor: at } });
+  });
+  await sleep(200);
+  const block = await h.page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll("#app .cm-line.mdm-math-line"));
+    const spans = lines.flatMap((l) => Array.from(l.querySelectorAll("span")));
+    const cmd = spans.find((s) => s.textContent.indexOf("\\sum") === 0);
+    return {
+      cmdColor: cmd ? getComputedStyle(cmd).color : null,
+      colours: [...new Set(spans.map((s) => getComputedStyle(s).color))].length,
+    };
+  });
+  assert.equal(block.cmdColor, "rgb(1, 86, 146)", "\\sum is not coloured as a keyword");
+  assert.ok(block.colours >= 3, "the block maths has only " + block.colours + " colours");
   assert.deepEqual(h.errors, []);
   await h.close();
 });

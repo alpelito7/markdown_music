@@ -1772,22 +1772,30 @@
   // block widget that sits under the source lines, which are hidden while no
   // caret is in them (the live preview of the block that is being edited).
   class MathWidget extends WidgetType {
-    constructor(tex, display, block) {
+    constructor(tex, display, block, preview) {
       super();
       this.tex = tex;
       this.display = display;
       this.block = block; // block widget (after the source) or inline replace
+      // The live render an inline equation shows beside its source while it is
+      // being edited: not a replacement, an extra drawing after the closing $.
+      this.preview = !!preview;
     }
     eq(other) {
       return (
         other.tex === this.tex &&
         other.display === this.display &&
-        other.block === this.block
+        other.block === this.block &&
+        other.preview === this.preview
       );
     }
-    toDOM() {
-      const el = document.createElement(this.block ? "div" : "span");
-      el.className = this.block ? "mdm-math mdm-math--block" : "mdm-math";
+    className() {
+      let c = this.block ? "mdm-math mdm-math--block" : "mdm-math";
+      if (this.preview) c += " mdm-math--preview";
+      return c;
+    }
+    paint(el) {
+      el.className = this.className();
       const out = renderTex(this.tex, this.display);
       if (out.html) {
         el.innerHTML = out.html;
@@ -1798,11 +1806,26 @@
         el.className += " mdm-math--error";
         el.textContent = out.error;
       }
+    }
+    toDOM() {
+      const el = document.createElement(this.block ? "div" : "span");
+      this.paint(el);
       return el;
+    }
+    // The preview is rebuilt on every keystroke as the source changes; painting
+    // in place instead of from scratch keeps the same element, so its entrance
+    // animation plays once when it appears, not on every character typed. The
+    // class is set from scratch each time because CodeMirror may hand this the
+    // element of the plain (non-preview) widget it is replacing.
+    updateDOM(dom) {
+      if (!this.preview) return false;
+      this.paint(dom);
+      return true;
     }
     // A click on the drawing puts the caret at its source, which is what
     // opens it; the editor's own click handler does that (revealBlock), so
-    // CodeMirror leaves the event alone.
+    // CodeMirror leaves the event alone. The preview sits after the source
+    // the caret is already in, so its clicks are its own too.
     ignoreEvent() {
       return true;
     }
@@ -2179,6 +2202,18 @@
             decos.push(
               Decoration.mark({ class: "mdm-math-src" + (out.html ? "" : " mdm-math--broken") }).range(n.from, n.to)
             );
+            // Editing it: the source stays and, once the LaTeX compiles, the
+            // rendered equation appears just after the closing delimiter as a
+            // live preview. While it does not compile there is nothing to draw
+            // and the source stands alone.
+            if (out.html) {
+              decos.push(
+                Decoration.widget({
+                  widget: new MathWidget(tex, display, false, true),
+                  side: 1,
+                }).range(n.to)
+              );
+            }
           }
           return false;
         }

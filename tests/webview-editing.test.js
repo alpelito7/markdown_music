@@ -247,16 +247,30 @@ test("an equation that does not compile shows KaTeX's message while open and its
 
 test("inline math renders in place and shows its source when touched", { skip }, async () => {
   const h = await open({ text: "Take $x^2$ here.\n\nOther.\n", scores: 0 });
+  // Caret off it: a rendered widget replaces the source, no preview beside it.
   await setSelection(h.page, await posOf(h.page, "Other"));
-  assert.equal(await count(h.page, "span.mdm-math .katex"), 1);
+  assert.equal(await count(h.page, "span.mdm-math:not(.mdm-math--preview) .katex"), 1);
   assert.equal(await count(h.page, ".mdm-math-src"), 0);
+  assert.equal(await count(h.page, ".mdm-math--preview"), 0);
+  // Caret on it: the replace goes, the source shows, and a live preview of the
+  // rendered equation appears beside it.
   await setSelection(h.page, await posOf(h.page, "x^2"));
-  assert.equal(await count(h.page, "span.mdm-math"), 0);
+  assert.equal(await count(h.page, "span.mdm-math:not(.mdm-math--preview)"), 0);
   assert.equal(await count(h.page, ".mdm-math-src"), 1);
-  assert.equal((await lineAt(h.page, 0)).text, "Take $x^2$ here.");
-  // Broken inline math keeps its source with the broken class.
+  assert.equal(await count(h.page, ".mdm-math--preview .katex"), 1);
+  // The source itself is the literal delimiters and body (the preview is a
+  // widget after it, so it is not part of the document text).
+  assert.equal(await docText(h.page), "Take $x^2$ here.\n\nOther.\n");
+  assert.equal(
+    await h.page.evaluate(() => document.querySelector("#app .mdm-math-src").textContent),
+    "$x^2$"
+  );
+  // Broken inline math keeps its source with the broken class, and the preview
+  // goes while there is nothing to draw.
   await h.page.keyboard.type("\\frac{");
   assert.equal(await count(h.page, ".mdm-math-src.mdm-math--broken"), 1);
+  assert.equal(await count(h.page, ".mdm-math--preview"), 0);
+  // Off a broken one, the source stays (no render to replace it with).
   await setSelection(h.page, await posOf(h.page, "Other"));
   assert.equal(await count(h.page, ".mdm-math-src.mdm-math--broken"), 1);
   assert.equal(await count(h.page, "span.mdm-math"), 0);
@@ -731,6 +745,119 @@ test("the outline panel lists the headings, marks the section and jumps", { skip
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// Inline maths shows a live render beside its source while the caret is in it,
+// the way the Vditor editor did: with the caret off it, a rendered widget
+// replaces the source; with the caret in it the source stays and, once the
+// LaTeX compiles, the render appears just after the closing delimiter; while
+// it does not compile the source stands alone.
+test("inline maths shows a live preview beside the source while editing", { skip }, async () => {
+  const h = await open({
+    text: "Here is $f_n = n f_1$ inline.\n",
+    scores: 0,
+    seed: { settings: { frontMatter: "hidden" } },
+  });
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  // Caret off it: a rendered widget, no source, no preview.
+  await h.page.evaluate(() => window.__mdm.view.dispatch({ selection: { anchor: 0 } }));
+  await sleep(150);
+  assert.deepEqual(
+    await h.page.evaluate(() => ({
+      rendered: document.querySelectorAll("#app .mdm-math:not(.mdm-math--preview)").length,
+      src: document.querySelectorAll("#app .mdm-math-src").length,
+      preview: document.querySelectorAll("#app .mdm-math--preview").length,
+    })),
+    { rendered: 1, src: 0, preview: 0 }
+  );
+  // Caret inside: source shown and a compiled preview after it.
+  await h.page.evaluate(() => {
+    const at = window.__mdm.view.state.doc.toString().indexOf("f_n") + 1;
+    window.__mdm.view.dispatch({ selection: { anchor: at } });
+  });
+  await sleep(200);
+  const on = await h.page.evaluate(() => {
+    const prev = document.querySelector("#app .mdm-math--preview");
+    return {
+      src: !!document.querySelector("#app .mdm-math-src"),
+      preview: !!prev,
+      katex: prev ? !!prev.querySelector(".katex") : false,
+    };
+  });
+  assert.deepEqual(on, { src: true, preview: true, katex: true });
+  // Break the LaTeX: the source stays (marked broken) and the preview goes.
+  await h.page.evaluate(() => {
+    const at = window.__mdm.view.state.doc.toString().indexOf("f_n") + 1;
+    window.__mdm.view.dispatch({ changes: { from: at, insert: "\\zq{" } });
+  });
+  await sleep(200);
+  const broken = await h.page.evaluate(() => ({
+    src: !!document.querySelector("#app .mdm-math-src"),
+    broken: !!document.querySelector("#app .mdm-math-src.mdm-math--broken"),
+    preview: !!document.querySelector("#app .mdm-math--preview"),
+  }));
+  assert.deepEqual(broken, { src: true, broken: true, preview: false });
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Outside the text column there is no document: the strip of pane either side
+// of it is dead, and the pointer says so before a click is made. What made it
+// worth spelling out is that CodeMirror listens on its scroller, so the strip
+// used to answer a click like any other part of the pane, and not even
+// consistently: the box of .cm-content stood 50px out from the text, and over
+// a block widget a click inside that invisible edge opened the score's source
+// while one a finger's width further out landed on the line after the block.
+// The box is now the column itself, so the boundary the pointer changes at and
+// the boundary a click stops at are the same one (main.js, style.css).
+const MARGINS = [
+  "Short line.",
+  "",
+  "A second paragraph, somewhere quiet for the caret to go back to.",
+  "",
+  "```python",
+  "x = 1",
+  "```",
+  "",
+  "```abc",
+  "X:1",
+  "K:C",
+  "CDEF|",
+  "```",
+  "",
+  "Tail.",
+  "",
+].join("\n");
+
+// The one thing a click out in the dead margin does: put away whatever is open
+// for editing. A caret in a fenced block or in an equation carries its source,
+// and the click takes the caret out of it, so the drawing comes back, the way a
+// click in the text below it would leave things.
+const DISMISS = [
+  "A paragraph with $x^2 + y^2$ inside it, and words after the equation.",
+  "",
+  "$$",
+  "e^{i\\pi} + 1 = 0",
+  "$$",
+  "",
+  "```python",
+  "x = 1",
+  "```",
+  "",
+  "```abc",
+  "X:1",
+  "K:C",
+  "CDEF|",
+  "```",
+  "",
+  "Tail paragraph.",
+  "",
+].join("\n");
+
+// The same, ending at the score: there is no line after the block for the
+// caret to take, so it goes to the one above instead.
+const DISMISS_AT_END = ["Text above.", "", "```abc", "X:1", "K:C", "CDEF|", "```"].join(
+  "\n"
+);
 
 // The outline is as wide as the user drags it. The grip is a strip over the
 // panel's edge, a flex item of no width so it takes nothing from the row (a
