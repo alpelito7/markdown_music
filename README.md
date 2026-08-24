@@ -137,7 +137,9 @@ How the editing works:
   Inline maths and inline marks show only their source while the caret is
   in them, there being no room for two copies in a line.
 - **Getting in and out.** A click on a rendered equation or score puts the
-  caret at the start of its source. The arrow keys walk into a rendered
+  caret at the start of its source; with the multicursor modifier held it
+  adds a caret there and leaves the others where they are, the way a click
+  anywhere else in the document does. The arrow keys walk into a rendered
   block from the line above or below (Down into its first line, Up into
   its last), and out again past its last line. `Ctrl+Enter` leaves the
   block the caret is in (a fence, an equation, a list, a quote, a callout,
@@ -150,7 +152,23 @@ How the editing works:
   of the selection, `Ctrl+Shift+L` every occurrence, `Ctrl+Alt+Up/Down`
   adds a caret on the line above or below, `Escape` goes back to one.
   Typing, the formatting commands and undo act at every caret at once (one
-  `Ctrl+Z` takes back a multi-caret insert). This is what moved the editor
+  `Ctrl+Z` takes back a multi-caret insert). The clicks that answer something
+  other than "put the caret here" leave the rest of the carets alone: one that
+  closes a block open for editing (in the dead margin, on the outline, on the
+  toolbar) moves only the caret that was inside that block, and one on a
+  drawing adds its caret instead of replacing them. Both used to dispatch a
+  single caret of their own, which threw away every other one, and read from
+  the outside as the multicursor losing its carets and refusing to edit.
+  Alt itself is VS Code's as much as this editor's: a tap on it focuses the
+  menu bar (File, Edit), and the workbench reads that off a clean press and
+  release, cancelling it on any mousedown of its own. A click made inside a
+  webview never reaches the workbench, so a held Alt read there as a tap and
+  the release pulled the focus into the File menu: the caret had been added
+  and then the carets stopped being drawn and the typing went to the menu,
+  which is why the gesture only worked on the second try. An Alt release that
+  followed a mouse press is now held back at the document, one stop before
+  the window the host forwards keys from; a tap on its own still leaves the
+  page, so the File menu still answers it. This is what moved the editor
   off its previous engine: a `contenteditable` in Chromium keeps a single
   selection range (measured: after adding three, `rangeCount` is still 1),
   so a multicursor there could only have been an emulation, redone after
@@ -323,7 +341,25 @@ How the editing works:
     controls, which need the native drag, and on the progress bar, which
     answers the arrow keys once it has been clicked. The widget the bar
     lives in tells CodeMirror to ignore every event inside it, so a click
-    on play never becomes a caret placement.
+    on play never becomes a caret placement. What the headphones do move is
+    the focus, and only the focus: opening a player hands it to the bar, so
+    the selection stays exactly where it was and the caret simply stops
+    being drawn until the document is clicked again. That is what Space
+    rides on.
+  - **Space is the play and the pause of the open player**, and only while
+    the player holds the keyboard. This is a text editor first, and a space
+    typed into the document has to stay a space: what the key is read off
+    is the element the focus is on, never the branch the node hangs from
+    (the bar is a widget of the editor, so it sits inside the very element
+    a caret focuses, and an ancestor test read every press as the
+    document's). The content is editable and the bar is not, which is what
+    tells the two apart; a focused control keeps its own press, so the
+    buttons of the toolbar and of the bar and the volume slider still
+    answer Space with what they do. Escape hands the keyboard back to the
+    text, and so does closing the player. The press goes through the
+    widget's own play button and not through the controller, so the face of
+    the button, its label and the resume in silence follow a key exactly as
+    they follow a click.
   - The cursor is told 16 times a beat (`beatSubdivisions`). abcjs reports
     once a beat by default, and that same number is where its cursor
     resumes from after a pause, while the sound goes on exactly where it
@@ -415,6 +451,14 @@ How the editing works:
   and back (setting `mdm.scoreAlign`, `center`/`left`). The icon and the
   tooltip name the destination of the click. Only scores narrower than the
   panel move: one that takes the whole width looks the same either way.
+- **Paragraph spacing of a rendered page**: the blank line that separates
+  two paragraphs of Markdown is drawn an em tall rather than as another line
+  of prose, which puts the paragraphs 16px apart on the 16px body. That is
+  the figure a rendered document uses (`p { margin-bottom: 16px }` in
+  Vditor's sheet, which is what the Office Viewer preview draws with, and
+  what the editor that came before this one showed), and it is what the
+  gaps around headings, code blocks and scores come out at too. The lines of
+  the text keep their own leading, wider than that.
 - **Scores set into the text**: spacing identical to a paragraph's, no red
   flash when a note is clicked (the SVG is transparent to the pointer, the
   click means "open the source"), and narrow ones (`%%staffwidth`) centred
@@ -429,7 +473,9 @@ How the editing works:
   through the API, nothing is selected, and the confirmation is a brief
   pulse of the block's own background (the code card rises towards the
   text colour and comes back; a score, which has no background, takes the
-  accent tint and fades). A score is also copied without its layout
+  accent tint and fades) plus the button's own tooltip, which says "Copied"
+  for a second and a half and then goes, leaving "Copy" behind it for the
+  next hover. A score is also copied without its layout
   directives (`%%staffwidth` and the like), which size it for this document
   and mean nothing pasted somewhere else.
 - **Quarto callouts decorated**: `::: {.callout-note title="..."}` is
@@ -437,7 +483,12 @@ How the editing works:
   range carries an accent bar and a tint by type
   (note/tip/warning/important/caution) and the `:::` lines are drawn small
   and faint until the caret is on them. An unclosed `:::` stays plain text.
-- **English interface**, tooltips included, drawn downwards.
+- **English interface**, tooltips included, drawn downwards. A tooltip names
+  what the click leads to rather than the state in force, so a click on a
+  button that carries two texts (the headphones, the staff lines, the score
+  alignment, the YAML header) would leave the other one showing under a
+  pointer that has not moved: the click puts the tooltip away instead, and it
+  comes back when the pointer leaves the button and returns.
 - **YAML header, shown and editable**: the last toolbar button shows and
   hides it (setting `mdm.frontMatter`, hidden by default; the button is
   disabled if the file has no header). Shown, it is the first lines of the

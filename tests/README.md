@@ -32,9 +32,9 @@ a browser of its own and in parallel they trip over each other's waits.
 | `audio-assets.test.js` | 4 tests of the player's vendored assets: the copies of abcjs 6.7.0 and abcjs-audio.css under `vscode-mdm/media` byte-identical to those in `_extensions` (so they cannot drift), the bundle whole (engraver and synth both exported), the 88 keys A0–C8 of the piano present and carrying a real mp3, and the harness loading the same audio assets the real webview page does (abcjs as a plain script, the soundfont path, the stylesheet, the CM6 bundle). | Node |
 | `theme.test.js` | 26 tests of `vscode-mdm/theme.js`: JSON with comments and trailing commas, TextMate scope matching (prefix by dot, the most specific wins, a tie goes to the last, selectors with a space ignored), the `include` chain, finding a theme by id and by `%nls%` label, sanitizing down to hex colours (those values go into the HTML of the webview), `tokenColorCustomizations`, and VS Code's built-in Monokai read from disk when it is installed. | Node |
 | `render.test.js` | 6 tests of `bin/mdm` + `_extensions/mdm/mdm.lua`: the CLI guards, HTML (2 figures, `mdm-play`, escaping of `&`/`<`, abcjs deps, and that ` ```music ` is NO LONGER an alias), PDF (cache by sha1 of the source with its trailing newline, the `.w` sidecar, a BoundingBox trimmed and consistent with `.w`, a narrow score < 330 pt centred in the `.tex`, a wide one at `width=100%`, a warm cache that does not run abcm2ps again). It renders in `tests/tmp/` with symlinks to `_extensions/` and `tools/`; it never touches the repo. | quarto, TeX, gs |
-| `webview-editing.test.js` | 32 tests of the CodeMirror editor itself (`vscode-mdm/media/main.js`), in a real Chrome on `webview/harness.html`: **multicursor** (Alt+click adds carets and typing lands at both; `editor.multiCursorModifier` = `ctrlCmd` turns that into Ctrl+click, live through a `settings` message; Shift+Alt+drag column; Ctrl+D twice; Ctrl+Shift+L; Ctrl+Alt+Down/Up; Escape; a multi-caret insert undone in one Ctrl+Z), **reveal** (a display equation hidden behind its KaTeX widget, its three source lines and the widget kept while a caret is in it, hidden again when it leaves; a broken equation as source with the broken edge when untouched and with KaTeX's message under it while edited, rendered the moment `}{b}` closes it; inline maths replaced or shown as `.mdm-math-src`; two carets open two equations at once; the `#` of a heading, the `**`, `*` and backticks of inline marks, the `-` of a bullet, the rule, the `>` of a quote and its continuation line, the callout classes by kind with the fence lines small until the caret is on them and nothing at all for an unclosed `:::`, the YAML header lines, the task checkbox flipping `[ ]` to `[x]` in the text), **literal delimiters** (Backspace on one `$` of a closing `$$` leaves a plain paragraph with the text in view and nothing regenerates it, the `$` retyped renders again, Ctrl+Z twice walks back; a backtick of a closing fence deleted and restored; `$$` and a formula typed from scratch end rendered), **sync** (the edit posted with the typed text and `withFrontMatter`, an external update before and after the caret leaves it on its word and posts no echo, the hidden-header mode), **commands** (Ctrl+B at two ranges wrapping and unwrapping, Ctrl+I at a caret, the heading button on three lines with `######` going back to a paragraph, Ctrl+Enter out of a fence onto a fresh line, ArrowDown and ArrowUp into a rendered equation, a click on the equation and on the score drawing landing at the start of the source) and the code chrome (the `python` label, the copy button shown on hover of a code line and gone when the pointer leaves, the fences revealed by a caret). | google-chrome |
-| `webview-look.test.js` | 24 tests of the look and the settings of the editor, the old webview tests ported to the new DOM: typing inside the header keeps the caret and the text; code, scores and equations spaced like paragraphs (the blank line is the gap, above and below); a display equation rendered; the header button taking the editor to the top, on and off; the copy button copying the source and pulsing the block (every line of a code block, the `code.language-abc` of a score, which also loses its `%%staffwidth`) with no page selection and the caret left where it was; a setting with no colour in it not repainting; the theme menu listing what the host sent and a click asking for it; the three grounds (light/dark/white, the code on a floor darker than the page, measured on `.cm-editor` and `.mdm-code-line`); a title wider than its staff not cropped; an edited score keeping no card behind it and its widget rebuilt from the edited source; the alignment button; the ten `--mdm-syn-*` applied and spent (the YAML key and the Python `def` take the palette's attr and keyword colours, the fallbacks come back when the palette is from the other side, a `palette` message repaints live, a named theme brings its side); inline code on the card ground; staff lines grey by default and back to ink by the button (lit for ink), a darker grey on the dark side; the score fill menu with a tick, one value per side; clicking a rendered equation or score opening its source; an ordinary Delete inside a paragraph staying ordinary. | google-chrome |
-| `webview-player.test.js` | 34 tests of the player and the toolbar, ported: a toggle on every score (and only there) left of the copy button, shown on hover; opening and closing the bar without opening the source, tooltips naming the destination; play sounding from the local soundfont (notes over `file://`, nothing to the network, the source staying shut); a byte-identical round trip with the player open; one player at a time; the bar surviving edits of its block and full external updates (and closing with no residue if the scores disappear); silent chord symbols; the session volume (a real GainNode on the playback path); the notes lighting up while they sound (brass per side, computed, no staff line lit) and the ink back on close; play with the source open and the document held still; tooltips following the state; the repeat button really painting; the chrome taking no syntax colour; the two faces of the speaker; stop; no focus box on the slider (the VS Code sheet injected); the volume set without closing the open source; the bar's discs and glyphs; the pointer answers; the filled track; the cursor told 16 times a beat; the sizes of the two little buttons; the progress drag (head under the pointer while the button is down, the tune landing where it is dropped, the clock not pulling the head away, the arrow keys, seeks before the tune is ready adding up in order, a scrub with the source open); resume in silence landing on the beat and a scrub inside the gap lifting it; export/undo/redo at the head of the bar with the rotating arrows and undo greyed on a fresh document; the three export entries posting their format; the output woken by a player and let go after the idle minute, and a hidden webview letting it go unless a tune sounds. | google-chrome |
+| `webview-editing.test.js` | 41 tests of the CodeMirror editor itself (`vscode-mdm/media/main.js`), in a real Chrome on `webview/harness.html`: **multicursor** (Alt+click adds carets and typing lands at both; `editor.multiCursorModifier` = `ctrlCmd` turns that into Ctrl+click, live through a `settings` message; Shift+Alt+drag column; Ctrl+D twice; Ctrl+Shift+L; Ctrl+Alt+Down/Up; Escape; a multi-caret insert undone in one Ctrl+Z; a click that closes an open block moving only the caret that was in it, and a drawing clicked with the modifier down adding a caret instead of replacing them all; an Alt release that followed a mouse press held back from the host's key forwarder, with a bare tap still forwarded), **reveal** (a display equation hidden behind its KaTeX widget, its three source lines and the widget kept while a caret is in it, hidden again when it leaves; a broken equation as source with the broken edge when untouched and with KaTeX's message under it while edited, rendered the moment `}{b}` closes it; inline maths replaced or shown as `.mdm-math-src`; two carets open two equations at once; the `#` of a heading, the `**`, `*` and backticks of inline marks, the `-` of a bullet, the rule, the `>` of a quote and its continuation line, the callout classes by kind with the fence lines small until the caret is on them and nothing at all for an unclosed `:::`, the YAML header lines, the task checkbox flipping `[ ]` to `[x]` in the text), **literal delimiters** (Backspace on one `$` of a closing `$$` leaves a plain paragraph with the text in view and nothing regenerates it, the `$` retyped renders again, Ctrl+Z twice walks back; a backtick of a closing fence deleted and restored; `$$` and a formula typed from scratch end rendered), **sync** (the edit posted with the typed text and `withFrontMatter`, an external update before and after the caret leaves it on its word and posts no echo, the hidden-header mode), **commands** (Ctrl+B at two ranges wrapping and unwrapping, Ctrl+I at a caret, the heading button on three lines with `######` going back to a paragraph, Ctrl+Enter out of a fence onto a fresh line, ArrowDown and ArrowUp into a rendered equation, a click on the equation and on the score drawing landing at the start of the source) and the code chrome (the `python` label, the copy button shown on hover of a code line and gone when the pointer leaves, the fences revealed by a caret). | google-chrome |
+| `webview-look.test.js` | 30 tests of the look and the settings of the editor, the old webview tests ported to the new DOM: typing inside the header keeps the caret and the text; code, scores and equations spaced like paragraphs (the blank line is the gap, above and below); a display equation rendered; the header button taking the editor to the top, on and off; the copy button copying the source and pulsing the block (every line of a code block, the `code.language-abc` of a score, which also loses its `%%staffwidth`) with no page selection and the caret left where it was; a setting with no colour in it not repainting; the theme menu listing what the host sent and a click asking for it; the three grounds (light/dark/white, the code on a floor darker than the page, measured on `.cm-editor` and `.mdm-code-line`); a title wider than its staff not cropped; an edited score keeping no card behind it and its widget rebuilt from the edited source; the alignment button; the ten `--mdm-syn-*` applied and spent (the YAML key and the Python `def` take the palette's attr and keyword colours, the fallbacks come back when the palette is from the other side, a `palette` message repaints live, a named theme brings its side); inline code on the card ground; staff lines grey by default and back to ink by the button (lit for ink), a darker grey on the dark side; the score fill menu with a tick, one value per side; clicking a rendered equation or score opening its source; an ordinary Delete inside a paragraph staying ordinary; the copy button's "Copied" held for a beat and then put away, with the tooltip back for the next hover; and the blank line between two paragraphs drawn an em tall (the space a rendered page leaves between paragraphs) while the blank lines of a fence keep the height of a line of code. | google-chrome |
+| `webview-player.test.js` | 41 tests of the player and the toolbar, ported: a toggle on every score (and only there) left of the copy button, shown on hover; opening and closing the bar without opening the source, tooltips naming the destination; play sounding from the local soundfont (notes over `file://`, nothing to the network, the source staying shut); a byte-identical round trip with the player open; one player at a time; the bar surviving edits of its block and full external updates (and closing with no residue if the scores disappear); silent chord symbols; the session volume (a real GainNode on the playback path); the notes lighting up while they sound (brass per side, computed, no staff line lit) and the ink back on close; play with the source open and the document held still; tooltips following the state; the repeat button really painting; the chrome taking no syntax colour; the two faces of the speaker; stop; no focus box on the slider (the VS Code sheet injected); the volume set without closing the open source; the bar's discs and glyphs; the pointer answers; the filled track; the cursor told 16 times a beat; the sizes of the two little buttons; the progress drag (head under the pointer while the button is down, the tune landing where it is dropped, the clock not pulling the head away, the arrow keys, seeks before the tune is ready adding up in order, a scrub with the source open); resume in silence landing on the beat and a scrub inside the gap lifting it; export/undo/redo at the head of the bar with the rotating arrows and undo greyed on a fresh document; the three export entries posting their format; the output woken by a player and let go after the idle minute, and a hidden webview letting it go unless a tune sounds; and the keyboard: opening a player hands the focus to its bar, where Space plays and pauses (and neither press reaches the document or opens the score), Escape and closing give the keyboard back, and a caret in the text keeps Space for the text with the player still open. The headphones also put their tooltip away on a pointer click, so the half of the toggle that is no longer on offer is not left showing under a pointer that has not moved, and bring it back when the pointer leaves and returns; a click from script, which has no pointer resting anywhere, leaves it alone. | google-chrome |
 | `html.test.js` | 5 tests of the **rendered** HTML page, in Chrome: what `_extensions/mdm/resources/mdm.js` does on load, which the pandoc output does not say. The three blocks engraved; only the narrow one wrapped in `.mdm-fit` with its `max-width` and centred; the gap under the score equal to the height of the drawing (the percentage padding fix plus `height:0`); the audio controls on the `.play` block only (three buttons, `abcjs-inline-audio`); no script errors. Verified to bite: commenting out `height: 0 !important` fails the gap test, and removing the `.mdm-fit` wrapper fails two. | quarto, google-chrome |
 | `../vscode-mdm/vendor-src/test/markdown.test.js` | 31 tests of the three Lezer Markdown extensions that go into the CodeMirror bundle (run with `npm test` inside `vscode-mdm/vendor-src/`, which needs its own `npm install`): maths by Pandoc's rules (`$` not followed by a space, not closed before a digit, `\$` escaped, the first unescaped `$` the only closer, `$$` inline display, a `$$` block over several lines with its exact ranges on `example.mdm`, in a quote and in a list, content never parsed as Markdown, every unterminated form left as a paragraph), the YAML header only at position 0 and only when closed (with YAML nodes mounted inside), and the callouts (both opener forms, the closer, kinds, nesting, unterminated gives no node, `calloutKind`). | Node |
 
@@ -74,7 +74,11 @@ arrives while an edit is debounced (300 ms) is dropped, so wait for
 with no scores and `text` for a fixture; `harness.html` seeds
 `window.__settings/__palette/__side/__themes` with `evaluateOnNewDocument`
 and leaves a `window.__toHost` hook for running the real `extension.js` in
-Node; nothing uses it today.
+Node; nothing uses it today. It also opens with the part of VS Code's own
+webview sheet the editor has to outrank (`@layer vscode-default`, the
+scrollbar rules, with the host on a dark theme). Without it the harness draws
+bars no webview ever draws, which is how a bar that the editor was losing to
+the host inside VS Code came out right here three reports running.
 
 ## Mutation checks
 
@@ -105,6 +109,216 @@ test, restoring and checking the file is back, in one command. The round of
   bundle in the page, the converged echo on blank lines typed under a
   hidden header).
 
+The parity round of 2026-08-21 (bugs found against the Vditor version on
+`main`) added these, all caught:
+
+- `webview-look`: the gray staff-lines rule dropped from `.abcjs-staff
+  path` (left on the group alone). abcjs 6 draws the five lines as `<path>`
+  children carrying `fill="currentColor"`, which a fill on the group does
+  not override; the check now reads a path, so the group-only rule fails it.
+- `webview-editing`: heading spacing drawn with `margin-top` instead of
+  `padding-top` (a line drifts 43 px from the height map, so a click on the
+  lower half of a paragraph lands on the next line).
+
+The outline test (the button lists the headings and jumps to the one picked,
+with the empty note for a document with none) is not mutation-checked by a
+one-line break; removing the `outline` entry from the toolbar specs is the
+mutation, and the test throws on the missing button.
+
+The second parity round of 2026-08-21 (more regressions the user reported from
+VS Code) added these, all caught:
+
+- `webview-look`: the drop-down background taken from
+  `--vscode-editorWidget-background` again (dark on dark ink when mdm.theme
+  holds the editor light under a dark VS Code theme); the selection layer left
+  at CodeMirror's default z-index (a selection inside a code card is hidden
+  under it, so Ctrl+D matches in a code comment show nothing).
+- `webview-editing`: the inline-math preview widget dropped (no live render
+  beside the source while editing); `selectNextOccurrenceMaybe` pinned to
+  whole-word (the Ctrl+D substring toggle does nothing); `toggleOutline` never
+  adds `mdm-outline--open` (the outline panel does not open). This round also
+  watched the `dismissFromGutter` listener on the scroller, which the fourth
+  round retired along with its test.
+
+The outline was also rebuilt as a side panel down the left edge (the Vditor
+shape the user missed), replacing the earlier drop-down; its test asserts the
+panel, the leading button, the marked section and that it stays open on a pick.
+
+The third round added LaTeX syntax highlighting to the maths source: a stex
+overlay (parseMixed) on the *MathContent nodes, so the body of an inline or
+block equation is coloured by the same palette as code while its source shows.
+Mutation checks: the `wrap` removed from `mdmMath` (the vendor-src mount test
+`inline math: the LaTeX overlay is mounted over a control sequence` fails); the
+`tags.tagName` rule dropped from `mdmHighlight` (the webview test `the LaTeX of
+a shown equation is syntax-highlighted` fails, a control sequence loses its
+keyword colour). The bundle (`media/vendor/cm6/cm6.bundle.js`) must be rebuilt
+with `npm run vendor` in `vscode-mdm/vendor-src/` after any change under
+`vendor-src/src/`; the webview tests run against the built bundle, the
+vendor-src tests against `src/` directly. The vendor-src math tests were also
+made content-based (they located `$$`/`$L$` by line number, which broke when
+example.mdm lost some blank lines).
+
+The fourth round of 2026-08-23 (five more reports from VS Code) added these,
+all caught:
+
+- `webview-look`: the `color-scheme` rules on `#app` removed (the editor takes
+  the scheme VS Code stamps on the webview root, so under a dark VS Code with
+  mdm.theme light the browser draws its own scrollbars dark: black bars down
+  the side and along the bottom of a drop-down, on a light panel).
+- `webview-editing`: `matchTip()` pinned to one string (the Ctrl+D button says
+  the same thing whichever way it is set).
+- `webview-editing`: the `deadMargin` listener removed from `view.dom` (a click
+  in the strip of pane beside the text is answered again, since CodeMirror
+  listens on its scroller); and `.cm-content` given back a `max-width` of 920px
+  with 50px of padding (its box stands 50px out from the text again, so the
+  edge a click stops at and the edge the pointer changes at are no longer the
+  same one). The margins were made uniformly live earlier the same day and then
+  dead, which is the decision that stands.
+- `webview-editing`: the `dismissOpenBlock()` call taken out of `deadMargin` (a
+  click in the margin leaves whatever is open for editing open, instead of
+  taking the caret out of it so the drawing comes back); and the fallback of
+  `positionOutside` put back to the start of the block's own first line, where
+  the old gutter handler left the caret (a block that ends the document counts
+  as touched from there, so it stays open).
+- `webview-player`: the seek wrapper on `controller.seek` reduced to
+  `clearResumeHold()` (a head dropped inside a chord marks the chord after it
+  and plays that chord's tail with no attack); the `at - here.milliseconds <=
+  25` guard dropped from `scheduleSilentGap` (a silence is put in front of a
+  note's own attack, the top of the tune included). The second needs a primed
+  tune to show: before the first play the timer holds no note timings, so
+  nothing is scheduled either way, which is why the test presses play, stops
+  and presses again.
+- `webview-player`: the rewind of the stop button put back in the tick of the
+  pause it follows (abcjs writes down where it paused after that click returns,
+  so the rewind is undone: the clock, the head and the ink go back to the top
+  and the next play sounds from where the tune was stopped).
+
+The fifth round of 2026-08-23 (five more reports from VS Code) added these,
+all caught:
+
+- `webview-look`: the `::-webkit-scrollbar-thumb` rule removed (the bars go
+  back to being the browser's, which draws them from the colour scheme of the
+  host and put black bars on a light panel). That rule is gone now, and with
+  it the mutation: see the third report of the same bar below.
+  `scrollbar-gutter: stable` removed
+  from `.mdm-menu` (the room the vertical bar takes comes out of the panel's
+  width again); the `box-shadow` put back on `.mdm-menu`.
+- `webview-editing`: `makeOutlineGrip` never called (the outline's width is
+  fixed at 250px again); the `dismissFromOutside` listener removed from the
+  document (a click on the outline or the toolbar leaves open for editing
+  whatever was open); the language tag put back into `CodeChromeWidget` (the
+  corner of a code block names its language beside the copy button).
+
+The sixth round of 2026-08-23 added these, both caught:
+
+- `webview-player`: the 26px `height` taken off `#app .mdm-score .mdm-chrome`
+  (the buttons ride over the top right of the engraving again, and a score
+  scaled down to a narrow pane brings its last chord symbol up under them);
+  `markNoteAt` marking `noteAt` rather than what `soundFrom` says will sound
+  (a head dropped inside a chord marks that chord, when what follows from
+  there is the silence and the chord that is due should light when it sounds).
+
+Space on the open player (2026-08-23) added these, both caught:
+
+- `webview-player`: the `bar.focus()` taken out of the headphones branch of
+  `handleChromeClick` (the bar never holds the keyboard, so Space does
+  nothing and the test times out waiting for the tune to start); the
+  `at.isContentEditable` guard dropped from `playerTakesSpace` (a space typed
+  into the document plays the tune instead of reaching the text). The second
+  is the trap of the feature: the bar is a widget of the editor and so hangs
+  inside `.cm-content`, the element a caret focuses, so a `closest()` test on
+  the event target reads every press as the document's, and the first cut of
+  this ran with the key doing nothing at all.
+
+The multicursor against the clicks around it (2026-08-23) added these, both
+caught:
+
+- `webview-editing`: `dismissOpenBlock` dispatching the single caret that left
+  the block instead of mapping every range (three carets, one of them inside a
+  code block, come back as one after a click in the dead margin, on the outline
+  or on the toolbar); `revealBlock` ignoring its `adds` argument (a drawing
+  clicked with the multicursor modifier down replaces every caret with one at
+  its source). Both were reported as "the multicursor loses its carets and does
+  not edit": the Alt+click itself was adding the range all along, what threw
+  the carets away was the click that landed outside the text or on a drawing.
+
+Alt+click against the host's menu bar (2026-08-23) added this one, caught:
+
+- `webview-editing`: the `stopPropagation()` dropped from the Alt keyup in
+  `watchAltPresses` (the release reaches the stand-in for the VS Code preload,
+  which is the clean press-and-release pair the workbench's menu bar reads:
+  in real VS Code the focus goes to the File menu and the carets stop being
+  drawn). The stand-in is a bubble listener on the window, where the preload
+  puts its own (`contentWindow.addEventListener('keyup', handleInnerKeyup)`,
+  in `workbench/contrib/webview/browser/pre/index.html`); the test also probes
+  `view.contentDOM` to show the page itself still gets the release. What the
+  harness cannot show is the other half, the menu bar taking the focus: that
+  lives in the workbench, and the evidence for it was read off the installed
+  build (`ModifierKeyEmitter` in `workbench.desktop.main.js`: `mousedown` on
+  `document.body` clears `lastKeyPressed`, and the menu bar focuses on
+  `lastKeyPressed === "alt" && lastKeyReleased === "alt"`).
+
+One thing the harness cannot show: the horizontal bar that a long drop-down
+grew under its list. It needs bars that take layout space, and this browser
+draws them floating over the content, 2px wide. What the test asserts is the
+reservation (`scrollbar-gutter`), which is the fix, and the overflow, which
+stays at zero here either way. The width of the bar is read off that same
+reservation, which does follow `scrollbar-width`: 10px for the `thin` the
+editor asks for against the 15px the browser gives on its own.
+
+The bar of the theme menu, reported a third time (2026-08-23), added this,
+caught:
+
+- `webview-look`: the `scrollbar-color` on `#app` removed (the bars come back
+  from the host, thumb and track both: VS Code's slider grey over its editor
+  background, which is the black strip down a white panel that was reported);
+  the `scrollbar-width` removed (the bar goes back to the browser's 15px from
+  the 10px the editor asks for). Neither mutation shows without the host's
+  sheet in the harness, which is the point of the round: the editor was
+  painting its bars with `::-webkit-scrollbar` rules, and VS Code sets
+  `scrollbar-color` on `html`, which is inherited and which turns those rules
+  off wherever it reaches. The rules were dead in VS Code and alive here, so
+  the page the tests were reading was never the page the user was looking at.
+
+The four papercuts of 2026-08-23 (the copied sign, the headphones' tooltip,
+the name of the Ctrl+D toggle, the gap between paragraphs) added these, all
+caught:
+
+- `webview-look`: the `hideTipUntilLeave` call taken out of `copyBlock` (the
+  "Copied" sign sits under the pointer until it leaves the block, which is
+  what it did); the `mdm-blank` line class never added (the blank line between
+  two paragraphs goes back to the height of a line of prose, half again the
+  gap a rendered page leaves).
+- `webview-player`: the `dismissTip` listener removed from the document (a
+  click on the headphones leaves "Show player" showing over the player it has
+  just opened); the `:hover` guard dropped from `hideTipUntilLeave` (a click
+  from script or from the keyboard puts the tooltip away with no pointer to
+  leave the button and bring it back, so it never shows again).
+- `webview-editing`: the two texts of the Ctrl+D toggle are pinned, so a
+  rename of either fails the toggle test.
+
+The grace note that was not heard (2026-08-23) added these, both caught:
+
+- `webview-player`: `attacks()` built with `midiGraceNotePitches` ignored, one
+  attack per note group (a head dropped inside a `{d}c2` waits the whole group
+  out, ornament and note together, which is the report); `scheduleSilentGap`
+  no longer lighting what it waits for, the ink left to the event alone (the
+  gain comes back for the ornamented note with no ink on it, since the event
+  abcjs handed over at the seek is the note AFTER the group and now waits for
+  its own moment). The tune is `ORNAMENT_FIXTURE`, quarters at a quarter of
+  100 with a grace note on the ninth: the group is at 4800 ms, its d sounds
+  there, its own C at 5100 and the note after it at 5400, so a gap that runs
+  to 5400 is the fault and one that ends at 5100 is the fix.
+
+  What the round turned on is that abcjs keeps the two apart: `midiPitches` on
+  a timing is the note alone, `midiGraceNotePitches` the ornament, and the
+  timing's `milliseconds` is where the ORNAMENT begins, not the note. Read as
+  one attack per timing, an ornamented note looked like a plain one starting
+  where its grace does. Measured on the third score of `example.mdm` before
+  the fix: seeking to 26400 ms held the output muted for 300 ms, through the
+  d and the c both; after it, 0 ms there and 130 ms from 26300, which ends on
+  the c's own attack.
+
 ## Pending
 
 1. `h.errors` is asserted empty in many tests but not all; moving it to the
@@ -118,3 +332,11 @@ test, restoring and checking the file is back, in one command. The round of
 4. The three webview files share `webview/helpers.js`; a cold-start flake
    was seen once (the first `open()` of a run timing out on its three SVGs)
    and not reproduced.
+5. Player seek: measured in the harness (a scratch run under `tests/tmp/`),
+   the audio lands on a single source with no overlap, but the head is drawn
+   1 to 5 per cent ahead of where abcjs seeks the sound (larger on a short
+   tune), because the head uses the buffer duration, release tail included,
+   while abcjs seeks against the musical duration. Same code as the Vditor
+   editor, so not a rewrite regression, and the report of the head drifting
+   as it is dragged is not yet reproduced as a fault of its own. No test
+   added.

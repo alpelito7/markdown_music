@@ -47,7 +47,7 @@ w: 2:1 3:2 4:3 5:4 6:5 7:6 8:7
 
 A Python loop is enough to walk the circle of fifths. One modular step, `d = (d + 3) % 7`, drops each root a fifth below the last, the $3:2$ of $\Delta_2 \approx 702$ cents from the previous section, and seven of them exhaust C major and land back at the start. The loop stacks every other note of the scale into a chord, reads its name off the gaps between its own notes, and prints the line that becomes the score below.
 
-Two cadences fall out unasked: the ii-V-I in C that opens the sequence and the ii-V-i in A minor that closes it. Only the second needs help, since A minor's leading tone is G sharp and C major hasn't got one, so one `if` supplies it. The loop stops when the root is D again, and the same trick once more, C sharp on the A chord, adds an eighth bar: A7, the dominant of the first bar, so that the repeat button of the player resolves the last chord into the first and the circle closes instead of starting over.
+Two cadences fall out unasked: a II-V-I in C opens the sequence, one in A minor closes it. Only the second needs help, since A minor's leading tone is G sharp and C major hasn't got one, so one `if` supplies it. The same trick adds a bar of A7, and the repeat button resolves it into the first.
 
 ```python
 NAME = "C _D D _E E F _G G _A A _B B".split()  # ABC names
@@ -91,7 +91,7 @@ K:C
 
 ## From score to sound
 
-In the editor the speaker on the block plays it, and each note lights up on the score as it sounds; in HTML the `.play` class puts a player bar under the score, and the PDF keeps the engraving alone.
+In the editor the headphone on the block plays it, and each note lights up on the score as it sounds; in HTML the `.play` class puts a player bar under the score, and the PDF keeps the engraving alone.
 
 ```{.abc .play}
 X:1
