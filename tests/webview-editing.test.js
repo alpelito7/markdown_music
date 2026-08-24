@@ -919,3 +919,42 @@ test("the outline panel is as wide as the grip is dragged", { skip }, async () =
   await h.close();
 });
 
+// Ctrl+D matches whole words by default, like VS Code: "score" walks the
+// standalone occurrences and steps over "scores". The toolbar toggle turns on
+// substring matching, where "score" also lands inside "scores". Regression
+// guard for the toggle the user asked for.
+test("the Ctrl+D toggle switches whole-word matching to substring", { skip }, async () => {
+  const h = await open({ text: "score and scores and a score here\n", scores: 0, seed: { settings: { frontMatter: "hidden" } } });
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  const ranges = () => h.page.evaluate(() => window.__mdm.view.state.selection.ranges.map((r) => [r.from, r.to]));
+  // Default: whole word. The "score" inside "scores" (10-16) is skipped.
+  await h.page.evaluate(() => window.__mdm.view.dispatch({ selection: { anchor: 2 } }));
+  await chord(h.page, ["Control"], "d");
+  await chord(h.page, ["Control"], "d");
+  await chord(h.page, ["Control"], "d");
+  assert.deepEqual(await ranges(), [[0, 5], [23, 28]]);
+  // The button carries a text for each state, naming what the click switches
+  // to rather than the state in use, the way the staff, alignment and header
+  // buttons do. It names the feature and not the chord: the key is one way of
+  // reaching a multicursor and the button is another.
+  const matchButton = () =>
+    h.page.evaluate(() => {
+      const b = document.querySelector('#app button[data-type="mdm-match-substring"]');
+      return { tip: b.getAttribute("aria-label"), lit: b.classList.contains("mdm-btn--on") };
+    });
+  assert.deepEqual(await matchButton(), { tip: "Multicursor matches inside words", lit: false });
+  // Toggle on, and it lights and changes what it says.
+  await h.page.click('#app button[data-type="mdm-match-substring"]');
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  assert.deepEqual(await matchButton(), { tip: "Multicursor matches whole words", lit: true });
+  // Now the "score" inside "scores" is caught too.
+  await h.page.evaluate(() => window.__mdm.view.dispatch({ selection: { anchor: 2 } }));
+  await chord(h.page, ["Control"], "d");
+  await chord(h.page, ["Control"], "d");
+  await chord(h.page, ["Control"], "d");
+  assert.deepEqual(await ranges(), [[0, 5], [10, 15], [23, 28]]);
+  await h.page.keyboard.type("Q");
+  assert.equal(await docText(h.page), "Q and Qs and a Q here\n");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});

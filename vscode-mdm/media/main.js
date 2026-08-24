@@ -2667,6 +2667,92 @@
     };
   }
 
+  // ---------- Ctrl+D: next occurrence ----------
+
+  // Off by default, Ctrl+D matches whole words, the way VS Code does: a caret
+  // in "score" walks the standalone "score"s and steps over "scores". The
+  // toolbar toggle turns on substring matching, where "score" also lands
+  // inside "scores", "scoreboard" and the like.
+  let matchSubstring = false;
+
+  // The substring form of selectNextOccurrence. The first press, on an empty
+  // selection, takes the word under the caret (so the toggle can be flipped
+  // mid-word); each press after adds the next literal run of that text,
+  // wrapping and skipping the ones already in the selection.
+  function selectNextSubstring(v) {
+    const state = v.state;
+    const sel = state.selection;
+    const main = sel.main;
+    if (main.empty) {
+      const word = state.wordAt(main.head);
+      if (!word) return false;
+      v.dispatch({
+        selection: CM.EditorSelection.create(
+          sel.ranges.map(function (r) {
+            return r === main ? word : r;
+          }),
+          sel.mainIndex
+        ),
+      });
+      return true;
+    }
+    const query = state.sliceDoc(main.from, main.to);
+    if (!query) return false;
+    const doc = state.doc.toString();
+    const matches = [];
+    for (let i = doc.indexOf(query); i >= 0; i = doc.indexOf(query, i + 1)) {
+      matches.push(i);
+    }
+    const taken = new Set(
+      sel.ranges.filter(function (r) {
+        return !r.empty;
+      }).map(function (r) {
+        return r.from;
+      })
+    );
+    const rightmost = sel.ranges.reduce(function (m, r) {
+      return Math.max(m, r.to);
+    }, 0);
+    let pick = matches.find(function (m) {
+      return m >= rightmost && !taken.has(m);
+    });
+    if (pick === undefined) {
+      pick = matches.find(function (m) {
+        return !taken.has(m);
+      });
+    }
+    if (pick === undefined) return true; // every occurrence is already in
+    const range = CM.EditorSelection.range(pick, pick + query.length);
+    const ranges = sel.ranges.concat(range);
+    v.dispatch({
+      selection: CM.EditorSelection.create(ranges, ranges.length - 1),
+      scrollIntoView: true,
+    });
+    return true;
+  }
+
+  // What Ctrl+D runs: the substring form while the toggle is on, CodeMirror's
+  // own whole-word selectNextOccurrence otherwise.
+  function selectNextOccurrenceMaybe(v) {
+    return matchSubstring ? selectNextSubstring(v) : CM.selectNextOccurrence(v);
+  }
+
+  // Both sides of the toggle get their own text, the way the header button has
+  // one for each state: what the tooltip names is what the click switches to,
+  // not the state in use (the convention of the staff, alignment and header
+  // buttons).
+  function matchTip() {
+    return matchSubstring
+      ? "Multicursor matches whole words"
+      : "Multicursor matches inside words";
+  }
+
+  function updateMatchButton() {
+    const btn = document.querySelector('#app button[data-type="mdm-match-substring"]');
+    if (!btn) return;
+    btn.setAttribute("aria-label", matchTip());
+    btn.classList.toggle("mdm-btn--on", matchSubstring);
+  }
   // ---------- Mouse ----------
 
   // The click that adds a caret follows VS Code's editor.multiCursorModifier.
@@ -2927,6 +3013,8 @@
       { key: "ArrowUp", run: stepIntoBlock(-1) },
       { key: "Ctrl-Alt-ArrowDown", mac: "Cmd-Alt-ArrowDown", run: addCaretVertically(1) },
       { key: "Ctrl-Alt-ArrowUp", mac: "Cmd-Alt-ArrowUp", run: addCaretVertically(-1) },
+      // Before searchKeymap's own Mod-d, so the substring toggle is honoured.
+      { key: "Mod-d", run: selectNextOccurrenceMaybe },
     ];
     const state = CM.EditorState.create({
       doc: text,
@@ -3027,6 +3115,18 @@
     '<svg viewBox="0 0 16 16"><circle cx="3" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><rect x="6" y="3.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="7.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="11.3" width="8.5" height="1.4" rx=".7"/></svg>';
   const OLIST_ICON =
     '<svg viewBox="0 0 16 16"><path d="M2.2 2.4h1v3.1h-1V3.4l-.7.4-.4-.8Z"/><path d="M1.3 7.2q.2-.9 1.3-.9.6 0 .9.3t.3.8q0 .5-.5 1l-.9.9h1.5v.8H1.2v-.7l1.5-1.5q.3-.3.3-.5 0-.3-.4-.3-.4 0-.5.4Z"/><path d="M1.2 12.7q.2-.8 1.3-.8.6 0 1 .3t.3.7q0 .5-.5.7.6.2.6.8 0 .5-.4.8t-1 .3q-1.1 0-1.3-.9l.8-.2q.1.4.5.4.4 0 .4-.3t-.5-.3h-.3v-.7h.3q.4 0 .4-.3t-.4-.3q-.3 0-.4.3Z"/><rect x="6" y="3.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="7.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="11.3" width="8.5" height="1.4" rx=".7"/></svg>';
+  // The Ctrl+D toggle: two text carets standing on a word, drawn as a faint
+  // bar. What the icon names is the family the button belongs to, the
+  // multicursor, and not the mode in force: which of the two modes is on is
+  // said by the disc of mdm-btn--on and by the tooltip, as it is on the staff,
+  // alignment and header buttons. The drawing before this one was a selection
+  // box around the middle of the bar, for "a part inside a word", and at the
+  // 15px the toolbar draws at it read as a code block, or as a minus sign shut
+  // in a box. Fill only, since the toolbar stylesheet zeroes strokes: each
+  // caret is three rounded rectangles (two serifs and a stem) and the word is
+  // drawn faint with fill-opacity.
+  const MULTICURSOR_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="1.5" y="11.6" width="13" height="2" rx="1" fill-opacity="0.4"/><rect x="3.2" y="2.4" width="3.6" height="1.3" rx=".65"/><rect x="4.35" y="2.4" width="1.3" height="7.8" rx=".2"/><rect x="3.2" y="8.9" width="3.6" height="1.3" rx=".65"/><rect x="9.2" y="2.4" width="3.6" height="1.3" rx=".65"/><rect x="10.35" y="2.4" width="1.3" height="7.8" rx=".2"/><rect x="9.2" y="8.9" width="3.6" height="1.3" rx=".65"/></svg>';
   // A stack of headings, longest at the top: the document's own table of
   // contents, the glyph an outline has always carried.
   const OUTLINE_ICON =
@@ -3296,6 +3396,19 @@
       "|",
       { name: "list", icon: LIST_ICON, tip: "Bulleted list", click: run(toggleList(false)) },
       { name: "ordered-list", icon: OLIST_ICON, tip: "Numbered list", click: run(toggleList(true)) },
+      "|",
+      // Ctrl+D matches whole words by default; this lights up to match inside
+      // words too (score -> also the score in scores).
+      {
+        name: "mdm-match-substring",
+        icon: MULTICURSOR_ICON,
+        tip: matchTip(),
+        click: function () {
+          matchSubstring = !matchSubstring;
+          updateMatchButton();
+          if (view) view.focus();
+        },
+      },
       "|",
       // Theme first: the fill colours are defined per theme, so the wider
       // switch reads before the one that depends on it.
