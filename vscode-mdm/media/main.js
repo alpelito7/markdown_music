@@ -1159,15 +1159,24 @@
     button.addEventListener("click", function () {
       const start = bar.querySelector(".abcjs-midi-start");
       if (start && start.classList.contains("abcjs-pushed")) start.click();
-      if (player && player.bar === bar && player.controller) {
-        try {
-          player.controller.restart();
-        } catch (e) {
-          // a tune that never played has no timer to rewind
+      // The rewind waits a microtask on that pause. abcjs finishes pausing
+      // after the click returns and writes down where the sound stopped as it
+      // does, so a restart in the same tick was undone by it: the clock, the
+      // head and the ink went back to the top while the buffer stayed where it
+      // was, and the next play sounded from there (measured: stop at 450 ms,
+      // then play, and the sound came in 450 ms into the tune while the ink
+      // ran from the beginning).
+      Promise.resolve().then(function () {
+        if (player && player.bar === bar && player.controller) {
+          try {
+            player.controller.restart();
+          } catch (e) {
+            // a tune that never played has no timer to rewind
+          }
         }
-      }
-      clearResumeHold(); // a fresh start is never a resume
-      clearPlayingHighlight();
+        clearResumeHold(); // a fresh start is never a resume
+        clearPlayingHighlight();
+      });
     });
     return button;
   }
@@ -1462,22 +1471,20 @@
             onEvent: function (ev) {
               try {
                 if (!ev || typeof ev.startChar !== "number") return;
-                // Inside a resume gap the sound is muted and this event is
-                // the one the timer reported early; the ink waits with the
-                // sound and lights when the gain comes back.
-                const wait = inkHoldUntil - performance.now();
-                if (wait > 0) {
-                  pendingInk = ev;
-                  if (!inkTimer) {
-                    inkTimer = setTimeout(function () {
-                      inkTimer = null;
-                      const held = pendingInk;
-                      pendingInk = null;
-                      if (held && player) {
-                        highlightPlaying(held.startChar, held.endChar);
-                      }
-                    }, wait);
-                  }
+                // Inside a resume gap the sound is muted and this event is the
+                // one the timer reported early: abcjs advances its pointer the
+                // moment it is told to move, so what it hands over is the note
+                // AFTER the head. It waits for the moment it is really due,
+                // which is its own on the tune clock; what the gap itself is
+                // waiting for was put on that clock when the gap was
+                // scheduled. The two are the same note whenever the gap ends
+                // on the next note, and different under an ornament, where it
+                // ends on the note the head is already inside.
+                if (inkHeld()) {
+                  paintInkAt(
+                    ev,
+                    typeof ev.milliseconds === "number" ? ev.milliseconds : inkEndsAt
+                  );
                   return;
                 }
                 highlightPlaying(ev.startChar, ev.endChar);
@@ -1521,12 +1528,36 @@
           chordsOff: true,
         });
         decorateWidget(bar, controller);
-        // Scrubbing wants sound at once: any seek, ours or the drag's,
-        // discards the pause point and whatever silence was scheduled.
+        // A seek is a scrub, and a scrub lands inside a note as often as not.
+        // Left alone the engine would start the sound on that note's tail with
+        // no attack, an echo of the chord that was going, and paint the ink on
+        // the note AFTER the head, its event pointer having moved on the
+        // moment it was told to seek. Both are what a resume from a pause used
+        // to do, and both are answered the same way (scheduleSilentGap): the
+        // remainder of the note under the head passes in silence and the note
+        // that is due lands on its beat, in ink and in sound together.
+        //
+        // The silence is scheduled BEFORE the engine is told to move, since
+        // the event it reports comes back from inside that call and the ink
+        // hold has to be in force to catch it. Outside a gap (nothing
+        // sounding, or a head dropped on an attack) the ink is placed here
+        // instead, over the note the engine just marked one too far along.
         const controllerSeek = controller.seek;
-        controller.seek = function () {
-          clearResumeHold();
-          return controllerSeek.apply(controller, arguments);
+        controller.seek = function (percent) {
+          const timer = controller.timer;
+          const total = (timer && timer.lastMoment) || 0;
+          const at =
+            typeof percent === "number" && total > 0 ? percent * total : null;
+          if (at === null) return controllerSeek.apply(controller, arguments);
+          if (isSounding(bar)) scheduleSilentGap(timer, at);
+          else clearResumeHold();
+          const out = controllerSeek.apply(controller, arguments);
+          // Outside a gap the ink is ours to place, over the note the engine
+          // just marked one too far along: the note the head is on when it is
+          // on an attack, and none at all when it is inside a note, where what
+          // comes next is the silence.
+          if (!inkHeld()) markNoteAt(timer, at);
+          return out;
         };
         player.controller = controller;
       })
@@ -1620,35 +1651,57 @@
     });
   }
 
-  // Resume keeps the beat. A pause cuts a note short; pressing play again
-  // must not replay its tail with no attack (abcjs's own resume), must not
-  // jump ahead to the next note (this editor's first attempt, which near a
-  // barline could land a full measure late, since the visual clock runs a
-  // touch apart from the sound), and must not paint ink before its sound
-  // (abcjs restarts its cursor by advancing the event pointer, which reported
-  // the NEXT note the moment play was pressed). What it does instead is what
-  // a count-in does: the sound resumes exactly where it stopped but MUTED,
-  // the remainder of the cut note passes in true silence with the clock
-  // running, and the gain comes back a hair before the next note attacks, on
-  // the audio context's own clock, so the note that is due lands on its beat
-  // in ink and in sound together.
+
+  // Starting anywhere but on a note's attack keeps the beat. A pause cuts a
+  // note short, and so does a head dropped mid-chord; starting from there must
+  // not replay the note's tail with no attack (abcjs's own resume, which
+  // sounds like an echo of the chord that was going), must not jump ahead to
+  // the next note (this editor's first attempt, which near a barline could
+  // land a full measure late, since the visual clock runs a touch apart from
+  // the sound), and must not paint ink before its sound (abcjs advances its
+  // event pointer the moment it is told to move or to restart, so the note it
+  // reports is the NEXT one). What it does instead is what a count-in does:
+  // the sound picks up exactly where the head is but MUTED, the remainder of
+  // the cut note passes in true silence with the clock running, and the gain
+  // comes back a hair before the next note attacks, on the audio context's own
+  // clock, so the note that is due lands on its beat in ink and in sound
+  // together.
   //
-  // The pause position is remembered at the pause press; the gap is only
-  // scheduled when play resumes from that same spot, so a seek in between
-  // (the progress bar, stop) plays immediately, the way a scrub should.
-  let resumePoint = null; // ms on the tune clock, set by the pause press
-  let inkHoldUntil = 0; // wall clock; events before it wait for the beat
-  let inkTimer = null;
-  let pendingInk = null;
+  // One rule covers the two gestures, since both are read off the tune clock
+  // alone: a press of play, wherever the tune stands, and a seek while it is
+  // sounding. On an attack (the top of the tune included) there is nothing to
+  // wait out and the sound comes at once.
+  let inkHoldUntil = 0; // wall clock; the end of the gap the ink waits out
+  let inkEndsAt = 0; // the same moment, on the tune clock
+  let inkClockZero = 0; // the wall-clock moment the tune clock read zero
+  let inkTimers = []; // paints put off until the moment they are due
+
+  // Whether a gap is running, which is what says the ink is spoken for.
+  function inkHeld() {
+    return inkHoldUntil > performance.now();
+  }
+
+  // A stretch of source lit at the moment the tune clock reaches `ms`, and at
+  // once when that moment has gone by. Never before the gap ends: what the ink
+  // says and what is coming out have to agree.
+  function paintInkAt(note, ms) {
+    const wait = inkClockZero + Math.max(ms, inkEndsAt) - performance.now();
+    if (wait <= 0) {
+      highlightPlaying(note.startChar, note.endChar);
+      return;
+    }
+    inkTimers.push(
+      setTimeout(function () {
+        if (player) highlightPlaying(note.startChar, note.endChar);
+      }, wait)
+    );
+  }
 
   function clearResumeHold() {
-    resumePoint = null;
     inkHoldUntil = 0;
-    pendingInk = null;
-    if (inkTimer) {
-      clearTimeout(inkTimer);
-      inkTimer = null;
-    }
+    inkEndsAt = 0;
+    inkTimers.forEach(clearTimeout);
+    inkTimers = [];
     if (audioMute && audioCtx) {
       try {
         audioMute.gain.cancelScheduledValues(0);
@@ -1659,6 +1712,13 @@
     }
   }
 
+  // Whether the tune is running. The play button wears abcjs-pushed while it
+  // is, which is also how the press handler below tells a pause from a play.
+  function isSounding(bar) {
+    const start = bar && bar.querySelector(".abcjs-midi-start");
+    return !!start && start.classList.contains("abcjs-pushed");
+  }
+
   // Capture phase on the bar: runs before the handler abcjs put on the play
   // button, observes, and never swallows the click.
   function watchPlayPresses(e) {
@@ -1666,57 +1726,140 @@
     if (!button || !player || !player.controller) return;
     const timer = player.controller.timer;
     if (!timer || typeof timer.currentMillisecond !== "function") return;
-    if (button.classList.contains("abcjs-pushed")) {
-      resumePoint = timer.currentMillisecond(); // this press pauses
-      return;
+    if (button.classList.contains("abcjs-pushed")) return; // this press pauses
+    // Play from wherever the tune stands. From the top, or from a note's
+    // attack, that is at once; from inside a note (a pause, or a head dropped
+    // mid-chord) the remainder of that note passes in silence first.
+    scheduleSilentGap(timer, timer.currentMillisecond());
+  }
+
+  // Milliseconds to the whole note, at the moment a timing sits on. The timer
+  // works in milliseconds while abcjs gives the length of a grace note in whole
+  // notes (midiGraceNotePitches calls the field durationInMeasures, but a
+  // measure is not what it counts: the d of {d}c2 in 3/4 comes back as 0.125,
+  // an eighth of a whole note and a sixth of that measure), so an ornament
+  // cannot be put on the clock without this. Read off the timing's own measure,
+  // so a tempo change is taken where it happens rather than averaged over the
+  // tune. Zero when the tune is not there to ask, and the ornament then
+  // collapses onto its note, which is where it used to be.
+  function msPerWhole(timing) {
+    const visual = player && player.controller && player.controller.visualObj;
+    const perMeasure = timing && timing.millisecondsPerMeasure;
+    if (!visual || !perMeasure) return 0;
+    const measure = visual.getBeatLength() * visual.getBeatsPerMeasure();
+    return measure > 0 ? perMeasure / measure : 0;
+  }
+
+  // Every moment the tune attacks, in order: when a sound begins, and the note
+  // group it was written from, which is what the ink is painted from. A bar
+  // line or a line end sounds nothing and carries no pitches, so it is no
+  // attack.
+  //
+  // A note under an ornament attacks more than once. abcjs sounds the grace
+  // notes at the group's own moment and pushes the note itself back behind
+  // them, and the timer keeps the two apart: midiPitches is the note alone,
+  // midiGraceNotePitches the ornament. Read as one attack per group, {d}c2
+  // would look like a single note beginning where its d does, and a head
+  // dropped anywhere inside it would wait the whole group out in silence,
+  // ornament and note together.
+  function attacks(timer) {
+    const timings = (timer && timer.noteTimings) || [];
+    const out = [];
+    for (let i = 0; i < timings.length; i++) {
+      const t = timings[i];
+      if (!t || typeof t.milliseconds !== "number") continue;
+      if (!t.midiPitches || !t.midiPitches.length) continue;
+      const graces = t.midiGraceNotePitches || [];
+      const scale = graces.length ? msPerWhole(t) : 0;
+      let at = t.milliseconds;
+      for (let g = 0; g < graces.length; g++) {
+        out.push({ at: at, note: t });
+        at += (graces[g].durationInMeasures || 0) * scale;
+      }
+      out.push({ at: at, note: t });
     }
-    const at = timer.currentMillisecond();
-    const fromPause =
-      at > 0 && resumePoint !== null && Math.abs(at - resumePoint) <= 30;
-    if (fromPause) scheduleSilentGap(timer, at);
-    else clearResumeHold();
-    resumePoint = null;
+    return out;
+  }
+
+  // What sounds first from a point on the tune clock, and the silence that goes
+  // in front of it. One reading, and the two things that follow from a seek or
+  // a press of play are read off it, so they cannot disagree:
+  //
+  //  - on an attack, within a hair of it, what begins there and no silence:
+  //    what sounds from that point is its own beginning;
+  //  - inside a sound, whatever attacks next behind a silence: the remainder of
+  //    the one the point is in passes muted, and the ink waits with it;
+  //  - inside a sound but a hair short of the next attack, that attack and no
+  //    silence: there is nothing left worth cutting;
+  //  - inside the last sound, nothing and a silence to the end: nothing will
+  //    attack again, so the tail stays quiet rather than sounding with no
+  //    beginning;
+  //  - before the first attack, nothing at all.
+  //
+  // Attacks and not notes throughout, since an ornamented note holds several
+  // (see attacks): the c of a {d}c2 is due on its own beat, and a head dropped
+  // on the d must not take it down with the ornament.
+  //
+  // The wait is set a few ms short so that a clock skew clips a sliver of
+  // silence and never the attack that is due.
+  const ATTACK_SLACK = 25;
+  function soundFrom(timer, at) {
+    const list = attacks(timer);
+    let here = null;
+    let after = null;
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].at > at + 1) {
+        after = list[i];
+        break;
+      }
+      here = list[i];
+    }
+    if (!here) return null;
+    if (at - here.at <= ATTACK_SLACK) return { note: here.note, wait: 0 };
+    const next = after ? after.at : timer.lastMoment || 0;
+    const wait = (next - at - ATTACK_SLACK) / 1000;
+    return { note: after ? after.note : null, wait: wait <= 0.03 ? 0 : wait };
+  }
+
+  // The ink under the head, once the head has been moved: the note that sounds
+  // from there, and none at all when what comes first is the silence.
+  function markNoteAt(timer, at) {
+    const from = soundFrom(timer, at);
+    if (from && !from.wait && from.note) {
+      highlightPlaying(from.note.startChar, from.note.endChar);
+    } else {
+      clearPlayingHighlight();
+    }
   }
 
   function scheduleSilentGap(timer, at) {
     clearResumeHold();
     if (!audioMute || !audioCtx) return;
-    const timings = timer.noteTimings || [];
-    let next = null;
-    for (let i = 0; i < timings.length; i++) {
-      const t = timings[i];
-      if (
-        t &&
-        typeof t.milliseconds === "number" &&
-        t.milliseconds > at + 1 &&
-        t.midiPitches &&
-        t.midiPitches.length
-      ) {
-        next = t.milliseconds;
-        break;
-      }
-    }
-    // Paused inside the last note: nothing will attack again, so the tail
-    // stays silent to the end rather than replaying without its beginning.
-    if (next === null) next = timer.lastMoment || 0;
-    // A few ms early, so a clock skew clips a sliver of silence and never
-    // the attack of the note that is due.
-    const remaining = (next - at - 25) / 1000;
-    if (remaining <= 0.03) return; // paused on the boundary: play as is
+    const from = soundFrom(timer, at);
+    if (!from || !from.wait) return; // an attack, or nothing worth cutting
+    const remaining = from.wait;
     try {
       const now = audioCtx.currentTime;
       audioMute.gain.cancelScheduledValues(now);
       audioMute.gain.setValueAtTime(0, now);
       audioMute.gain.setValueAtTime(1, now + remaining);
     } catch (e) {
-      return; // no silence is better than no sound
+      // The two calls are one gesture and the second is the one that can
+      // refuse its value; a silence taken and never given back is a player
+      // that stays quiet for the rest of the session, so the gain goes back
+      // up whatever went wrong. No silence is better than no sound.
+      clearResumeHold();
+      return;
     }
-    // The ink falls silent with the sound: the cut note goes back to ink,
-    // and the event the timer reports early (its restart advances the event
-    // pointer to the next note at once) waits for the moment that note
-    // really attacks.
+    // The ink falls silent with the sound: the cut note goes back to ink, and
+    // what is due when the gain comes back is lit then and not before. That is
+    // read off the same soundFrom the silence was, so the ink cannot name a
+    // note other than the one that sounds.
     clearPlayingHighlight();
+    inkClockZero = performance.now() - at;
+    inkEndsAt = at + remaining * 1000;
     inkHoldUntil = performance.now() + remaining * 1000;
+    if (from.note) paintInkAt(from.note, inkEndsAt);
   }
 
   // ---------- Rendering: decorations over the syntax tree ----------

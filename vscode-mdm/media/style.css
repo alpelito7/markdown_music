@@ -668,7 +668,14 @@ body {
 #app .mdm-score[data-mdm-audio] .mdm-chrome {
   opacity: 1;
 }
+/* On a score the chrome gets a strip of its own above the engraving, rather
+   than riding over its top right corner. A score is scaled to the width of the
+   pane, so the narrower the pane the higher its top row of ink climbs: past
+   about 500px the last chord symbol came up under the buttons and was covered
+   by them. The strip is the height of a button and its 4px of clearance, and
+   it is what the drawing starts under. */
 #app .mdm-score .mdm-chrome {
+  height: 26px;
   opacity: 0;
   transition: opacity 0.12s ease;
 }

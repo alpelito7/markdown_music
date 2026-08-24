@@ -75,6 +75,91 @@ function sourceShowing() {
   return !!document.querySelector("#app .cm-line.mdm-src-line");
 }
 
+// The audio probe the resume and seek tests measure with: where every playback
+// source starts on the context's own clock (the audioSpy of open() watches
+// connections, not starts, so the recorder lives in the page), which note is
+// lit, where the mute stage stands, and the moment each note first lit, which
+// is the tune's onset grid.
+async function installAudioProbe(page) {
+  await page.evaluate(() => {
+    window.__sources = [];
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (when, offset) {
+      try {
+        if (
+          this.buffer &&
+          this.buffer.duration > 2 &&
+          this.context.constructor.name === "AudioContext"
+        ) {
+          window.__sources.push({
+            ctx: this.context,
+            calledAt: this.context.currentTime,
+            when: when || 0,
+            offset: offset || 0,
+          });
+        }
+      } catch (e) {
+        // never break playback from the spy
+      }
+      return start.apply(this, arguments);
+    };
+    window.__audioPos = function () {
+      const s = window.__sources[window.__sources.length - 1];
+      return s ? s.ctx.currentTime - Math.max(s.calledAt, s.when) + s.offset : null;
+    };
+    window.__lit = function () {
+      const notes = Array.from(
+        document.querySelectorAll(
+          "#app [data-mdm-audio] code.language-abc svg .abcjs-note"
+        )
+      );
+      const el = document.querySelector(
+        "#app [data-mdm-audio] code.language-abc svg .abcjs-note.abcjs-note_selected"
+      );
+      return el ? notes.indexOf(el) : -1;
+    };
+    window.__mute = function () {
+      return window.__gain ? window.__gain.gain.value : null;
+    };
+    window.__onsets = {};
+    setInterval(function () {
+      const n = window.__lit();
+      const p = window.__audioPos();
+      if (n >= 0 && p !== null && !(n in window.__onsets)) window.__onsets[n] = p;
+    }, 25);
+  });
+}
+
+// The head dropped at a fraction of the track, the gesture a pointer makes.
+async function dropHead(page, percent) {
+  await page.evaluate((p) => {
+    const track = document.querySelector(
+      ".mdm-audio .abcjs-midi-progress-background"
+    );
+    const box = track.getBoundingClientRect();
+    const opts = {
+      button: 0,
+      bubbles: true,
+      pointerId: 7,
+      clientX: box.x + box.width * p,
+      clientY: box.y + box.height / 2,
+    };
+    track.dispatchEvent(new PointerEvent("pointerdown", opts));
+    track.dispatchEvent(new PointerEvent("pointerup", opts));
+  }, percent);
+}
+
+// The tune's own grid, read off the primed timings: what the seek tests aim at.
+async function noteGrid(page) {
+  return page.evaluate(() => {
+    const t = window.__mdm.player.controller.timer;
+    const notes = (t.noteTimings || []).filter(
+      (x) => x.midiPitches && x.midiPitches.length
+    );
+    return { total: t.lastMoment, onsets: notes.map((x) => x.milliseconds) };
+  });
+}
+
 test("every score gets a player toggle beside the copy button; other code does not", { skip }, async () => {
   const h = await open({});
   const counts = await h.page.evaluate(() => {
@@ -857,6 +942,7 @@ test("stop halts the tune and takes it back to the top", { skip }, async () => {
     () => document.querySelector(".mdm-audio .mdm-audio-stop"),
     { timeout: 15000 }
   );
+  await installAudioProbe(h.page);
   const order = await h.page.evaluate(() => {
     const widget = document.querySelector(".mdm-audio .abcjs-inline-audio");
     return Array.from(widget.querySelectorAll(".abcjs-btn")).map((b) =>
@@ -915,6 +1001,20 @@ test("stop halts the tune and takes it back to the top", { skip }, async () => {
     ) || 0
   );
   assert.equal(still, 0);
+  // The sound goes back to the top with the clock. abcjs writes down where it
+  // paused after the click that pauses it returns, so the rewind waits a
+  // microtask on that: done in the same tick it was undone, and the next play
+  // sounded from where the tune was stopped while the ink ran from the
+  // beginning.
+  await h.page.evaluate(() => (window.__sources.length = 0));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await h.page.waitForFunction(() => window.__sources.length > 0, {
+    timeout: 15000,
+  });
+  const restarted = await h.page.evaluate(() => window.__sources[0].offset);
+  assert.equal(restarted, 0, "play after stop sounded from " + restarted + "s in");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1244,6 +1344,56 @@ test("the cursor is told where it is many times a beat", { skip }, async () => {
   // At this tempo a beat is about half a second: one reading per beat would
   // give two or three distinct positions in a second.
   assert.ok(readings >= 10, "progress reported " + readings + " times a second");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The buttons in the corner of a score keep clear of its engraving. A score is
+// scaled to the width of the pane, so the narrower the pane the higher its top
+// row of ink climbs: past about 500px the last chord symbol came up under the
+// buttons and was covered by them. They have a strip of their own above the
+// drawing now, so no width brings the two together.
+test("the buttons of a score keep clear of the engraving at any width", { skip }, async () => {
+  const h = await open({});
+  // The player open on the last score, so its buttons stay up without a hover.
+  await h.page.evaluate(() => {
+    const blocks = document.querySelectorAll("#app .mdm-score");
+    blocks[blocks.length - 1].querySelector(".mdm-audio-toggle").click();
+  });
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  for (const width of [1200, 800, 620, 500]) {
+    await h.page.setViewport({ width, height: 1000 });
+    await new Promise((r) => setTimeout(r, 400));
+    const seen = await h.page.evaluate(() => {
+      const blocks = document.querySelectorAll("#app .mdm-score");
+      const block = blocks[blocks.length - 1];
+      block.scrollIntoView({ block: "center" });
+      const svg = block.querySelector("code.language-abc svg");
+      const marks = Array.from(svg.querySelectorAll("path,text,rect,tspan"));
+      const covers = (btn) => {
+        const b = btn.getBoundingClientRect();
+        return marks.some((el) => {
+          const r = el.getBoundingClientRect();
+          return (
+            r.width > 0 && r.height > 0 &&
+            r.left < b.right && r.right > b.left &&
+            r.top < b.bottom && r.bottom > b.top
+          );
+        });
+      };
+      return {
+        onCopy: covers(block.querySelector(".mdm-copy")),
+        onToggle: covers(block.querySelector(".mdm-audio-toggle")),
+        drawn: marks.length,
+      };
+    });
+    assert.ok(seen.drawn > 20, "the score is not engraved at " + width + "px");
+    assert.equal(seen.onCopy, false, "the copy button sits on the ink at " + width + "px");
+    assert.equal(seen.onToggle, false, "the player button sits on the ink at " + width + "px");
+  }
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1629,53 +1779,7 @@ test("resume waits out the cut note in silence, and the next lands on its beat",
   );
   // Track when each note first lights, against the audio clock the spy sees,
   // and where the sound is at any moment.
-  await h.page.evaluate(() => {
-    // Where every playback source starts, on the context's own clock: the
-    // audioSpy of open() watches connections, not starts, so the recorder
-    // lives here, patched in before play is pressed.
-    window.__sources = [];
-    const start = AudioBufferSourceNode.prototype.start;
-    AudioBufferSourceNode.prototype.start = function (when, offset) {
-      try {
-        if (
-          this.buffer &&
-          this.buffer.duration > 2 &&
-          this.context.constructor.name === "AudioContext"
-        ) {
-          window.__sources.push({
-            ctx: this.context,
-            calledAt: this.context.currentTime,
-            when: when || 0,
-            offset: offset || 0,
-          });
-        }
-      } catch (e) {
-        // never break playback from the spy
-      }
-      return start.apply(this, arguments);
-    };
-    window.__audioPos = function () {
-      const s = window.__sources[window.__sources.length - 1];
-      return s ? s.ctx.currentTime - Math.max(s.calledAt, s.when) + s.offset : null;
-    };
-    window.__lit = function () {
-      const notes = Array.from(
-        document.querySelectorAll(
-          "#app [data-mdm-audio] code.language-abc svg .abcjs-note"
-        )
-      );
-      const el = document.querySelector(
-        "#app [data-mdm-audio] code.language-abc svg .abcjs-note.abcjs-note_selected"
-      );
-      return el ? notes.indexOf(el) : -1;
-    };
-    window.__onsets = {};
-    setInterval(function () {
-      const n = window.__lit();
-      const p = window.__audioPos();
-      if (n >= 0 && p !== null && !(n in window.__onsets)) window.__onsets[n] = p;
-    }, 25);
-  });
+  await installAudioProbe(h.page);
   await pressPlay(h.page);
   // Pause squarely inside a note, not on a wall-clock guess: a fixed sleep
   // drifts to the note boundary on a loaded machine, where every resume
@@ -1754,41 +1858,146 @@ test("resume waits out the cut note in silence, and the next lands on its beat",
   await h.close();
 });
 
-test("a scrub during the resume gap lifts the silence at once", { skip }, async () => {
-  const h = await open({ audioSpy: true });
+// The rule has one exception, and it is the commonest case of all: on a note's
+// attack, the top of the tune above every other, what sounds first is that
+// note's own beginning, so there is nothing to wait out and no silence goes in
+// front of it.
+test("play from the top sounds at once, with no silence in front of it", { skip }, async () => {
+  const h = await open({ audioSpy: true, text: TIMING_FIXTURE });
   await clickToggle(h.page, 2);
   await h.page.waitForFunction(
     () => document.querySelector(".mdm-audio .abcjs-midi-start"),
     { timeout: 15000 }
   );
-  await h.page.evaluate(() => {
-    window.__sources = [];
-    const start = AudioBufferSourceNode.prototype.start;
-    AudioBufferSourceNode.prototype.start = function (when, offset) {
-      try {
-        if (
-          this.buffer &&
-          this.buffer.duration > 2 &&
-          this.context.constructor.name === "AudioContext"
-        ) {
-          window.__sources.push({
-            ctx: this.context,
-            calledAt: this.context.currentTime,
-            when: when || 0,
-            offset: offset || 0,
-          });
-        }
-      } catch (e) {
-        // never break playback from the spy
-      }
-      return start.apply(this, arguments);
-    };
-    window.__audioPos = function () {
-      const s = window.__sources[window.__sources.length - 1];
-      return s ? s.ctx.currentTime - Math.max(s.calledAt, s.when) + s.offset : null;
-    };
-  });
+  await installAudioProbe(h.page);
+  // Prime the tune and take it back to the top. The press under test is this
+  // second one: before a tune is primed the timer holds no note timings at
+  // all, so there is nothing to schedule a silence against either way.
   await pressPlay(h.page);
+  await h.page.waitForFunction(() => window.__sources.length > 0, {
+    timeout: 15000,
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .mdm-audio-stop").click()
+  );
+  await new Promise((r) => setTimeout(r, 250));
+  await h.page.evaluate(() => (window.__sources.length = 0));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await h.page.waitForFunction(() => window.__sources.length > 0, {
+    timeout: 15000,
+  });
+  await new Promise((r) => setTimeout(r, 100));
+  const out = await h.page.evaluate(() => ({
+    mute: window.__mute(),
+    lit: window.__lit(),
+    offset: window.__sources[0].offset,
+  }));
+  assert.equal(out.offset, 0, "the tune did not start at the top: " + out.offset);
+  assert.equal(out.mute, 1, "silence was put in front of the first note");
+  assert.equal(out.lit, 0, "the first note is not the one lit: note " + out.lit);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A head dropped inside a chord marks nothing: what follows from there is the
+// silence, and the chord that is due lights when it sounds and not before. The
+// engine marks the chord AFTER the head, its event pointer having moved on the
+// moment it was told to seek, and it sounded the tail of the chord the head is
+// in with no attack, an echo of the one that was going. Dropped on an attack
+// instead, that note is marked at once: what sounds from there is its own
+// beginning.
+test("a head dropped inside a chord marks nothing, and play waits out its remainder", { skip }, async () => {
+  const h = await open({ audioSpy: true, text: TIMING_FIXTURE });
+  await clickToggle(h.page, 2);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await installAudioProbe(h.page);
+  // Prime the tune and take it back to the top: the timings the marks are read
+  // from are the primed ones.
+  await pressPlay(h.page);
+  await new Promise((r) => setTimeout(r, 400));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .mdm-audio-stop").click()
+  );
+  await new Promise((r) => setTimeout(r, 250));
+  // The fixture's grid: a note every 300 ms over 9600 ms. The head goes half
+  // way into the seventeenth, which is where a scrub lands as often as not.
+  const grid = await noteGrid(h.page);
+  assert.equal(grid.total, 9600, "the fixture's clock moved");
+  assert.equal(grid.onsets[16], 4800, "the fixture's note grid moved");
+  const at = 4950;
+  await dropHead(h.page, at / grid.total);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(
+    await h.page.evaluate(() => window.__lit()),
+    -1,
+    "a chord was marked for a head dropped inside one"
+  );
+  // On an attack there is nothing to wait out, so that note is marked.
+  await dropHead(h.page, grid.onsets[20] / grid.total);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(
+    await h.page.evaluate(() => window.__lit()),
+    20,
+    "a head dropped on an attack did not mark its note"
+  );
+  await dropHead(h.page, at / grid.total);
+  await new Promise((r) => setTimeout(r, 300));
+
+  // Play from there: the sound picks up where the head is but muted, and no
+  // ink is lit while the remainder of that chord passes.
+  await h.page.evaluate(() => (window.__sources.length = 0));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await new Promise((r) => setTimeout(r, 60));
+  const gap = await h.page.evaluate(() => ({
+    lit: window.__lit(),
+    mute: window.__mute(),
+    offset: (window.__sources[0] || {}).offset,
+  }));
+  assert.equal(gap.mute, 0, "the remainder of the chord under the head sounds");
+  assert.equal(gap.lit, -1, "ink lit during the silent gap: note " + gap.lit);
+  assert.ok(
+    Math.abs(gap.offset - at / 1000) <= 0.06,
+    "the sound did not pick up under the head: " + gap.offset
+  );
+
+  // Past the next onset: the chord that is due sounds and lights.
+  await new Promise((r) => setTimeout(r, 220));
+  const landed = await h.page.evaluate(() => ({
+    lit: window.__lit(),
+    mute: window.__mute(),
+  }));
+  assert.equal(landed.lit, 17, "the due chord did not land: ink on " + landed.lit);
+  assert.equal(landed.mute, 1, "the gain never came back");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A scrub while the tune sounds is answered the same way, and the silence it
+// sets is its own: scrubbing in the middle of a resume gap does not wait out
+// the gap it interrupted, it waits out the chord under the new head. What
+// tells the two apart is the note that lights, one near the head that was
+// dropped and not one near the point the tune was paused at.
+test("a scrub while the tune sounds waits out the chord under the new head", { skip }, async () => {
+  const h = await open({ audioSpy: true, text: TIMING_FIXTURE });
+  await clickToggle(h.page, 2);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await installAudioProbe(h.page);
+  await pressPlay(h.page);
+  const grid = await noteGrid(h.page);
+  assert.equal(grid.onsets[25], 7500, "the fixture's note grid moved");
+  // Pause squarely inside a note, so that the resume below schedules a gap of
+  // its own for the scrub to override.
   await h.page.evaluate(
     () =>
       new Promise((resolve) => {
@@ -1803,33 +2012,152 @@ test("a scrub during the resume gap lifts the silence at once", { skip }, async 
       })
   );
   await new Promise((r) => setTimeout(r, 300));
-  // Resume and scrub in the same breath, well inside the ~150ms silent gap:
-  // the seek must lift the scheduled silence itself, not wait it out, or the
-  // scrubbed-to spot plays its first stretch muted.
-  await h.page.evaluate(() => {
-    document.querySelector(".mdm-audio .abcjs-midi-start").click();
-    const track = document.querySelector(
-      ".mdm-audio .abcjs-midi-progress-background"
-    );
-    const box = track.getBoundingClientRect();
-    const x = box.x + box.width * 0.75;
-    const y = box.y + box.height / 2;
-    const opts = {
-      button: 0,
-      bubbles: true,
-      pointerId: 7,
-      clientX: x,
-      clientY: y,
-    };
-    track.dispatchEvent(new PointerEvent("pointerdown", opts));
-    track.dispatchEvent(new PointerEvent("pointerup", opts));
-  });
+  // Resume and scrub in the same breath, well inside the resume's own gap: the
+  // head goes half way into the twenty-sixth note (7500-7800 ms).
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await dropHead(h.page, 7650 / grid.total);
   await new Promise((r) => setTimeout(r, 80));
-  const out = await h.page.evaluate(() => ({
-    mute: window.__gain ? window.__gain.gain.value : null,
-    at: window.__audioPos(),
+  const gap = await h.page.evaluate(() => ({
+    lit: window.__lit(),
+    mute: window.__mute(),
+    offset: (window.__sources[window.__sources.length - 1] || {}).offset,
   }));
-  assert.equal(out.mute, 1, "the scrubbed-to spot plays muted: gain " + out.mute);
+  assert.equal(gap.mute, 0, "the chord under the new head is not waited out");
+  assert.equal(gap.lit, -1, "ink lit during the silent gap: note " + gap.lit);
+  assert.ok(
+    Math.abs(gap.offset - 7.65) <= 0.06,
+    "the sound did not pick up under the new head: " + gap.offset
+  );
+  // Past the onset the scrub was waiting for: the chord there sounds and
+  // lights, and it is the head's neighbour, not the pause's.
+  await new Promise((r) => setTimeout(r, 220));
+  const landed = await h.page.evaluate(() => ({
+    lit: window.__lit(),
+    mute: window.__mute(),
+  }));
+  assert.equal(landed.lit, 26, "the due chord did not land: ink on " + landed.lit);
+  assert.equal(landed.mute, 1, "the gain never came back");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// An ornament is more than one sound, and the rule above has to see all of
+// them. Same shape as TIMING_FIXTURE, with a grace note on the third bar of
+// the tune: quarters at a quarter of 100, so a note falls every 600 ms, the
+// ornamented note is the ninth (4800 ms), its d sounds there and its own C a
+// grace note later.
+const ORNAMENT_FIXTURE = [
+  "---",
+  'title: "Ornament fixture"',
+  "---",
+  "",
+  "A tune with an ornament in it, and two more so the player mounts as it does in the document.",
+  "",
+  "```abc",
+  "X:1",
+  "K:C",
+  "CDEFGABc|",
+  "```",
+  "",
+  "The middle score.",
+  "",
+  "```abc",
+  "X:1",
+  "K:C",
+  "cBAGFEDC|",
+  "```",
+  "",
+  "Four 4/4 bars of quarters at a quarter of 100: 9.6 seconds, a note every 600 ms, and a grace note on the ninth.",
+  "",
+  "```{.abc .play}",
+  "X:1",
+  "M:4/4",
+  "L:1/8",
+  "Q:1/4=100",
+  "K:C",
+  "C2D2E2F2 | G2A2B2c2 | {d}C2D2E2F2 | G2A2B2c2 |",
+  "```",
+  "",
+].join("\n");
+
+// A grace note sounds where its note is written and pushes the note itself
+// back behind it, so an ornamented note holds two attacks and the silence in
+// front of a resume must end at the second, not at the note after the group.
+// Read as one attack, {d}C2 looked like a single note beginning at its d, and
+// a head dropped in it waited the whole group out: the ornament AND the note
+// it decorates passed muted, which is what "the grace note is not heard" was.
+test("an ornament is not swallowed: the note under it lands on its own beat", { skip }, async () => {
+  const h = await open({ audioSpy: true, text: ORNAMENT_FIXTURE });
+  await clickToggle(h.page, 2);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await installAudioProbe(h.page);
+  // Prime the tune and take it back to the top: the timings the marks are read
+  // from are the primed ones.
+  await pressPlay(h.page);
+  await new Promise((r) => setTimeout(r, 400));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .mdm-audio-stop").click()
+  );
+  await new Promise((r) => setTimeout(r, 250));
+  const grid = await noteGrid(h.page);
+  assert.equal(grid.total, 9600, "the fixture's clock moved");
+  assert.equal(grid.onsets[8], 4800, "the fixture's note grid moved");
+
+  // The head on the group's own moment, which is where its grace note sounds:
+  // there is nothing to wait out, so that note is marked.
+  await dropHead(h.page, grid.onsets[8] / grid.total);
+  await new Promise((r) => setTimeout(r, 300));
+  const onAttack = await h.page.evaluate(() => window.__lit());
+  assert.ok(onAttack >= 0, "a head dropped on the ornament marked nothing");
+
+  // The head inside the ornament: what comes first from there is the silence,
+  // so nothing is marked until the note it decorates attacks.
+  await dropHead(h.page, 4950 / grid.total);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(
+    await h.page.evaluate(() => window.__lit()),
+    -1,
+    "a note was marked for a head dropped inside an ornament"
+  );
+
+  // Play from there: the remainder of the grace note passes muted.
+  await h.page.evaluate(() => (window.__sources.length = 0));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await new Promise((r) => setTimeout(r, 60));
+  const gap = await h.page.evaluate(() => ({
+    lit: window.__lit(),
+    mute: window.__mute(),
+    offset: (window.__sources[0] || {}).offset,
+  }));
+  assert.equal(gap.mute, 0, "the remainder of the grace note sounds");
+  assert.equal(gap.lit, -1, "ink lit during the silent gap: note " + gap.lit);
+  assert.ok(
+    Math.abs(gap.offset - 4.95) <= 0.06,
+    "the sound did not pick up under the head: " + gap.offset
+  );
+
+  // The note the ornament decorates is due at 5100 ms, a grace note after the
+  // group's moment and half a beat before the note after it. The gain comes
+  // back for it and the ink lands on it: read as one attack, both waited for
+  // 5400 and the note was never heard.
+  await new Promise((r) => setTimeout(r, 200));
+  const landed = await h.page.evaluate(() => ({
+    lit: window.__lit(),
+    mute: window.__mute(),
+  }));
+  assert.equal(landed.mute, 1, "the ornamented note was swallowed with its grace");
+  assert.equal(
+    landed.lit,
+    onAttack,
+    "the ornamented note did not land: ink on " + landed.lit
+  );
   assert.deepEqual(h.errors, []);
   await h.close();
 });
