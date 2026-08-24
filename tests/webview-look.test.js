@@ -373,6 +373,125 @@ test(
   }
 );
 
+// The copy button answers in its own tooltip, "Copied" where "Copy" was. A
+// tooltip is drawn on :hover, so with the pointer resting on the button after
+// the click the answer would sit there until the pointer moved off the block.
+// It is held for a beat and then put away, and the label goes back to "Copy"
+// so the next hover reads as it did. Only a pointer click leaves anything to
+// put away: a synthetic one (the rest of the suite) has no hover to fight.
+test("the copied sign is shown for a beat and then goes", { skip }, async () => {
+  const h = await open({ clipboard: true });
+  const SEL = "#app .mdm-score .mdm-chrome .mdm-copy";
+  // The chrome is drawn at opacity 0 and shown while the pointer is on the
+  // block, so the button has to be hovered before it can be clicked.
+  const where = await h.page.evaluate(() => {
+    const score = document.querySelector("#app .mdm-score");
+    score.scrollIntoView({ block: "center" });
+    const r = score.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + Math.min(30, r.height / 2) };
+  });
+  await h.page.mouse.move(where.x, where.y);
+  await sleep(300);
+  const button = await h.page.evaluate((sel) => {
+    const r = document.querySelector(sel).getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, SEL);
+  const read = () =>
+    h.page.evaluate((sel) => {
+      const btn = document.querySelector(sel);
+      return {
+        label: btn.getAttribute("aria-label"),
+        drawn: getComputedStyle(btn, "::after").display !== "none",
+        hovered: btn.matches(":hover"),
+      };
+    }, SEL);
+  await h.page.mouse.click(button.x, button.y);
+  await sleep(150);
+  assert.deepEqual(
+    await read(),
+    { label: "Copied", drawn: true, hovered: true },
+    "the sign did not come up on the button the pointer is on"
+  );
+  await sleep(1600);
+  assert.deepEqual(
+    await read(),
+    { label: "Copy", drawn: false, hovered: true },
+    "the sign stayed up under the pointer"
+  );
+  // The pointer leaves and comes back: the button says what it says again.
+  await h.page.mouse.move(5, 5);
+  await sleep(200);
+  await h.page.mouse.move(button.x, button.y);
+  await sleep(300);
+  assert.deepEqual(
+    await read(),
+    { label: "Copy", drawn: true, hovered: true },
+    "the tooltip never came back"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The gap between two paragraphs is the blank line of the Markdown, and it is
+// drawn at an em rather than at the height of a line of prose: 16px on a 16px
+// body, the space a rendered document leaves between two paragraphs (Vditor's
+// `p { margin-bottom: 16px }`, which is what the Office Viewer preview and the
+// editor that came before this one draw with). A blank line inside a fence is
+// a line of the block and keeps the height of one.
+test("a blank line between paragraphs is an em, not a line of prose", { skip }, async () => {
+  const text = [
+    "First paragraph.",
+    "",
+    "Second paragraph.",
+    "",
+    "```python",
+    "a = 1",
+    "",
+    "b = 2",
+    "c = 3",
+    "```",
+    "",
+  ].join("\n");
+  const h = await open({ text, scores: 0, seed: { settings: { frontMatter: "hidden" } } });
+  const seen = await h.page.evaluate(() => {
+    const view = window.__mdm.view, doc = view.state.doc;
+    const boxOf = (n) => {
+      const dom = view.domAtPos(doc.line(n).from).node;
+      const el = dom.nodeType === 1 ? dom : dom.parentElement;
+      const line = el.closest(".cm-line");
+      const r = line.getBoundingClientRect();
+      return { cls: line.className, top: r.top, bottom: r.bottom, height: r.height };
+    };
+    const em = parseFloat(getComputedStyle(document.querySelector("#app .cm-content")).fontSize);
+    const prose = [boxOf(1), boxOf(2), boxOf(3)];
+    // The blank line of the fence against a line of code beside it. Neither
+    // the first line of the block nor the last: those carry the padding that
+    // stands the card off its own edges.
+    const code = [boxOf(8), boxOf(7)];
+    return {
+      em,
+      blank: { cls: prose[1].cls, height: prose[1].height },
+      gap: prose[2].top - prose[0].bottom,
+      proseLine: prose[0].height,
+      codeBlank: { cls: code[1].cls, height: code[1].height },
+      codeLine: code[0].height,
+    };
+  });
+  assert.match(seen.blank.cls, /mdm-blank/, "the blank line of the prose is not marked");
+  assert.equal(seen.blank.height, seen.em, "the blank line is not an em tall");
+  // What separates the paragraphs is that em and nothing else.
+  assert.equal(Math.round(seen.gap), Math.round(seen.em), "the paragraphs are not an em apart");
+  assert.ok(
+    seen.proseLine > seen.em * 1.5,
+    "a line of prose is no taller than the gap: " + seen.proseLine
+  );
+  // The fence keeps its own rhythm.
+  assert.doesNotMatch(seen.codeBlank.cls, /mdm-blank/, "a blank line of the fence was marked");
+  assert.equal(seen.codeBlank.height, seen.codeLine, "the fence's blank line was shortened");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a setting that touches no colour does not repaint the theme", { skip }, async () => {
   const h = await open({
     seed: { settings: { frontMatter: "hidden" } },
@@ -883,7 +1002,13 @@ test("inline code sits on the code ground, not the theme's own wash", { skip }, 
 function staffColours(page) {
   return page.evaluate(() => {
     const svg = document.querySelector("#app code.language-abc svg");
-    const staff = svg.querySelector(".abcjs-staff");
+    // abcjs 6 draws the five staff lines as <path> children of a
+    // <g class="abcjs-staff">, each path carrying its own fill="currentColor"
+    // attribute. A fill set on the group is not inherited past that attribute,
+    // so the visible colour of a line is the path's, not the group's: the
+    // measurement has to read the path or it reports gray while the lines
+    // stay in ink.
+    const staff = svg.querySelector(".abcjs-staff path") || svg.querySelector(".abcjs-staff");
     const note = svg.querySelector(".abcjs-note");
     const btn = document.querySelector('#app button[data-type="mdm-staff-lines"]');
     return {
@@ -1128,6 +1253,192 @@ test("an ordinary delete inside a paragraph stays ordinary", { skip }, async () 
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// A drop-down panel keeps its contrast even when mdm.theme holds the editor
+// to a side the VS Code theme does not share. The panel used the VS Code
+// widget background, which under a dark VS Code theme came out dark behind
+// the light-side ink of the menu text: dark on dark, unreadable. It now takes
+// the editor's own ground, which moves with the same side as the ink.
+test("a drop-down keeps its contrast when the editor and VS Code disagree on side", { skip }, async () => {
+  const h = await open({ seed: { settings: { theme: "light", frontMatter: "hidden" } } });
+  // VS Code on a dark theme: seed the widget/background vars dark, as the host
+  // would hand them over.
+  await h.page.evaluate(() => {
+    const a = document.getElementById("app");
+    a.style.setProperty("--vscode-editorWidget-background", "#1e1e1e");
+    a.style.setProperty("--vscode-editor-background", "#1e1e1e");
+  });
+  await h.page.click('#app button[data-type="mdm-theme"]');
+  await sleep(150);
+  const seen = await h.page.evaluate(() => {
+    const panel = document.querySelector("#app .mdm-toolbar__item--open .mdm-menu");
+    const item = document.querySelector('#app button[data-type="mdm-theme-0"]');
+    const lum = (c) => {
+      // rgb(...) gives 0-255 components; a color-mix result serializes as
+      // color(srgb ...) with 0-1 components. Normalize both to 0-1.
+      const m = c.match(/[\d.]+/g).map(Number);
+      const scale = c.indexOf("color(") === 0 ? 1 : 255;
+      return (0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]) / scale;
+    };
+    const bg = getComputedStyle(panel).backgroundColor;
+    const fg = getComputedStyle(item).color;
+    return {
+      bgLum: lum(bg),
+      fgLum: lum(fg),
+      bg,
+      fg,
+      shadow: getComputedStyle(panel).boxShadow,
+    };
+  });
+  // Light editor: the panel is light (near the page), the text dark, and the
+  // two are far apart. The dark VS Code var must not have leaked in.
+  assert.ok(seen.bgLum > 0.7, "the panel went dark under the editor's light side: " + seen.bg);
+  assert.ok(seen.bgLum - seen.fgLum > 0.4, "panel and text do not contrast: " + seen.bg + " / " + seen.fg);
+  // The border lifts the panel off the page on its own; the drop shadow it
+  // used to carry read as a hard frame around a tall one.
+  assert.equal(seen.shadow, "none", "the panel kept its shadow: " + seen.shadow);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The scrollbars are the editor's own, painted in the ink of the side it is
+// showing. They were the browser's, and the browser drew them from what VS
+// Code puts on the webview root: its colour scheme, and its own
+// scrollbar-color, which is inherited and which disables every
+// ::-webkit-scrollbar rule it reaches. So the first two goes at this (a colour
+// scheme on #app, then the bars painted with the webkit pseudo-elements) left
+// the theme menu with a black track down a white panel under a dark VS Code,
+// the third report of the same bar. The colours are set with the standard
+// properties now, which is what the host sets and what the editor has to
+// outrank; the harness replays the host's sheet so this is tested against it.
+const MANY_THEMES = [
+  "Abyss", "Dark Modern", "Dark+", "Default High Contrast",
+  "Default High Contrast Light", "Kimbie Dark", "Light Modern", "Light+",
+  "Monokai", "Monokai Dimmed", "Quiet Light", "Red", "Solarized Dark",
+  "Solarized Light", "Tomorrow Night Blue",
+].map((name) => ({ name, kind: /light|quiet/i.test(name) ? "light" : "dark" }));
+
+test("the editor paints its own scrollbars, in the ink of the side it shows", { skip }, async () => {
+  for (const [side, want] of [["light", "light"], ["dark", "dark"], ["white", "light"]]) {
+    // A short pane on purpose: the panel is capped at 60vh, so a tall window
+    // would show the whole list and there would be no bar to look at.
+    const h = await open({
+      height: 600,
+      scores: 0,
+      seed: { settings: { theme: side, frontMatter: "hidden" }, themes: MANY_THEMES },
+    });
+    // VS Code on a dark theme marks the root with its scheme.
+    await h.page.evaluate(() => {
+      document.documentElement.style.colorScheme = "dark";
+    });
+    await sleep(150);
+    await h.page.click('#app button[data-type="mdm-theme"]');
+    await sleep(200);
+    const seen = await h.page.evaluate(() => {
+      const scheme = (el) => (el ? getComputedStyle(el).colorScheme : null);
+      // A colour as three 0-255 components, whether it serializes as rgb()
+      // or as color(srgb ...), which is what a color-mix comes back as.
+      const rgb = (c) => {
+        const parts = (c.match(/[\d.]+/g) || []).map(Number);
+        const scale = c.indexOf("color(") === 0 ? 255 : 1;
+        return parts.slice(0, 3).map((v) => Math.round(v * scale));
+      };
+      // scrollbar-color is two colours, the thumb's and the track's. The
+      // track's is transparent here, so the panel shows through it, and a
+      // transparent colour serializes with its own channels at zero: what is
+      // read off the thumb is the first of the two.
+      const bar = (el) => {
+        const both =
+          getComputedStyle(el).scrollbarColor.match(/[a-z-]+\([^()]*\)|[a-z]+/gi) || [];
+        return { thumb: rgb(both[0] || ""), track: both[1] || "" };
+      };
+      const app = document.getElementById("app");
+      const menu = document.querySelector("#app .mdm-toolbar__item--open .mdm-menu");
+      const scroller = document.querySelector("#app .cm-scroller");
+      return {
+        root: scheme(document.documentElement),
+        app: scheme(app),
+        scroller: scheme(scroller),
+        menu: scheme(menu),
+        ink: rgb(getComputedStyle(app).color),
+        hostBar: getComputedStyle(document.documentElement).scrollbarColor,
+        menuBar: bar(menu),
+        pageBar: bar(scroller),
+        // The room the bar reserves: what the panel's box holds over what its
+        // content is given, less the border, which the first counts and the
+        // second does not.
+        bar: (() => {
+          const cs = getComputedStyle(menu);
+          const border =
+            parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+          return menu.offsetWidth - menu.clientWidth - border;
+        })(),
+        width: getComputedStyle(menu).scrollbarWidth,
+        scrolls: menu.scrollHeight > menu.clientHeight,
+        acrossToo: menu.scrollWidth > menu.clientWidth,
+        gutter: getComputedStyle(menu).scrollbarGutter,
+      };
+    });
+    assert.equal(seen.root, "dark", "the harness did not put VS Code on the dark side");
+    assert.equal(seen.app, want, "the editor took the root's scheme (" + side + ")");
+    assert.equal(seen.scroller, want, "the page's scrollbar took the root's scheme (" + side + ")");
+    assert.equal(seen.menu, want, "the drop-down took the root's scheme (" + side + ")");
+    // The host is asking for bars of its own, as it does inside VS Code.
+    assert.match(seen.hostBar, /^rgba?\(/, "the harness is not replaying the host's bars");
+    // The bars are ours all the same, and the same ink as the text of the side
+    // in force, over a track left transparent so the panel shows through.
+    assert.deepEqual(seen.menuBar.thumb, seen.ink, "the drop-down's bar is not the editor's ink (" + side + ")");
+    assert.deepEqual(seen.pageBar.thumb, seen.ink, "the page's bar is not the editor's ink (" + side + ")");
+    assert.equal(seen.menuBar.track, "rgba(0, 0, 0, 0)", "the drop-down's bar has a track of its own (" + side + ")");
+    // A thin bar, which is the 10px the editor used to ask for and no stepper
+    // arrows at either end. Measured off the gutter, which is the room the bar
+    // reserves: this browser floats its bars over the content, so the width
+    // the stylesheet asks for shows up nowhere else.
+    assert.equal(seen.width, "thin", "the bar is not the editor's own (" + side + ")");
+    assert.equal(seen.bar, 10, "the bar is not 10px wide (" + side + ")");
+    // A list long enough to scroll must not grow a bar across the bottom as
+    // well: the panel is as wide as its widest entry, and the room the
+    // vertical bar takes is reserved rather than taken out of that width.
+    // The reservation is what is asserted: a bar that floats over the content,
+    // which is what this browser draws when it is not told otherwise, takes no
+    // width to begin with and so cannot push anything out of the panel here.
+    assert.equal(seen.scrolls, true, "the theme list is too short to test with");
+    assert.equal(seen.gutter, "stable", "the vertical bar's room is not reserved (" + side + ")");
+    assert.equal(seen.acrossToo, false, "the drop-down grew a horizontal bar (" + side + ")");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// A selection inside a code block (or a heading, or the header) shows above
+// the opaque card those lines sit on. CodeMirror draws the selection on a
+// layer behind the content, so a match Ctrl+D found in a code comment was
+// hidden under the card; the layer is lifted above the text (its colours are
+// translucent). This checks the selection paints on top where a card is.
+test("a selection inside a code block shows above its card", { skip }, async () => {
+  const h = await open({ seed: { settings: { theme: "light", frontMatter: "hidden" } } });
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  const top = await h.page.evaluate(() => {
+    const { view, CM } = window.__mdm;
+    const doc = view.state.doc.toString();
+    const at = doc.indexOf("render the score") + "render the ".length;
+    view.dispatch({ selection: CM.EditorSelection.range(at, at + 5) });
+    return at;
+  });
+  await sleep(300);
+  const painted = await h.page.evaluate((at) => {
+    const { view } = window.__mdm;
+    const c = view.coordsAtPos(at + 2);
+    const el = document.elementsFromPoint(c.left, (c.top + c.bottom) / 2)[0];
+    return el ? el.className : null;
+  }, top);
+  // The topmost box over the selected code word is the selection, not the code
+  // line that would otherwise cover it.
+  assert.equal(painted, "cm-selectionBackground");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // The LaTeX inside inline and block maths is syntax-highlighted while its
 // source shows (a stex overlay on the math content, mounted in the Lezer tree
 // and coloured by the same palette as code). Regression guard: the content

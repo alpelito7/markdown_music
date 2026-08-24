@@ -180,6 +180,84 @@ test("the toggle opens the player without expanding the block, and closes it", {
   await h.close();
 });
 
+// The headphones name what the click leads to, "Show player" and "Hide
+// player", so the label flips under a pointer that has not moved. The tooltip
+// is put away by the click and comes back when the pointer leaves and
+// returns, the manners the toolbar has had since the Vditor days: showing the
+// new text at once would read as a flicker under a resting pointer, and it
+// says nothing the lit disc of the block does not say already. Only a pointer
+// click has anything to put away, which is why the rest of this file, which
+// clicks the toggle from script, never meets this.
+test("a click on the headphones puts its tooltip away until the pointer leaves", { skip }, async () => {
+  const h = await open({});
+  const SEL = "#app .mdm-score .mdm-audio-toggle";
+  // The chrome of a score is drawn at opacity 0 and shown on hover.
+  const spot = await h.page.evaluate((sel) => {
+    const score = document.querySelector("#app .mdm-score");
+    score.scrollIntoView({ block: "center" });
+    const s = score.getBoundingClientRect();
+    const r = document.querySelector(sel).getBoundingClientRect();
+    return {
+      block: { x: s.x + s.width / 2, y: s.y + Math.min(30, s.height / 2) },
+      button: { x: r.x + r.width / 2, y: r.y + r.height / 2 },
+    };
+  }, SEL);
+  const read = () =>
+    h.page.evaluate((sel) => {
+      const btn = document.querySelector(sel);
+      return {
+        label: btn.getAttribute("aria-label"),
+        drawn: getComputedStyle(btn, "::after").display !== "none",
+        hovered: btn.matches(":hover"),
+      };
+    }, SEL);
+  await h.page.mouse.move(spot.block.x, spot.block.y);
+  await new Promise((r) => setTimeout(r, 300));
+  await h.page.mouse.move(spot.button.x, spot.button.y);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(
+    await read(),
+    { label: "Show player", drawn: true, hovered: true },
+    "the tooltip is not up on the button the pointer is resting on"
+  );
+  await h.page.mouse.click(spot.button.x, spot.button.y);
+  await h.page.waitForFunction(() => !!document.querySelector(".mdm-audio"), {
+    timeout: 15000,
+  });
+  assert.deepEqual(
+    await read(),
+    { label: "Hide player", drawn: false, hovered: true },
+    "the tooltip stayed up naming the other half of the toggle"
+  );
+  // Away and back: it says what the next click leads to.
+  await h.page.mouse.move(5, 5);
+  await new Promise((r) => setTimeout(r, 200));
+  await h.page.mouse.move(spot.button.x, spot.button.y);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(
+    await read(),
+    { label: "Hide player", drawn: true, hovered: true },
+    "the tooltip never came back"
+  );
+  // A click that no pointer made leaves nothing to put away: the mouseleave
+  // that brings the tooltip back would never come, and the button would go
+  // quiet for good.
+  await h.page.mouse.move(5, 5);
+  await new Promise((r) => setTimeout(r, 200));
+  await h.page.evaluate((sel) => document.querySelector(sel).click(), SEL);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(
+    await h.page.evaluate(
+      (sel) => document.querySelector(sel).classList.contains("mdm-tip--off"),
+      SEL
+    ),
+    false,
+    "a click from script left the tooltip put away with no pointer to bring it back"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("play sounds from the vendored soundfont, no network", { skip }, async () => {
   const h = await open({});
   const requests = [];

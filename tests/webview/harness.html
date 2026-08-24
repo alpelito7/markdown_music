@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <!--
-  The webview page as extension.js builds it (getHtml), with three differences:
+  The webview page as extension.js builds it (getHtml), with four differences:
   the resources are loaded over file:// instead of the webview scheme, there is
-  no CSP (nothing here is remote anyway), and acquireVsCodeApi is a shim that
-  records what the webview posts to the host in window.__posts.
+  no CSP (nothing here is remote anyway), acquireVsCodeApi is a shim that
+  records what the webview posts to the host in window.__posts, and the sheet
+  VS Code injects into a webview of its own is replayed below, since nothing
+  here is inside VS Code to inject it.
 
   The values the host interpolates are read from window.__settings, __palette,
   __side and __themes, which the test seeds with evaluateOnNewDocument before
@@ -12,6 +14,35 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!--
+  What VS Code drops into every webview of its own (the _defaultStyles sheet of
+  pre/index.html), or the part of it the editor has to live with: the bars of
+  every scroller in the page are set from the host's colours, and
+  scrollbar-color is inherited, so the setting reaches every box of the editor
+  and disables any ::-webkit-scrollbar rule it meets on the way. Without this
+  the harness draws bars no webview ever draws. The fallbacks stand for a VS
+  Code on a dark theme, which is the case that put a black bar down a light
+  panel. The rest of that sheet (type, links, code) is left out: the editor
+  overrides all of it inside #app.
+-->
+<style>
+@layer vscode-default {
+  html {
+    scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4))
+      var(--vscode-editor-background, #1f1f1f);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-corner {
+    background-color: var(--vscode-editor-background, #1f1f1f);
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+  }
+}
+</style>
 <link rel="stylesheet" href="../../vscode-mdm/media/vendor/cm6/katex.min.css">
 <link rel="stylesheet" href="../../vscode-mdm/media/vendor/abcjs/abcjs-audio.css">
 <link rel="stylesheet" href="../../vscode-mdm/media/style.css">

@@ -1880,22 +1880,12 @@
   // are positioned against that line, so they overlay the card's top right
   // corner.
   class CodeChromeWidget extends WidgetType {
-    constructor(lang) {
-      super();
-      this.lang = lang;
-    }
-    eq(other) {
-      return other.lang === this.lang;
+    eq() {
+      return true; // one of these is like another: a copy button and nothing else
     }
     toDOM() {
       const el = document.createElement("span");
       el.className = "mdm-chrome mdm-chrome--code";
-      if (this.lang) {
-        const tag = document.createElement("span");
-        tag.className = "mdm-lang";
-        tag.textContent = this.lang;
-        el.appendChild(tag);
-      }
       el.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
       return el;
     }
@@ -2012,6 +2002,12 @@
   function lineClassCollector(doc) {
     const lines = new Map(); // line number -> Set of classes
     return {
+      // Whether a line has been given no class at all, which is what says it
+      // is prose: every block of the document (a fence, the front matter, a
+      // table, a quote) classes the lines it covers.
+      bare: function (n) {
+        return !lines.has(n);
+      },
       add: function (from, to, cls) {
         const first = doc.lineAt(from).number;
         const last = doc.lineAt(Math.max(from, to)).number;
@@ -2040,12 +2036,6 @@
   // Which fence info strings are scores: ```abc and Pandoc's ```{.abc .play}.
   function isAbcInfo(info) {
     return /^(abc\b|\{\s*\.abc\b)/.test(info.trim());
-  }
-
-  // The language a ```lang fence names, with Pandoc's {.lang attrs} form.
-  function fenceLanguage(info) {
-    const m = /^\{\s*\.([A-Za-z0-9_+#-]+)/.exec(info.trim()) || /^([A-Za-z0-9_+#-]+)/.exec(info.trim());
-    return m ? m[1] : "";
   }
 
   // Marks hidden while their node is not touched: the node name and the names
@@ -2136,7 +2126,7 @@
           // that line is hidden).
           decos.push(
             Decoration.widget({
-              widget: new CodeChromeWidget(fenceLanguage(infoText)),
+              widget: new CodeChromeWidget(),
               side: -1,
             }).range(body ? body.from : openLine.to)
           );
@@ -2370,6 +2360,20 @@
         return true;
       },
     });
+
+    // The gap between two paragraphs is a blank line of Markdown, and drawn
+    // at the height of a line of prose it left the paragraphs adrift: the
+    // rendered document (Vditor, and the Office Viewer preview with it) puts
+    // 16px between two paragraphs of a 16px body, an em, where a line of this
+    // editor stands at 1.7 of one. The class is what the stylesheet draws
+    // that em from. Only on prose: a blank line inside a fence or the front
+    // matter is a line of the block and already carries its class.
+    for (let n = 1; n <= doc.lines; n++) {
+      const line = doc.line(n);
+      if (lines.bare(n) && /^\s*$/.test(line.text)) {
+        lines.add(line.from, line.from, "mdm-blank");
+      }
+    }
 
     return Decoration.set(decos.concat(lines.decorations()), true);
   }
@@ -2753,6 +2757,40 @@
     btn.setAttribute("aria-label", matchTip());
     btn.classList.toggle("mdm-btn--on", matchSubstring);
   }
+
+  // ---------- Tooltips ----------
+
+  // A tooltip is drawn on :hover from aria-label (.mdm-tip in style.css), so
+  // a button that changes what it says when it is clicked says the new thing
+  // under the pointer that has not moved: the headphones flipped from "Hide
+  // player" to "Show player" with the panel still open under them, and the
+  // toolbar's tooltip, drawn southwards, covered the first entry of the panel
+  // its own click had just opened. A click puts the tooltip away until the
+  // pointer leaves and comes back, which is when the button has something new
+  // to say. Nothing to put away if the pointer is not on the button (a button
+  // worked from the keyboard): the mouseleave that restores it would never
+  // come, and the next hover would show nothing.
+  function hideTipUntilLeave(el) {
+    if (!el || !el.matches || !el.matches(":hover")) return;
+    el.classList.add("mdm-tip--off");
+    const restore = function () {
+      el.classList.remove("mdm-tip--off");
+      el.removeEventListener("mouseleave", restore);
+    };
+    el.addEventListener("mouseleave", restore);
+  }
+
+  // One rule for the whole editor, in capture so that it is read before the
+  // handlers that stop the click travelling (the block chrome, the player
+  // bar). The copy button is the exception: its click has something to say,
+  // so it holds the tooltip open for its own answer and puts it away itself
+  // (copyBlock).
+  function dismissTip(e) {
+    const el = e.target && e.target.closest ? e.target.closest(".mdm-tip") : null;
+    if (!el || el.classList.contains("mdm-copy")) return;
+    hideTipUntilLeave(el);
+  }
+
   // ---------- Mouse ----------
 
   // The click that adds a caret follows VS Code's editor.multiCursorModifier.
@@ -2763,6 +2801,66 @@
   function addsCaret(e) {
     if (e.shiftKey) return false;
     return multiCursorModifier === "ctrlCmd" ? e.ctrlKey || e.metaKey : e.altKey;
+  }
+
+  // Alt+click has to reach this editor the way it reaches VS Code's own: the
+  // first press was being eaten by the menu bar.
+  //
+  // What happens without this. VS Code focuses the menu bar (File, Edit, ...)
+  // on a CLEAN press and release of Alt, and the workbench decides that in
+  // ModifierKeyEmitter: the Alt keydown writes lastKeyPressed="alt", the
+  // keyup writes lastKeyReleased="alt", and the two together are what the
+  // menu bar reads. A press used with the mouse is not clean, and what says
+  // so is a listener of its own on `document.body`, which clears
+  // lastKeyPressed on every mousedown. That body is the workbench's: a click
+  // made inside a webview never reaches it, so a held Alt here always looked
+  // like a tap, and the release took the focus out of this page and into the
+  // File menu. From the inside that reads as the multicursor breaking: the
+  // caret WAS added by the click, and then the carets stopped being drawn and
+  // the typing went to the menu bar, so the gesture only worked on the second
+  // try, once the menu bar had been dismissed by another Alt.
+  //
+  // What is done about it. The tap must keep opening the File menu, so the
+  // press is left alone and it is the RELEASE that is held back, and only
+  // when the press was used with the mouse, which is the same rule the
+  // workbench applies to itself. The keys leave the page through a bubble
+  // listener the webview preload puts on the window (contentWindow
+  // .addEventListener('keyup', handleInnerKeyup), in
+  // workbench/contrib/webview/browser/pre/index.html), so stopping the event
+  // on the way up at the document keeps it from ever being forwarded, while
+  // everything inside the page has already had it. A key event of our own is
+  // no use here: the host drops what it is sent unless event.isTrusted
+  // (shouldForwardKeyEvent), and a dispatched one is never trusted.
+  //
+  // The workbench is left believing Alt is still down until the next key it
+  // sees, which is the next character typed here, since every keydown writes
+  // the modifier state afresh. Nothing reads that state in between but the
+  // alternative actions some toolbars show while Alt is held.
+  let altUsedWithMouse = false;
+
+  function watchAltPresses() {
+    document.addEventListener(
+      "keydown",
+      function (e) {
+        if (e.key === "Alt" && !e.repeat) altUsedWithMouse = false;
+      },
+      true
+    );
+    // Capture: a press inside the player bar is stopped there (openPlayer).
+    document.addEventListener(
+      "mousedown",
+      function (e) {
+        if (e.altKey) altUsedWithMouse = true;
+      },
+      true
+    );
+    // Bubble at the document, the last stop before the window: the editor and
+    // every other listener in the page see this release, the host does not.
+    document.addEventListener("keyup", function (e) {
+      if (e.key !== "Alt" || !altUsedWithMouse) return;
+      altUsedWithMouse = false;
+      e.stopPropagation();
+    });
   }
 
   // Inside VS Code, Ctrl+Z reaches this editor twice: once as the keydown,
@@ -2861,6 +2959,108 @@
     });
   }
 
+  // Outside the sheet there is no document. The strip of pane either side of
+  // the text column belongs to CodeMirror's scroller, which answers a click out
+  // there like any other: the caret lands on the line at that height, and
+  // beside a score that opens its source. The mousedown is taken here instead,
+  // on the way down and above the scroller, so nothing below hears it: no
+  // caret, no focus, no selection drag. Only the mousedown, so a click out
+  // there still closes an open drop-down of the toolbar, and only the left
+  // button, and never over the scrollbar, which is the scroller's own
+  // furniture: it sits past clientWidth, and a mousedown taken from it would
+  // kill the drag of the handle.
+  //
+  // The strip is everything .cm-content does not cover, and the stylesheet
+  // makes that box the text column itself, so this boundary and the one the
+  // pointer changes at are the same one.
+  function deadMargin(e) {
+    if (e.button !== 0 || !e.target || !e.target.closest || !view) return;
+    if (e.target.closest(".cm-content")) return;
+    const box = view.scrollDOM.getBoundingClientRect();
+    if (e.clientX - box.left >= view.scrollDOM.clientWidth) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  // Anywhere but the text, whatever is open for editing goes back to its
+  // drawing: the dead margin, the outline and its grip, the toolbar and its
+  // panels. Caught on the way down at the document, so it is done before the
+  // click is answered by whatever it was actually for; the buttons that work
+  // on the caret only meet this with a caret inside a block, where they have
+  // nothing to say anyway.
+  function dismissFromOutside(e) {
+    if (e.button !== 0 || !e.target || !e.target.closest || !view) return;
+    if (e.target.closest(".cm-content")) return;
+    dismissOpenBlock();
+  }
+
+  // What shows its source while a caret is in it: a fenced block, code or
+  // score, and an equation of either kind. Not the YAML header, and not
+  // indented code: those are drawn the same way wherever the carets are, so
+  // there is nothing to put away (see the decoration field below).
+  const OPEN_NODES = /^(FencedCode|BlockMath|InlineMath|InlineBlockMath)$/;
+
+  // Both sides of the position are asked, since a caret at either edge of a
+  // node counts as being in it (touchedBy), and resolveInner only looks the
+  // way it is told to.
+  function openNodeAt(state, pos) {
+    const sides = [-1, 1];
+    for (let i = 0; i < sides.length; i++) {
+      let node = CM.syntaxTree(state).resolveInner(pos, sides[i]);
+      while (node && !OPEN_NODES.test(node.name)) node = node.parent;
+      if (node) return node;
+    }
+    return null;
+  }
+
+  // Where the caret goes when something open is put away: the line after the
+  // one the node ends on, which is where a click in the text below it would
+  // have left the caret. A node that ends the document is left by the line
+  // above instead, and a document that is nothing but the node has nowhere to
+  // go, so it stays as it is.
+  function positionOutside(state, node) {
+    const doc = state.doc;
+    const last = doc.lineAt(node.to);
+    if (last.number < doc.lines) return doc.line(last.number + 1).from;
+    const first = doc.lineAt(node.from);
+    if (first.number > 1) return doc.line(first.number - 1).to;
+    return null;
+  }
+
+  // The one thing a click in the dead margin does: put away whatever is open
+  // for editing. A caret carries the source of the block it is in, so the
+  // click takes the caret out of it and the block goes back to its drawing.
+  // Every caret is asked, not only the main one, and they collapse into the
+  // one this leaves, so several blocks opened at once close together. With
+  // nothing open the margin does nothing at all.
+  // Caret by caret: the ones inside an open block come out of it, which is
+  // what closes it, and every other one stays where it is. It used to replace
+  // the whole selection with the single caret that came out, which threw away
+  // the rest of a multicursor (measured: three carets, one of them in a code
+  // block, came back as one after a click in the dead margin, and the two in
+  // the prose were gone).
+  function dismissOpenBlock() {
+    const state = view.state;
+    const sel = state.selection;
+    let moved = false;
+    const ranges = sel.ranges.map(function (range) {
+      const node =
+        openNodeAt(state, range.from) ||
+        (range.to !== range.from ? openNodeAt(state, range.to) : null);
+      if (!node) return range;
+      const at = positionOutside(state, node);
+      if (at === null) return range;
+      moved = true;
+      return CM.EditorSelection.cursor(at);
+    });
+    if (!moved) return;
+    // No focus of its own: the click was prevented, so whatever had the focus
+    // keeps it, and what the source hangs on is the selection, not the focus.
+    view.dispatch({
+      selection: CM.EditorSelection.create(ranges, sel.mainIndex),
+    });
+  }
+
   // The copy button and the player toggle live in widget chrome, which
   // CodeMirror leaves alone (ignoreEvent); their clicks are answered here.
   function handleChromeClick(e) {
@@ -2886,7 +3086,7 @@
     const drawing = e.target.closest(".mdm-score, .mdm-math");
     if (drawing) {
       e.preventDefault();
-      revealBlock(drawing);
+      revealBlock(drawing, addsCaret(e));
     }
   }
 
@@ -2894,7 +3094,11 @@
   // its source, which shows it (the block is touched from then on). For a
   // score and a display equation the source opens above the drawing, which
   // stays as the live preview.
-  function revealBlock(el) {
+  //
+  // With the multicursor modifier down the caret is ADDED, as it is anywhere
+  // else in the document: this is a click like any other, and replacing the
+  // selection here wiped every caret that was already out in the prose.
+  function revealBlock(el, adds) {
     if (!view) return;
     const pos = view.posAtDOM(el);
     const tree = CM.syntaxTree(view.state);
@@ -2908,7 +3112,16 @@
       const content = node.getChild("CodeText") || node.getChild("BlockMathContent") || node.getChild("InlineMathContent") || node.getChild("InlineBlockMathContent");
       at = content ? content.from : node.from;
     }
-    view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+    const sel = view.state.selection;
+    view.dispatch({
+      selection: adds
+        ? CM.EditorSelection.create(
+            sel.ranges.concat([CM.EditorSelection.cursor(at)]),
+            sel.ranges.length
+          )
+        : { anchor: at },
+      scrollIntoView: true,
+    });
     view.focus();
   }
 
@@ -2971,14 +3184,22 @@
     return { source: body ? view.state.sliceDoc(body.from, body.to) : "", lines: lines };
   }
 
+  const COPIED_MS = 1500;
+
   function copyBlock(button) {
     const found = chromeSource(button);
     if (!found) return;
     copyPlain(found.score ? stripLayoutDirectives(found.source) : found.source);
+    // The answer is the tooltip itself, so it stays up for a beat and then
+    // goes, rather than sitting there under a pointer that has not moved
+    // until the block loses the hover. A second and a half is long enough to
+    // be read without becoming a label of its own; it is what the copy
+    // buttons of GitHub and the like hold theirs for.
     button.setAttribute("aria-label", "Copied");
     setTimeout(function () {
+      hideTipUntilLeave(button);
       button.setAttribute("aria-label", "Copy");
-    }, 1200);
+    }, COPIED_MS);
     if (found.score) {
       pulseBlock(found.score);
     } else if (found.lines) {
@@ -3066,6 +3287,10 @@
     view.contentDOM.addEventListener("mousedown", handleMouseDown, true);
     view.contentDOM.addEventListener("click", handleChromeClick, true);
     view.contentDOM.addEventListener("mouseover", handleMouseOver);
+    // Above the scroller, so the margins are dead before CodeMirror hears them.
+    view.dom.addEventListener("mousedown", deadMargin, true);
+    document.addEventListener("mousedown", dismissFromOutside, true);
+    document.addEventListener("click", dismissTip, true);
   }
 
   // The element that scrolls.
@@ -3328,6 +3553,8 @@
         if (view) view.focus();
       });
     }
+    // The tooltip goes away on a click, the manners of the whole editor now
+    // (dismissTip, on the document); this button never needed any of its own.
     // A pointer click leaves the button focused, and a focused button keeps
     // its tooltip up; the focus goes back to the text. Keyboard users (detail
     // 0) keep theirs.
@@ -3498,6 +3725,7 @@
     applyTheme();
     applyScoreAlign();
     watchScoreSelection();
+    watchAltPresses();
     afterRender();
   }
 

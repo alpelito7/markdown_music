@@ -81,6 +81,68 @@ test("Alt+click adds a caret and typing lands at both", { skip }, async () => {
   await h.close();
 });
 
+test("an Alt used with the mouse keeps its release out of the host's menu bar", { skip }, async () => {
+  const h = await open({ text: "alpha\nbeta\ngamma\n", scores: 0 });
+  // A stand-in for the VS Code preload, which forwards the keys of a webview
+  // to the workbench from a bubble listener on the window
+  // (contentWindow.addEventListener('keyup', handleInnerKeyup)). What reaches
+  // it is what the workbench's menu bar reads: a clean Alt press AND release
+  // is what takes the focus into the File menu.
+  await h.page.evaluate(() => {
+    window.__host = [];
+    window.addEventListener("keydown", (e) => window.__host.push("down:" + e.key));
+    window.addEventListener("keyup", (e) => window.__host.push("up:" + e.key));
+    // And a probe below the document, to show the page itself is untouched.
+    window.__page = [];
+    window.__mdm.view.contentDOM.addEventListener("keyup", (e) =>
+      window.__page.push("up:" + e.key)
+    );
+  });
+  const first = await coordsAt(h.page, 0);
+  const third = await coordsAt(h.page, await posOf(h.page, "gamma"));
+  await h.page.mouse.click(first.x, first.y);
+  await sleep(600);
+
+  // A tap on its own still leaves the page: the File menu is VS Code's and it
+  // keeps working from in here.
+  await h.page.keyboard.down("Alt");
+  await h.page.keyboard.up("Alt");
+  assert.deepEqual(await h.page.evaluate(() => window.__host), [
+    "down:Alt",
+    "up:Alt",
+  ]);
+
+  // Used with a click it does not: the press is forwarded, the release is
+  // held back, so the workbench never sees the clean pair that focuses the
+  // menu bar and the carets stay here.
+  await h.page.evaluate(() => {
+    window.__host = [];
+    window.__page = [];
+  });
+  await h.page.keyboard.down("Alt");
+  await h.page.mouse.click(third.x, third.y);
+  await h.page.keyboard.up("Alt");
+  assert.deepEqual(await h.page.evaluate(() => window.__host), ["down:Alt"]);
+  assert.deepEqual(await h.page.evaluate(() => window.__page), ["up:Alt"]);
+  assert.deepEqual(await selectionRanges(h.page), [[0, 0], [11, 11]]);
+  await h.page.keyboard.type("X");
+  assert.equal(await docText(h.page), "Xalpha\nbeta\nXgamma\n");
+
+  // The next tap is a tap again: what was held back is one release, not the
+  // key.
+  await h.page.evaluate(() => {
+    window.__host = [];
+  });
+  await h.page.keyboard.down("Alt");
+  await h.page.keyboard.up("Alt");
+  assert.deepEqual(await h.page.evaluate(() => window.__host), [
+    "down:Alt",
+    "up:Alt",
+  ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("under ctrlCmd it is Ctrl+click that adds the caret, and Alt+click only moves it", { skip }, async () => {
   const h = await open({
     text: "alpha\nbeta\ngamma\n",
@@ -574,7 +636,9 @@ test("Ctrl+Enter leaves a fenced block into a fresh paragraph below it", { skip 
   assert.equal(await docText(h.page), "Intro.\n\n```python\nx = 1\n```\n\n\n\nAfter.\n");
   const head = (await selectionRanges(h.page))[0][0];
   assert.equal(head, (await posOf(h.page, "```", 3, 1)) + 2);
-  assert.equal((await lineAt(h.page, head)).className, "cm-line");
+  // A plain line of prose, out of the fence. It is empty, so it also carries
+  // the class that draws the gap between paragraphs at an em.
+  assert.equal((await lineAt(h.page, head)).className, "cm-line mdm-blank");
   await h.page.keyboard.type("New.");
   assert.equal(await docText(h.page), "Intro.\n\n```python\nx = 1\n```\n\nNew.\n\nAfter.\n");
   assert.deepEqual(h.errors, []);
@@ -635,21 +699,23 @@ test("a click on a rendered equation or score opens it at the start of its sourc
 
 // ---- Code chrome ----
 
-test("a python block names its language and shows the copy button on hover", { skip }, async () => {
+test("a code block carries a copy button, and nothing else, on hover", { skip }, async () => {
   const h = await open({ text: CODE, scores: 0 });
   assert.equal(await count(h.page, ".cm-line.mdm-code-line"), 1);
   assert.equal(await count(h.page, ".cm-line.mdm-fence-line"), 0);
+  // The corner used to name the language as well ("python", beside the
+  // button); the chrome is the button alone now.
   const chrome = await h.page.evaluate(() => {
     const c = document.querySelector("#app .cm-line.mdm-code-line span.mdm-chrome.mdm-chrome--code");
     return c
       ? {
-          lang: c.querySelector(".mdm-lang").textContent,
+          text: c.textContent,
           copy: !!c.querySelector(".mdm-copy"),
           shown: c.classList.contains("mdm-chrome--show"),
         }
       : null;
   });
-  assert.deepEqual(chrome, { lang: "python", copy: true, shown: false });
+  assert.deepEqual(chrome, { text: "", copy: true, shown: false });
   const over = await coordsAt(h.page, (await posOf(h.page, "x = 1")) + 2);
   await h.page.mouse.move(over.x, over.y);
   await sleep(100);
@@ -665,6 +731,87 @@ test("a python block names its language and shows the copy button on hover", { s
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// A line box must not drift from CodeMirror's height map, or a click and a
+// vertical caret move land on the wrong line. Heading lines used to carry a
+// top margin, which the height map does not see (it measures the line box):
+// every line below a heading sat lower on screen than the map believed, so a
+// click on the lower half of a paragraph fell through to the line beneath it.
+// The fix draws the spacing with padding, which is inside the box. This holds
+// the invariant: for every line, the painted top equals the mapped top.
+test("no line drifts from the height map (a click lands on the line clicked)", { skip }, async () => {
+  const h = await open({ seed: { settings: { theme: "light", frontMatter: "hidden" } } });
+  const drift = await h.page.evaluate(() => {
+    const { view } = window.__mdm;
+    const doc = view.state.doc;
+    const contentTop =
+      view.contentDOM.getBoundingClientRect().top + view.documentPadding.top;
+    let worst = 0;
+    let worstLine = 0;
+    for (let i = 1; i <= doc.lines; i++) {
+      const line = doc.line(i);
+      // The box CodeMirror hit-tests against is the .cm-line element. Its top
+      // must match the height map; a margin (outside the box) shifts the
+      // element without the map knowing, a padding (inside it) does not.
+      let node = view.domAtPos(line.from).node;
+      if (node.nodeType !== 1) node = node.parentElement;
+      const el = node && node.closest ? node.closest(".cm-line") : null;
+      if (!el) continue;
+      const mapped = contentTop + view.lineBlockAt(line.from).top;
+      const d = Math.abs(el.getBoundingClientRect().top - mapped);
+      if (d > worst) {
+        worst = d;
+        worstLine = i;
+      }
+    }
+    return { worst, worstLine };
+  });
+  // A pixel or two of rounding is fine; the margin bug drove this past 30.
+  assert.ok(
+    drift.worst <= 3,
+    "line " + drift.worstLine + " drifts " + drift.worst + "px from the map"
+  );
+  // And a click just right of the end of a heading, and of the first paragraph
+  // after it, lands the caret on that very line. The two lines are read off the
+  // syntax tree rather than matched by their words: example.mdm is written and
+  // rewritten by hand and the wording drifts.
+  const numbers = await h.page.evaluate(() => {
+    const { view, CM } = window.__mdm;
+    const doc = view.state.doc;
+    let heading = 0;
+    let para = 0;
+    CM.syntaxTree(view.state).iterate({
+      enter(n) {
+        if (!heading) {
+          if (/^ATXHeading[1-6]$/.test(n.name)) heading = doc.lineAt(n.from).number;
+          return;
+        }
+        if (!para && n.name === "Paragraph") para = doc.lineAt(n.from).number;
+      },
+    });
+    return [heading, para];
+  });
+  assert.ok(numbers[0] && numbers[1], "no heading with a paragraph under it: " + numbers);
+  for (const number of numbers) {
+    await setSelection(h.page, 0);
+    await sleep(60);
+    const to = await h.page.evaluate((n) => {
+      const { view } = window.__mdm;
+      const line = view.state.doc.line(n);
+      const c = view.coordsAtPos(line.to, -1);
+      return { line: n, x: c.right, y: (c.top + c.bottom) / 2 };
+    }, number);
+    await h.page.mouse.click(to.x + 40, to.y);
+    await sleep(80);
+    const landed = await h.page.evaluate(
+      () => window.__mdm.view.state.doc.lineAt(window.__mdm.view.state.selection.main.head).number
+    );
+    assert.equal(landed, to.line, "a click near line " + to.line + " missed it");
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // The outline is a panel down the left edge (as in the Vditor version, not a
 // drop-down): its button leads the bar and toggles the panel, which lists the
 // headings, marks the section the caret is in, jumps to the one picked and
@@ -858,6 +1005,287 @@ const DISMISS = [
 const DISMISS_AT_END = ["Text above.", "", "```abc", "X:1", "K:C", "CDEF|", "```"].join(
   "\n"
 );
+
+test("a click outside the text puts away what is open for editing", { skip }, async () => {
+  const h = await open({ text: DISMISS, withFrontMatter: false, scores: 1 });
+  await h.page.setViewport({ width: 1400, height: 1200 });
+  await sleep(400);
+  const margin = await h.page.evaluate(() => {
+    const c = window.__mdm.view.contentDOM.getBoundingClientRect();
+    return { x: c.right + 60, y: c.top + 20 };
+  });
+  // What is open: the source lines of a score or a display equation, the
+  // fences a code block shows only while a caret is in it, and the source of
+  // an inline equation.
+  const shown = () =>
+    h.page.evaluate(() => ({
+      source: document.querySelectorAll("#app .cm-line.mdm-src-line").length,
+      fences: document.querySelectorAll("#app .cm-line.mdm-fence-line").length,
+      inline: document.querySelectorAll("#app .mdm-math-src").length,
+    }));
+  const cases = [
+    { name: "an inline equation", needle: "x^2", open: (v) => v.inline > 0 },
+    { name: "a display equation", needle: "e^{i", open: (v) => v.source > 0 },
+    { name: "a code block", needle: "x = 1", open: (v) => v.fences > 0 },
+    { name: "a score", needle: "CDEF", open: (v) => v.source > 0 },
+  ];
+  for (const one of cases) {
+    const at = await posOf(h.page, one.needle, 1);
+    await setSelection(h.page, at);
+    await sleep(250);
+    const before = await shown();
+    assert.ok(one.open(before), one.name + " never opened: " + JSON.stringify(before));
+    await h.page.mouse.click(margin.x, margin.y);
+    await sleep(250);
+    assert.deepEqual(
+      await shown(),
+      { source: 0, fences: 0, inline: 0 },
+      one.name + " stayed open after a click in the margin"
+    );
+    const head = await h.page.evaluate(
+      () => window.__mdm.view.state.selection.main.head
+    );
+    assert.ok(head !== at, one.name + " left the caret where it was");
+  }
+  // Not only the margin: the outline, the toolbar and its buttons are outside
+  // the text too, and a click on any of them puts the block away before it is
+  // answered by whatever it was for.
+  const elsewhere = [
+    ["the outline panel", "#app .mdm-outline__title"],
+    ["a toolbar button", '#app button[data-type="mdm-theme"]'],
+    ["the toolbar itself", "#app .mdm-toolbar"],
+  ];
+  await h.page.click('#app button[data-type="outline"]');
+  await sleep(250);
+  for (const [name, selector] of elsewhere) {
+    await setSelection(h.page, await posOf(h.page, "CDEF", 1));
+    await sleep(250);
+    assert.ok((await shown()).source > 0, "the score never opened for " + name);
+    const box = await h.page.evaluate((sel) => {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, selector);
+    await h.page.mouse.click(box.x, box.y);
+    await sleep(250);
+    assert.deepEqual(
+      await shown(),
+      { source: 0, fences: 0, inline: 0 },
+      "the score stayed open after a click on " + name
+    );
+  }
+  await h.page.click('#app button[data-type="outline"]');
+  await sleep(200);
+
+  // Nothing open: the margin does nothing at all, not even move the caret.
+  await setSelection(h.page, 2);
+  await sleep(150);
+  await h.page.mouse.click(margin.x, margin.y);
+  await sleep(200);
+  assert.equal(
+    await h.page.evaluate(() => window.__mdm.view.state.selection.main.head),
+    2,
+    "the margin moved the caret with nothing open"
+  );
+
+  // A block that ends the document has no line after it: the caret takes the
+  // one above. Left where the old gutter handler put it, the start of the
+  // block's own first line, the block counted as touched and stayed open.
+  await update(h.page, DISMISS_AT_END, false, 1);
+  await sleep(300);
+  const inScore = await posOf(h.page, "CDEF", 1);
+  await setSelection(h.page, inScore);
+  await sleep(250);
+  assert.ok((await shown()).source > 0, "the score at the end never opened");
+  await h.page.mouse.click(margin.x, margin.y);
+  await sleep(250);
+  assert.deepEqual(
+    await shown(),
+    { source: 0, fences: 0, inline: 0 },
+    "a score ending the document stayed open"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a click that closes a block, or lands on a drawing, keeps the other carets", { skip }, async () => {
+  const h = await open({ text: DISMISS, withFrontMatter: false, scores: 1 });
+  await h.page.setViewport({ width: 1400, height: 1200 });
+  await sleep(400);
+  const drawing = () =>
+    h.page.evaluate(() => {
+      const svg = document.querySelector("#app .mdm-score code.language-abc svg");
+      const r = svg.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+  const srcLines = () =>
+    h.page.evaluate(
+      () => document.querySelectorAll("#app .cm-line.mdm-src-line").length
+    );
+
+  // Two carets out in the prose, and the score clicked with the multicursor
+  // modifier down: the caret at its source is ADDED. Replacing the selection
+  // here, which is what it used to do, wiped both of them.
+  const first = await posOf(h.page, "paragraph");
+  const tail = await posOf(h.page, "Tail");
+  await setSelection(h.page, [{ anchor: first }, { anchor: tail }]);
+  await sleep(250);
+  const score = await drawing();
+  await h.page.keyboard.down("Alt");
+  await h.page.mouse.click(score.x, score.y);
+  await h.page.keyboard.up("Alt");
+  await sleep(250);
+  const added = await selectionRanges(h.page);
+  assert.equal(added.length, 3, "the drawing swallowed the other carets");
+  assert.deepEqual(added[0], [first, first]);
+  assert.deepEqual(added[2], [tail, tail]);
+  assert.ok((await srcLines()) > 0, "the score never opened at its source");
+
+  // Without the modifier it still replaces them: a plain click means "put the
+  // caret here", as it does anywhere else in the document.
+  await sleep(600); // two clicks in a row on one spot read as a double
+  const again = await drawing();
+  await h.page.mouse.click(again.x, again.y);
+  await sleep(250);
+  assert.equal((await selectionRanges(h.page)).length, 1);
+
+  // And the click that closes an open block moves the caret that is in it,
+  // not the ones that are not: three carets, one of them inside the code
+  // block, used to come back as the single caret that left the block.
+  const margin = await h.page.evaluate(() => {
+    const c = window.__mdm.view.contentDOM.getBoundingClientRect();
+    return { x: c.right + 60, y: c.top + 20 };
+  });
+  const inCode = await posOf(h.page, "x = 1");
+  await setSelection(h.page, [
+    { anchor: first },
+    { anchor: inCode },
+    { anchor: tail },
+  ]);
+  await sleep(250);
+  await h.page.mouse.click(margin.x, margin.y);
+  await sleep(250);
+  const kept = await selectionRanges(h.page);
+  assert.equal(kept.length, 3, "the margin swallowed the other carets");
+  assert.deepEqual(kept[0], [first, first]);
+  assert.deepEqual(kept[2], [tail, tail]);
+  assert.notDeepEqual(kept[1], [inCode, inCode], "the caret never left the block");
+  assert.equal(
+    await h.page.evaluate(
+      () => document.querySelectorAll("#app .cm-line.mdm-fence-line").length
+    ),
+    0,
+    "the code block stayed open"
+  );
+
+  // All three still edit.
+  const before = await docText(h.page);
+  await h.page.keyboard.type("Z");
+  await sleep(200);
+  const after = await docText(h.page);
+  assert.equal(
+    after.split("Z").length - before.split("Z").length,
+    3,
+    "typing did not land at every caret"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("the margins beside the text are dead, and the pointer says so", { skip }, async () => {
+  const h = await open({ text: MARGINS, withFrontMatter: false, scores: 1 });
+  // A wide pane, so there is a real margin beside the 820px column.
+  await h.page.setViewport({ width: 1400, height: 1000 });
+  await sleep(400);
+  // The heights to probe at: a short paragraph line, a line of code, and the
+  // score, a block widget with no text of its own.
+  const spots = await h.page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll("#app .cm-line"));
+    const mid = (el) => {
+      const r = el.getBoundingClientRect();
+      return (r.top + r.bottom) / 2;
+    };
+    const para = lines.find((l) => l.textContent === "Short line.");
+    // The chrome of a code block (its language tag and copy button) is an
+    // inline widget in the first line, so that line's text reads "pythonx = 1".
+    const code = lines.find(
+      (l) => l.classList.contains("mdm-code-line") && l.textContent.endsWith("x = 1")
+    );
+    const score = document.querySelector("#app .mdm-score");
+    const view = window.__mdm.view;
+    const content = view.contentDOM.getBoundingClientRect();
+    const column = para.getBoundingClientRect();
+    const scroller = view.scrollDOM.getBoundingClientRect();
+    return {
+      para: mid(para),
+      code: mid(code),
+      score: mid(score),
+      content: { left: content.left, right: content.right },
+      column: { left: column.left, right: column.right },
+      scroller: { left: scroller.left, right: scroller.right },
+      cursorContent: getComputedStyle(view.contentDOM).cursor,
+      cursorScroller: getComputedStyle(view.scrollDOM).cursor,
+    };
+  });
+  // One boundary for the two: what the pointer changes at is the edge of the
+  // live area, and both are the edge of the text.
+  assert.equal(spots.cursorContent, "text", "the text lost its I-beam");
+  assert.equal(spots.cursorScroller, "default", "the margin does not show a pointer");
+  assert.ok(
+    Math.abs(spots.content.left - spots.column.left) < 1 &&
+      Math.abs(spots.content.right - spots.column.right) < 1,
+    "the live box is not the text column: " +
+      JSON.stringify(spots.content) +
+      " vs " +
+      JSON.stringify(spots.column)
+  );
+
+  const caretAfterClick = async (x, y) => {
+    await setSelection(h.page, 0);
+    await sleep(120);
+    await h.page.evaluate(() => document.activeElement.blur());
+    await sleep(60);
+    await h.page.mouse.click(x, y);
+    await sleep(160);
+    return h.page.evaluate(() => ({
+      head: window.__mdm.view.state.selection.main.head,
+      focus: window.__mdm.view.hasFocus,
+      src: document.querySelectorAll("#app .mdm-src-line").length,
+    }));
+  };
+
+  // Inside the column, a hair from its edge: the click lands, so nothing below
+  // can pass by everything being dead.
+  for (const where of ["para", "code"]) {
+    const live = await caretAfterClick(spots.column.right - 8, spots[where]);
+    assert.ok(live.head > 0, "a click inside the column did nothing at the " + where);
+    assert.equal(live.focus, true, "a click inside the column did not focus the editor");
+  }
+  const onScore = await caretAfterClick(spots.column.right - 8, spots.score);
+  assert.ok(onScore.src > 0, "a click on the score did not open its source");
+
+  // Out in either margin, from a hair past the text to the far edge of the
+  // pane: no caret, no focus, and no score opened.
+  const outside = [
+    spots.column.right + 8,
+    spots.column.right + 60,
+    spots.scroller.right - 40,
+    spots.column.left - 8,
+    spots.column.left - 60,
+    spots.scroller.left + 15,
+  ];
+  for (const where of ["para", "code", "score"]) {
+    for (const x of outside) {
+      const dead = await caretAfterClick(x, spots[where]);
+      assert.deepEqual(
+        dead,
+        { head: 0, focus: false, src: 0 },
+        "a click at x=" + Math.round(x) + " beside the " + where + " was answered"
+      );
+    }
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
 
 // The outline is as wide as the user drags it. The grip is a strip over the
 // panel's edge, a flex item of no width so it takes nothing from the row (a

@@ -20,6 +20,55 @@ body {
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   color: var(--mdm-ink);
 }
+/* Whatever the browser paints itself inside the editor, the scrollbars above
+   all, follows the side the editor is showing rather than the side VS Code is
+   on. VS Code stamps its own colour scheme on the webview root, so with
+   mdm.theme holding this editor to light under a dark VS Code the drop-down
+   panels came out with a black bar down the side and another along the
+   bottom, and so did the page's own scrollbar. Colour-scheme inherits, so
+   every box inside #app takes the side in force; white is a light look and
+   never meets the dark rule. It was not enough on its own for the bars, which
+   are painted below. */
+#app {
+  color-scheme: light;
+}
+#app.mdm--dark {
+  color-scheme: dark;
+}
+/* The bars themselves are painted here rather than left to the browser, and
+   through the standard properties rather than the ::-webkit-scrollbar
+   pseudo-elements they were painted with before, which never took inside VS
+   Code. The sheet the host drops into every webview (pre/index.html, under
+   @layer vscode-default) opens with
+
+     html { scrollbar-color: var(--vscode-scrollbarSlider-background)
+                             var(--vscode-editor-background); }
+
+   and scrollbar-color is inherited: a scroller that carries it takes no
+   ::-webkit-scrollbar rule at all, however specific the selector. The block
+   that used to be here was dead in the one place it was written for, so the
+   bars went on coming from the VS Code side instead of ours, and with
+   mdm.theme holding the editor light under a dark VS Code the theme menu grew
+   a black track down a white panel, with the stepper arrows of the native
+   Linux bar at either end. Setting the same two properties takes the bars
+   back: the thumb is the ink of the side in force at a quarter strength, the
+   track is left transparent so the panel's own ground shows through, and thin
+   brings the bar back to the 10px width it used to ask for while playing the
+   arrows down to a hint. The colour inherits from #app and the width does
+   not, which is why there are two rules. */
+#app {
+  scrollbar-color: color-mix(in srgb, var(--mdm-ink) 26%, transparent) transparent;
+}
+#app,
+#app * {
+  scrollbar-width: thin;
+}
+/* Below the toolbar, a row: the outline panel and the editor. */
+#app .mdm-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
 #app .mdm-editor {
   flex: 1 1 auto;
   min-width: 0;
@@ -127,16 +176,29 @@ body {
 #app .cm-editor.cm-focused {
   outline: none;
 }
+/* Outside the sheet there is no document: the strip of pane to either side of
+   the text is dead, and it says so with the pointer it shows (main.js swallows
+   what a click there would have done).
+
+   The strip is everything .cm-content does not cover, so the box is made to
+   coincide with the text column rather than to stand 50px out from it: one
+   boundary, the visible one, for the pointer and for the hit test alike. What
+   the box used to carry as horizontal padding is carried here instead, where
+   it is breathing room on a pane too narrow for the column and nothing at all
+   on a wide one. */
 #app .cm-scroller {
   font-family: inherit;
   font-size: 16px;
-  line-height: 1.65;
+  line-height: 1.7;
   overflow: auto;
+  padding: 0 50px;
+  cursor: default;
 }
 #app .cm-content {
-  padding: 18px 50px 40vh;
-  max-width: 920px;
+  max-width: 820px;
   margin: 0 auto;
+  padding: 18px 0 40vh;
+  cursor: text;
   caret-color: var(--mdm-ink);
 }
 #app .cm-line {
@@ -157,6 +219,19 @@ body {
 }
 #app .cm-selectionMatch {
   background: color-mix(in srgb, var(--mdm-ink) 12%, transparent);
+}
+/* The lines of a code block, of an equation and of the header sit on an
+   opaque card (--mdm-syn-card below); CodeMirror draws the selection on a
+   layer behind the content, so a selection inside a card was hidden under it
+   and a match found by Ctrl+D in a code comment showed nothing. The layer is
+   lifted above the text instead (the selection colours are translucent, so
+   the text reads through), and the caret layer is lifted above that so a
+   caret is never covered by its own selection. */
+#app .cm-selectionLayer {
+  z-index: 1 !important;
+}
+#app .cm-cursorLayer {
+  z-index: 2 !important;
 }
 /* The ink of the prose, on either side. */
 #app {
@@ -243,9 +318,24 @@ body {
   padding: 4px 0;
   border: 1px solid color-mix(in srgb, var(--mdm-ink) 16%, transparent);
   border-radius: 6px;
-  background: var(--vscode-editorWidget-background, var(--mdm-syn-page));
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  /* The editor's own ground, raised a little off the toolbar, never the VS
+     Code widget colour: mdm.theme can hold the editor to light while VS Code
+     is on a dark theme, and a dark --vscode-editorWidget-background carried
+     the panel dark under the light ink of the menu text, which then read as
+     dark on dark. The page and the ink move together with the editor's side,
+     so this always keeps its contrast. */
+  background: color-mix(in srgb, var(--mdm-ink) 7%, var(--mdm-syn-page));
+  color: var(--mdm-ink);
+  /* No shadow: tinted with the ink of the side in force it still read as a
+     hard frame around a tall panel, and the border alone is enough to lift it
+     off the page. No focus outline of its own either (VS Code draws one on
+     focusable scroll containers inside its webview). */
+  outline: none;
   z-index: 5;
+  /* Room for the vertical bar, reserved. The panel is as wide as its widest
+     entry, and the bar was then taken out of that width, so a list long enough
+     to scroll (the theme names) grew a horizontal bar under it as well. */
+  scrollbar-gutter: stable;
 }
 #app .mdm-toolbar__item--open .mdm-menu {
   display: block;
@@ -305,6 +395,13 @@ body {
 #app .mdm-tip:hover::after {
   opacity: 1;
 }
+/* Put away by a click (toolbarButton in main.js) and while the button's
+   panel is open: the tooltip of the bar is drawn southwards, over the panel,
+   and covered its first entry. */
+#app .mdm-tip--off::after,
+#app .mdm-toolbar__item--open .mdm-tip::after {
+  display: none;
+}
 #app .mdm-tip--s::after {
   top: 100%;
   left: 50%;
@@ -323,14 +420,19 @@ body {
 
 /* ---------- Headings, marks, inline ---------- */
 
+/* Padding, never margin, on a line: CodeMirror measures a line's box to map
+   a click or a vertical caret move to a position, and a margin sits outside
+   that box. With margins here every line below a heading drifted from the
+   map by the margins above it, and a click on the lower half of a paragraph
+   landed on the line after it. */
 #app .cm-line.mdm-h {
   font-weight: 600;
   line-height: 1.3;
-  margin-top: 0.6em;
+  padding-top: 0.6em;
 }
 #app .cm-line.mdm-h1 {
   font-size: 2em;
-  margin-top: 0.4em;
+  padding-top: 0.4em;
   padding-bottom: 0.2em;
   border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
 }
@@ -349,10 +451,18 @@ body {
 #app .cm-line.mdm-h6 {
   font-size: 1em;
 }
-/* Paragraph spacing: a blank line is the Markdown gap, and the line boxes
-   are given a little air so the text reads as prose rather than as code. */
-#app .cm-line {
-  padding: 0.1em 0;
+/* Paragraph spacing, taken from the Office Viewer preview: a line stands at
+   1.7 of an em there (`--editor-line-height` in Vditor's sheet, which that
+   preview draws with) and two paragraphs an em apart (`p { margin-bottom:
+   1em }`). So the lines carry no air of their own, up in the .cm-scroller
+   rule, and the blank line that is the Markdown gap is drawn at that em
+   rather than at the height of a line of prose. Line height and padding,
+   never margin: CodeMirror measures the line's box to map a click, and a
+   margin sits outside it. The class comes from buildDecorations, and only
+   prose carries it. */
+#app .cm-line.mdm-blank {
+  line-height: 1;
+  padding: 0;
 }
 /* A mark that is showing (the caret is on its node): quiet, so the text
    keeps the eye. */
@@ -581,15 +691,6 @@ body {
 #app .mdm-chrome .mdm-audio-toggle {
   right: 32px;
 }
-#app .mdm-chrome .mdm-lang {
-  position: absolute;
-  top: 6px;
-  right: 36px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  color: color-mix(in srgb, var(--mdm-syn-base) 45%, transparent);
-  pointer-events: none;
-}
 #app .mdm-chrome svg {
   width: 14px;
   height: 14px;
@@ -670,8 +771,11 @@ body {
   --mdm-play-accent: #d9a94f;
 }
 #app code.language-abc svg .abcjs-note_selected,
+#app code.language-abc svg .abcjs-note_selected *,
 #app.mdm--dark code.language-abc svg .abcjs-note_selected,
-#app.mdm-staff--gray code.language-abc svg .abcjs-note_selected {
+#app.mdm--dark code.language-abc svg .abcjs-note_selected *,
+#app.mdm-staff--gray code.language-abc svg .abcjs-note_selected,
+#app.mdm-staff--gray code.language-abc svg .abcjs-note_selected * {
   fill: var(--mdm-play-accent);
 }
 /* No pointer events inside a score: a click means "open the ABC source"
@@ -693,12 +797,20 @@ body {
   margin: 0;
 }
 /* Guitar-Pro-style gray staff lines (mdm.staffLines = "gray"): add_classes in
-   renderScore tags the five lines .abcjs-staff; only those are recoloured, so
-   notes, clefs and bar lines keep the ink colour. */
-#app.mdm-staff--gray code.language-abc svg .abcjs-staff {
+   renderScore tags the staff .abcjs-staff; only those lines are recoloured,
+   so notes, clefs and bar lines keep the ink colour. abcjs 6 draws the five
+   lines as paths inside a <g class="abcjs-staff">, each with a fill attribute
+   of its own (currentColor), and a fill set on the group is not inherited
+   past an attribute on the child: the rule has to reach the paths. (abcjs
+   5.10.3, which the Vditor editor engraved with, put the class on the path
+   itself; with the group alone the lines stayed in ink and the staff-lines
+   button did nothing visible.) */
+#app.mdm-staff--gray code.language-abc svg .abcjs-staff,
+#app.mdm-staff--gray code.language-abc svg .abcjs-staff path {
   fill: #a3a3a3;
 }
-#app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-staff {
+#app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-staff,
+#app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-staff path {
   fill: #6f6f6f;
 }
 /* A score sits in the text the way an equation does. These are the
