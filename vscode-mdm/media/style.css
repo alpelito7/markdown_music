@@ -962,6 +962,13 @@ body {
 #app.mdm-score--left .mdm-audio {
   margin-left: 0;
 }
+/* The bar holds the focus while the player is the thing being used: that is
+   what puts Space on play/pause (main.js, watchPlayerKeys). It is a box and
+   not a control, so it draws no ring of its own; what says the keyboard is
+   on the player is the caret, gone from the text while the bar has it. */
+#app .mdm-audio:focus {
+  outline: none;
+}
 #app .mdm-audio .abcjs-inline-audio {
   height: 30px;
   padding: 0 8px 0 4px;

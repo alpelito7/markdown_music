@@ -1357,7 +1357,11 @@
         // a synth that never finished initializing
       }
     }
+    // The bar may be holding the focus (see openPlayer); with it gone the
+    // keyboard would land on nothing, so the document takes it back.
+    const hadFocus = p.bar && p.bar.contains(document.activeElement);
     if (p.bar && p.bar.parentElement) p.bar.parentElement.removeChild(p.bar);
+    if (hadFocus && view) view.focus();
     document.querySelectorAll("#app [data-mdm-audio]").forEach(function (el) {
       el.removeAttribute("data-mdm-audio");
     });
@@ -1375,6 +1379,11 @@
     const bar = document.createElement("div");
     bar.className = "mdm-audio";
     bar.setAttribute("contenteditable", "false");
+    // Focusable, though never in the tab order: the headphones hand it the
+    // focus as they open it (handleChromeClick), and holding the focus is
+    // what puts Space on play/pause (playerTakesSpace) without ever taking
+    // the key from the document, where a space is a space.
+    bar.setAttribute("tabindex", "-1");
     // The player's events are its own: the widget tells CodeMirror to ignore
     // what happens in the bar (ScoreWidget.ignoreEvent), and stopping them
     // here keeps the document's own listeners (the chrome click handler, the
@@ -1651,6 +1660,74 @@
     });
   }
 
+  // ---- The keyboard ----
+
+  // With a player open, Space is its play and its pause, the way it is in
+  // any other player. Only where a space is not text: this is a text editor
+  // first and a space typed into the document has to stay a space, so the
+  // key is taken only while the focus is out of the editor's content. That
+  // is where the headphones leave it (opening a player focuses its bar, and
+  // the caret gone from the text is what says the keyboard is on the
+  // player); clicking back into the document hands Space back to the text.
+  // Never from a control that answers a press of its own either: the
+  // toolbar's buttons and menu rows, the volume slider, and the bar's own
+  // play, stop and repeat, which a Tab can reach.
+  const SELF_KEYED = "button, input, select, textarea, a[href]";
+
+  function playerTakesSpace(e) {
+    if (!player || !player.bar) return false;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
+    if (e.repeat) return false; // held down is one press, not a stutter
+    // What the focus is on, never what it hangs from: the bar is a widget of
+    // the editor, so it sits inside the very element a caret focuses, and an
+    // ancestor test would read every press as the document's. The two are
+    // told apart on the element itself, the content editable and the bar
+    // (contenteditable=false) not.
+    const at = document.activeElement;
+    if (!at || !at.matches) return false;
+    if (at.isContentEditable) return false; // a caret in the text
+    return !at.matches(SELF_KEYED); // a control answers its own press
+  }
+
+  // Through the widget's own play button rather than the controller, the way
+  // the stop button does it: the face of the button, its label and the
+  // resume in silence (watchPlayPresses) then follow a press of the key
+  // exactly as they follow a press of the mouse.
+  function togglePlayback() {
+    const start =
+      player && player.bar && player.bar.querySelector(".abcjs-midi-start");
+    if (!start) return; // a bar whose synth has not mounted yet
+    wakeAudio(); // a press is a gesture, and the output wakes on it
+    start.click();
+  }
+
+  // Capture at the document: the bar stops the keys it hears (openPlayer),
+  // so a listener waiting for the bubble would never see a press made with
+  // the bar focused.
+  function watchPlayerKeys() {
+    document.addEventListener(
+      "keydown",
+      function (e) {
+        if ((e.key === " " || e.key === "Spacebar") && playerTakesSpace(e)) {
+          e.preventDefault(); // and never the page's scroll
+          togglePlayback();
+          return;
+        }
+        // The way back to the text: while the bar holds the focus nothing
+        // else answers the keyboard, so Escape hands it to the document.
+        if (
+          e.key === "Escape" &&
+          view &&
+          player &&
+          player.bar &&
+          player.bar.contains(document.activeElement)
+        ) {
+          view.focus();
+        }
+      },
+      true
+    );
+  }
 
   // Starting anywhere but on a note's attack keeps the beat. A pause cuts a
   // note short, and so does a head dropped mid-chord; starting from there must
@@ -3222,7 +3299,14 @@
       const block = toggle.closest(".mdm-score");
       if (!block) return;
       if (player && playerBlock() === block) closePlayer();
-      else openPlayer(block);
+      else {
+        openPlayer(block);
+        // Space plays from the moment the bar is open (watchPlayerKeys).
+        // Only from this click: syncPlayer opens the player again whenever
+        // its source is edited, and pulling the focus out of the text
+        // mid-keystroke would stop the typing dead.
+        if (player && player.bar) player.bar.focus({ preventScroll: true });
+      }
       return;
     }
     if (e.target.closest(".mdm-audio")) return; // the player bar's own
@@ -3423,8 +3507,16 @@
       state: state,
       parent: document.querySelector("#app .mdm-editor"),
     });
-    // For the test harness and for poking at a live editor: the view itself.
-    window.__mdm = { view: view, CM: CM };
+    // For the test harness and for poking at a live editor: the view itself,
+    // and the open player, which is the only way in to the synth controller
+    // (abcjs keeps it on no element of the bar it builds).
+    window.__mdm = {
+      view: view,
+      CM: CM,
+      get player() {
+        return player;
+      },
+    };
     watchContent();
     disarmNativeHistory();
     view.contentDOM.addEventListener("mousedown", handleMouseDown, true);
@@ -3868,6 +3960,7 @@
     applyTheme();
     applyScoreAlign();
     watchScoreSelection();
+    watchPlayerKeys();
     watchAltPresses();
     afterRender();
   }

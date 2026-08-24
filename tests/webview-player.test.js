@@ -343,6 +343,97 @@ test("a click on the headphones puts its tooltip away until the pointer leaves",
   await h.close();
 });
 
+test("the bar takes the keyboard: Space plays and pauses, Escape gives it back", { skip }, async () => {
+  const h = await open({});
+  const before = await docText(h.page);
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  // Opening a player hands the keyboard to its bar. The caret leaving the
+  // text is what says so on screen, and what keeps a space typed into the
+  // document a space (the test below).
+  assert.deepEqual(
+    await h.page.evaluate(() => ({
+      bar: document.activeElement.classList.contains("mdm-audio"),
+      editor: window.__mdm.view.hasFocus,
+    })),
+    { bar: true, editor: false }
+  );
+
+  await h.page.keyboard.press(" ");
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start").classList.contains("abcjs-pushed"),
+    { timeout: 15000 }
+  );
+  await h.page.keyboard.press(" ");
+  await h.page.waitForFunction(
+    () => !document.querySelector(".mdm-audio .abcjs-midi-start").classList.contains("abcjs-pushed"),
+    { timeout: 15000 }
+  );
+  // Neither press reached the document, and neither opened the score.
+  assert.equal(await docText(h.page), before);
+  assert.equal(await h.page.evaluate(sourceShowing), false);
+
+  // Closing hands the keyboard back: the bar it was on is gone.
+  await clickToggle(h.page, 0);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal((await playerState(h.page)).bars, 0);
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true);
+
+  // And so does Escape, with the player left open.
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await h.page.keyboard.press("Escape");
+  assert.deepEqual(
+    await h.page.evaluate(() => ({
+      editor: window.__mdm.view.hasFocus,
+      bars: document.querySelectorAll(".mdm-audio").length,
+    })),
+    { editor: true, bars: 1 }
+  );
+  assert.equal(await docText(h.page), before);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a caret in the document keeps Space for the text, player open or not", { skip }, async () => {
+  const h = await open({});
+  const before = await docText(h.page);
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  // The end of the first body paragraph, wherever the wording of example.mdm
+  // has drifted to.
+  const at = await h.page.evaluate(() => {
+    const text = window.__mdm.view.state.doc.toString();
+    const para = text.replace(/^---\n[\s\S]*?\n---\n\n/, "").split("\n")[0];
+    return text.indexOf(para) + para.length;
+  });
+  await setSelection(h.page, at); // which focuses the editor, as a click does
+  await h.page.keyboard.press(" ");
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await docText(h.page), before.slice(0, at) + " " + before.slice(at));
+  assert.deepEqual(
+    await h.page.evaluate(() => ({
+      pushed: document
+        .querySelector(".mdm-audio .abcjs-midi-start")
+        .classList.contains("abcjs-pushed"),
+      bars: document.querySelectorAll(".mdm-audio").length,
+    })),
+    { pushed: false, bars: 1 },
+    "the space typed into the document reached the player"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("play sounds from the vendored soundfont, no network", { skip }, async () => {
   const h = await open({});
   const requests = [];
