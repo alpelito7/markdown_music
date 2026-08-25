@@ -22,13 +22,37 @@ function activate(context) {
 // first one is the fallback. The allowlist earns its keep twice: these values
 // are interpolated into the webview HTML, and a workspace settings.json can
 // carry any string at all.
+//
+// This table is also the editor's memory: every toolbar button that holds a
+// state writes it here rather than painting itself, which is what makes a
+// document reopen looking as it was left, and what keeps two editors open on
+// two files in step.
 const SETTINGS = {
   theme: ["auto", "light", "dark", "white"],
   scoreFill: ["none", "paper", "slate", "brass"],
   staffLines: ["gray", "ink"],
   scoreAlign: ["center", "left"],
   frontMatter: ["hidden", "shown"],
+  outline: ["hidden", "shown"],
+  multicursorMatch: ["word", "substring"],
 };
+
+// A setting whose value is a number and not one of a handful of words. The
+// allowlist above does two jobs at once, and here a clamp does both: a
+// settings.json carries whatever it carries, and these values are written into
+// the webview HTML. The band is the webview's own (OUTLINE_MIN and
+// OUTLINE_MAX in media/main.js), so a width that comes back from here is one
+// the panel would have let the grip reach.
+const NUMBER_SETTINGS = {
+  outlineWidth: { min: 140, max: 1200, fallback: 250 },
+};
+
+function numberSetting(key, value) {
+  const spec = NUMBER_SETTINGS[key];
+  if (!spec) return undefined;
+  if (typeof value !== "number" || !isFinite(value)) return spec.fallback;
+  return Math.min(spec.max, Math.max(spec.min, Math.round(value)));
+}
 
 // mdm.theme takes the name of a VS Code colour theme as well as its three
 // fixed values, and those names cannot be listed in advance. The allowlist
@@ -55,6 +79,9 @@ function readSettings(installed) {
     const allowed = allowedValues(key, installed);
     const value = config.get(key);
     out[key] = allowed.indexOf(value) !== -1 ? value : allowed[0];
+  });
+  Object.keys(NUMBER_SETTINGS).forEach((key) => {
+    out[key] = numberSetting(key, config.get(key));
   });
   // VS Code's own choice of the click that adds a caret (Alt or Ctrl/Cmd),
   // so the gesture is the same here as in the text editors beside this one.
@@ -107,14 +134,23 @@ function inlineJson(value) {
 // lives: a workspace that pinned the setting keeps overriding user settings,
 // so writing globally there would look like the button did nothing.
 async function writeSetting(key, value) {
-  if (!SETTINGS[key] || allowedValues(key).indexOf(value) === -1) return;
+  let stored;
+  if (SETTINGS[key]) {
+    if (allowedValues(key).indexOf(value) === -1) return;
+    stored = value;
+  } else if (NUMBER_SETTINGS[key]) {
+    if (typeof value !== "number" || !isFinite(value)) return;
+    stored = numberSetting(key, value);
+  } else {
+    return;
+  }
   const config = vscode.workspace.getConfiguration("mdm");
   const inspected = config.inspect(key);
   const target =
     inspected && inspected.workspaceValue !== undefined
       ? vscode.ConfigurationTarget.Workspace
       : vscode.ConfigurationTarget.Global;
-  await config.update(key, value, target);
+  await config.update(key, stored, target);
 }
 
 // ---------- Export ----------

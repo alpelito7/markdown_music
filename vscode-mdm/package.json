@@ -64,6 +64,33 @@
           ],
           "default": "hidden",
           "description": "Whether the YAML header is part of the document in the editor. Shown, it is an ordinary block: what is typed in it goes to the file, and deleting it deletes it from the file."
+        },
+        "mdm.outline": {
+          "type": "string",
+          "enum": ["hidden", "shown"],
+          "enumDescriptions": [
+            "The outline panel is closed.",
+            "The outline panel is open down the left edge, listing the headings."
+          ],
+          "default": "hidden",
+          "description": "Whether the outline panel is open. The toolbar button on the left of the bar writes it, so a document reopens with the panel it was left with."
+        },
+        "mdm.outlineWidth": {
+          "type": "number",
+          "minimum": 140,
+          "maximum": 1200,
+          "default": 250,
+          "description": "Width of the outline panel in pixels, as the grip beside it was last dragged to. The editor keeps a column of its own, so a panel wider than the pane allows is narrowed to fit while it is open."
+        },
+        "mdm.multicursorMatch": {
+          "type": "string",
+          "enum": ["word", "substring"],
+          "enumDescriptions": [
+            "Ctrl+D walks whole words, the way VS Code does: a caret in 'score' steps over 'scores'.",
+            "Ctrl+D walks every run of the text, inside words too: 'score' also lands in 'scores'."
+          ],
+          "default": "word",
+          "description": "What Ctrl+D (select next occurrence) matches. The toolbar toggle writes it."
         }
       }
     },

@@ -25,35 +25,123 @@ const {
   setSelection,
   selectionRanges,
   lineAt,
+  settingsMessage,
+  postSettings,
+  setSettingPosts,
 } = require("./webview/helpers.js");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// The settings message the host sends back after a button press: every key,
-// with the defaults of the harness unless overridden.
-function settingsMessage(overrides) {
-  return {
-    type: "settings",
-    settings: Object.assign(
-      {
-        theme: "light",
-        scoreFill: "none",
-        staffLines: "gray",
-        scoreAlign: "center",
-        frontMatter: "shown",
+// ---------- The memory of the buttons ----------
+
+// Every toolbar button that holds a state stores it as an mdm.* setting, so a
+// document opens showing what it was closed with. The three that used to live
+// in the page alone (the outline, its width and the Ctrl+D toggle) are the ones
+// checked here: the editor is opened on a seeded settings object, which is what
+// the host interpolates into the page, and nothing is clicked.
+test("the outline and the Ctrl+D toggle come back as they were left", { skip }, async () => {
+  const h = await open({
+    seed: {
+      settings: {
+        frontMatter: "hidden",
+        outline: "shown",
+        outlineWidth: 320,
+        multicursorMatch: "substring",
       },
-      overrides || {}
+    },
+    text: "score and scores and a score here\n",
+    scores: 0,
+  });
+  const panel = await h.page.evaluate(() => {
+    const el = document.querySelector("#app .mdm-outline");
+    return {
+      open: document.getElementById("app").classList.contains("mdm-outline--open"),
+      display: getComputedStyle(el).display,
+      width: Math.round(el.getBoundingClientRect().width),
+      lit: document
+        .querySelector('#app button[data-type="outline"]')
+        .classList.contains("mdm-btn--on"),
+    };
+  });
+  assert.equal(panel.open, true, "the outline came back shut");
+  assert.equal(panel.display, "block");
+  assert.equal(panel.lit, true, "the button did not come back lit");
+  // A pixel of slack: the box measured carries the panel's border, the width
+  // the setting names does not.
+  assert.ok(
+    Math.abs(panel.width - 320) <= 2,
+    "the panel came back at another width: " + panel.width
+  );
+  // The Ctrl+D toggle is lit, names the way back, and matches inside words
+  // with nothing clicked: the setting is applied and not merely painted.
+  assert.deepEqual(
+    await h.page.evaluate(() => {
+      const b = document.querySelector('#app button[data-type="mdm-match-substring"]');
+      return { tip: b.getAttribute("aria-label"), lit: b.classList.contains("mdm-btn--on") };
+    }),
+    { tip: "Multicursor matches whole words", lit: true }
+  );
+  await h.page.evaluate(() => {
+    window.__mdm.view.focus();
+    window.__mdm.view.dispatch({ selection: { anchor: 2 } });
+  });
+  for (let i = 0; i < 3; i++) {
+    await h.page.keyboard.down("Control");
+    await h.page.keyboard.press("d");
+    await h.page.keyboard.up("Control");
+  }
+  assert.deepEqual(
+    await h.page.evaluate(() =>
+      window.__mdm.view.state.selection.ranges.map((r) => [r.from, r.to])
     ),
-  };
-}
+    [[0, 5], [10, 15], [23, 28]],
+    "Ctrl+D matched whole words with the setting on substring"
+  );
+  // Pressing the panel's button asks for the other side of the setting.
+  await h.page.click('#app button[data-type="outline"]');
+  await sleep(150);
+  assert.deepEqual(await setSettingPosts(h.page), [
+    { type: "setSetting", key: "outline", value: "hidden" },
+  ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
 
-function postSettings(page, overrides) {
-  return page.evaluate((msg) => window.postMessage(msg, "*"), settingsMessage(overrides));
-}
-
-function setSettingPosts(page) {
-  return page.evaluate(() => window.__posts.filter((m) => m.type === "setSetting"));
-}
+// A width dragged out on a wide window would swallow a narrow pane, so what is
+// applied is the setting or the room there is, whichever is less. The setting
+// itself is left alone: the panel goes back to its full width as soon as there
+// is room for it again.
+test("an outline wider than the pane is narrowed to fit, and grows back", { skip }, async () => {
+  const h = await open({
+    seed: { settings: { frontMatter: "hidden", outline: "shown", outlineWidth: 700 } },
+    text: "# One\n\nText.\n",
+    scores: 0,
+  });
+  const width = () =>
+    h.page.evaluate(() =>
+      Math.round(document.querySelector("#app .mdm-outline").getBoundingClientRect().width)
+    );
+  await h.page.setViewport({ width: 600, height: 900 });
+  await sleep(300);
+  const squeezed = await width();
+  assert.ok(
+    squeezed <= 600 - 200 + 2 && squeezed >= 140,
+    "the panel left the editor no room: " + squeezed
+  );
+  assert.deepEqual(
+    await setSettingPosts(h.page),
+    [],
+    "the fit was written back as if the user had asked for it"
+  );
+  await h.page.setViewport({ width: 1200, height: 900 });
+  await sleep(300);
+  assert.ok(
+    Math.abs((await width()) - 700) <= 2,
+    "the panel did not go back to the width it was left at: " + (await width())
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
 
 // ---------- The YAML header ----------
 

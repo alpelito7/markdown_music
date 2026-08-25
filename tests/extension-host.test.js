@@ -87,6 +87,9 @@ test("hostile setting values never reach the webview HTML", () => {
     "mdm.staffLines": 42,
     "mdm.scoreAlign": "left; drop",
     "mdm.frontMatter": null,
+    "mdm.outline": { shown: true },
+    "mdm.outlineWidth": "</script>",
+    "mdm.multicursorMatch": ["substring"],
   });
   assert.ok(!h.html.includes("alert(1)"));
   const m = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html);
@@ -97,6 +100,9 @@ test("hostile setting values never reach the webview HTML", () => {
     staffLines: "gray",
     scoreAlign: "center",
     frontMatter: "hidden",
+    outline: "hidden",
+    multicursorMatch: "word",
+    outlineWidth: 250,
     multiCursorModifier: "alt",
   });
 });
@@ -108,6 +114,9 @@ test("valid setting values pass through to the webview HTML", () => {
     "mdm.staffLines": "ink",
     "mdm.scoreAlign": "left",
     "mdm.frontMatter": "shown",
+    "mdm.outline": "shown",
+    "mdm.outlineWidth": 480,
+    "mdm.multicursorMatch": "substring",
   });
   const m = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html);
   assert.deepEqual(JSON.parse(m[1]), {
@@ -116,8 +125,60 @@ test("valid setting values pass through to the webview HTML", () => {
     staffLines: "ink",
     scoreAlign: "left",
     frontMatter: "shown",
+    outline: "shown",
+    multicursorMatch: "substring",
+    outlineWidth: 480,
     multiCursorModifier: "alt",
   });
+});
+
+// The width of the outline panel is the one setting that is a number, so it is
+// held to a band instead of to a list of words: the two jobs the allowlist does
+// (a settings.json carries anything, and these values are written into the
+// webview HTML) are done here by a clamp.
+test("the outline width is clamped to the band the grip can reach", () => {
+  const width = (value) => {
+    const h = boot("Body\n", { "mdm.outlineWidth": value });
+    return JSON.parse(/window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html)[1]).outlineWidth;
+  };
+  assert.equal(width(320), 320);
+  assert.equal(width(320.6), 321, "a fractional width is rounded");
+  assert.equal(width(10), 140, "under the floor");
+  assert.equal(width(9000), 1200, "over the ceiling");
+  assert.equal(width(undefined), 250, "unset");
+  assert.equal(width("320"), 250, "a string is not a width");
+  assert.equal(width(NaN), 250);
+  assert.equal(width(Infinity), 250);
+});
+
+test("setSetting stores a width, clamped, and refuses what is not a number", async () => {
+  const h = boot("Body\n", {});
+  await h.receive({ type: "setSetting", key: "outlineWidth", value: 3000 });
+  await h.receive({ type: "setSetting", key: "outlineWidth", value: 317.4 });
+  await h.receive({ type: "setSetting", key: "outlineWidth", value: "320" });
+  await h.receive({ type: "setSetting", key: "outlineWidth", value: null });
+  assert.deepEqual(
+    vscode._state.updates.map((u) => [u.key, u.value]),
+    [
+      ["mdm.outlineWidth", 1200],
+      ["mdm.outlineWidth", 317],
+    ]
+  );
+});
+
+test("setSetting writes the outline and the Ctrl+D toggle, and no other word", async () => {
+  const h = boot("Body\n", {});
+  await h.receive({ type: "setSetting", key: "outline", value: "shown" });
+  await h.receive({ type: "setSetting", key: "multicursorMatch", value: "substring" });
+  await h.receive({ type: "setSetting", key: "outline", value: "peek" });
+  await h.receive({ type: "setSetting", key: "multicursorMatch", value: "regex" });
+  assert.deepEqual(
+    vscode._state.updates.map((u) => [u.key, u.value]),
+    [
+      ["mdm.outline", "shown"],
+      ["mdm.multicursorMatch", "substring"],
+    ]
+  );
 });
 
 test("the webview HTML carries a CSP without eval, and the editor bundle", () => {

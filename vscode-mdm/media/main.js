@@ -2893,11 +2893,12 @@
 
   // ---------- Ctrl+D: next occurrence ----------
 
-  // Off by default, Ctrl+D matches whole words, the way VS Code does: a caret
-  // in "score" walks the standalone "score"s and steps over "scores". The
-  // toolbar toggle turns on substring matching, where "score" also lands
-  // inside "scores", "scoreboard" and the like.
-  let matchSubstring = false;
+  // Ctrl+D matches whole words, the way VS Code does: a caret in "score" walks
+  // the standalone "score"s and steps over "scores". The toolbar toggle turns
+  // on substring matching, where "score" also lands inside "scores",
+  // "scoreboard" and the like. Which of the two is in force is a setting
+  // (mdm.multicursorMatch), so the toggle comes back lit as it was left.
+  let matchSubstring = SETTINGS.multicursorMatch === "substring";
 
   // The substring form of selectNextOccurrence. The first press, on an empty
   // selection, takes the word under the caret (so the toggle can be flipped
@@ -3628,7 +3629,11 @@
   // section the caret is in marked, each one a jump. It is a toggle, not a
   // drop-down: it stays open while the document is navigated, and its button
   // leads the toolbar, on the side the panel appears.
-  let outlineOpen = false;
+  //
+  // Open or shut is a setting (mdm.outline), as is how wide it is opened
+  // (mdm.outlineWidth): the panel comes back the way it was left, here and in
+  // the next document opened.
+  let outlineOpen = SETTINGS.outline === "shown";
 
   function outlineList() {
     return document.querySelector("#app .mdm-outline__list");
@@ -3672,19 +3677,49 @@
     });
   }
 
-  function updateOutlineButton() {
+  // The panel drawn from the setting in force: the class that shows it, the
+  // lit button, and the list, which is only filled while it is open.
+  function applyOutline() {
+    const root = app();
+    if (root) root.classList.toggle("mdm-outline--open", outlineOpen);
     const btn = document.querySelector('#app button[data-type="outline"]');
     if (btn) btn.classList.toggle("mdm-btn--on", outlineOpen);
+    if (outlineOpen) refreshOutline();
   }
 
   // ---------- The width of the outline ----------
 
-  // The panel opens at 250px and the grip beside it sets it from there, the
-  // sash of a side panel. What it writes is a custom property on #app, in force
-  // for as long as the editor is open: not a setting, the way the player's
-  // volume is not one either.
+  // The panel opens at the width the grip beside it was last dragged to, the
+  // sash of a side panel. What the drag writes is a custom property on #app,
+  // and what it leaves behind on the drop is the setting, so the panel is as
+  // wide in the next document as in this one.
   const OUTLINE_MIN = 140;
+  // The ceiling extension.js clamps mdm.outlineWidth to as well, so a width
+  // that comes back from the host is one the grip could have reached.
+  const OUTLINE_MAX = 1200;
   const EDITOR_MIN = 200;
+  let outlineWidth = SETTINGS.outlineWidth || 250;
+
+  // The editor keeps a column of its own whatever the setting says: a width
+  // dragged out on a wide window would otherwise swallow the pane on a narrow
+  // one. The setting is left alone, so the panel goes back to its full width
+  // as soon as there is room for it again.
+  function applyOutlineWidth() {
+    const root = app();
+    if (!root) return;
+    const body = document.querySelector("#app .mdm-body");
+    const room = body ? body.getBoundingClientRect().width - EDITOR_MIN : Infinity;
+    const width = Math.max(OUTLINE_MIN, Math.min(outlineWidth, room));
+    root.style.setProperty("--mdm-outline-width", Math.round(width) + "px");
+  }
+
+  // The pane can be resized under an open panel (the editor group dragged
+  // narrower, the window itself), so the fit is worked out again whenever it
+  // changes. Only the width on screen moves; the setting stays where the grip
+  // left it.
+  function watchOutlineRoom() {
+    window.addEventListener("resize", applyOutlineWidth);
+  }
 
   function makeOutlineGrip(grip, body) {
     grip.addEventListener("pointerdown", function (e) {
@@ -3692,9 +3727,10 @@
       const root = app();
       const box = body.getBoundingClientRect();
       // The editor keeps a column of its own wherever the sash is dragged to.
-      const most = Math.max(OUTLINE_MIN, box.width - EDITOR_MIN);
+      const most = Math.min(OUTLINE_MAX, Math.max(OUTLINE_MIN, box.width - EDITOR_MIN));
+      let width = outlineWidth;
       const drag = function (ev) {
-        const width = Math.min(most, Math.max(OUTLINE_MIN, ev.clientX - box.left));
+        width = Math.min(most, Math.max(OUTLINE_MIN, ev.clientX - box.left));
         root.style.setProperty("--mdm-outline-width", Math.round(width) + "px");
       };
       const drop = function () {
@@ -3703,6 +3739,10 @@
         grip.removeEventListener("pointermove", drag);
         grip.removeEventListener("pointerup", drop);
         grip.removeEventListener("pointercancel", drop);
+        // Written once, on the drop: a setting per frame of the drag would be
+        // a hundred writes to settings.json for one gesture. The panel is
+        // already at that width, so what comes back changes nothing on screen.
+        askSetting("outlineWidth", Math.round(width));
       };
       // The press is not prevented, so the click still counts as one made
       // outside the text (dismissFromOutside); what a drag would otherwise
@@ -3720,12 +3760,11 @@
     });
   }
 
+  // The button asks the host, the way every other button that holds a state
+  // does; the panel opens when the setting comes back. The keyboard goes back
+  // to the text at once: that is the click's doing, not the setting's.
   function toggleOutline() {
-    outlineOpen = !outlineOpen;
-    const root = app();
-    if (root) root.classList.toggle("mdm-outline--open", outlineOpen);
-    updateOutlineButton();
-    if (outlineOpen) refreshOutline();
+    askSetting("outline", outlineOpen ? "hidden" : "shown");
     if (view) view.focus();
   }
 
@@ -3866,8 +3905,7 @@
         icon: MULTICURSOR_ICON,
         tip: matchTip(),
         click: function () {
-          matchSubstring = !matchSubstring;
-          updateMatchButton();
+          askSetting("multicursorMatch", matchSubstring ? "word" : "substring");
           if (view) view.focus();
         },
       },
@@ -3956,6 +3994,12 @@
     buildEditor(text);
     updateFrontMatter();
     updateUndoButtons();
+    // The buttons that hold a state come up showing the setting they were left
+    // on, the panel included: the document reopens as it was closed.
+    applyOutlineWidth();
+    applyOutline();
+    updateMatchButton();
+    watchOutlineRoom();
     watchTheme();
     applyTheme();
     applyScoreAlign();
@@ -3992,6 +4036,9 @@
         scrollToTop = true;
       }
       frontMatter = nextFm;
+      outlineOpen = next.outline === "shown";
+      outlineWidth = next.outlineWidth || 250;
+      matchSubstring = next.multicursorMatch === "substring";
       // applyTheme repaints the toolbar and the score styling, whose colours
       // are picked from the effective theme. A theme chosen from the menu
       // also brings a palette message right behind this one, which repaints
@@ -3999,6 +4046,12 @@
       applyTheme();
       applyScoreAlign();
       updateFrontMatter();
+      // The width first: the panel is shown by the call after it, and setting
+      // its width before that keeps it from opening at one width and jumping
+      // to another.
+      applyOutlineWidth();
+      applyOutline();
+      updateMatchButton();
       return;
     }
     if (msg.type === "palette") {

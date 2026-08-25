@@ -566,6 +566,27 @@ How the editing works:
   what has just been shown lives. Verified: editing `example.mdm` in the
   editor and saving leaves the file byte-identical apart from what was
   edited, in both modes.
+- **Outline panel**: the button that leads the bar opens a column down the
+  left edge with the headings of the document, indented by level, the section
+  the caret is in marked and every row a jump to it. It stays open while the
+  document is navigated, and the grip on its edge sets how wide it is, the
+  editor keeping a column of its own however far the grip is pushed. Both are
+  settings (`mdm.outline`, `mdm.outlineWidth`), so the panel comes back the
+  way it was left; a width that does not fit the pane is narrowed to fit while
+  it is open, and the setting is not touched, so it grows back as soon as
+  there is room.
+- **The buttons remember what they were left on.** Every toolbar button that
+  holds a state writes it as an `mdm.*` setting instead of repainting itself,
+  and the editor draws from the value the host sends back. That is what makes
+  a document open showing what it was closed with, and what keeps two editors
+  open on two files in step: the theme, the score fill, the staff lines, the
+  score alignment, the YAML header, the outline with its width, and the
+  multicursor toggle (`mdm.multicursorMatch`), which decides whether `Ctrl+D`
+  walks whole words, as VS Code does, or lands inside them too, so that
+  "score" also matches in "scores". The one state deliberately left out is the
+  player's volume: it lasts as long as the editor is open, the way a player's
+  volume does. The values are written where they already live, so a workspace
+  that pinned one goes on overriding the user's own.
 
 What is in the bundle: `vscode-mdm/media/vendor/cm6/cm6.bundle.js` is built
 by `vscode-mdm/vendor-src/` (`npm install && npm run vendor`, the one place

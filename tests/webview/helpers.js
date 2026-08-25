@@ -370,6 +370,44 @@ function lineAt(page, pos) {
   }, pos);
 }
 
+// The settings message the host sends back after a button press. The webview
+// never repaints itself: every toolbar button that holds a state asks the host
+// (setSetting) and waits for the value to come back, so a test that presses one
+// posts this behind it. Every key travels, with the harness defaults unless
+// overridden, which is what the real readSettings does.
+function settingsMessage(overrides) {
+  return {
+    type: "settings",
+    settings: Object.assign(
+      {
+        theme: "light",
+        scoreFill: "none",
+        staffLines: "gray",
+        scoreAlign: "center",
+        frontMatter: "shown",
+        outline: "hidden",
+        outlineWidth: 250,
+        multicursorMatch: "word",
+      },
+      overrides || {}
+    ),
+  };
+}
+
+function postSettings(page, overrides) {
+  return page.evaluate(
+    (msg) => window.postMessage(msg, "*"),
+    settingsMessage(overrides)
+  );
+}
+
+// What the webview asked the host to store, in the order it asked.
+function setSettingPosts(page) {
+  return page.evaluate(() =>
+    window.__posts.filter((m) => m.type === "setSetting")
+  );
+}
+
 module.exports = {
   CHROME,
   HARNESS,
@@ -386,4 +424,7 @@ module.exports = {
   selectionRanges,
   coordsAt,
   lineAt,
+  settingsMessage,
+  postSettings,
+  setSettingPosts,
 };

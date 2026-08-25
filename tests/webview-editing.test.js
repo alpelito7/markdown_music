@@ -25,10 +25,23 @@ const {
   selectionRanges,
   coordsAt,
   lineAt,
+  postSettings,
+  setSettingPosts,
 } = require("./webview/helpers.js");
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// The outline button asks the host to store mdm.outline and the panel opens
+// when the value comes back, the way every other button that holds a state
+// works. Nothing here is inside VS Code to answer, so the test posts the
+// answer itself; `seeded` carries whatever the test seeded, since the host
+// sends every setting in that message and the defaults would undo them.
+async function pressOutline(page, shown, seeded) {
+  await page.click('#app button[data-type="outline"]');
+  await postSettings(page, Object.assign({ outline: shown ? "shown" : "hidden" }, seeded || {}));
+  await sleep(200);
 }
 
 // A key with a modifier held, the way a user chords it.
@@ -832,8 +845,21 @@ test("the outline panel lists the headings, marks the section and jumps", { skip
     ),
     "none"
   );
+  // The press asks the host and repaints nothing by itself.
   await h.page.click('#app button[data-type="outline"]');
   await sleep(150);
+  assert.deepEqual(await setSettingPosts(h.page), [
+    { type: "setSetting", key: "outline", value: "shown" },
+  ]);
+  assert.equal(
+    await h.page.evaluate(() =>
+      document.getElementById("app").classList.contains("mdm-outline--open")
+    ),
+    false,
+    "the panel opened before the host answered"
+  );
+  await postSettings(h.page, { outline: "shown", theme: "light", frontMatter: "hidden" });
+  await sleep(200);
   const panel = await h.page.evaluate(() => ({
     open: document.getElementById("app").classList.contains("mdm-outline--open"),
     display: getComputedStyle(document.querySelector("#app .mdm-outline")).display,
@@ -1055,8 +1081,7 @@ test("a click outside the text puts away what is open for editing", { skip }, as
     ["a toolbar button", '#app button[data-type="mdm-theme"]'],
     ["the toolbar itself", "#app .mdm-toolbar"],
   ];
-  await h.page.click('#app button[data-type="outline"]');
-  await sleep(250);
+  await pressOutline(h.page, true);
   for (const [name, selector] of elsewhere) {
     await setSelection(h.page, await posOf(h.page, "CDEF", 1));
     await sleep(250);
@@ -1073,8 +1098,7 @@ test("a click outside the text puts away what is open for editing", { skip }, as
       "the score stayed open after a click on " + name
     );
   }
-  await h.page.click('#app button[data-type="outline"]');
-  await sleep(200);
+  await pressOutline(h.page, false);
 
   // Nothing open: the margin does nothing at all, not even move the caret.
   await setSelection(h.page, 2);
@@ -1306,8 +1330,7 @@ test("the outline panel is as wide as the grip is dragged", { skip }, async () =
     });
   // Closed, there is nothing to take hold of.
   assert.equal(await gripShown(), "none", "the grip shows with the panel closed");
-  await h.page.click('#app button[data-type="outline"]');
-  await sleep(250);
+  await pressOutline(h.page, true, { frontMatter: "hidden" });
   assert.equal(await gripShown(), "block", "the grip did not come with the panel");
   const open250 = await panel();
   assert.ok(
@@ -1343,6 +1366,14 @@ test("the outline panel is as wide as the grip is dragged", { skip }, async () =
     widest.width <= 1200 - 200 + 2,
     "the panel left the editor no room: " + widest.width
   );
+  // Every drop leaves the width with the host, once per gesture and not once
+  // per frame, and what it stores is the width the panel came to rest at.
+  const stored = (await setSettingPosts(h.page)).filter((m) => m.key === "outlineWidth");
+  assert.equal(stored.length, 3, "one write per drag: " + JSON.stringify(stored));
+  assert.ok(
+    Math.abs(stored[2].value - widest.width) <= 2,
+    "the width stored is not the one on screen: " + stored[2].value
+  );
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1371,8 +1402,17 @@ test("the Ctrl+D toggle switches whole-word matching to substring", { skip }, as
       return { tip: b.getAttribute("aria-label"), lit: b.classList.contains("mdm-btn--on") };
     });
   assert.deepEqual(await matchButton(), { tip: "Multicursor matches inside words", lit: false });
-  // Toggle on, and it lights and changes what it says.
+  // Toggle on. The press asks the host (mdm.multicursorMatch) and the button
+  // lights when the value comes back, the way the rest of the bar works, so
+  // the toggle is still on when the document is opened again.
   await h.page.click('#app button[data-type="mdm-match-substring"]');
+  await sleep(150);
+  assert.deepEqual(await setSettingPosts(h.page), [
+    { type: "setSetting", key: "multicursorMatch", value: "substring" },
+  ]);
+  assert.equal((await matchButton()).lit, false, "lit before the host answered");
+  await postSettings(h.page, { multicursorMatch: "substring", frontMatter: "hidden" });
+  await sleep(200);
   await h.page.evaluate(() => window.__mdm.view.focus());
   assert.deepEqual(await matchButton(), { tip: "Multicursor matches whole words", lit: true });
   // Now the "score" inside "scores" is caught too.
