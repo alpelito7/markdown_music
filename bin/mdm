@@ -23,4 +23,24 @@ if [[ -e "$tmp" ]]; then
 fi
 cp "$file" "$tmp"
 trap 'rm -f "$tmp"' EXIT
-quarto render "$tmp" "$@"
+
+# Quarto offers the document's other formats in the margin of the HTML ("Other
+# Formats", one link per format the header declares). An .mdm usually declares
+# both, so every HTML page grew a link to a PDF that is only on disk if a PDF
+# was asked for too: `--to html` alone left it pointing at nothing. The editor
+# the page is dressed as has no such column either, so it is off here.
+#
+# It goes on the command line and not in the filter: Quarto settles the format
+# options before the filters run, so a `format-links` written from mdm.lua
+# arrives too late and the block comes out all the same (measured). A document
+# that wants the links keeps them by saying so itself, which is what the grep
+# leaves room for; `-M` on the command line would otherwise outrank the header.
+#
+# Two calls rather than one with an array of extra arguments: `"${arr[@]}"` on
+# an empty array is an unbound variable under `set -u` in bash 3.2, which is
+# the bash macOS ships.
+if grep -qE '^[[:space:]]*format-links[[:space:]]*:' "$file"; then
+  quarto render "$tmp" "$@"
+else
+  quarto render "$tmp" -M format-links:false "$@"
+fi

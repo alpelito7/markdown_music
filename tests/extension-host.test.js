@@ -536,7 +536,9 @@ test("export saves a dirty document and runs bin/mdm on it", async () => {
 
   assert.deepEqual(vscode._state.savedUris, ["file://" + doc], "the document was not saved first");
   const log = fs.readFileSync(path.join(tmp, "bin", "args.txt"), "utf8").trim().split("\n");
-  assert.equal(log[0], "render " + doc + " --to html");
+  // The look of the editor rides along after the format (see the look tests
+  // below); what is pinned here is the call itself.
+  assert.equal(log[0].split(" -M ")[0], "render " + doc + " --to html");
   assert.equal(log[1], tmp, "the renderer did not run in the document's folder");
   assert.equal(vscode._state.progressTitles.length, 1);
   assert.match(vscode._state.progressTitles[0], /doc\.mdm/);
@@ -563,9 +565,104 @@ test("exporting both formats passes no --to and offers both files", async () => 
   // Clean documents skip the save; bin/mdm's default is already HTML + PDF.
   assert.deepEqual(vscode._state.savedUris, []);
   const args = fs.readFileSync(path.join(tmp, "bin", "args.txt"), "utf8").trim();
-  assert.equal(args, "render " + doc);
+  assert.equal(args.split(" -M ")[0], "render " + doc);
   assert.deepEqual(vscode._state.infoMessages[0].buttons, ["Open HTML", "Open PDF"]);
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------- The look the export carries ----------
+
+// One export against a fake bin/mdm that writes down its arguments, and what
+// it was called with. `themeKind` is what VS Code itself is showing
+// (vscode.ColorThemeKind), which mdm.theme = "auto" follows.
+async function exportWith(to, settings, extensions, themeKind) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  fs.mkdirSync(path.join(tmp, "bin"));
+  const renderer = path.join(tmp, "bin", "mdm");
+  fs.writeFileSync(
+    renderer,
+    '#!/bin/sh\necho "$@" > "$(dirname "$0")/args.txt"\nexit 0\n'
+  );
+  fs.chmodSync(renderer, 0o755);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, "Body\n");
+  const h = boot("Body\n", settings, extensions, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  if (themeKind !== undefined) vscode._state.activeColorThemeKind = themeKind;
+  await h.receive({ type: "export", to });
+  const args = fs.readFileSync(path.join(tmp, "bin", "args.txt"), "utf8").trim();
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return args;
+}
+
+// The -M key:value pairs of a call, as the Lua filter will read them.
+function lookOf(args) {
+  const parts = args.split(/\s+/);
+  const out = {};
+  parts.forEach((part, i) => {
+    if (parts[i - 1] !== "-M") return;
+    const at = part.indexOf(":");
+    out[part.slice(0, at)] = part.slice(at + 1);
+  });
+  return out;
+}
+
+test("the export carries the look the editor is showing", async () => {
+  const args = await exportWith(
+    "html",
+    {
+      "mdm.theme": "Test Theme",
+      "mdm.scoreFill": "brass",
+      "mdm.staffLines": "ink",
+      "mdm.scoreAlign": "left",
+    },
+    seedTheme("#e6db74")
+  );
+  const look = lookOf(args);
+  assert.equal(look["mdm-look"], "dark", "the named theme's side did not travel");
+  assert.equal(look["mdm-score-fill"], "brass");
+  assert.equal(look["mdm-staff-lines"], "ink");
+  assert.equal(look["mdm-score-align"], "left");
+  // The palette of that same theme, spelt without the `#` a -M value cannot
+  // carry (it would open a YAML comment).
+  assert.equal(look["mdm-syn-string"], "e6db74");
+  assert.equal(look["mdm-syn-base"], "f8f8f2");
+  assert.equal(look["mdm-syn-bg"], "272822");
+});
+
+test("a palette from the other side is left out of the export", async () => {
+  // The editor held to light while VS Code is on a dark theme: the side
+  // travels, its colours do not, and the render falls back to the palette the
+  // editor itself falls back to.
+  const args = await exportWith(
+    "html",
+    { "mdm.theme": "light", "workbench.colorTheme": "Test Theme" },
+    seedTheme("#e6db74")
+  );
+  const look = lookOf(args);
+  assert.equal(look["mdm-look"], "light");
+  assert.deepEqual(
+    Object.keys(look).filter((k) => k.startsWith("mdm-syn-")),
+    [],
+    "dark syntax colours were sent for a light page"
+  );
+});
+
+test("the white page look travels as itself", async () => {
+  const args = await exportWith("html", { "mdm.theme": "white" }, null);
+  assert.equal(lookOf(args)["mdm-look"], "white");
+});
+
+test("on auto the export follows the side VS Code is on", async () => {
+  const dark = await exportWith("html", {}, null, vscode.ColorThemeKind.Dark);
+  assert.equal(lookOf(dark)["mdm-look"], "dark");
+  const light = await exportWith(
+    "html",
+    {},
+    null,
+    vscode.ColorThemeKind.HighContrastLight
+  );
+  assert.equal(lookOf(light)["mdm-look"], "light");
 });
 
 test("a failing renderer surfaces its stderr, and a bogus format does nothing", async () => {

@@ -5,6 +5,12 @@
 // narrow score keeps its natural width and sits centred, whether the box under
 // it is the height of the drawing, and whether a .play block grows its
 // controls.
+//
+// And the look: the exported page is dressed as the MDM editor
+// (resources/mdm-look.css), so what is checked here as well is the ground the
+// document sits on, the code cards and their colours, the shape of the player
+// bar, and that the look the editor exports with (the -M metadata the
+// extension passes) reaches the page.
 // Run with: node --test tests/html.test.js   (needs quarto and google-chrome)
 
 "use strict";
@@ -70,6 +76,13 @@ P:melodic
 ABcd e^f^ga | a=g=fe dcBA |]
 \`\`\`
 
+A line of prose with \`inline code\` in it.
+
+\`\`\`python
+def f(x):
+    return "a string" + str(3)  # a comment
+\`\`\`
+
 Playable:
 
 \`\`\`{.abc .play}
@@ -83,8 +96,27 @@ CDEF GABc |
 \`\`\`
 `;
 
-// Rendered once for the whole file: quarto takes a few seconds.
+// What the VS Code extension passes when it exports from a dark editor with a
+// fill under the scores, staff lines in ink and scores lined up left
+// (exportLook in vscode-mdm/extension.js). The colours are Monokai's, spelt
+// without their `#`, which a -M value cannot carry.
+const DARK_LOOK = [
+  "-M", "mdm-look:dark",
+  "-M", "mdm-score-fill:paper",
+  "-M", "mdm-staff-lines:ink",
+  "-M", "mdm-score-align:left",
+  "-M", "mdm-syn-base:f8f8f2",
+  "-M", "mdm-syn-bg:272822",
+  "-M", "mdm-syn-keyword:f92672",
+  "-M", "mdm-syn-string:e6db74",
+  "-M", "mdm-syn-comment:88846f",
+];
+
+// Rendered once for the whole file: quarto takes a few seconds. Twice, in
+// fact: the same document with the look of the command line (the editor's own
+// fallbacks) and with the look of a dark editor.
 let PAGE = null;
+let DARK_PAGE = null;
 
 test.before(() => {
   if (!available) return;
@@ -98,6 +130,15 @@ test.before(() => {
   });
   assert.equal(r.status, 0, r.stderr);
   PAGE = "file://" + path.join(DIR, "doc.html");
+
+  fs.writeFileSync(path.join(DIR, "dark.mdm"), DOC);
+  const d = spawnSync(
+    MDM,
+    ["render", "dark.mdm", "--to", "html"].concat(DARK_LOOK),
+    { cwd: DIR, encoding: "utf8" }
+  );
+  assert.equal(d.status, 0, d.stderr);
+  DARK_PAGE = "file://" + path.join(DIR, "dark.html");
 });
 
 const OPEN_BROWSERS = new Set();
@@ -112,7 +153,7 @@ test.after(async () => {
 });
 
 // Loads the rendered page and waits for mdm.js to have engraved every block.
-async function open() {
+async function open(url) {
   const browser = await puppeteer.launch({
     executablePath: CHROME,
     args: ["--no-sandbox", "--allow-file-access-from-files"],
@@ -125,7 +166,7 @@ async function open() {
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
   });
-  await page.goto(PAGE);
+  await page.goto(url || PAGE);
   await page.waitForFunction(
     () => document.querySelectorAll(".mdm-paper svg").length >= 3,
     { timeout: 20000 }
@@ -141,8 +182,10 @@ async function open() {
   };
 }
 
-// One entry per music block: the boxes of the figure, the fitting wrapper if
-// mdm.js added one, the paper and the engraved SVG.
+// One entry per music block: the boxes of the figure, the box mdm.js holds the
+// score in, the paper and the engraved SVG. Every score gets that box (it is
+// what carries the fill and the alignment); only one whose source fixed its
+// width is pinned to a size of its own.
 function blocks(page) {
   return page.evaluate(() =>
     Array.from(document.querySelectorAll(".mdm-block")).map((block) => {
@@ -157,6 +200,7 @@ function blocks(page) {
       return {
         play: block.classList.contains("mdm-play"),
         fitted: !!fit,
+        pinned: !!(fit && fit.style.maxWidth),
         maxWidth: fit ? fit.style.maxWidth : "",
         block: box(block),
         fit: box(fit),
@@ -174,24 +218,27 @@ function blocks(page) {
   );
 }
 
-test("every music block is engraved, and only the narrow one is fitted", { skip }, async () => {
+test("every music block is engraved, and only the narrow one is pinned", { skip }, async () => {
   const h = await open();
   const out = await blocks(h.page);
   assert.equal(out.length, 3);
   for (const b of out) {
     assert.ok(b.svg.width > 0 && b.svg.height > 0, "a block was not engraved");
+    assert.equal(b.fitted, true, "a score was left without its box");
   }
-  // The narrow score keeps the width %%staffwidth asked for, in a wrapper of
-  // its own, and stays well inside the page.
-  assert.equal(out[0].fitted, true, "the narrow score was not fitted");
+  // The narrow score keeps the width %%staffwidth asked for and stays well
+  // inside the page. The measurement that decides this is made against the
+  // width of the box: mdm.js engraves the first pass at that width, so a tune
+  // with nothing to say about its own comes out filling it exactly.
+  assert.equal(out[0].pinned, true, "the narrow score was not pinned");
   assert.match(out[0].maxWidth, /^\d+px$/);
   assert.ok(
     out[0].svg.width < out[0].block.width - 40,
     "the narrow score was stretched: " + out[0].svg.width
   );
-  // The wide one and the playable one take the text width, with no wrapper.
+  // The wide one and the playable one take the text width, at no fixed size.
   for (const b of [out[1], out[2]]) {
-    assert.equal(b.fitted, false);
+    assert.equal(b.pinned, false, "a wide score was pinned to a width");
     assert.ok(
       b.svg.width > b.block.width - 40,
       "a wide score did not fill the line: " + b.svg.width
@@ -224,7 +271,7 @@ test("the box under a score is the height of the drawing", { skip }, async () =>
   for (const b of out) {
     assert.ok(
       Math.abs(b.paper.height - b.svg.height) < 4,
-      (b.fitted ? "narrow" : "wide") +
+      (b.pinned ? "narrow" : "wide") +
         ": paper " +
         Math.round(b.paper.height) +
         " under a drawing of " +
@@ -260,6 +307,168 @@ test("the .play block, and only it, grows playback controls", { skip }, async ()
 
 test("the page loads with no script errors", { skip }, async () => {
   const h = await open();
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// ---------- The look of the editor ----------
+
+// A computed colour, whatever notation the browser hands it back in: a plain
+// colour comes back as rgb(), one that went through color-mix() as
+// color(srgb ...) with the channels in 0..1.
+function channels(value) {
+  const rgb = /^rgba?\(([^)]+)\)/.exec(value);
+  if (rgb) return rgb[1].split(",").slice(0, 3).map(Number);
+  const srgb = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/.exec(value);
+  if (srgb) return [+srgb[1] * 255, +srgb[2] * 255, +srgb[3] * 255];
+  return null;
+}
+
+function luma(value) {
+  const c = channels(value);
+  assert.ok(c, "not a colour: " + value);
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+
+// Everything the look decides, read off the rendered page.
+function looks(page) {
+  return page.evaluate(() => {
+    const css = (sel, prop) => {
+      const el = document.querySelector(sel);
+      return el ? getComputedStyle(el)[prop] : null;
+    };
+    const bar = document.querySelector(".mdm-block.mdm-play .mdm-audio");
+    return {
+      page: css("body", "backgroundColor"),
+      ink: css("body", "color"),
+      fontSize: css("body", "fontSize"),
+      lineHeight: css("body", "lineHeight"),
+      column: document.querySelector("main.content").getBoundingClientRect().width,
+      card: css("div.sourceCode", "backgroundColor"),
+      codeSize: css("div.sourceCode", "fontSize"),
+      codeInk: css("div.sourceCode", "color"),
+      keyword: css("code span.kw", "color"),
+      keywordWeight: css("code span.kw", "fontWeight"),
+      string: css("code span.st", "color"),
+      comment: css("code span.co", "color"),
+      lineSpan: css("code.sourceCode > span", "color"),
+      inlineCode: css("p code", "backgroundColor"),
+      staff: css(".mdm-paper svg .abcjs-staff path", "fill"),
+      scoreFill: css(".mdm-fit", "backgroundColor"),
+      scoreMargin: css(".mdm-fit", "marginLeft"),
+      barButtons: bar
+        ? Array.from(bar.querySelectorAll(".abcjs-btn")).map((b) =>
+            b.getAttribute("aria-label")
+          )
+        : [],
+      trackLabel: (() => {
+        const t = document.querySelector(".abcjs-midi-progress-background");
+        return t ? t.getAttribute("aria-label") : null;
+      })(),
+      barVolume: !!document.querySelector(".mdm-audio .mdm-audio-vol input"),
+      barWidget: css(".mdm-audio .abcjs-inline-audio", "borderRadius"),
+      barHeight: css(".mdm-audio .abcjs-inline-audio", "height"),
+      barGround: css(".mdm-audio .abcjs-inline-audio", "backgroundColor"),
+      button: css(".mdm-audio .abcjs-btn", "width"),
+      buttonRadius: css(".mdm-audio .abcjs-btn", "borderRadius"),
+      track: css(".abcjs-midi-progress-background", "height"),
+      head: css(".abcjs-midi-progress-indicator", "width"),
+      clock: css(".abcjs-midi-clock", "fontSize"),
+      progress: (() => {
+        const t = document.querySelector(".abcjs-midi-progress-background");
+        return t ? t.style.getPropertyValue("--mdm-progress") : null;
+      })(),
+    };
+  });
+}
+
+test("the page is the editor's: its ground, its ink, its measure", { skip }, async () => {
+  const h = await open();
+  const l = await looks(h.page);
+  assert.equal(l.fontSize, "16px");
+  assert.equal(l.lineHeight, "27.2px", "the editor's 1.7 of a line");
+  assert.ok(l.column <= 820, "the text column is wider than the editor's 820");
+  // The two grounds of the editor: whichever side is in force, the code sits
+  // on the darker of the two and the page on the lighter.
+  assert.ok(
+    luma(l.card) < luma(l.page),
+    "the code card is not darker than the page: " + l.card + " on " + l.page
+  );
+  await h.close();
+});
+
+test("code is on the editor's card, in the palette's colours", { skip }, async () => {
+  const h = await open();
+  const l = await looks(h.page);
+  assert.equal(l.codeSize, "14.08px", "0.88 of the editor's 16px");
+  // The fallback palette, which is what the editor shows when it cannot read a
+  // theme, and so what a render from the command line gets:
+  // stackoverflow-light.
+  assert.equal(l.keyword, "rgb(1, 86, 146)");
+  assert.equal(l.string, "rgb(84, 121, 13)");
+  assert.equal(l.comment, "rgb(101, 110, 119)");
+  // A token carries colour and nothing else, as in the editor; Quarto's own
+  // stylesheet bolds its keywords and paints the line wrappers navy.
+  assert.equal(l.keywordWeight, "400");
+  assert.equal(l.lineSpan, "rgb(47, 51, 55)", "the base colour of the palette");
+  // Inline code takes the card material too, not Quarto's own chip.
+  assert.ok(
+    Math.abs(luma(l.inlineCode) - luma(l.card)) < 1,
+    "inline code is not on the card ground: " + l.inlineCode
+  );
+  await h.close();
+});
+
+test("the player bar is the editor's", { skip }, async () => {
+  const h = await open();
+  const out = await blocks(h.page);
+  if (!out[2].supportsAudio) {
+    await h.close();
+    return; // no Web Audio here: there is no bar to look at
+  }
+  const l = await looks(h.page);
+  // What abcjs ships is a 34px slab of square buttons on #424242, a 10px
+  // trough and a 20px lozenge. What the editor draws, and this with it: a
+  // 30px pill on the card ground, round 24px buttons, a hairline track with a
+  // round head, and the clock a size smaller.
+  assert.deepEqual(l.barButtons, ["Play", "Stop", "Repeat"]);
+  assert.equal(l.trackLabel, "Position", "the track was never given its role");
+  assert.equal(l.barVolume, true, "the volume control is missing");
+  assert.equal(l.barHeight, "30px");
+  assert.equal(l.barWidget, "15px");
+  assert.equal(l.button, "24px");
+  assert.equal(l.buttonRadius, "50%");
+  assert.equal(l.track, "4px");
+  assert.equal(l.head, "11px");
+  assert.equal(l.clock, "11px");
+  assert.equal(l.progress, "0.00%", "the track's fill was never written");
+  assert.ok(
+    Math.abs(luma(l.barGround) - luma(l.card)) < 1,
+    "the bar is not on the card ground: " + l.barGround
+  );
+  await h.close();
+});
+
+test("the look the editor exports with reaches the page", { skip }, async () => {
+  const h = await open(DARK_PAGE);
+  const l = await looks(h.page);
+  // The dark side: the editor's ink, and the page above the code rather than
+  // under it (dark is the one arrangement where the card is the theme's own
+  // background and the page the tint over it).
+  assert.equal(l.ink, "rgb(212, 212, 212)");
+  assert.ok(
+    luma(l.card) < luma(l.page),
+    "the code card is not darker than the page: " + l.card + " on " + l.page
+  );
+  // The palette that travelled, Monokai's.
+  assert.equal(l.keyword, "rgb(249, 38, 114)");
+  assert.equal(l.string, "rgb(230, 219, 116)");
+  assert.equal(l.codeInk, "rgb(248, 248, 242)");
+  // The fill under the scores (paper, on its dark value), staff lines back in
+  // ink rather than gray, and scores lined up with the text.
+  assert.equal(l.scoreFill, "rgb(42, 39, 35)");
+  assert.equal(l.staff, "rgb(212, 212, 212)", "the staff lines are not in ink");
+  assert.equal(l.scoreMargin, "0px", "the scores are not lined up left");
   assert.deepEqual(h.errors, []);
   await h.close();
 });

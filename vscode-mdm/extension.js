@@ -126,6 +126,101 @@ const EXPORT_TARGETS = {
   both: { args: [], outputs: [".html", ".pdf"] },
 };
 
+// ---------- The look the export is dressed in ----------
+//
+// The exported HTML reads as the editor does (the page's ground, the ink, the
+// code cards and their colours, the scores and the player bar), and what the
+// editor is showing right now travels to the renderer as metadata the Lua
+// filter reads: see the look section of _extensions/mdm/mdm.lua, which holds
+// the other end of this. A render with none of it, `bin/mdm render` from a
+// terminal, comes out in the editor's default look with the palette it falls
+// back to.
+
+// The ten slots the editor paints code with (theme.js).
+const SYNTAX_SLOTS = [
+  "base",
+  "bg",
+  "comment",
+  "string",
+  "number",
+  "keyword",
+  "attr",
+  "name",
+  "type",
+  "variable",
+];
+
+// vscode.ColorThemeKind: Light, Dark, HighContrast (dark), HighContrastLight.
+// A high contrast theme counts as the side it sits on, which is what the
+// webview compares against as well.
+const LIGHT_THEME_KINDS = [1, 4];
+
+// Which side the editor is on, worked out here the way the webview works it
+// out (isDark in main.js), the host being the one that knows what VS Code is
+// showing: the three fixed values of mdm.theme say it themselves, a named
+// colour theme brings its own, and "auto" follows the workbench.
+function exportSide(settings, installed) {
+  const chosen = settings.theme;
+  if (chosen === "light" || chosen === "dark" || chosen === "white") {
+    return chosen;
+  }
+  const named = (installed || []).find((t) => t.name === chosen);
+  if (named) return named.kind;
+  const active = vscode.window.activeColorTheme;
+  const kind = active && active.kind;
+  return LIGHT_THEME_KINDS.indexOf(kind) !== -1 ? "light" : "dark";
+}
+
+// A colour on its way into a `-M` value: six hex digits and no `#`, which
+// would open a YAML comment and take the rest of the argument with it. A
+// three-digit colour, which theme.js also lets through, is spelt out; the
+// four and eight digit forms carry an alpha the page has no use for.
+function metaColor(value) {
+  const full = /^#([0-9a-fA-F]{6})$/.exec(value || "");
+  if (full) return full[1].toLowerCase();
+  const short = /^#([0-9a-fA-F]{3})$/.exec(value || "");
+  if (!short) return null;
+  return short[1]
+    .toLowerCase()
+    .replace(/./g, (digit) => digit + digit);
+}
+
+// The metadata arguments for one render. The palette goes only while it is on
+// the same side as the editor, again as the webview does (applyPalette):
+// mdm.theme can hold this editor to light with VS Code on a dark theme, and
+// dark syntax colours on a light ground are unreadable.
+function exportLook() {
+  try {
+    const installed = themes();
+    const settings = readSettings(installed);
+    const side = exportSide(settings, installed);
+    const args = [
+      "-M",
+      "mdm-look:" + side,
+      "-M",
+      "mdm-staff-lines:" + settings.staffLines,
+      "-M",
+      "mdm-score-fill:" + settings.scoreFill,
+      "-M",
+      "mdm-score-align:" + settings.scoreAlign,
+    ];
+    const palette = readPalette(installed).palette;
+    const usable =
+      palette &&
+      palette.colors &&
+      palette.kind === (side === "dark" ? "dark" : "light");
+    if (usable) {
+      SYNTAX_SLOTS.forEach((slot) => {
+        const color = metaColor(palette.colors[slot]);
+        if (color) args.push("-M", "mdm-syn-" + slot + ":" + color);
+      });
+    }
+    return args;
+  } catch (e) {
+    return []; // an export never fails over the look it would have had
+  }
+}
+
 // The same renderer the command line uses. Looked for in the workspace of
 // the document first; failing that, next to this extension, which during
 // development is a symlink into the repo, so ../bin/mdm is the real one.
@@ -149,7 +244,9 @@ function findRenderer(documentUri) {
 // Export = save, then render. Saving first is what makes the export button a
 // save button too: what lands in the HTML and the PDF is always what is on
 // screen, never a stale file. Rendering goes through bin/mdm (Quarto under
-// it), with a progress notice while it runs, since a PDF takes seconds.
+// it), with a progress notice while it runs, since a PDF takes seconds. The
+// look of the editor travels with the call (exportLook above), so the HTML
+// comes out dressed as the editor it was exported from.
 async function exportDocument(document, to) {
   const target = EXPORT_TARGETS[to];
   if (!target) return;
@@ -176,9 +273,11 @@ async function exportDocument(document, to) {
         let log = "";
         let child;
         try {
-          child = cp.spawn(renderer, ["render", file].concat(target.args), {
-            cwd: path.dirname(file),
-          });
+          child = cp.spawn(
+            renderer,
+            ["render", file].concat(target.args).concat(exportLook()),
+            { cwd: path.dirname(file) }
+          );
         } catch (e) {
           resolve({ code: -1, log: String(e.message || e) });
           return;

@@ -21,6 +21,7 @@ const state = {
   workspaceFolder: null, // fsPath served by getWorkspaceFolder
   registeredProviders: [],
   extensions: [], // {extensionPath, packageJSON}, for the theme lookup
+  activeColorThemeKind: 1, // vscode.ColorThemeKind.Light
 };
 
 function reset() {
@@ -40,9 +41,11 @@ function reset() {
   state.workspaceFolder = null;
   state.registeredProviders = [];
   state.extensions = [];
+  state.activeColorThemeKind = 1;
 }
 
 const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 };
+const ColorThemeKind = { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 };
 
 const workspace = {
   getConfiguration(section) {
@@ -162,6 +165,11 @@ const window = {
     state.progressTitles.push(options && options.title);
     return task();
   },
+  // The theme VS Code itself is showing, which is what mdm.theme = "auto"
+  // follows. Seeded through _state.activeColorThemeKind.
+  get activeColorTheme() {
+    return { kind: state.activeColorThemeKind };
+  },
   onDidChangeActiveColorTheme(listener) {
     state.colorThemeListeners.push(listener);
     return {
@@ -199,6 +207,7 @@ module.exports = {
   Range,
   Uri,
   ConfigurationTarget,
+  ColorThemeKind,
   _state: state,
   _reset: reset,
   _makeDocument: makeDocument,

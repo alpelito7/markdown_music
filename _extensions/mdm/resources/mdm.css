@@ -1,14 +1,8 @@
+/* The geometry of an engraved score. What it looks like (the ink, the staff
+   lines, the fill behind it and the player bar under it) is in mdm-look.css,
+   which carries the editor's own; nothing here paints. */
 .mdm-block {
   margin: 1.5rem 0;
-}
-/* A narrow score is centred, the way a display equation is (mdm.js wraps its
-   paper in a .mdm-fit held at the natural width, which is what %%staffwidth
-   gives). A wide one gets no wrapper, and there the auto margins do nothing.
-   This lives in a stylesheet because the responsive render of abcjs
-   overwrites margins set inline. */
-.mdm-fit {
-  margin-left: auto;
-  margin-right: auto;
 }
 .mdm-paper {
   /* The responsive render of abcjs sets display:inline-block inline, as part
@@ -26,8 +20,4 @@
 .mdm-paper svg {
   max-width: 100%;
   height: auto;
-}
-.mdm-audio {
-  margin-top: 0.5rem;
-  max-width: 480px;
 }

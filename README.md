@@ -70,13 +70,74 @@ they would with no label at all.
 - **HTML**: the Lua filter (`_extensions/mdm/mdm.lua`) emits the ABC source
   and `_extensions/mdm/resources/mdm.js` renders it to SVG with
   [abcjs](https://github.com/paulrosen/abcjs) (vendored, v6.7.0) once the
-  page has loaded.
+  page has loaded, on a page dressed as the visual editor (below).
 - **PDF**: the filter engraves each block with `abcm2ps` to EPS, trims the
   BoundingBox to the real ink with ghostscript (abcm2ps writes it at the
   full page width, which shrank the scores when they were scaled), converts
   it with `epstopdf` and inserts it: at text width if it is wide, at its
   natural size and centred if it is narrow (< 330 pt). Results are cached
   by a hash of the content in `mdm_cache/`.
+
+### The HTML looks like the editor
+
+The page a render produces is dressed as the VS Code editor rather than as a
+stock Quarto document: the same ground under the document and the same ink on
+it, prose at the editor's measure, code on the same cards in the same
+colours, scores drawn and filled the same way, and the same player bar under
+a `.play` block. `_extensions/mdm/resources/mdm-look.css` is that look, a
+port of the editor's own stylesheet (`vscode-mdm/media/style.css`) onto the
+HTML Quarto produces; it spends a handful of custom properties, and the
+filter writes them into the page from what it is told.
+
+What varies travels as plain metadata, which the VS Code extension passes
+when it exports (`exportLook` in `vscode-mdm/extension.js`) and a plain
+`bin/mdm render` does not pass at all:
+
+| Key | Values |
+|---|---|
+| `mdm-look` | `light`, `dark`, `white`: the side the editor is on, and with it the two grounds, the ink and the accents |
+| `mdm-staff-lines` | `gray`, `ink` |
+| `mdm-score-fill` | `none`, `paper`, `slate`, `brass` |
+| `mdm-score-align` | `center`, `left` |
+| `mdm-syn-*` | the ten syntax slots (`base`, `bg`, `comment`, `string`, `number`, `keyword`, `attr`, `name`, `type`, `variable`), as six hex digits **without** the `#`, which would open a YAML comment |
+
+So a render from a terminal comes out in the editor's default look with the
+palette the editor itself falls back to (stackoverflow-light), and one from
+the toolbar comes out in whatever the editor was showing, its colour theme
+included:
+
+```sh
+./bin/mdm render example.mdm --to html \
+  -M mdm-look:dark -M mdm-score-fill:paper -M mdm-syn-keyword:f92672
+```
+
+These values reach a `<style>` block, and metadata is whatever the command
+line carried, so the filter lets nothing through that is not one of the words
+above or six hex digits. The block is written on `html:root` rather than on
+`:root`, so it outranks the stylesheet's own fallbacks by weight and not by
+the order Quarto happens to put the two in.
+
+Two things are as close as they get rather than identical, and in both cases
+the reason is the engine underneath. The code is tokenized by skylighting
+here and by Lezer in the editor, so the palette is shared but the cut into
+tokens is not, and a line the two read differently comes out coloured
+differently. The equations are set by MathJax here, Quarto's own, against
+KaTeX in the editor.
+
+One thing the render drops rather than dresses: the margin block Quarto adds
+with the document's other formats ("Other Formats", one link per format the
+header declares). An `.mdm` usually declares both, so every HTML page carried
+a link to a PDF that is only on disk if a PDF was asked for as well, and with
+`--to html` it pointed at nothing; the editor has no such column either.
+`bin/mdm` passes `-M format-links:false` for it, and only when the document
+says nothing about `format-links`, so a document that wants the links keeps
+them by asking for them itself. It goes on the command line and not in the
+filter because Quarto settles the format options before the filters run: a
+`format-links` written from `mdm.lua` arrives too late and the block comes out
+all the same (measured).
+
+The PDF is untouched by all this: it is a printed page, and the filter writes
+the look for the HTML format alone.
 
 ## Requirements
 
@@ -193,7 +254,10 @@ How the editing works:
   PDF. Each entry saves the document first (which makes export a save as
   well: what reaches the HTML and the PDF is always what is on screen) and
   runs the same `bin/mdm render` as the command line, with a progress
-  notice and buttons to open what it produced. `Ctrl+S` still saves as in
+  notice and buttons to open what it produced. The look of the editor goes
+  with the call, so the HTML comes out dressed as the editor it was exported
+  from, theme and all (see [The HTML looks like the
+  editor](#the-html-looks-like-the-editor)). `Ctrl+S` still saves as in
   any VS Code editor; "save as" is VS Code's own (File > Save As). The
   renderer is looked up in the `bin/mdm` of the document's workspace and,
   failing that, next to the extension.
@@ -533,6 +597,12 @@ differs, carets and undo history kept.
   (the VS Code editor does not: it carries the piano vendored).
 - No LilyPond support yet for typographically demanding scores; the natural
   route would be a `lilypond` block the filter compiles the way it does ABC.
+- The exported HTML matches the editor as far as two different engines let
+  it: the code is highlighted by skylighting rather than by Lezer and the
+  equations are set by MathJax rather than by KaTeX, so the palette and the
+  spacing are shared while the tokenizing and the glyphs are not. Callouts
+  are left to Quarto as well, which draws them with a heading and an icon
+  where the editor draws an accent bar over the source.
 - `bin/mdm` renders single files; for a whole book (a Quarto `book`
   project) the chapters would go as `.qmd` with the filter.
 
@@ -541,7 +611,10 @@ differs, carets and undo history kept.
 ### A preview identical to the MDM Editor, with audio
 
 The goal: that the preview of an `.mdm` look exactly like the visual editor
-and play the ` ```{.abc .play} ` blocks as well. Today VS Code's Markdown
+and play the ` ```{.abc .play} ` blocks as well. Half of that is already
+there in the export, which is dressed as the editor and plays its scores
+(above); what is missing is the loop, a preview that follows the document as
+it is typed rather than a render asked for by hand. Today VS Code's Markdown
 preview opens on an `.mdm` (the extension already maps `.mdm` to the
 `markdown` language id), but it renders with markdown-it, which knows
 nothing about ABC: music blocks come out as code and Quarto callouts as raw

@@ -105,7 +105,9 @@ test("HTML render: figures, playback, escaping, deps, and no music alias", () =>
   // NOT an alias any more (renamed to abc on 2026-08-17) and must stay a
   // plain code block.
   assert.equal((html.match(/class="mdm-block/g) || []).length, 2);
-  assert.equal((html.match(/mdm-play/g) || []).length, 1);
+  // The class on the figure, not the bare word: the look block writes
+  // --mdm-play-accent into the same page.
+  assert.equal((html.match(/class="mdm-block mdm-play/g) || []).length, 1);
   assert.match(html, /<pre class="mdm-src" style="display:none">/);
   assert.ok(!/class="mdm-block[^"]*"[^>]*>[^]*X:3/.test(html.split("mdm-src")[0]));
   assert.match(html, /class="[^"]*\bmusic\b[^"]*"/);
@@ -114,9 +116,164 @@ test("HTML render: figures, playback, escaping, deps, and no music alias", () =>
   assert.match(html, /T:Ties &amp; &lt;slurs&gt;/);
 
   // The abcjs + mdm assets ride along as HTML dependencies.
-  for (const dep of ["abcjs-basic-min", "mdm.js", "mdm.css", "abcjs-audio.css"]) {
+  for (const dep of [
+    "abcjs-basic-min",
+    "mdm.js",
+    "mdm.css",
+    "mdm-look.css",
+    "abcjs-audio.css",
+  ]) {
     assert.ok(html.includes(dep), dep + " missing from HTML");
   }
+});
+
+// ---------- The look of the editor ----------
+
+// The block of custom properties the filter writes for the look in force, as
+// a map of property to value.
+function lookBlock(html) {
+  const m = /html:root \{([^}]*)\}/.exec(html);
+  assert.ok(m, "no look block in the page");
+  const out = {};
+  m[1]
+    .split(";")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const at = line.indexOf(":");
+      out[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+    });
+  return out;
+}
+
+const PLAIN_DOC = `---
+title: "No music here"
+format:
+  html: {}
+filters:
+  - mdm
+---
+
+Just prose, and \`some code\` in it.
+`;
+
+test("the look rides on every HTML render, music or no music", () => {
+  const dir = freshDir("look-plain");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), PLAIN_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  // The ground and the ink of the document are the document's, not the
+  // scores': a page with no music is dressed all the same. abcjs is not,
+  // which is what the dependency of the music blocks is for.
+  assert.ok(html.includes("mdm-look.css"), "the look stylesheet is missing");
+  assert.ok(!html.includes("abcjs-basic-min"), "abcjs rode along for nothing");
+  const look = lookBlock(html);
+  // Nothing was passed, so what is written is the light side alone and the
+  // palette is left to the fallbacks of the stylesheet.
+  assert.equal(look["--mdm-ink"], "#24292e");
+  assert.equal(look["--mdm-syn-page"], "var(--mdm-syn-wash)");
+  assert.equal(look["--mdm-staff-fill"], "#a3a3a3");
+  assert.ok(!("--mdm-syn-string" in look), "a palette came from nowhere");
+  assert.ok(!("--mdm-score-fill" in look), "a score fill came from nowhere");
+});
+
+test("the look metadata is read, and only what is on the list gets through", () => {
+  const dir = freshDir("look-values");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), PLAIN_DOC);
+  const r = runMdm(
+    [
+      "render", "doc.mdm", "--to", "html",
+      "-M", "mdm-look:dark",
+      "-M", "mdm-score-fill:brass",
+      "-M", "mdm-score-align:left",
+      "-M", "mdm-staff-lines:ink",
+      "-M", "mdm-syn-string:e6db74",
+      // What must not get through: these values go into a <style> block, and
+      // metadata is whatever the command line carried.
+      "-M", "mdm-syn-base:red",
+      "-M", "mdm-syn-keyword:e6db74} body { display: none",
+      "-M", "mdm-syn-number:</style><script>alert(1)</script>",
+    ],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  const look = lookBlock(html);
+  assert.equal(look["--mdm-look"], undefined, "the raw metadata was echoed");
+  assert.equal(look["--mdm-ink"], "#d4d4d4");
+  assert.equal(look["--mdm-scheme"], "dark");
+  assert.equal(look["--mdm-syn-card"], "var(--mdm-syn-bg)");
+  assert.equal(look["--mdm-syn-string"], "#e6db74");
+  assert.equal(look["--mdm-score-fill"], "#332c1c", "brass, on its dark value");
+  assert.equal(look["--mdm-score-margin"], "0");
+  assert.equal(look["--mdm-staff-fill"], "currentColor");
+  // A colour that is not six hex digits is dropped whole, and the fallback of
+  // the stylesheet paints that slot instead.
+  assert.ok(!("--mdm-syn-base" in look), "a colour name reached the page");
+  assert.ok(!("--mdm-syn-keyword" in look), "a value with CSS in it got through");
+  assert.ok(!("--mdm-syn-number" in look), "a value with markup in it got through");
+  assert.ok(!html.includes("alert(1)"), "the payload reached the page anyway");
+});
+
+// Quarto lists the document's other formats in the margin of the HTML ("Other
+// Formats"). An .mdm declares both, so every page carried a link to a PDF that
+// is only on disk if one was rendered too, and the editor the page is dressed
+// as has no such column. bin/mdm turns it off, and a document that wants it
+// keeps it by saying so: the flag is only passed when the file says nothing.
+const TWO_FORMATS = `---
+title: "Two formats"
+format:
+  html: {}
+  pdf: {}
+filters:
+  - mdm
+---
+
+Prose.
+`;
+
+test("the other formats of a document are not linked in the margin", () => {
+  const dir = freshDir("links-off");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), TWO_FORMATS);
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  assert.ok(!html.includes("quarto-alternate-formats"), "the margin column is back");
+  assert.ok(!html.includes('href="doc.pdf"'), "a link to a PDF that is not there");
+});
+
+test("a document that asks for the format links keeps them", () => {
+  const dir = freshDir("links-on");
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    TWO_FORMATS.replace("filters:", "format-links: true\nfilters:")
+  );
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  assert.ok(html.includes("quarto-alternate-formats"), "the document was overruled");
+});
+
+test("a word the filter does not know falls back to the plain look", () => {
+  const dir = freshDir("look-bogus");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), PLAIN_DOC);
+  const r = runMdm(
+    [
+      "render", "doc.mdm", "--to", "html",
+      "-M", "mdm-look:midnight",
+      "-M", "mdm-score-fill:</style>",
+      "-M", "mdm-staff-lines:none",
+      "-M", "mdm-score-align:middle",
+    ],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const look = lookBlock(fs.readFileSync(path.join(dir, "doc.html"), "utf8"));
+  assert.equal(look["--mdm-ink"], "#24292e", "an unknown side was honoured");
+  assert.ok(!("--mdm-score-fill" in look));
+  assert.equal(look["--mdm-staff-fill"], "#a3a3a3");
+  assert.ok(!("--mdm-score-margin" in look), "an unknown alignment was honoured");
 });
 
 // ---------- PDF rendering ----------
