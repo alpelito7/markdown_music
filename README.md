@@ -627,6 +627,23 @@ in the visual editor, what was typed wins (last writer), and an outside
 change that arrives between keystrokes is merged at the stretch that
 differs, carets and undo history kept.
 
+## Licence
+
+MDM is MIT (`LICENSE`). What it vendors is credited one by one in
+`THIRD-PARTY-NOTICES.md`, with the version of each copy actually in the tree:
+abcjs 6.7.0, CodeMirror 6 with its Lezer packages, and KaTeX 0.18.4 are all
+MIT; the piano the editor plays with is the Musyng Kite soundfont, which is
+CC BY-SA 3.0 and is included unmodified, so the notice is the attribution the
+licence asks for.
+
+`tools/bin/abcm2ps` is the one binary in the tree, and it is somebody else's
+program: abcm2ps 8.14.15, LGPL-3.0-or-later, copyright Jean-Francois Moine,
+adapted from Michael Methfessel's abc2ps. It is called as a separate process,
+never linked into anything here. Its licence texts are in `licenses/`, and
+the source it was built from is <https://github.com/lewdlime/abcm2ps>. The VS
+Code extension does not carry it: it looks for abcm2ps on the PATH, so the
+`.vsix` is MIT throughout except for the soundfont.
+
 ## Known limitations (prototype)
 
 - One tune per `abc` block (only the first is inserted in PDF).

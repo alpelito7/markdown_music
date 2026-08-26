@@ -298,9 +298,11 @@ function onPath(name) {
 // the extension was installed from a .vsix or symlinked from a clone.
 const FILTER = path.join(__dirname, "render", "mdm", "mdm.lua");
 
-// abcm2ps engraves the scores of a PDF, and it is not shipped: it is a GPL
-// binary and a platform-specific one. This is the same search mdm.lua does
-// (find_abcm2ps), run before Quarto so that a missing one is said out loud.
+// abcm2ps engraves the scores of a PDF, and it is not shipped: the build in
+// the repository is Linux x86-64 only, and it is a separate LGPL-3.0-or-later
+// program, credited in THIRD-PARTY-NOTICES.md. This is the same search
+// mdm.lua does (find_abcm2ps), run before Quarto so a missing one is said out
+// loud.
 // Without it the filter only warns and the PDF comes out with its scores left
 // as text, which is worse than not exporting.
 function findAbcm2ps(dir) {

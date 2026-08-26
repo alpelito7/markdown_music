@@ -1,7 +1,8 @@
 # Vendored soundfont
 
 `acoustic_grand_piano-mp3/` (88 files, A0–C8) is the piano of the **Musyng
-Kite** soundfont, in the pre-rendered MIDI.js format abcjs consumes, taken
+Kite** soundfont (1.75 GB uncompressed at the source), in the pre-rendered
+MIDI.js format abcjs consumes, taken
 from <https://github.com/gleitz/midi-js-soundfonts> (gh-pages, MusyngKite
 set). It is what the editor's player sounds with, served from disk so
 playback works offline.
