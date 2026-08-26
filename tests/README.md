@@ -28,7 +28,7 @@ a browser of its own and in parallel they trip over each other's waits.
 | File | What it pins down | Requires |
 |---|---|---|
 | `transforms.test.js` | 17 tests of `vscode-mdm/transforms.js`: the editor text is the file text, so what is pinned is the one thing the mapping does, the YAML header hidden and spliced back (the blank lines under it taken from the file, one put in when the file has none, a header-only file, a header without its trailing newline, CRLF kept), byte-identical round trips of `example.mdm` in both modes, fence info strings untouched in both directions, `toEditor` idempotent. | Node |
-| `extension-host.test.js` | 42 tests of `vscode-mdm/extension.js` against a mock of the API (`mocks/vscode.js`): the settings allowlist against injection from `settings.json` (and the clamp of `mdm.outlineWidth`, the one setting that is a number), the Workspace/Global target when writing, the ready/update/edit protocol, the conditional echo (the first-Enter regression), the `withFrontMatter` flag travelling with the text, external and configuration changes, the syntax palette in the HTML and in the `palette` messages, dispose, and the audio wiring in the HTML (synth and soundfont URIs, the widget css, `unsafe-eval` and `connect-src` in the CSP). And export: it saves a dirty document before rendering (and leaves a clean one alone), runs `bin/mdm render <doc> [--to html|pdf]` from the document's folder (a fake shell bin/mdm records arguments and cwd), offers the Open HTML/PDF buttons that fit, shows the stderr if the renderer fails, and refuses a format that is not in the table (the value comes from the webview). And the look that rides with an export: the side of a named theme, of the three fixed values and of the workbench while on `auto`, the three score settings, the palette spelt without its `#`, and a palette from the other side left behind. | Node |
+| `extension-host.test.js` | 52 tests of `vscode-mdm/extension.js` against a mock of the API (`mocks/vscode.js`): the settings allowlist against injection from `settings.json` (and the clamp of `mdm.outlineWidth`, the one setting that is a number), the Workspace/Global target when writing, the ready/update/edit protocol, the conditional echo (the first-Enter regression), the `withFrontMatter` flag travelling with the text, external and configuration changes, the syntax palette in the HTML and in the `palette` messages, dispose, and the audio wiring in the HTML (synth and soundfont URIs, the widget css, `unsafe-eval` and `connect-src` in the CSP). And export: it saves a dirty document before rendering (and leaves a clean one alone), runs `quarto render <doc>.qmd [--to html|pdf]` from the document's folder (a fake `quarto` on a PATH holding nothing else records arguments, cwd and the copy it was handed), makes that copy point at the filter the extension ships and leaves the `.mdm` untouched, drops the copy afterwards whether the render worked or not, keeps `format-links` when the document asks for them, offers the Open HTML/PDF buttons that fit, and refuses a format that is not in the table before starting a process (the value comes from the webview). And the light half of it: with no `quarto` on the PATH the notification names Quarto and the log says where to get it, a PDF of a document with scores names abcm2ps and gives the install line while one without scores renders anyway, a failed render puts Quarto's whole output in the MDM channel and the "Show log" button opens it, and a `.qmd` already in the way stops the export instead of being overwritten. The header rewrite is checked on its own (block list, flow list, a header with no `filters` key, no header at all, a quote in the path), so is the fence test that decides whether a score is there, and the filter the extension carries is compared file by file with `_extensions/mdm`. And the look that rides with an export: the side of a named theme, of the three fixed values and of the workbench while on `auto`, the three score settings, the palette spelt without its `#`, and a palette from the other side left behind. | Node |
 | `audio-assets.test.js` | 4 tests of the player's vendored assets: the copies of abcjs 6.7.0 and abcjs-audio.css under `vscode-mdm/media` byte-identical to those in `_extensions` (so they cannot drift), the bundle whole (engraver and synth both exported), the 88 keys A0–C8 of the piano present and carrying a real mp3, and the harness loading the same audio assets the real webview page does (abcjs as a plain script, the soundfont path, the stylesheet, the CM6 bundle). | Node |
 | `theme.test.js` | 26 tests of `vscode-mdm/theme.js`: JSON with comments and trailing commas, TextMate scope matching (prefix by dot, the most specific wins, a tie goes to the last, selectors with a space ignored), the `include` chain, finding a theme by id and by `%nls%` label, sanitizing down to hex colours (those values go into the HTML of the webview), `tokenColorCustomizations`, and VS Code's built-in Monokai read from disk when it is installed. | Node |
 | `render.test.js` | 11 tests of `bin/mdm` + `_extensions/mdm/mdm.lua`: the CLI guards, HTML (2 figures, `mdm-play`, escaping of `&`/`<`, abcjs deps, and that ` ```music ` is NO LONGER an alias), PDF (cache by sha1 of the source with its trailing newline, the `.w` sidecar, a BoundingBox trimmed and consistent with `.w`, a narrow score < 330 pt centred in the `.tex`, a wide one at `width=100%`, a warm cache that does not run abcm2ps again), and the look block the filter writes on `html:root`: it rides on every HTML render, music or no music (and drags no abcjs along when there is none), it reads the `-M mdm-*` metadata, and it lets nothing else through (a colour by name, a value carrying CSS of its own or a `</style>`, a side or an alignment that is not on the list, all dropped for the fallback), and the margin block of the other formats, which `bin/mdm` turns off (a document declaring html and pdf renders without it, and one that says `format-links: true` keeps it). It renders in `tests/tmp/` with symlinks to `_extensions/` and `tools/`; it never touches the repo. | quarto, TeX, gs |
@@ -361,6 +361,40 @@ these, all caught:
   from a hand-edited settings.json then reaches the webview as it was written,
   which is the one thing the allowlist is there to prevent; the test reads the
   settings block of the HTML.
+
+The export moved inside the extension (2026-08-26) added these, all caught,
+each run against `extension-host.test.js`:
+
+- the copy handed to Quarto written from the document unchanged instead of
+  through `withFilter` (its `- mdm` entry survives, so Quarto goes looking for
+  an `_extensions` folder that an installed extension has no reason to have);
+- `onPath("quarto")` falling back to the bare name instead of reporting it
+  missing (the export starts a process that dies with ENOENT and says nothing
+  about which tool was absent);
+- the abcm2ps guard dropped (a PDF of a document with scores renders with the
+  scores left as text, exit 0, which reads as a successful export);
+- `channel().appendLine(result.log)` removed (a failed render leaves nothing
+  in the MDM channel, so the "Show log" button opens an empty page);
+- `fs.unlinkSync(copy)` removed (the `.qmd` is left in the user's folder, and
+  the next export refuses to run because a file of that name is in the way,
+  which is the second test that fails here);
+- `FILTER` pointed back at `../_extensions/mdm/mdm.lua` (the path leaves the
+  extension directory, so it resolves to nothing once installed from a
+  `.vsix`).
+
+The filter the extension carries (`vscode-mdm/render/mdm/`) is compared file
+by file with `_extensions/mdm/`, the same way the two abcjs copies are pinned
+in `audio-assets.test.js`: the mutation is editing either copy.
+
+Measured while designing that move, on Quarto 1.9.37, in directories holding
+no `_extensions` and no `tools/`: Quarto does not walk up the tree looking for
+an extension (`_extensions` in the parent folder fails exactly as none at
+all), a `--metadata-file` does not outrank the header's own `filters:`, and a
+filter named by absolute path renders both formats, copying its five
+`resources/` files byte for byte into `doc_files/libs/quarto-contrib/`. The
+end to end check of the result: `example.mdm` copied to a bare directory
+renders to a 1.8 MB HTML and to a 3 page PDF with its 3 scores engraved into
+`mdm_cache/` and embedded as vectors.
 
 ## Pending
 

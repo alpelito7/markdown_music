@@ -1,0 +1,23 @@
+/* The geometry of an engraved score. What it looks like (the ink, the staff
+   lines, the fill behind it and the player bar under it) is in mdm-look.css,
+   which carries the editor's own; nothing here paints. */
+.mdm-block {
+  margin: 1.5rem 0;
+}
+.mdm-paper {
+  /* The responsive render of abcjs sets display:inline-block inline, as part
+     of its padding-bottom trick for the aspect ratio. The trick works just as
+     well on a block, and there the auto margins do centre it. */
+  display: block !important;
+  margin-left: auto;
+  margin-right: auto;
+  /* Beside that percentage padding, abcjs also writes the natural height of
+     the engraving in px. Once the drawing is scaled, that height is no longer
+     its height and a gap is left underneath. The ratio is the padding's to
+     keep. */
+  height: 0 !important;
+}
+.mdm-paper svg {
+  max-width: 100%;
+  height: auto;
+}

@@ -5,7 +5,18 @@ const cp = require("child_process");
 const { toEditor, fromEditor, frontMatter } = require("./transforms");
 const { syntaxPalette, listThemes } = require("./theme");
 
+// The log of every export, kept out of the notifications: a toast truncates,
+// does not scroll and cannot be copied, and what an export has to say when it
+// fails is a page of Quarto's own output. Created on the first call rather
+// than at load, so requiring this module runs nothing.
+let output = null;
+function channel() {
+  if (!output) output = vscode.window.createOutputChannel("MDM");
+  return output;
+}
+
 function activate(context) {
+  context.subscriptions.push(channel());
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
       "mdm.editor",
@@ -155,7 +166,7 @@ async function writeSetting(key, value) {
 
 // ---------- Export ----------
 
-// What each export entry asks bin/mdm for, and what it leaves on disk.
+// What each export entry asks Quarto for, and what it leaves on disk.
 const EXPORT_TARGETS = {
   html: { args: ["--to", "html"], outputs: [".html"] },
   pdf: { args: ["--to", "pdf"], outputs: [".pdf"] },
@@ -257,32 +268,168 @@ function exportLook() {
   }
 }
 
-// The same renderer the command line uses. Looked for in the workspace of
-// the document first; failing that, next to this extension, which during
-// development is a symlink into the repo, so ../bin/mdm is the real one.
-function findRenderer(documentUri) {
-  const candidates = [];
-  const folder =
-    vscode.workspace.getWorkspaceFolder &&
-    vscode.workspace.getWorkspaceFolder(documentUri);
-  if (folder) candidates.push(path.join(folder.uri.fsPath, "bin", "mdm"));
-  candidates.push(path.resolve(__dirname, "..", "bin", "mdm"));
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate)) return candidate;
-    } catch (e) {
-      // unreadable candidate: try the next
+// ---------- What an export needs, and what to say when it is missing ----------
+
+// An executable on the PATH, or null. Looked up rather than spawned to see
+// whether it answers: what the message has to name is WHICH tool is missing,
+// and a spawn that fails with ENOENT says only that something did.
+function onPath(name) {
+  const dirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  const names =
+    process.platform === "win32"
+      ? [name + ".exe", name + ".cmd", name + ".bat", name]
+      : [name];
+  for (const dir of dirs) {
+    for (const n of names) {
+      const full = path.join(dir, n);
+      try {
+        if (fs.existsSync(full) && fs.statSync(full).isFile()) return full;
+      } catch (e) {
+        // an unreadable entry of the PATH is not a match
+      }
     }
   }
   return null;
 }
 
+// The Lua filter that turns .abc fences into scores, shipped inside this
+// extension. The same directory is _extensions/mdm in the repository and a
+// test pins the two byte for byte, so this copy is the one that runs whether
+// the extension was installed from a .vsix or symlinked from a clone.
+const FILTER = path.join(__dirname, "render", "mdm", "mdm.lua");
+
+// abcm2ps engraves the scores of a PDF, and it is not shipped: it is a GPL
+// binary and a platform-specific one. This is the same search mdm.lua does
+// (find_abcm2ps), run before Quarto so that a missing one is said out loud.
+// Without it the filter only warns and the PDF comes out with its scores left
+// as text, which is worse than not exporting.
+function findAbcm2ps(dir) {
+  const local = path.join(dir, "tools", "bin", "abcm2ps");
+  try {
+    if (fs.existsSync(local)) return local;
+  } catch (e) {
+    // unreadable: the PATH is the other half of the search
+  }
+  return onPath("abcm2ps");
+}
+
+// Whether the document holds a score at all, in either of the two forms that
+// give Pandoc the class: ```abc and ```{.abc}. One that holds none never
+// calls abcm2ps, so it exports to PDF without it.
+function hasScores(text) {
+  return /^[ \t]*(?:`{3,}|~{3,})[ \t]*(?:\{[^}\n]*\.abc\b|abc\b)/m.test(text);
+}
+
+// One way out for every export that cannot go on, and for every one that
+// fails: the whole story to the channel, one line to the notification, and a
+// button to get from the one to the other. A toast truncates, does not scroll
+// and cannot be copied, and Quarto's answer when something is wrong is a page
+// of it.
+function exportFailed(summary, detail) {
+  channel().appendLine(detail);
+  vscode.window
+    .showErrorMessage("MDM: " + summary, "Show log")
+    .then(function (choice) {
+      if (choice === "Show log") channel().show(true);
+    });
+}
+
+// ---------- The copy Quarto renders ----------
+
+// A value going into the YAML of the copy. Single quotes, since a Windows
+// path in double quotes would read its backslashes as escapes.
+function quoteYaml(value) {
+  return "'" + String(value).replace(/'/g, "''") + "'";
+}
+
+// Quarto resolves `filters: [mdm]` against an _extensions directory in the
+// folder of the file it renders, and nowhere else: it does not walk up the
+// tree, and a --metadata-file does not outrank the header (both measured on
+// 1.9.37). So the copy names the filter by absolute path instead, and the
+// document renders wherever it happens to live with no _extensions beside it.
+// Its own `- mdm` entry is what gets replaced, since leaving it there would
+// send Quarto looking for the extension all the same.
+function withFilter(text, lua) {
+  const item = quoteYaml(lua);
+  const bare = function (v) {
+    return v.replace(/^['"]|['"]$/g, "");
+  };
+  const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  if (!header) {
+    return "---\nfilters:\n  - " + item + "\n---\n\n" + text;
+  }
+  const lines = header[1].split("\n");
+  let done = false;
+  for (let i = 0; i < lines.length && !done; i++) {
+    const line = lines[i].replace(/\r$/, "");
+    const flow = /^filters:[ \t]*\[(.*)\][ \t]*$/.exec(line);
+    if (flow) {
+      const items = flow[1]
+        .split(",")
+        .map(function (v) {
+          return v.trim();
+        })
+        .filter(function (v) {
+          return v.length;
+        });
+      const at = items.findIndex(function (v) {
+        return bare(v) === "mdm";
+      });
+      if (at === -1) items.unshift(item);
+      else items[at] = item;
+      lines[i] = "filters: [" + items.join(", ") + "]";
+      done = true;
+      break;
+    }
+    if (!/^filters:[ \t]*$/.test(line)) continue;
+    // A block list: the indented `- ` lines that follow the key.
+    let at = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      const entry = /^[ \t]+-[ \t]*(.*?)[ \t]*$/.exec(lines[j].replace(/\r$/, ""));
+      if (!entry) break;
+      if (bare(entry[1]) === "mdm") {
+        at = j;
+        break;
+      }
+    }
+    if (at === -1) lines.splice(i + 1, 0, "  - " + item);
+    else lines[at] = lines[at].replace(/-[ \t]*.*$/, "- " + item);
+    done = true;
+  }
+  if (!done) lines.push("filters:", "  - " + item);
+  return "---\n" + lines.join("\n") + "\n---\n" + text.slice(header[0].length);
+}
+
+// The render itself, which is what bin/mdm does from a terminal: copy the
+// .mdm to a .qmd beside it, point the copy at the filter, call Quarto, and
+// take the copy away again. Done here rather than shelled out to that script
+// so that the export needs no bash, which Windows has not got, and no clone
+// of the repository. The copy stays in the document's own folder, so a
+// relative path inside it (an image, an include) still points where it did.
+//
+// Quarto offers the document's other formats in the margin of the HTML, one
+// link per format the header declares, and an .mdm usually declares both, so
+// `--to html` alone left every page pointing at a PDF that is not there. It
+// goes on the command line because Quarto settles the format options before
+// the filters run. A document that wants the links keeps them by saying so.
+function renderArgs(text, copy, extra) {
+  const args = ["render", copy];
+  if (!/^[ \t]*format-links[ \t]*:/m.test(text)) {
+    args.push("-M", "format-links:false");
+  }
+  return args.concat(extra);
+}
+
 // Export = save, then render. Saving first is what makes the export button a
 // save button too: what lands in the HTML and the PDF is always what is on
-// screen, never a stale file. Rendering goes through bin/mdm (Quarto under
-// it), with a progress notice while it runs, since a PDF takes seconds. The
-// look of the editor travels with the call (exportLook above), so the HTML
-// comes out dressed as the editor it was exported from.
+// screen, never a stale file. The look of the editor travels with the call
+// (exportLook above), so the HTML comes out dressed as the editor it was
+// exported from.
+//
+// Nothing here is checked when the extension starts. The editor renders and
+// plays scores on its own and knows nothing about Quarto; an export is the
+// only thing that asks for it, and asking is what tells the user what is
+// missing.
 async function exportDocument(document, to) {
   const target = EXPORT_TARGETS[to];
   if (!target) return;
@@ -290,15 +437,55 @@ async function exportDocument(document, to) {
     const saved = await vscode.workspace.save(document.uri);
     if (!saved) return; // an unsaved untitled document, or the user backed out
   }
-  const renderer = findRenderer(document.uri);
-  if (!renderer) {
-    vscode.window.showErrorMessage(
-      "MDM: bin/mdm was not found (looked in the workspace and next to the extension)."
+  const file = document.uri.fsPath;
+  const dir = path.dirname(file);
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    exportFailed(
+      "the file could not be read for export.",
+      "Reading " + file + " failed: " + String(e.message || e)
     );
     return;
   }
-  const file = document.uri.fsPath;
+  const quarto = onPath("quarto");
+  if (!quarto) {
+    exportFailed(
+      "Quarto is not installed, so there is nothing to export with. The editor works without it.",
+      "quarto was not found on the PATH.\nPATH: " +
+        (process.env.PATH || "") +
+        "\nInstall it from https://quarto.org/docs/get-started/ and reopen the window."
+    );
+    return;
+  }
+  if (target.outputs.indexOf(".pdf") !== -1 && hasScores(text) && !findAbcm2ps(dir)) {
+    exportFailed(
+      "abcm2ps is not installed, and a PDF needs it to engrave the scores.",
+      "abcm2ps was not found in " +
+        path.join(dir, "tools", "bin") +
+        " nor on the PATH, and this document has scores in it. Without it the " +
+        "PDF would come out with them left as text.\nDebian and Ubuntu: apt " +
+        "install abcm2ps. macOS: brew install abcm2ps."
+    );
+    return;
+  }
+  const copy = file.replace(/\.mdm$/i, "") + ".qmd";
+  if (fs.existsSync(copy)) {
+    exportFailed(
+      "a file named " + path.basename(copy) + " is in the way of the export.",
+      "The export renders a copy of the document named " +
+        copy +
+        ", and something of that name is already there. It is not overwritten."
+    );
+    return;
+  }
   const pretty = path.basename(file);
+  const args = renderArgs(text, copy, target.args.concat(exportLook()));
+  channel().appendLine(
+    "[" + new Date().toISOString() + "] " + pretty + " \u2192 " + to
+  );
+  channel().appendLine("  " + quarto + " " + args.join(" ") + "  (in " + dir + ")");
   const result = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -309,11 +496,8 @@ async function exportDocument(document, to) {
         let log = "";
         let child;
         try {
-          child = cp.spawn(
-            renderer,
-            ["render", file].concat(target.args).concat(exportLook()),
-            { cwd: path.dirname(file) }
-          );
+          fs.writeFileSync(copy, withFilter(text, FILTER));
+          child = cp.spawn(quarto, args, { cwd: dir });
         } catch (e) {
           resolve({ code: -1, log: String(e.message || e) });
           return;
@@ -333,9 +517,16 @@ async function exportDocument(document, to) {
       });
     }
   );
+  try {
+    fs.unlinkSync(copy);
+  } catch (e) {
+    // never rendered, or already gone: nothing to take away
+  }
+  if (result.log) channel().appendLine(result.log.trimEnd());
   if (result.code !== 0) {
-    vscode.window.showErrorMessage(
-      "MDM: export failed: " + result.log.slice(-300).trim()
+    exportFailed(
+      "the export of " + pretty + " failed.",
+      "Quarto exited with " + result.code + "."
     );
     return;
   }
@@ -533,4 +724,7 @@ window.MDM_PALETTE = ${inlineJson(readPalette())};
 
 function deactivate() {}
 
-module.exports = { activate, deactivate };
+// withFilter, hasScores and renderArgs are pure and are exported for the
+// tests: they decide what Quarto is handed, which is the half of the export
+// that can be checked without running anything.
+module.exports = { activate, deactivate, withFilter, hasScores, renderArgs, FILTER };

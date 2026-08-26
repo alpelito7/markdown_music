@@ -1,0 +1,7 @@
+title: MDM (Markdown Music)
+author: alpelito7
+version: 0.1.0
+quarto-required: ">=1.4.0"
+contributes:
+  filters:
+    - mdm.lua

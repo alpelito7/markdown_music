@@ -554,7 +554,7 @@ test("a failing settings write surfaces as an error message", async () => {
     vscode.workspace.getConfiguration = config;
   }
   assert.equal(vscode._state.errorMessages.length, 1);
-  assert.ok(vscode._state.errorMessages[0].includes("mdm.theme"));
+  assert.ok(vscode._state.errorMessages[0].message.includes("mdm.theme"));
 });
 
 // ---------- Audio wiring ----------
@@ -578,29 +578,80 @@ test("the webview HTML wires the synth engine, the soundfont and the widget styl
 
 // ---------- Export ----------
 
-test("export saves a dirty document and runs bin/mdm on it", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
-  fs.mkdirSync(path.join(tmp, "bin"));
-  const renderer = path.join(tmp, "bin", "mdm");
+// A fake Quarto on the PATH. The extension looks the real one up there
+// (onPath), so a directory holding this one, and a PATH holding only that
+// directory, is the whole of the substitution and leaves nothing of the real
+// machine in the way. Shell builtins only, for the same reason: under that
+// PATH there is no cat and no cp. It writes down its arguments and its
+// working directory, and keeps a copy of the file it was handed, which is the
+// one whose header the extension has just rewritten and deletes afterwards.
+function fakeBin(tmp, opts) {
+  const options = opts || {};
+  const bin = path.join(tmp, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const quarto = path.join(bin, "quarto");
   fs.writeFileSync(
-    renderer,
-    '#!/bin/sh\necho "$@" > "$(dirname "$0")/args.txt"\npwd >> "$(dirname "$0")/args.txt"\nexit 0\n'
+    quarto,
+    "#!/bin/sh\n" +
+      'echo "$@" > "' + tmp + '/args.txt"\n' +
+      'pwd >> "' + tmp + '/args.txt"\n' +
+      ': > "' + tmp + '/copy.qmd"\n' +
+      'while IFS= read -r line; do echo "$line" >> "' + tmp + '/copy.qmd"; done < "$2"\n' +
+      (options.say ? 'echo "' + options.say + '" >&2\n' : "") +
+      "exit " + (options.code || 0) + "\n"
   );
-  fs.chmodSync(renderer, 0o755);
+  fs.chmodSync(quarto, 0o755);
+  if (options.abcm2ps) {
+    const engraver = path.join(bin, "abcm2ps");
+    fs.writeFileSync(engraver, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(engraver, 0o755);
+  }
+  return bin;
+}
+
+// The PATH the export searches, put back when the test is done with it.
+function usePath(dir) {
+  const before = process.env.PATH;
+  process.env.PATH = dir;
+  return function () {
+    process.env.PATH = before;
+  };
+}
+
+// The MDM channel as the extension left it.
+function exportLog() {
+  const channel = vscode._state.outputChannels.find((c) => c.name === "MDM");
+  return channel ? channel : { lines: [], shown: 0 };
+}
+
+// The buttons of an error notification are answered on a microtask; let it run.
+function settle() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+const SOURCE = "---\ntitle: T\nfilters:\n  - mdm\n---\n\nBody\n";
+
+test("export saves a dirty document and runs Quarto on a copy of it", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
   const doc = path.join(tmp, "doc.mdm");
-  fs.writeFileSync(doc, "Body\n");
+  fs.writeFileSync(doc, SOURCE);
   const h = boot("Body\n", {}, null, "file://" + doc);
   vscode._state.workspaceFolder = tmp;
   vscode._state.dirtyDocuments.add("file://" + doc);
 
   await h.receive({ type: "export", to: "html" });
+  restore();
 
   assert.deepEqual(vscode._state.savedUris, ["file://" + doc], "the document was not saved first");
-  const log = fs.readFileSync(path.join(tmp, "bin", "args.txt"), "utf8").trim().split("\n");
-  // The look of the editor rides along after the format (see the look tests
-  // below); what is pinned here is the call itself.
-  assert.equal(log[0].split(" -M ")[0], "render " + doc + " --to html");
-  assert.equal(log[1], tmp, "the renderer did not run in the document's folder");
+  const log = fs.readFileSync(path.join(tmp, "args.txt"), "utf8").trim().split("\n");
+  const args = log[0].split(" ");
+  assert.equal(args[0], "render");
+  assert.equal(args[1], path.join(tmp, "doc.qmd"), "Quarto renders the copy, not the .mdm itself");
+  assert.ok(log[0].includes("-M format-links:false"), "the format links were left on");
+  assert.ok(log[0].includes("--to html"));
+  assert.equal(log[1], tmp, "the render did not run in the document's folder");
+  assert.ok(!fs.existsSync(path.join(tmp, "doc.qmd")), "the copy was left behind");
   assert.equal(vscode._state.progressTitles.length, 1);
   assert.match(vscode._state.progressTitles[0], /doc\.mdm/);
   assert.equal(vscode._state.infoMessages.length, 1);
@@ -610,48 +661,253 @@ test("export saves a dirty document and runs bin/mdm on it", async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test("the copy names the filter by absolute path, and the .mdm is left alone", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "html" });
+  restore();
+
+  const copy = fs.readFileSync(path.join(tmp, "copy.qmd"), "utf8");
+  assert.ok(
+    copy.includes("- '" + ext.FILTER + "'"),
+    "the copy does not point at the filter this extension ships"
+  );
+  assert.ok(
+    !/^\s*-\s*mdm\s*$/m.test(copy),
+    "the bare mdm entry is still there, so Quarto would go looking for an _extensions folder"
+  );
+  assert.ok(copy.includes("title: T"), "the rest of the header did not survive");
+  assert.equal(fs.readFileSync(doc, "utf8"), SOURCE, "the document itself was rewritten");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test("exporting both formats passes no --to and offers both files", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
-  fs.mkdirSync(path.join(tmp, "bin"));
-  const renderer = path.join(tmp, "bin", "mdm");
-  fs.writeFileSync(renderer, '#!/bin/sh\necho "$@" > "$(dirname "$0")/args.txt"\nexit 0\n');
-  fs.chmodSync(renderer, 0o755);
+  const restore = usePath(fakeBin(tmp, { abcm2ps: true }));
   const doc = path.join(tmp, "doc.mdm");
-  fs.writeFileSync(doc, "Body\n");
+  fs.writeFileSync(doc, SOURCE);
   const h = boot("Body\n", {}, null, "file://" + doc);
   vscode._state.workspaceFolder = tmp;
 
   await h.receive({ type: "export", to: "both" });
+  restore();
 
-  // Clean documents skip the save; bin/mdm's default is already HTML + PDF.
+  // Clean documents skip the save; Quarto's default is already HTML + PDF.
   assert.deepEqual(vscode._state.savedUris, []);
-  const args = fs.readFileSync(path.join(tmp, "bin", "args.txt"), "utf8").trim();
-  assert.equal(args.split(" -M ")[0], "render " + doc);
+  const args = fs.readFileSync(path.join(tmp, "args.txt"), "utf8").trim().split("\n")[0];
+  assert.ok(!args.includes("--to "), "both formats should not name one");
   assert.deepEqual(vscode._state.infoMessages[0].buttons, ["Open HTML", "Open PDF"]);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test("a document that asks for the format links keeps them", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, "---\nformat-links: true\nfilters:\n  - mdm\n---\n\nBody\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "html" });
+  restore();
+
+  const args = fs.readFileSync(path.join(tmp, "args.txt"), "utf8").trim().split("\n")[0];
+  assert.ok(!args.includes("format-links:false"), "the document's own choice was overruled");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------- The export as the light half of the extension ----------
+//
+// None of these tools is looked for when the extension starts: the editor
+// draws and plays scores knowing nothing about Quarto. An export is the only
+// thing that asks, and what it has to do when the answer is no is say which
+// tool is missing and where the whole story is.
+
+test("without Quarto the export says which tool is missing and logs where to get it", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const empty = path.join(tmp, "empty");
+  fs.mkdirSync(empty);
+  const restore = usePath(empty);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  vscode._state.errorChoices["Quarto is not installed"] = "Show log";
+
+  await h.receive({ type: "export", to: "html" });
+  await settle();
+  restore();
+
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.match(vscode._state.errorMessages[0].message, /Quarto is not installed/);
+  assert.match(vscode._state.errorMessages[0].message, /editor works without it/);
+  assert.deepEqual(vscode._state.errorMessages[0].buttons, ["Show log"]);
+  const channel = exportLog();
+  assert.match(channel.lines.join("\n"), /quarto\.org/, "the log does not say where to get it");
+  assert.equal(channel.shown, 1, "the Show log button did not open the channel");
+  assert.equal(vscode._state.progressTitles.length, 0, "a render was started with no Quarto");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a PDF of a document with scores says abcm2ps is missing before rendering", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE + "\n```{.abc}\nX:1\nK:C\nCDEF|\n```\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "pdf" });
+  restore();
+
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.match(vscode._state.errorMessages[0].message, /abcm2ps is not installed/);
+  assert.match(exportLog().lines.join("\n"), /apt install abcm2ps/);
+  assert.equal(vscode._state.progressTitles.length, 0, "the PDF would have come out with no scores");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a document with no scores exports to PDF without abcm2ps", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "pdf" });
+  restore();
+
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.equal(vscode._state.progressTitles.length, 1);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a render that fails keeps its whole log and offers to show it", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const noise = "line of quarto output";
+  const restore = usePath(fakeBin(tmp, { code: 1, say: noise }));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "html" });
+  await settle();
+  restore();
+
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.match(vscode._state.errorMessages[0].message, /export of doc\.mdm failed/);
+  assert.deepEqual(vscode._state.errorMessages[0].buttons, ["Show log"]);
+  const lines = exportLog().lines.join("\n");
+  assert.ok(lines.includes(noise), "Quarto's own output is not in the channel");
+  assert.match(lines, /exited with 1/);
+  assert.ok(lines.includes(path.join(tmp, "doc.qmd")), "the call itself was not written down");
+  assert.ok(!fs.existsSync(path.join(tmp, "doc.qmd")), "a failed render left the copy behind");
+  assert.deepEqual(vscode._state.infoMessages, [], "a failed export announced a file");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a .qmd already in the way stops the export instead of overwriting it", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  fs.writeFileSync(path.join(tmp, "doc.qmd"), "someone else's file\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "html" });
+  restore();
+
+  assert.match(vscode._state.errorMessages[0].message, /doc\.qmd is in the way/);
+  assert.equal(
+    fs.readFileSync(path.join(tmp, "doc.qmd"), "utf8"),
+    "someone else's file\n",
+    "the file in the way was overwritten"
+  );
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------- The header the copy carries ----------
+
+test("the filter entry is put in whatever shape the header has", () => {
+  const lua = "/x/mdm.lua";
+  const block = ext.withFilter("---\ntitle: T\nfilters:\n  - mdm\n---\n\nb\n", lua);
+  assert.ok(block.includes("  - '/x/mdm.lua'"));
+  assert.ok(!/-\s*mdm\s*$/m.test(block));
+  assert.ok(block.includes("title: T"));
+
+  // A flow list keeps the filters the document names beside ours.
+  const flow = ext.withFilter("---\nfilters: [mdm, other]\n---\nb\n", lua);
+  assert.ok(flow.includes("filters: ['/x/mdm.lua', other]"));
+
+  // No filters key: one is added, and the rest of the header is untouched.
+  const bare = ext.withFilter("---\ntitle: T\n---\nb\n", lua);
+  assert.ok(bare.includes("title: T") && bare.includes("filters:\n  - '/x/mdm.lua'"));
+
+  // No header at all: one is written, and the body follows it.
+  const none = ext.withFilter("plain body\n", lua);
+  assert.ok(none.startsWith("---\nfilters:\n  - '/x/mdm.lua'\n---\n"));
+  assert.ok(none.endsWith("plain body\n"));
+
+  // A path with a quote in it cannot break out of the YAML scalar.
+  assert.ok(ext.withFilter("plain\n", "/a'b/mdm.lua").includes("'/a''b/mdm.lua'"));
+});
+
+test("a score is recognised in both fence forms, and nothing else is", () => {
+  assert.equal(ext.hasScores("```{.abc}\nX:1\n```\n"), true);
+  assert.equal(ext.hasScores("```abc\nX:1\n```\n"), true);
+  assert.equal(ext.hasScores("```{.abc .play}\nX:1\n```\n"), true);
+  assert.equal(ext.hasScores("```python\nabc = 1\n```\n"), false);
+  assert.equal(ext.hasScores("```{.abcd}\n```\n"), false);
+  assert.equal(ext.hasScores("An abc in a paragraph.\n"), false);
+});
+
+// ---------- The renderer the extension ships ----------
+
+test("the Quarto filter inside the extension is the one the repository renders with", () => {
+  const shipped = path.join(__dirname, "..", "vscode-mdm", "render", "mdm");
+  const source = path.join(__dirname, "..", "_extensions", "mdm");
+  const walk = (root, base) =>
+    fs.readdirSync(root, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory()
+        ? walk(path.join(root, e.name), path.join(base, e.name))
+        : [path.join(base, e.name)]
+    );
+  const names = walk(source, "").sort();
+  assert.deepEqual(walk(shipped, "").sort(), names, "the two filter copies hold different files");
+  assert.ok(names.includes("mdm.lua"), "the filter itself is not there");
+  for (const name of names) {
+    const a = fs.readFileSync(path.join(shipped, name));
+    const b = fs.readFileSync(path.join(source, name));
+    assert.ok(a.equals(b), name + " drifted between the extension and _extensions");
+  }
+  // And it is the file the export actually points at.
+  assert.equal(ext.FILTER, path.join(__dirname, "..", "vscode-mdm", "render", "mdm", "mdm.lua"));
+});
+
 // ---------- The look the export carries ----------
 
-// One export against a fake bin/mdm that writes down its arguments, and what
+// One export against a fake Quarto that writes down its arguments, and what
 // it was called with. `themeKind` is what VS Code itself is showing
 // (vscode.ColorThemeKind), which mdm.theme = "auto" follows.
 async function exportWith(to, settings, extensions, themeKind) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
-  fs.mkdirSync(path.join(tmp, "bin"));
-  const renderer = path.join(tmp, "bin", "mdm");
-  fs.writeFileSync(
-    renderer,
-    '#!/bin/sh\necho "$@" > "$(dirname "$0")/args.txt"\nexit 0\n'
-  );
-  fs.chmodSync(renderer, 0o755);
+  const restore = usePath(fakeBin(tmp));
   const doc = path.join(tmp, "doc.mdm");
-  fs.writeFileSync(doc, "Body\n");
+  fs.writeFileSync(doc, SOURCE);
   const h = boot("Body\n", settings, extensions, "file://" + doc);
   vscode._state.workspaceFolder = tmp;
   if (themeKind !== undefined) vscode._state.activeColorThemeKind = themeKind;
   await h.receive({ type: "export", to });
-  const args = fs.readFileSync(path.join(tmp, "bin", "args.txt"), "utf8").trim();
+  restore();
+  const args = fs.readFileSync(path.join(tmp, "args.txt"), "utf8").trim().split("\n")[0];
   fs.rmSync(tmp, { recursive: true, force: true });
   return args;
 }
@@ -726,26 +982,22 @@ test("on auto the export follows the side VS Code is on", async () => {
   assert.equal(lookOf(light)["mdm-look"], "light");
 });
 
-test("a failing renderer surfaces its stderr, and a bogus format does nothing", async () => {
+test("a format the webview made up is refused before anything runs", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
-  fs.mkdirSync(path.join(tmp, "bin"));
-  const renderer = path.join(tmp, "bin", "mdm");
-  fs.writeFileSync(renderer, '#!/bin/sh\necho "quarto exploded" >&2\nexit 3\n');
-  fs.chmodSync(renderer, 0o755);
+  const restore = usePath(fakeBin(tmp));
   const doc = path.join(tmp, "doc.mdm");
-  fs.writeFileSync(doc, "Body\n");
+  fs.writeFileSync(doc, SOURCE);
   const h = boot("Body\n", {}, null, "file://" + doc);
   vscode._state.workspaceFolder = tmp;
 
-  await h.receive({ type: "export", to: "pdf" });
-  assert.equal(vscode._state.errorMessages.length, 1);
-  assert.match(vscode._state.errorMessages[0], /export failed/);
-  assert.match(vscode._state.errorMessages[0], /quarto exploded/);
-  assert.deepEqual(vscode._state.infoMessages, []);
-
-  // An unknown format is refused before anything runs: the wire value comes
-  // from the webview, which a compromised document could script.
+  // The wire value comes from the webview, which a compromised document could
+  // script: an unknown format is dropped before a process is started.
   await h.receive({ type: "export", to: "html; rm -rf /" });
-  assert.equal(vscode._state.errorMessages.length, 1, "a bogus format did something");
+  restore();
+
+  assert.equal(vscode._state.progressTitles.length, 0, "a bogus format started a render");
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.infoMessages, []);
+  assert.ok(!fs.existsSync(path.join(tmp, "args.txt")), "a bogus format reached Quarto");
   fs.rmSync(tmp, { recursive: true, force: true });
 });

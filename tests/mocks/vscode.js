@@ -12,8 +12,10 @@ const state = {
   textDocumentListeners: [],
   configurationListeners: [],
   colorThemeListeners: [],
-  errorMessages: [],
+  errorMessages: [], // {message, buttons}
+  errorChoices: {}, // message fragment -> button the user "presses"
   infoMessages: [], // {message, buttons}
+  outputChannels: [], // {name, lines, shown}
   progressTitles: [],
   savedUris: [],
   openedExternal: [],
@@ -33,7 +35,9 @@ function reset() {
   state.configurationListeners = [];
   state.colorThemeListeners = [];
   state.errorMessages = [];
+  state.errorChoices = {};
   state.infoMessages = [];
+  state.outputChannels = [];
   state.progressTitles = [];
   state.savedUris = [];
   state.openedExternal = [];
@@ -154,8 +158,45 @@ const window = {
     state.registeredProviders.push({ viewType, provider, options });
     return { dispose() {} };
   },
-  showErrorMessage(msg) {
-    state.errorMessages.push(msg);
+  // Buttons and a thenable, like showInformationMessage: the export offers a
+  // "Show log" here. A test seeds _state.errorChoices with a fragment of the
+  // message to say which button the user presses.
+  showErrorMessage(message, ...buttons) {
+    state.errorMessages.push({ message, buttons });
+    const hit = Object.keys(state.errorChoices).find((k) => message.includes(k));
+    return Promise.resolve(hit ? state.errorChoices[hit] : undefined);
+  },
+  // The MDM channel the export writes its log to. One object per name, so a
+  // test reads back everything the extension appended over a whole run.
+  createOutputChannel(name) {
+    // The record is looked up on every call and not held: the extension keeps
+    // the channel it made at activation, and _reset() between tests empties
+    // this list, so a held object has to find its way back to the new one.
+    const record = function () {
+      let channel = state.outputChannels.find((c) => c.name === name);
+      if (!channel) {
+        channel = { name, lines: [], shown: 0 };
+        state.outputChannels.push(channel);
+      }
+      return channel;
+    };
+    record();
+    return {
+      name,
+      appendLine(line) {
+        record().lines.push(String(line));
+      },
+      append(text) {
+        record().lines.push(String(text));
+      },
+      show() {
+        record().shown++;
+      },
+      clear() {
+        record().lines.length = 0;
+      },
+      dispose() {},
+    };
   },
   showInformationMessage(message, ...buttons) {
     state.infoMessages.push({ message, buttons });

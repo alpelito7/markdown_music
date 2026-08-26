@@ -166,7 +166,8 @@ HTML output uses, and the equations by KaTeX 0.18.
 
 Installation: symlink the directory into
 `~/.vscode/extensions/alpelito7.mdm-editor-0.1.0` and reload the window
-(`Developer: Reload Window`). To go back to the plain text editor: right
+(`Developer: Reload Window`). The editor needs nothing else; an export needs
+Quarto, and a PDF of a document with scores in it needs TeX and abcm2ps. To go back to the plain text editor: right
 click the file, `Open With...`. Both can be open at once on the same file
 (Reopen Editor With... in a second group): they share the document.
 
@@ -259,8 +260,23 @@ How the editing works:
   from, theme and all (see [The HTML looks like the
   editor](#the-html-looks-like-the-editor)). `Ctrl+S` still saves as in
   any VS Code editor; "save as" is VS Code's own (File > Save As). The
-  renderer is looked up in the `bin/mdm` of the document's workspace and,
-  failing that, next to the extension.
+  extension renders on its own rather than calling `bin/mdm`: it copies the
+  document to a `.qmd` beside it, points that copy at the Lua filter the
+  extension carries (`vscode-mdm/render/mdm/mdm.lua`, the same file as
+  `_extensions/mdm/mdm.lua` and pinned to it byte for byte by a test), calls
+  `quarto render` in the document's folder and takes the copy away. Quarto
+  resolves `filters: [mdm]` against an `_extensions` folder in the folder of
+  the file it renders and nowhere else, so naming the filter by its path is
+  what lets a document export from wherever it lives, with no clone of this
+  repository anywhere.
+- **Nothing but the export needs anything installed.** The editor carries
+  everything it draws and plays, so it opens and works on a machine with no
+  Quarto, no TeX and no abcm2ps. Those are looked for the moment an export is
+  asked for and never at start-up: whichever is missing is named in the
+  notification, with the whole story (the command, Quarto's own output) in
+  the MDM output channel, one "Show log" away. A PDF asks for abcm2ps only
+  when the document actually holds a score, since without it the scores would
+  come out as text and the export would look like it had worked.
 - **Playback**: beside the copy button of every score (both appear on
   hover) there is a pair of headphones that unfolds a player bar under the
   score, with play/pause, stop, repeat, a draggable progress bar and
