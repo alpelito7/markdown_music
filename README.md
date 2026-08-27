@@ -198,6 +198,27 @@ How the editing works:
   under the source while one is; the moment it compiles, it renders.
   Inline maths and inline marks show only their source while the caret is
   in them, there being no room for two copies in a line.
+- **Nobody in it, nothing open.** The carets count only while somebody is
+  in the document: with the focus off it, every block goes back to its
+  drawing and no caret is drawn, which is the document as it reads. Any
+  click that is not on the text takes the focus there and then, the dead
+  margin either side of the column and the bare strip of the toolbar
+  included. The selection is left exactly as it was, so clicking back in
+  resumes at the same caret with the same source open. The furniture drawn
+  inside a block is part of the document for this: the volume slider and
+  the progress bar of a player keep the browser's focus while they are
+  dragged, and the score they belong to stays open. So do the toolbar
+  buttons, which hand the focus back to the text, since they are there to
+  act on the caret.
+
+  Leaving the window is not leaving the document. An Alt+Tab to another
+  application, or to another VS Code window, finds everything as it was on
+  the way back: the equation still open at its source, the caret where it
+  was left. What puts the document away is a press in the page, and the
+  desktop taking the window is not one. This is the one case the window
+  itself would have to answer for, and it cannot: the editor is an iframe,
+  so the workbench taking the focus for its own menu bar and the desktop
+  taking it for another window read exactly the same from in here.
 - **Getting in and out.** A click on a rendered equation or score puts the
   caret at the start of its source; with the multicursor modifier held it
   adds a caret there and leaves the others where they are, the way a click
@@ -207,7 +228,9 @@ How the editing works:
   block the caret is in (a fence, an equation, a list, a quote, a callout,
   a heading line) into a fresh paragraph below it; inside a code block
   plain `Enter` is a newline, as in any code editor, since the closing
-  fence is a line of text the caret can walk past.
+  fence is a line of text the caret can walk past. A click out in the dead
+  margin is the way out of everything at once: it puts away what was open
+  and takes the focus with it (above).
 - **Multicursor**, as in VS Code's own editor: `Alt+click` adds a caret
   (or `Ctrl+click`, following the `editor.multiCursorModifier` setting),
   `Shift+Alt+drag` selects a column, `Ctrl+D` selects the next occurrence

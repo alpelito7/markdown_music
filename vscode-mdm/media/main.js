@@ -1962,6 +1962,86 @@
     return false;
   }
 
+  // Whether anybody is in the document. What a caret reveals (the marks of a
+  // heading, the source under a rendered block) hangs on the selection, and a
+  // selection outlives the focus: a click on the bare part of the toolbar took
+  // the focus away and the heading went on showing its `##`, with no caret
+  // left in it to account for them. The focus is carried into the state so the
+  // decorations can go blind while the document is nobody's, which draws it as
+  // it reads. The selection is left untouched, so coming back resumes where it
+  // was, and the caret itself needs nothing: CodeMirror draws none without the
+  // focus.
+  const setFocused = CM.StateEffect.define();
+  const focusField = StateField.define({
+    create: function () {
+      return false;
+    },
+    update: function (value, tr) {
+      for (let i = 0; i < tr.effects.length; i++) {
+        if (tr.effects[i].is(setFocused)) value = tr.effects[i].value;
+      }
+      return value;
+    },
+  });
+
+  // The carets the rendering answers to: none at all while the document is
+  // unfocused, which is the whole of visual mode.
+  const NO_RANGES = [];
+  function activeRanges(state) {
+    return state.field(focusField, false) ? state.selection.ranges : NO_RANGES;
+  }
+
+  // The whole view counts as the document, not the text alone: the player bar
+  // is drawn inside a block, and its volume slider and its progress bar keep
+  // the browser's own focus, since both are dragged. Using them is not
+  // leaving the document, and the score they play must stay open.
+  //
+  // Where the focus is, and not whether the window has it: an Alt+Tab to
+  // another application must find the document exactly as it was left, open
+  // block and all. Whether the window has the focus does not tell the two
+  // apart anyway, the page being an iframe: the workbench taking it for its
+  // own menu bar and the desktop taking it for another window both read as
+  // `document.hasFocus()` false, and asking that question put the document
+  // away on every Alt+Tab.
+  function somebodyInside() {
+    const active = document.activeElement;
+    return !!(view && active && view.dom.contains(active));
+  }
+
+  // The last press made in the page, which is how a focus that was dropped
+  // here is told from one the desktop took away. Only the pointer: the Alt of
+  // an Alt+Tab does reach the page, and reading it as a press would put the
+  // document away on the very gesture this is here to protect.
+  let pressedAt = 0;
+
+  // Whether the focus leaving the view was somebody's doing in the page. It
+  // landing on something else in here says so outright (the toolbar, tabbed
+  // to or clicked); landing nowhere is either a click on a bare stretch of
+  // the page, which a press just before it accounts for, or the window being
+  // handed over, which leaves the document alone.
+  function leftByHand() {
+    const active = document.activeElement;
+    if (active && active !== document.body) return true;
+    return Date.now() - pressedAt < 500;
+  }
+
+  function syncFocus() {
+    if (!view) return;
+    const now = somebodyInside();
+    if (now === view.state.field(focusField, false)) return;
+    if (!now && !leftByHand()) return;
+    view.dispatch({ effects: setFocused.of(now) });
+  }
+
+  // Hands the focus back to whatever the page gives it to with nothing
+  // asking, which is the body: what makes the document nobody's. Whoever
+  // holds it inside the view is asked to let go, the text or a control of a
+  // player bar alike.
+  function leaveDocument() {
+    const active = document.activeElement;
+    if (active && active.blur && view && view.dom.contains(active)) active.blur();
+  }
+
   // ---- KaTeX ----
 
   // Rendered HTML per source, kept for the session: the same equation is
@@ -2271,7 +2351,7 @@
 
   function buildDecorations(state) {
     const doc = state.doc;
-    const ranges = state.selection.ranges;
+    const ranges = activeRanges(state);
     const tree = CM.syntaxTree(state);
     const decos = [];
     const lines = lineClassCollector(doc);
@@ -2607,6 +2687,7 @@
       if (
         tr.docChanged ||
         tr.selection ||
+        tr.state.field(focusField) !== tr.startState.field(focusField) ||
         CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState)
       ) {
         return buildDecorations(tr.state);
@@ -3201,6 +3282,11 @@
     if (e.clientX - box.left >= view.scrollDOM.clientWidth) return;
     e.preventDefault();
     e.stopPropagation();
+    // The default is prevented, so the browser moves no focus of its own: the
+    // margin takes it away by hand. That is what puts the document in visual
+    // mode, the same as a click on the bare part of the bar or on the menu
+    // bar of the window, and it is the whole point of clicking out there.
+    leaveDocument();
   }
 
   // Anywhere but the text, whatever is open for editing goes back to its
@@ -3489,6 +3575,9 @@
           extensions: CM.mdmMarkdownExtensions,
         }),
         CM.syntaxHighlighting(mdmHighlight),
+        // Before renderField, which reads it: a field only sees the fields
+        // configured ahead of it already updated.
+        focusField,
         renderField,
         EditorView.lineWrapping,
         EditorView.updateListener.of(function (update) {
@@ -3520,6 +3609,24 @@
     };
     watchContent();
     disarmNativeHistory();
+    // Not CodeMirror's own focusChangeEffect: it reports the focus of the
+    // text alone and it reports it a tick late (its handler defers), so the
+    // player bar read as leaving the document and the first click into an
+    // unfocused editor drew one frame with nothing open. Both are answered by
+    // watching the focus over the whole view, synchronously.
+    document.addEventListener(
+      "mousedown",
+      function () {
+        pressedAt = Date.now();
+      },
+      true
+    );
+    view.dom.addEventListener("focusin", syncFocus);
+    view.dom.addEventListener("focusout", function () {
+      // On the way out the focus has not landed yet: activeElement is still
+      // the element being left. Ask once it has.
+      setTimeout(syncFocus, 0);
+    });
     view.contentDOM.addEventListener("mousedown", handleMouseDown, true);
     view.contentDOM.addEventListener("click", handleChromeClick, true);
     view.contentDOM.addEventListener("mouseover", handleMouseOver);
@@ -3819,6 +3926,12 @@
           if (spec.build) fill(spec.build());
           item.classList.add("mdm-toolbar__item--open");
         }
+        // The bar is not somewhere to be: the focus goes back to the text, as
+        // it does from the buttons that act on the caret. Without this the
+        // press left the document unfocused, and unfocused it draws itself
+        // with nobody in it, so opening a menu would have closed the block
+        // being edited behind the panel.
+        if (view) view.focus();
       });
     } else {
       btn.addEventListener("click", function () {

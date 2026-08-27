@@ -232,6 +232,7 @@ async function open(options) {
   await update(page, opts.text || EXAMPLE, withFrontMatter, opts.scores);
   return {
     page,
+    browser,
     errors,
     close: async () => {
       OPEN_BROWSERS.delete(browser);

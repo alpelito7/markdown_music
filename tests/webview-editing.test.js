@@ -1201,7 +1201,17 @@ test("a click that closes a block, or lands on a drawing, keeps the other carets
     "the code block stayed open"
   );
 
-  // All three still edit.
+  // The margin took the focus with the click, which is what draws the
+  // document with nobody in it; what it did not do is forget the carets.
+  assert.equal(
+    await h.page.evaluate(() => window.__mdm.view.hasFocus),
+    false,
+    "the margin left the document focused"
+  );
+
+  // All three still edit, once somebody is in the document again.
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  await sleep(150);
   const before = await docText(h.page);
   await h.page.keyboard.type("Z");
   await sleep(200);
@@ -1211,6 +1221,149 @@ test("a click that closes a block, or lands on a drawing, keeps the other carets
     3,
     "typing did not land at every caret"
   );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Visual mode. What a caret reveals hangs on the selection, and a selection
+// outlives the focus: a click on the bare part of the toolbar took the focus
+// away and the heading went on showing its `##`, with no caret left in it to
+// account for them.
+const VISUAL = [
+  "## From equations to score",
+  "",
+  "A paragraph with **bold** and $x^2$ in it.",
+  "",
+  "$$",
+  "e^{i\\pi} + 1 = 0",
+  "$$",
+  "",
+  "```python",
+  "x = 1",
+  "```",
+  "",
+  "```abc",
+  "X:1",
+  "K:C",
+  "CDEF|",
+  "```",
+  "",
+  "Tail.",
+  "",
+].join("\n");
+
+test("a click off the text puts the document in visual mode", { skip }, async () => {
+  const h = await open({ text: VISUAL, withFrontMatter: false, scores: 1 });
+  await h.page.setViewport({ width: 1400, height: 1200 });
+  await sleep(400);
+
+  // The document as it looks from outside: the marks that only show under a
+  // caret, and whether a caret is drawn at all.
+  const look = () =>
+    h.page.evaluate(() => {
+      const v = window.__mdm.view;
+      const lines = Array.from(document.querySelectorAll("#app .cm-line")).map(
+        (l) => l.textContent
+      );
+      return {
+        focus: v.hasFocus,
+        head: v.state.selection.main.head,
+        heading: lines.some((t) => t.indexOf("## ") === 0),
+        bold: lines.some((t) => t.indexOf("**") !== -1),
+        fences: document.querySelectorAll("#app .cm-line.mdm-fence-line").length,
+        source: document.querySelectorAll("#app .cm-line.mdm-src-line").length,
+        inline: document.querySelectorAll("#app .mdm-math-src").length,
+        carets: Array.from(document.querySelectorAll("#app .cm-cursor")).filter(
+          (c) => getComputedStyle(c).display !== "none"
+        ).length,
+      };
+    });
+
+  const margin = await h.page.evaluate(() => {
+    const c = window.__mdm.view.contentDOM.getBoundingClientRect();
+    return { x: c.right + 60, y: c.top + 20 };
+  });
+  // The bare strip of the bar, past the last button.
+  const bare = await h.page.evaluate(() => {
+    const bar = document.querySelector("#app .mdm-toolbar").getBoundingClientRect();
+    const items = document.querySelectorAll("#app .mdm-toolbar__item");
+    const last = items[items.length - 1].getBoundingClientRect();
+    return { x: (last.right + bar.right) / 2, y: bar.top + bar.height / 2 };
+  });
+
+  // A caret in the heading shows its `##`, the case this was reported from.
+  const inHeading = await posOf(h.page, "From equations", 4);
+  await setSelection(h.page, inHeading);
+  await sleep(250);
+  const open1 = await look();
+  assert.ok(open1.heading, "the heading never showed its marks");
+  assert.equal(open1.carets, 1, "no caret was drawn in the heading");
+
+  await h.page.mouse.click(margin.x, margin.y);
+  await sleep(250);
+  const away = await look();
+  assert.equal(away.focus, false, "the margin left the document focused");
+  assert.equal(away.heading, false, "the heading kept its marks with nobody in it");
+  assert.equal(away.carets, 0, "a caret was still drawn with nobody in it");
+  assert.equal(away.head, inHeading, "the margin moved the caret out of the heading");
+
+  // And back: the same caret, the same marks. Nothing was thrown away.
+  const back = await coordsAt(h.page, inHeading);
+  await h.page.mouse.click(back.x, back.y);
+  await sleep(250);
+  const again = await look();
+  assert.equal(again.focus, true, "the click back never focused the document");
+  assert.ok(again.heading, "the marks never came back");
+
+  // The bare part of the bar is outside the text as much as the margin is.
+  const inBold = await posOf(h.page, "bold", 1);
+  await setSelection(h.page, inBold);
+  await sleep(250);
+  assert.ok((await look()).bold, "the bold never showed its marks");
+  await h.page.mouse.click(bare.x, bare.y);
+  await sleep(250);
+  const afterBar = await look();
+  assert.equal(afterBar.focus, false, "the bare bar left the document focused");
+  assert.equal(afterBar.bold, false, "the bold kept its marks with nobody in it");
+
+  // Leaving the window is not leaving the document. The focus stays on the
+  // element while the desktop hands the window over, so an Alt+Tab away and
+  // back finds the document exactly as it was left, open block and all.
+  for (const one of [
+    { name: "an inline equation", needle: "x^2", open: (v) => v.inline > 0 },
+    { name: "a display equation", needle: "e^{i", open: (v) => v.source > 0 },
+    { name: "a code block", needle: "x = 1", open: (v) => v.fences > 0 },
+    { name: "a score", needle: "CDEF", open: (v) => v.source > 0 },
+  ]) {
+    const at = await posOf(h.page, one.needle, 1);
+    await setSelection(h.page, at);
+    await sleep(250);
+    assert.ok(one.open(await look()), one.name + " never opened");
+    const other = await h.browser.newPage();
+    await other.bringToFront();
+    await sleep(300);
+    assert.ok(one.open(await look()), one.name + " was put away with the window gone");
+    await other.close();
+    await h.page.bringToFront();
+    await sleep(300);
+    const back2 = await look();
+    assert.ok(one.open(back2), one.name + " never came back");
+    assert.equal(back2.head, at, one.name + " came back with the caret moved");
+  }
+
+  // And the same if the focus is taken off the text as the window goes: a
+  // blur nobody in the page asked for is not somebody leaving the document.
+  const inScore = await posOf(h.page, "CDEF", 1);
+  await setSelection(h.page, inScore);
+  await sleep(250);
+  assert.ok((await look()).source > 0, "the score never opened");
+  await h.page.evaluate(() => document.activeElement.blur());
+  await sleep(300);
+  const dropped = await look();
+  assert.equal(dropped.focus, false, "the blur never landed");
+  assert.ok(dropped.source > 0, "a blur nobody asked for put the score away");
+  assert.equal(dropped.head, inScore, "a blur nobody asked for moved the caret");
+
   assert.deepEqual(h.errors, []);
   await h.close();
 });
