@@ -1,0 +1,17 @@
+# What the .vsix must not carry. The rule is the opposite of .gitignore's:
+# everything not named here goes into the package, so a new directory ships
+# unless this file turns it away. `npx @vscode/vsce ls --tree` prints what
+# would go in.
+
+# The CodeMirror build. media/vendor/cm6/cm6.bundle.js is built from here and
+# is what ships; the sources and their node_modules are 25 MB of build tooling
+# the editor never opens.
+vendor-src/**
+
+# Notes for whoever works on the extension, not for whoever installs it.
+docs/**
+
+.vscode/**
+.gitignore
+.vscodeignore
+**/.DS_Store

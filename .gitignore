@@ -9,3 +9,6 @@ example_files/
 node_modules/
 tests/tmp/
 
+# The packaged extension, built from vscode-mdm/ with @vscode/vsce
+*.vsix
+
