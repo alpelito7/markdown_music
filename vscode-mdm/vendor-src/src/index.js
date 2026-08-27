@@ -38,4 +38,5 @@ export { parser as markdownParser, GFM, Subscript, Superscript, Emoji, Table, Ta
 export { yaml, yamlLanguage } from "@codemirror/lang-yaml";
 export { default as katex } from "katex";
 export { codeLanguages } from "./languages.js";
+export { abc, abcTags } from "./abc.js";
 export * from "./markdown/index.js";

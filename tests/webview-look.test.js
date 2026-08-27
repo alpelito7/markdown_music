@@ -1015,6 +1015,100 @@ test("a named theme brings its own side, palette and all", { skip }, async () =>
   await h.close();
 });
 
+// ---------- The ABC colours ----------
+
+// The source of a score is painted apart from the code around it: its tags
+// are the extension's own (abc.js in the bundle) and the classes take fixed
+// colours from style.css, the brass of the icon and the ink beside it, so no
+// VS Code palette ever reaches a score. The caret has to open the block
+// first: the spans only exist while the source is on show.
+function abcPaint(page) {
+  return page.evaluate(() => {
+    const token = (cls, word) => {
+      const span = Array.from(
+        document.querySelectorAll("#app .cm-line.mdm-abc-line span." + cls)
+      ).find((s) => s.textContent === word);
+      return span ? getComputedStyle(span).color : null;
+    };
+    const lyric = document.querySelector(
+      "#app .cm-line.mdm-abc-line span.mdm-abc-lyric"
+    );
+    // The word the mark decoration wraps, measured where the paint lands:
+    // the Markdown highlighting already put a span of its own inside it,
+    // and an inner span with a colour rule wins on the text.
+    const marked = document.querySelector("#app .cm-line.mdm-fence-line .mdm-abc-info");
+    const info = marked ? marked.querySelector("span") || marked : null;
+    const line = document.querySelector("#app .cm-line.mdm-abc-line");
+    return {
+      // The staff ink: the field labels and the bar lines, as on paper.
+      field: token("mdm-abc-field", "T:"),
+      bar: token("mdm-abc-bar", "|"),
+      // The brass: the notes, and the word on the fence that says this
+      // block is a score.
+      note: token("mdm-abc-note", "C"),
+      info: info ? getComputedStyle(info).color : null,
+      // The rest of the family.
+      setting: token("mdm-abc-fieldval", "C clef=treble"),
+      text: token("mdm-abc-fieldtext", "Partials of a vibrating string"),
+      comment: token("mdm-abc-comment", "%%stretchlast 1"),
+      lyricStyle: lyric ? getComputedStyle(lyric).fontStyle : null,
+      // The plumbing between the notes takes no token of its own and must
+      // not be left to the theme: the line carries the staff ink.
+      plumbing: line ? getComputedStyle(line).color : null,
+    };
+  });
+}
+
+test("the score source is painted in the extension's own brass, palette or none", { skip }, async () => {
+  // Light, with a palette seeded: the code around takes the palette, the
+  // score does not.
+  let h = await open({
+    seed: { settings: { theme: "light" }, palette: palette("light") },
+  });
+  await setSelection(h.page, await posOf(h.page, "vibrating string"));
+  await sleep(400);
+  assert.equal((await paintedCode(h.page)).keyword, "rgb(10, 11, 12)");
+  assert.deepEqual(await abcPaint(h.page), {
+    field: "rgb(58, 53, 43)",
+    bar: "rgb(58, 53, 43)",
+    note: "rgb(138, 95, 0)",
+    info: "rgb(138, 95, 0)",
+    setting: "rgb(141, 104, 22)",
+    text: "rgb(90, 82, 71)",
+    comment: "rgb(120, 114, 101)",
+    lyricStyle: "italic",
+    plumbing: "rgb(58, 53, 43)",
+  });
+  await h.close();
+
+  // Dark: the brass of the sounding note (--mdm-play-accent) and the cream
+  // of the icon's lettering, straight from style.css.
+  h = await open({ seed: { settings: { theme: "dark" } } });
+  await setSelection(h.page, await posOf(h.page, "vibrating string"));
+  await sleep(400);
+  assert.deepEqual(await abcPaint(h.page), {
+    field: "rgb(240, 235, 221)",
+    bar: "rgb(240, 235, 221)",
+    note: "rgb(217, 169, 79)",
+    info: "rgb(217, 169, 79)",
+    setting: "rgb(214, 189, 131)",
+    text: "rgb(201, 193, 175)",
+    comment: "rgb(138, 130, 114)",
+    lyricStyle: "italic",
+    plumbing: "rgb(240, 235, 221)",
+  });
+  // The brass of the notes is the same value the note lit while it sounds
+  // takes, which is what makes the source and the engraving one colour.
+  assert.equal(
+    await h.page.evaluate(() =>
+      getComputedStyle(document.getElementById("app"))
+        .getPropertyValue("--mdm-play-accent").trim()
+    ),
+    "#d9a94f"
+  );
+  await h.close();
+});
+
 // A run of `code` inside a sentence, which the Vditor content themes washed
 // with a colour of their own: 5% black in light, barely visible on a page
 // that is already off white, and 36% of a Google blue in dark. It takes the

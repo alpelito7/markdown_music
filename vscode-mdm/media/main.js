@@ -2477,9 +2477,21 @@
               hideLines(blockFrom, blockTo);
               return false;
             }
-            lines.add(blockFrom, blockTo, "mdm-code-line mdm-src-line");
+            // mdm-abc-line: the source of a score is the one code whose
+            // colours the extension owns, the plumbing between the notes
+            // (slurs, ties, the brackets of a chord) included, so it carries
+            // a class of its own and no theme ink reaches it.
+            lines.add(blockFrom, blockTo, "mdm-code-line mdm-src-line mdm-abc-line");
             lines.add(openLine.from, openLine.from, "mdm-code-first mdm-fence-line");
             if (closeLine) lines.add(closeLine.from, closeLine.from, "mdm-code-last mdm-fence-line");
+            // The word on the fence that says this block is a score, in the
+            // brass the notes are drawn in: the info string is Markdown, so
+            // the ABC mode never sees it and it took the grey of the marks.
+            if (info) {
+              decos.push(
+                Decoration.mark({ class: "mdm-abc-info" }).range(info.from, info.to)
+              );
+            }
             return false;
           }
           // The chrome rides the first line of the code as an inline widget of
@@ -2815,6 +2827,24 @@
     { tag: tags.operator, color: "var(--mdm-syn-base)" },
     { tag: tags.punctuation, color: "var(--mdm-syn-base)" },
     { tag: tags.bracket, color: "var(--mdm-syn-base)" },
+    // The score source (```abc) is painted apart: its tags are the
+    // extension's own (see abc.js in the bundle) and answer to none of the
+    // slots above, so a score keeps the extension's own brass whatever
+    // palette the VS Code theme hands the rest of the code. Classes and not
+    // colours: the two palettes live in style.css, which is also where the
+    // twelve buckets below are spent on their seven roles.
+    { tag: CM.abcTags.field, class: "mdm-abc-field" },
+    { tag: CM.abcTags.fieldText, class: "mdm-abc-fieldtext" },
+    { tag: CM.abcTags.fieldValue, class: "mdm-abc-fieldval" },
+    { tag: CM.abcTags.note, class: "mdm-abc-note" },
+    { tag: CM.abcTags.accidental, class: "mdm-abc-accidental" },
+    { tag: CM.abcTags.duration, class: "mdm-abc-duration" },
+    { tag: CM.abcTags.rest, class: "mdm-abc-rest" },
+    { tag: CM.abcTags.bar, class: "mdm-abc-bar" },
+    { tag: CM.abcTags.decoration, class: "mdm-abc-deco" },
+    { tag: CM.abcTags.chord, class: "mdm-abc-chord" },
+    { tag: CM.abcTags.lyric, class: "mdm-abc-lyric" },
+    { tag: CM.abcTags.comment, class: "mdm-abc-comment" },
   ]);
 
   // ---------- Commands ----------

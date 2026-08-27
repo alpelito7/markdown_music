@@ -2,7 +2,8 @@
 // the ones a maths-and-music book is likely to carry, and the lighter stream
 // modes for the rest. Matched by the fence info string through
 // LanguageDescription.matchLanguageName (name or alias, case-insensitive).
-import { LanguageDescription, StreamLanguage } from "@codemirror/language";
+import { LanguageDescription, LanguageSupport, StreamLanguage } from "@codemirror/language";
+import { abc } from "./abc.js";
 import { python } from "@codemirror/lang-python";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -26,14 +27,17 @@ import { diff } from "@codemirror/legacy-modes/mode/diff";
 
 const full = (name, alias, support) =>
   LanguageDescription.of({ name, alias, support });
+// The markdown code parser reads `support.language.parser`, so a stream mode
+// has to travel inside a LanguageSupport; the bare StreamLanguage used to be
+// handed over and threw the moment a stream fence was parsed.
 const stream = (name, alias, mode) =>
-  LanguageDescription.of({ name, alias, support: new (support(mode))() });
-function support(mode) {
-  const lang = StreamLanguage.define(mode);
-  return function Support() { return lang; };
-}
+  LanguageDescription.of({ name, alias, support: new LanguageSupport(StreamLanguage.define(mode)) });
 
 export const codeLanguages = [
+  // First for the reader, not the matcher: the score fences are the reason
+  // this editor exists. The fuzzy match also catches the Quarto info string
+  // `{.abc .play}`, the same forms isAbcInfo() accepts in media/main.js.
+  stream("ABC", ["mdm-abc"], abc),
   full("Python", ["py"], python()),
   full("JavaScript", ["js", "node"], javascript()),
   full("TypeScript", ["ts"], javascript({ typescript: true })),

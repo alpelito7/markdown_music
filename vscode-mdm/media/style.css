@@ -1307,3 +1307,94 @@ body {
   --mdm-syn-card: var(--mdm-syn-tint);
   --mdm-syn-page: #fff;
 }
+
+/* ---------- ABC syntax colours ----------
+
+   The source of a score, apart from the code around it. The --mdm-syn-*
+   slots above follow whatever theme is picked in the menu; these do not.
+   ABC is the extension's own notation, so it is painted in the extension's
+   own colour, the brass of the note in the icon, in the one pair of looks
+   the editor has: light and dark. applyPalette() never touches these, and
+   the tags they answer to (abc.js in the bundle) descend from none of the
+   standard ones, so no theme rule reaches a score by inheritance either.
+
+   The scheme is the engraving the block turns into. On paper a staff and
+   its bar lines are drawn in ink, and nothing in this extension is brass
+   but the note: the note in the icon, and the note lit while it sounds
+   (--mdm-play-accent above; the dark value here is that same value). The
+   source is read the same way, in seven roles of one warm family:
+
+   - note: the pitches, in full brass. The line of music is what the eye
+     should find first, and it is the only thing here drawn in the colour
+     of the icon.
+   - setting: what conditions how a pitch is read, at either scale, the
+     accidentals and octave marks beside a note and the values the header
+     declares (K:, M:, L:, Q:, V:). Brass, a step lighter than the notes.
+   - time: what measures the sound, lengths, tuplets and broken rhythm.
+     Copper, the brass turned towards red.
+   - ornament: what dresses a note without moving it, !trill! and the
+     shorthands, and the braces of grace notes. Brass turned towards olive.
+   - staff: the grid the music is written on, bar lines and repeats, and
+     the field labels that scaffold the tune. Ink, as on paper: warm near
+     black on the light side, and on the dark one the cream of the icon's
+     lettering.
+   - text: words rather than music, titles and the rest of the free fields,
+     the sung lyrics (in italic) and the chord symbols. Ink, a weight down.
+   - quiet: what makes no sound, rests and comments. The dimmest of them.
+
+   The light values are those same hues carried deep enough to read as
+   text: the brass of --mdm-play-accent is 3.5:1 on the code ground, too
+   thin for a body of source, so the light side takes the hue a step darker
+   (4.7:1). Every value here was measured against both grounds of its side,
+   the code card and the white page on the light one, `editor.background`
+   and the paler dark themes on the other; the loudest are above 4.5:1 and
+   the two quiet ones above 3:1, which is where they are meant to sit. */
+#app {
+  --mdm-abc-note: #8a5f00;
+  --mdm-abc-setting: #8d6816;
+  --mdm-abc-time: #9a4f16;
+  --mdm-abc-ornament: #6f6412;
+  --mdm-abc-staff: #3a352b;
+  --mdm-abc-text: #5a5247;
+  --mdm-abc-quiet: #787265;
+}
+#app.mdm--dark {
+  --mdm-abc-note: #d9a94f;
+  --mdm-abc-setting: #d6bd83;
+  --mdm-abc-time: #d98a4f;
+  --mdm-abc-ornament: #c2bd6b;
+  --mdm-abc-staff: #f0ebdd;
+  --mdm-abc-text: #c9c1af;
+  --mdm-abc-quiet: #8a8272;
+}
+/* The plumbing between the notes (slurs, ties, the brackets of a chord)
+   takes no token of its own, so it would be left in --mdm-syn-base, which
+   is the theme's. It goes to the staff ink instead: the block is the one
+   piece of code here whose colours are the extension's own, edge to edge.
+   The line class is set in main.js beside the score's other classes. */
+#app .cm-line.mdm-abc-line {
+  color: var(--mdm-abc-staff);
+}
+#app .mdm-abc-note { color: var(--mdm-abc-note); }
+#app .mdm-abc-accidental { color: var(--mdm-abc-setting); }
+#app .mdm-abc-fieldval { color: var(--mdm-abc-setting); }
+#app .mdm-abc-duration { color: var(--mdm-abc-time); }
+#app .mdm-abc-deco { color: var(--mdm-abc-ornament); }
+#app .mdm-abc-field { color: var(--mdm-abc-staff); }
+#app .mdm-abc-bar { color: var(--mdm-abc-staff); }
+#app .mdm-abc-fieldtext { color: var(--mdm-abc-text); }
+#app .mdm-abc-chord { color: var(--mdm-abc-text); }
+#app .mdm-abc-lyric { color: var(--mdm-abc-text); font-style: italic; }
+#app .mdm-abc-rest { color: var(--mdm-abc-quiet); }
+#app .mdm-abc-comment { color: var(--mdm-abc-quiet); }
+/* The `abc` of the fence, which is Markdown and not ABC: the mode never
+   sees it, so the info string took the theme's name colour like any other
+   fence label, and the one word that says "this block is a score" was the
+   only thing in it wearing a colour of the theme. The mark decoration
+   (main.js) wraps whatever the Markdown highlighting already put there, so
+   the rule has to reach the span inside it as well: an inner span carries
+   its own colour rule and would otherwise win on the text. */
+#app .cm-line.mdm-fence-line .mdm-abc-info,
+#app .cm-line.mdm-fence-line .mdm-abc-info span {
+  color: var(--mdm-abc-note);
+}
