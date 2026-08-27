@@ -72,6 +72,55 @@ const TIMING_FIXTURE = [
   "",
 ].join("\n");
 
+// A duet on two staves, the second in bass clef, for the highlight: the two
+// voices sound together and are engraved on staves of their own, and abcjs
+// names only the first of them in the startChar/endChar of the event it
+// reports. The clefs differ on purpose, so that a voice left dark is the one
+// a reader would notice; the parts run in parallel quarters, so that at every
+// moment there is exactly one note to light on each staff.
+const DUET_FIXTURE = [
+  "---",
+  'title: "Duet"',
+  "---",
+  "",
+  "Two parts, one in each clef, sounding together.",
+  "",
+  "```{.abc .play}",
+  "X:1",
+  "M:4/4",
+  "L:1/4",
+  "Q:1/4=120",
+  "K:C",
+  "V:1 clef=treble",
+  "V:2 clef=bass",
+  "[V:1] CDEF | GABc |",
+  "[V:2] C,D,E,F, | G,A,B,C |",
+  "```",
+  "",
+].join("\n");
+
+// A file that opens on a score: no front matter, the fence on the first line.
+// The selection an untouched document carries sits at character 0, which is
+// inside this block, so anything that wakes that selection shows the ABC of a
+// score nobody has put a caret in. A second score further down gives the
+// tests a player to open away from the top.
+const TOP_SCORE_FIXTURE = [
+  "```abc",
+  "X:1",
+  "K:C",
+  "CDEF|",
+  "```",
+  "",
+  "A file that opens on a score, with the prose below it.",
+  "",
+  "```abc",
+  "X:2",
+  "K:C",
+  "GABc|",
+  "```",
+  "",
+].join("\n");
+
 let puppeteer = null;
 try {
   puppeteer = require("puppeteer-core");
@@ -414,6 +463,8 @@ module.exports = {
   HARNESS,
   EXAMPLE,
   TIMING_FIXTURE,
+  DUET_FIXTURE,
+  TOP_SCORE_FIXTURE,
   typedIntoFirstParagraph,
   open,
   update,

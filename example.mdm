@@ -92,14 +92,18 @@ K:C
 ## From score to sound
 
 In the editor the headphone on the block plays it, and each note lights up on the score as it sounds; in HTML the `.play` class puts a player bar under the score, and the PDF keeps the engraving alone.
-
 ```{.abc .play}
 X:1
 M:3/4
 L:1/8
 Q:1/4=110
 K:Am
-G2 G2 A2 | B2 B2 B2 | B2 c B c2 | B4 z2 | z2 A G A2 | G4 z2 | 
-z6 | A2 B2 c2 | d2 d2 d2 | e2 d c B2 | A2 z4 |
-A2 B2 c2 | d2 d2 d2 | e2 f e d2 | c2 z2 e d | c2 B2 z2 | {d}c2 B2 A2 |]
+V:1
+G2 G2 A2 | B2 B2 B2 | B2 c B c2 | B4 z2 | z2 A G A2 | G4 z2 |
+A2 B2 c2 | d2 d2 d2 | e2 d c B2 | A2 z4 |
+A2 B2 c2 | d2 d2 d2 | e2 f e d2 | c2 z2 e d | c2 B2 z2 | d c B2 A2 |]
+V:2 clef=bass
+[G,,B,,D,]4 [G,,B,,D,]2 | [E,G,B,]4 [E,G,B,]2 | [C,E,G,]4 [C,E,G,]2 | [G,,B,,D,]6 | [A,,C,E,]4 [A,,C,E,]2 | [E,G,B,]6 |
+[E,A,,C]2 [E,A,C]4 | D,,4 [D,F,A,]2 | E,,2 [E,^G,B,]2 [E,^G,B,]2 | A,,2 E,2 C2 |
+A,,2 C,2 E,,2 | [D,,F,]4 [D,F,A,]2 | [C,E,G,]4 [G,,B,,D,]2 | C,,4 [E,G,C]2 | E,,2 [E,,^G,B,]4 | D,,2 B,,2 A,,2 |]
 ```

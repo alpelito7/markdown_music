@@ -1260,19 +1260,50 @@
     engraver.selected = [];
   }
 
+  // Every stretch of source sounding at one moment. The event names one of
+  // them in startChar/endChar, and only one: abcjs fills that pair from the
+  // first note it walks into the group and leaves it alone, while every note
+  // of the group, that one included, goes into startCharArray/endCharArray.
+  // In a duet those are the parts on the other staves, sounding together, so
+  // a range read off the pair alone lights the voice that was engraved first
+  // (the top staff) and leaves the rest of the system in ink.
+  function soundingRanges(ev) {
+    const starts = (ev && ev.startCharArray) || [];
+    const ends = (ev && ev.endCharArray) || [];
+    const ranges = [];
+    for (let i = 0; i < Math.min(starts.length, ends.length); i++) {
+      if (typeof starts[i] === "number" && typeof ends[i] === "number") {
+        ranges.push([starts[i], ends[i]]);
+      }
+    }
+    // An event that carries no arrays still lights the note it does name.
+    if (!ranges.length && ev && typeof ev.startChar === "number") {
+      ranges.push([ev.startChar, ev.endChar]);
+    }
+    return ranges;
+  }
+
   // What the engraver's own rangeHighlight does (walk the engraved elements,
-  // light the ones whose chars intersect the sounding range), but with a
-  // colour of ours: highlight() hardwires its default to the selection red.
-  function highlightPlaying(start, end) {
+  // light the ones whose chars intersect a sounding range), but with a colour
+  // of ours: highlight() hardwires its default to the selection red. And with
+  // every range the event carries, so that the voices of a duet light on
+  // their own staves together.
+  function highlightPlaying(ev) {
     const engraver = playerDisplayEngraver();
     if (!engraver) return;
+    const ranges = soundingRanges(ev);
     clearEngraverSelection(engraver);
     let root = null;
     engraver.staffgroups.forEach(function (group) {
       group.voices.forEach(function (voice) {
         voice.children.forEach(function (child) {
           const elem = child.abcelem;
-          if (elem && end > elem.startChar && start < elem.endChar) {
+          if (
+            elem &&
+            ranges.some(function (range) {
+              return range[1] > elem.startChar && range[0] < elem.endChar;
+            })
+          ) {
             engraver.selected.push(child);
             child.highlight(undefined, PLAY_HIGHLIGHT);
             if (!root && child.elemset && child.elemset[0]) {
@@ -1358,10 +1389,15 @@
       }
     }
     // The bar may be holding the focus (see openPlayer); with it gone the
-    // keyboard would land on nothing, so the document takes it back.
+    // keyboard would land on nothing, so the focus goes back to whoever the
+    // bar took it from. To the text when the document was somebody's, which
+    // is the caret it was left at; to nobody when it was nobody's, since
+    // handing the text a focus it never had would put a caret at the first
+    // character of the file, and the block there would come up as source
+    // (somebodyInside says the same thing from the other side).
     const hadFocus = p.bar && p.bar.contains(document.activeElement);
     if (p.bar && p.bar.parentElement) p.bar.parentElement.removeChild(p.bar);
-    if (hadFocus && view) view.focus();
+    if (hadFocus && view && view.state.field(focusField, false)) view.focus();
     document.querySelectorAll("#app [data-mdm-audio]").forEach(function (el) {
       el.removeAttribute("data-mdm-audio");
     });
@@ -1390,14 +1426,26 @@
     // toolbar's menu closer) out of it as well. Bubble phase, so the widget's
     // own listeners, which sit on the buttons and on the progress bar
     // themselves, have all run by then.
+    //
+    // The keys are NOT on this list, and must not be. A key pressed with the
+    // bar focused has to go on rising to the window, because that is where
+    // the webview preload picks it up and hands it to the workbench
+    // (handleInnerKeydown, in workbench/contrib/webview/browser/pre/
+    // index.html): stopped here, Ctrl+S never reached VS Code and the file
+    // would not save while the bar held the focus, and no other shortcut of
+    // the workbench worked either. Nothing in the page needs them stopped.
+    // CodeMirror already leaves them alone on its own: it walks up from the
+    // target to its content and drops the event at the first view that says
+    // to ignore it (eventBelongsToEditor), and this bar sits inside a
+    // ScoreWidget, whose ignoreEvent says exactly that. Measured with the bar
+    // focused: Backspace, Delete, Enter, a letter, ArrowDown and Ctrl+B all
+    // leave the document byte for byte as it was.
     [
       "click",
       "mousedown",
       "mouseup",
       "input",
       "change",
-      "keydown",
-      "keyup",
     ].forEach(function (type) {
       bar.addEventListener(type, function (e) {
         e.stopPropagation();
@@ -1496,7 +1544,7 @@
                   );
                   return;
                 }
-                highlightPlaying(ev.startChar, ev.endChar);
+                highlightPlaying(ev);
               } catch (e) {
                 // highlighting must never break playback
               }
@@ -1764,12 +1812,12 @@
   function paintInkAt(note, ms) {
     const wait = inkClockZero + Math.max(ms, inkEndsAt) - performance.now();
     if (wait <= 0) {
-      highlightPlaying(note.startChar, note.endChar);
+      highlightPlaying(note);
       return;
     }
     inkTimers.push(
       setTimeout(function () {
-        if (player) highlightPlaying(note.startChar, note.endChar);
+        if (player) highlightPlaying(note);
       }, wait)
     );
   }
@@ -1903,7 +1951,7 @@
   function markNoteAt(timer, at) {
     const from = soundFrom(timer, at);
     if (from && !from.wait && from.note) {
-      highlightPlaying(from.note.startChar, from.note.endChar);
+      highlightPlaying(from.note);
     } else {
       clearPlayingHighlight();
     }
@@ -1996,6 +2044,15 @@
   // the browser's own focus, since both are dragged. Using them is not
   // leaving the document, and the score they play must stay open.
   //
+  // The bar keeps a document that is already somebody's; what it does not do
+  // is make one somebody's, and that asymmetry is the whole of the rule. A
+  // document is entered by putting a caret in the text, and the headphones
+  // are not a caret: they open a player and hand the bar the focus so that
+  // Space plays. Counting that as entering woke the selection an untouched
+  // document carries, which sits at the first character, and the block there
+  // came up as source under a caret nobody had put in it. A score at the top
+  // of the file opened its ABC on the first click of the session.
+  //
   // Where the focus is, and not whether the window has it: an Alt+Tab to
   // another application must find the document exactly as it was left, open
   // block and all. Whether the window has the focus does not tell the two
@@ -2005,7 +2062,11 @@
   // away on every Alt+Tab.
   function somebodyInside() {
     const active = document.activeElement;
-    return !!(view && active && view.dom.contains(active));
+    if (!view || !active || !view.dom.contains(active)) return false;
+    if (active.closest && active.closest(".mdm-audio")) {
+      return !!view.state.field(focusField, false);
+    }
+    return true;
   }
 
   // The last press made in the page, which is how a focus that was dropped

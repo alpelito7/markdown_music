@@ -20,6 +20,8 @@ const assert = require("node:assert/strict");
 const {
   EXAMPLE,
   TIMING_FIXTURE,
+  DUET_FIXTURE,
+  TOP_SCORE_FIXTURE,
   typedIntoFirstParagraph,
   open,
   update,
@@ -73,6 +75,27 @@ async function pressPlay(page) {
 // above the widget. This is what "the block is open for editing" means now.
 function sourceShowing() {
   return !!document.querySelector("#app .cm-line.mdm-src-line");
+}
+
+// Puts a caret in the first line of prose, which is what makes the document
+// somebody's without opening anything: only code and maths blocks show their
+// source. A reader who has put no caret anywhere is a different document, and
+// what a player borrows the focus from decides what it gives back.
+async function caretInProse(page) {
+  const at = await page.evaluate(() => {
+    const doc = window.__mdm.view.state.doc;
+    let inHeader = doc.line(1).text === "---";
+    for (let i = 2; i <= doc.lines; i++) {
+      const line = doc.line(i);
+      if (inHeader) {
+        if (line.text === "---") inHeader = false;
+        continue;
+      }
+      if (line.text.trim() && !line.text.startsWith("```")) return line.from + 4;
+    }
+    return 0;
+  });
+  await setSelection(page, at);
 }
 
 // The audio probe the resume and seek tests measure with: where every playback
@@ -222,6 +245,80 @@ test("every score gets a player toggle beside the copy button; other code does n
   await h.close();
 });
 
+// The same on the first click of a document nobody has been in yet, which is
+// where it failed. A document carries a selection before anybody has put a
+// caret in it, at character 0, and the rendering ignores it while the document
+// is nobody's. The headphones hand the player bar the focus so that Space
+// plays, and the bar lives inside the view: counted as somebody arriving, that
+// untouched selection woke and the block at the top of the file came up as
+// source under a caret nobody had put there. The bar keeps a document that is
+// already somebody's (the second half below, and the volume and scrub tests
+// further down); it does not make one somebody's.
+test("the headphones of a fresh document open no source, and keep one that is open", { skip }, async () => {
+  const h = await open({ text: TOP_SCORE_FIXTURE, scores: 2 });
+  const fresh = await h.page.evaluate(() => ({
+    source: !!document.querySelector("#app .cm-line.mdm-src-line"),
+    selection: window.__mdm.view.state.selection.ranges.map((r) => [r.from, r.to]),
+  }));
+  assert.deepEqual(
+    fresh,
+    { source: false, selection: [[0, 0]] },
+    "the fixture must open with the untouched caret on the score at the top"
+  );
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  const opened = await h.page.evaluate(() => ({
+    source: !!document.querySelector("#app .cm-line.mdm-src-line"),
+    bars: document.querySelectorAll(".mdm-audio").length,
+    onBar: !!document.activeElement.closest(".mdm-audio"),
+  }));
+  assert.deepEqual(
+    opened,
+    { source: false, bars: 1, onBar: true },
+    "the headphones brought up the source of the block at the top of the file"
+  );
+  await clickToggle(h.page, 0); // close, and leave the document as it was
+  await new Promise((r) => setTimeout(r, 200));
+  // Closing gives back what was taken, and nobody had it: the keyboard does
+  // not land in the text, where it would draw a caret at the first character
+  // of the file and open the block there, which is the same bug one click
+  // later.
+  assert.deepEqual(
+    await h.page.evaluate(() => ({
+      source: !!document.querySelector("#app .cm-line.mdm-src-line"),
+      bars: document.querySelectorAll(".mdm-audio").length,
+      editor: window.__mdm.view.hasFocus,
+    })),
+    { source: false, bars: 0, editor: false },
+    "closing the player put a caret in a document nobody had been in"
+  );
+  // The other half: with a caret really in the second score, the headphones
+  // of the first must leave that block open, since the document is somebody's
+  // already and the bar is not asked to say otherwise.
+  const at = await posOf(h.page, "GABc", 0, 0);
+  await setSelection(h.page, at);
+  assert.equal(
+    await h.page.evaluate(() => !!document.querySelector("#app .cm-line.mdm-src-line")),
+    true,
+    "a caret in the second score did not open it"
+  );
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  assert.equal(
+    await h.page.evaluate(() => !!document.querySelector("#app .cm-line.mdm-src-line")),
+    true,
+    "the player closed the source the caret was keeping open"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("the toggle opens the player without expanding the block, and closes it", { skip }, async () => {
   const h = await open({});
   await clickToggle(h.page, 0);
@@ -346,6 +443,11 @@ test("a click on the headphones puts its tooltip away until the pointer leaves",
 test("the bar takes the keyboard: Space plays and pauses, Escape gives it back", { skip }, async () => {
   const h = await open({});
   const before = await docText(h.page);
+  // Somebody is in the document before the player opens, which is what the
+  // bar borrows the keyboard from and, on the way out, gives it back to. The
+  // reader who never put a caret anywhere is pinned in the test above: the
+  // bar takes the focus from nobody and returns it to nobody.
+  await caretInProse(h.page);
   await clickToggle(h.page, 0);
   await h.page.waitForFunction(
     () => document.querySelector(".mdm-audio .abcjs-midi-start"),
@@ -376,7 +478,8 @@ test("the bar takes the keyboard: Space plays and pauses, Escape gives it back",
   assert.equal(await docText(h.page), before);
   assert.equal(await h.page.evaluate(sourceShowing), false);
 
-  // Closing hands the keyboard back: the bar it was on is gone.
+  // Closing hands the keyboard back to the text it came from: the bar it was
+  // on is gone.
   await clickToggle(h.page, 0);
   await new Promise((r) => setTimeout(r, 200));
   assert.equal((await playerState(h.page)).bars, 0);
@@ -397,6 +500,63 @@ test("the bar takes the keyboard: Space plays and pauses, Escape gives it back",
     { editor: true, bars: 1 }
   );
   assert.equal(await docText(h.page), before);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Ctrl+S while the bar holds the keyboard, and with it every other shortcut
+// of the workbench. The keys leave the page through a bubble listener the
+// webview preload puts on the window (handleInnerKeydown, in
+// workbench/contrib/webview/browser/pre/index.html), which is what this
+// stands in for; the bar stopped every keydown and keyup at itself, so
+// nothing rose that far and the document would not save with a player open.
+// What keeps those keys off the text is not that stop but the widget they are
+// inside (ScoreWidget.ignoreEvent), which is the second half here.
+test("the keys of the workbench leave the page with the bar focused", { skip }, async () => {
+  const h = await open({});
+  await h.page.evaluate(() => {
+    window.__toWindow = [];
+    window.addEventListener("keydown", function (e) {
+      window.__toWindow.push((e.ctrlKey ? "Ctrl+" : "") + e.key);
+    });
+  });
+  await caretInProse(h.page);
+  const before = await docText(h.page);
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  assert.equal(
+    await h.page.evaluate(() => !!document.activeElement.closest(".mdm-audio")),
+    true,
+    "the bar did not take the keyboard, so the case is not the one being tested"
+  );
+  await h.page.evaluate(() => {
+    window.__toWindow = [];
+  });
+  await h.page.keyboard.down("Control");
+  await h.page.keyboard.press("s");
+  await h.page.keyboard.up("Control");
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(
+    (await h.page.evaluate(() => window.__toWindow)).includes("Ctrl+s"),
+    "Ctrl+S never rose to the window: the workbench would never see it and the file would not save"
+  );
+  // And the text is not the one answering them: the keys that would edit it.
+  for (const key of ["Backspace", "Delete", "Enter", "a", "ArrowDown"]) {
+    await h.page.keyboard.press(key);
+  }
+  await h.page.keyboard.down("Control");
+  await h.page.keyboard.press("b"); // the keymap's bold
+  await h.page.keyboard.up("Control");
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(
+    await docText(h.page),
+    before,
+    "a key pressed on the bar reached the text"
+  );
+  assert.equal(await h.page.evaluate(sourceShowing), false);
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -736,6 +896,83 @@ test("the sounding notes light up on the score, and the ink comes back", { skip 
     bars: document.querySelectorAll(".mdm-audio").length,
   }));
   assert.deepEqual(leftover, { lit: 0, bars: 0 });
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A duet lights on every staff at once. The event the synth reports names one
+// stretch of source in startChar/endChar, and only one: abcjs fills that pair
+// from the first note it walks into the group and puts every note of the
+// group, that one included, in startCharArray/endCharArray. Read off the pair
+// alone, the highlight lit the voice engraved first and left the rest of the
+// system in ink for the whole tune, which under a treble part is the bass one.
+test("every voice of a duet lights up, on its own staff", { skip }, async () => {
+  const h = await open({ text: DUET_FIXTURE, scores: 1 });
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await pressPlay(h.page);
+  // Sampled while it sounds rather than read once at the end: the mark moves
+  // with the tune, and a single reading could land in the silence after it.
+  // Each reading is a whole moment, since the repaint clears and lights again
+  // in one turn, and only the moments with something lit are kept.
+  await h.page.evaluate(() => {
+    window.__lit = [];
+    window.__litTimer = setInterval(function () {
+      const lit = Array.from(
+        document.querySelectorAll(
+          "#app [data-mdm-audio] code.language-abc svg .abcjs-note.abcjs-note_selected"
+        )
+      ).map(function (el) {
+        const classes = (el.getAttribute("class") || "").split(" ");
+        return {
+          voice: classes.filter((c) => /^abcjs-v\d+$/.test(c))[0],
+          fill: getComputedStyle(el).fill,
+          y: Math.round(el.getBoundingClientRect().top),
+        };
+      });
+      if (lit.length) window.__lit.push(lit);
+    }, 50);
+  });
+  await h.page
+    .waitForFunction(() => window.__lit.length >= 8, { timeout: 20000 })
+    .catch(() => {
+      // Let the assertions below say what was lit instead of timing out here.
+    });
+  const lit = await h.page.evaluate(() => {
+    clearInterval(window.__litTimer);
+    return window.__lit;
+  });
+  assert.ok(lit.length >= 8, "the tune did not play: " + lit.length + " moments lit");
+  const voices = lit.map((moment) =>
+    moment.map((note) => note.voice).sort().join(",")
+  );
+  assert.deepEqual(
+    Array.from(new Set(voices)),
+    ["abcjs-v0,abcjs-v1"],
+    "a moment of the duet lit only one of the two voices"
+  );
+  // Two staves and not two notes on one: the bass part is drawn below the
+  // treble one, and it is the accent that has to reach it, not just the class.
+  const moment = lit[0];
+  const top = moment.filter((note) => note.voice === "abcjs-v0")[0];
+  const bottom = moment.filter((note) => note.voice === "abcjs-v1")[0];
+  assert.ok(bottom.y > top.y, "the two voices were lit on the same staff");
+  assert.deepEqual(
+    Array.from(new Set(moment.map((note) => note.fill))),
+    ["rgb(160, 116, 15)"], // the light brass of --mdm-play-accent
+    "a voice of the duet was marked without being accented"
+  );
+  await clickToggle(h.page, 0); // close: playback stops, highlight cleared
+  await new Promise((r) => setTimeout(r, 300));
+  const leftoverDuet = await h.page.evaluate(
+    () =>
+      document.querySelectorAll("code.language-abc svg .abcjs-note_selected")
+        .length
+  );
+  assert.equal(leftoverDuet, 0);
   assert.deepEqual(h.errors, []);
   await h.close();
 });

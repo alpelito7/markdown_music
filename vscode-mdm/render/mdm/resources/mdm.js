@@ -488,19 +488,50 @@
     return engraver && engraver.staffgroups ? engraver : null;
   }
 
+  // Every stretch of source sounding at one moment. The event names one of
+  // them in startChar/endChar, and only one: abcjs fills that pair from the
+  // first note it walks into the group and leaves it alone, while every note
+  // of the group, that one included, goes into startCharArray/endCharArray.
+  // In a duet those are the parts on the other staves, sounding together, so
+  // a range read off the pair alone lights the voice that was engraved first
+  // (the top staff) and leaves the rest of the system in ink.
+  function soundingRanges(ev) {
+    var starts = (ev && ev.startCharArray) || [];
+    var ends = (ev && ev.endCharArray) || [];
+    var ranges = [];
+    for (var i = 0; i < Math.min(starts.length, ends.length); i++) {
+      if (typeof starts[i] === "number" && typeof ends[i] === "number") {
+        ranges.push([starts[i], ends[i]]);
+      }
+    }
+    // An event that carries no arrays still lights the note it does name.
+    if (!ranges.length && ev && typeof ev.startChar === "number") {
+      ranges.push([ev.startChar, ev.endChar]);
+    }
+    return ranges;
+  }
+
   // What the engraver's own rangeHighlight does (walk the engraved elements,
-  // light the ones whose chars intersect the sounding range), but with a
-  // colour of ours: highlight() hardwires its default to the selection red.
-  function highlightPlaying(visual, start, end) {
+  // light the ones whose chars intersect a sounding range), but with a colour
+  // of ours: highlight() hardwires its default to the selection red. And with
+  // every range the event carries, so that the voices of a duet light on
+  // their own staves together.
+  function highlightPlaying(visual, ev) {
     var engraver = engraverOf(visual);
     if (!engraver) return;
+    var ranges = soundingRanges(ev);
     clearEngraverSelection(engraver);
     var root = null;
     engraver.staffgroups.forEach(function (group) {
       group.voices.forEach(function (voice) {
         voice.children.forEach(function (child) {
           var elem = child.abcelem;
-          if (elem && end > elem.startChar && start < elem.endChar) {
+          if (
+            elem &&
+            ranges.some(function (range) {
+              return range[1] > elem.startChar && range[0] < elem.endChar;
+            })
+          ) {
             engraver.selected.push(child);
             child.highlight(undefined, PLAY_HIGHLIGHT);
             if (!root && child.elemset && child.elemset[0]) {
@@ -544,7 +575,7 @@
         onEvent: function (ev) {
           try {
             if (!ev || typeof ev.startChar !== "number") return;
-            highlightPlaying(visual, ev.startChar, ev.endChar);
+            highlightPlaying(visual, ev);
           } catch (e) {
             // highlighting must never break playback
           }

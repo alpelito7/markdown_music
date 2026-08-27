@@ -209,7 +209,12 @@ How the editing works:
   the progress bar of a player keep the browser's focus while they are
   dragged, and the score they belong to stays open. So do the toolbar
   buttons, which hand the focus back to the text, since they are there to
-  act on the caret.
+  act on the caret. A player bar keeps a document that is already
+  somebody's and hands out nothing on its own, which is not the same rule:
+  a document carries a selection before anybody has put a caret in it, at
+  its first character, and the headphones, which take the focus so that
+  Space plays, would otherwise wake it. A file that opens on a score came
+  up with its ABC showing on the first click of the session.
 
   Leaving the window is not leaving the document. An Alt+Tab to another
   application, or to another VS Code window, finds everything as it was on
@@ -366,7 +371,12 @@ How the editing works:
     (`#a0740f` light, `#d9a94f` dark, as the score backgrounds do): it
     paints the class `.abcjs-note_selected` from the stylesheet, so
     changing it is two lines. That brass belongs to the score and to
-    nothing else: the bar carries no colour of its own.
+    nothing else: the bar carries no colour of its own. A duet lights on
+    every staff, and the ranges for that have to be taken from the
+    `startCharArray`/`endCharArray` of the event: the `startChar`/`endChar`
+    beside them name one note only, the first of the group abcjs walked
+    into, so a highlight read off the pair alone lit the top staff and left
+    the lower one in ink for the whole tune.
   - The volume is one for the whole session: set it on one score and the
     next player opens at the same level. It resets when the document
     closes, deliberately (it is not an `mdm.*` setting). Underneath it is a
@@ -458,8 +468,18 @@ How the editing works:
     document's). The content is editable and the bar is not, which is what
     tells the two apart; a focused control keeps its own press, so the
     buttons of the toolbar and of the bar and the volume slider still
-    answer Space with what they do. Escape hands the keyboard back to the
-    text, and so does closing the player. The press goes through the
+    answer Space with what they do. What the bar does not do is stop those
+    presses at itself: they have to go on rising to the window, where the
+    webview preload picks them up and hands them to the workbench, and while
+    the bar stopped them Ctrl+S never reached VS Code and the file would not
+    save with a player open. Nothing needs them stopped, since CodeMirror
+    drops an event at the first view that says to ignore it and this bar is
+    inside a widget that does. Escape hands the keyboard back to the
+    text, and so does closing the player, though only to a text that had it:
+    a bar gives back what it took, and one opened on a document nobody was
+    in gives it back to nobody, since focusing the text on the reader's
+    behalf draws a caret at the first character of the file and opens the
+    block there. The press goes through the
     widget's own play button and not through the controller, so the face of
     the button, its label and the resume in silence follow a key exactly as
     they follow a click.
