@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2
+
+- A playing cursor: while a tune sounds, a brass line walks the engraving
+  the way sequencers draw their playhead, gliding between attacks so each
+  note reads as drawn the moment the line reaches it. It freezes where a
+  pause leaves the music, stands where a seek drops the head (played yet
+  or not), follows the progress head live while it is dragged, and leaves
+  with stop, with the end of the tune, and with the player. Grabbing the
+  head silences a sounding tune for as long as the drag lasts and puts the
+  lit note back in ink; the release lands the sound under the new head.
+
 ## 0.2.1
 
 - Search terms on the listing: `notation` on its own, `staff`, `music
