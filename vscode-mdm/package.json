@@ -2,15 +2,39 @@
   "name": "mdm-editor",
   "displayName": "Markdown Music",
   "description": "Editor for .mdm files: Markdown, equations and music scores in one rendered, editable document.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "alpelito7",
   "license": "MIT",
   "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#26241E",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alpelito7/markdown_music"
+  },
+  "bugs": {
+    "url": "https://github.com/alpelito7/markdown_music/issues"
+  },
+  "homepage": "https://github.com/alpelito7/markdown_music#readme",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Programming Languages",
+    "Visualization",
     "Other"
+  ],
+  "keywords": [
+    "music",
+    "abc notation",
+    "sheet music",
+    "score",
+    "markdown",
+    "katex",
+    "quarto",
+    "live preview"
   ],
   "main": "./extension.js",
   "activationEvents": [],
