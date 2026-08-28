@@ -785,6 +785,16 @@ body {
 #app.mdm-staff--gray code.language-abc svg .abcjs-note_selected * {
   fill: var(--mdm-play-accent);
 }
+/* The playing cursor: a brass line that walks the score while its tune
+   sounds (cursorFrame in main.js). It lives inside the SVG in the score's
+   own units, so the fitted scale moves it with the notes; the stroke keeps
+   a screen width through that scale (vector-effect on the element), and the
+   colour is the same accent the sounding note wears, one value per side. */
+#app code.language-abc svg .mdm-play-cursor {
+  stroke: var(--mdm-play-accent);
+  stroke-width: 1.6px;
+  fill: none;
+}
 /* No pointer events inside a score: a click means "open the ABC source"
    (the widget hands it to the editor), and letting it reach the SVG fired
    abcjs's own note-selection handler, which flashed the note red. */

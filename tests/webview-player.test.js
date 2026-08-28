@@ -153,6 +153,30 @@ async function installAudioProbe(page) {
   });
 }
 
+// One pointer event on the track, at a fraction of its width: the pieces a
+// drag is made of, for the tests that hold the head rather than drop it.
+async function headEvent(page, percent, type) {
+  await page.evaluate(
+    (p, t) => {
+      const track = document.querySelector(
+        ".mdm-audio .abcjs-midi-progress-background"
+      );
+      const box = track.getBoundingClientRect();
+      track.dispatchEvent(
+        new PointerEvent(t, {
+          button: 0,
+          bubbles: true,
+          pointerId: 7,
+          clientX: box.x + box.width * p,
+          clientY: box.y + box.height / 2,
+        })
+      );
+    },
+    percent,
+    type
+  );
+}
+
 // The head dropped at a fraction of the track, the gesture a pointer makes.
 async function dropHead(page, percent) {
   await page.evaluate((p) => {
@@ -1263,6 +1287,492 @@ test("the sounding note is accented on the dark side too", { skip }, async () =>
   await h.close();
 });
 
+// The playing cursor: the brass line that walks the engraving while the tune
+// sounds (cursorFrame in main.js). It glides between attacks rather than
+// hopping note to note, which is what makes a note read as being drawn the
+// moment the line reaches it, and it spans the whole system top to bottom.
+// Sampled frame by frame on the third score of the timing fixture, whose
+// notes come every 300 ms and whose first line lasts seconds: within one
+// line x never goes backwards, no frame jumps a whole note gap (adjacent
+// noteheads sit tens of units apart while an interpolated frame moves a few),
+// and the count of distinct readings says it moved most frames, not once per
+// note. The line the cursor is drawn with is the play accent, and the note
+// that is lit is never ahead of it.
+test("a brass cursor walks the score continuously while the tune sounds", { skip }, async () => {
+  const h = await open({ text: TIMING_FIXTURE });
+  await clickToggle(h.page, 2);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await pressPlay(h.page);
+  await h.page.waitForFunction(
+    () =>
+      document.querySelector(
+        "#app [data-mdm-audio] code.language-abc svg .mdm-play-cursor"
+      ),
+    { timeout: 15000 }
+  );
+  const seen = await h.page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const out = [];
+        function tick() {
+          const el = document.querySelector(
+            "#app [data-mdm-audio] code.language-abc svg .mdm-play-cursor"
+          );
+          if (el) {
+            out.push({
+              x: parseFloat(el.getAttribute("x1")),
+              y1: parseFloat(el.getAttribute("y1")),
+              y2: parseFloat(el.getAttribute("y2")),
+            });
+          }
+          if (out.length >= 50) resolve(out);
+          else requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      })
+  );
+  assert.equal(seen.length, 50);
+  const xs = seen.map((s) => s.x);
+  assert.ok(
+    xs.every((x) => isFinite(x)),
+    "a frame drew the cursor nowhere"
+  );
+  const steps = [];
+  for (let i = 1; i < xs.length; i++) steps.push(xs[i] - xs[i - 1]);
+  assert.ok(
+    steps.every((d) => d > -0.5),
+    "the cursor walked backwards inside a line"
+  );
+  assert.ok(
+    Math.max.apply(null, steps) < 40,
+    "the cursor hopped: a frame moved " + Math.max.apply(null, steps) + " units"
+  );
+  const distinct = new Set(xs).size;
+  assert.ok(
+    distinct >= 20,
+    "the cursor stood in only " + distinct + " positions over 50 frames"
+  );
+  assert.ok(
+    xs[xs.length - 1] - xs[0] > 20,
+    "the cursor barely advanced: " + (xs[xs.length - 1] - xs[0]) + " units"
+  );
+  assert.ok(
+    seen.every((s) => s.y2 - s.y1 >= 20),
+    "the cursor does not span the system"
+  );
+  const look = await h.page.evaluate(() => {
+    const el = document.querySelector("code.language-abc svg .mdm-play-cursor");
+    const lit = document.querySelector(
+      "code.language-abc svg .abcjs-note.abcjs-note_selected"
+    );
+    return {
+      stroke: getComputedStyle(el).stroke,
+      x: parseFloat(el.getAttribute("x1")),
+      litX: lit ? lit.getBBox().x : null,
+    };
+  });
+  assert.equal(look.stroke, "rgb(160, 116, 15)", "the cursor is not brass");
+  assert.ok(look.litX !== null, "no note lit under a walking cursor");
+  assert.ok(
+    look.x >= look.litX - 8,
+    "the lit note is ahead of the cursor: " + look.x + " vs " + look.litX
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Pausing holds the line where the music stopped, the way every sequencer
+// does; stop takes it away (the clock is rewound to nought and nothing is
+// standing anywhere), and the headphones going out take it away with the
+// whole player.
+test("the cursor freezes on pause, leaves on stop, and goes with the player", { skip }, async () => {
+  const h = await open({ text: TIMING_FIXTURE });
+  await clickToggle(h.page, 2);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await pressPlay(h.page);
+  await h.page.waitForFunction(
+    () => document.querySelector("code.language-abc svg .mdm-play-cursor"),
+    { timeout: 15000 }
+  );
+  await new Promise((r) => setTimeout(r, 500));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await h.page.waitForFunction(
+    () =>
+      !document
+        .querySelector(".mdm-audio .abcjs-midi-start")
+        .classList.contains("abcjs-pushed"),
+    { timeout: 5000 }
+  );
+  // The button unpushes on the click itself while the engine's pause lands
+  // behind its promises a few milliseconds later, so the first reading waits
+  // that out; after it the line must not move by a hair.
+  const frozen = await h.page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          const el = document.querySelector(
+            "code.language-abc svg .mdm-play-cursor"
+          );
+          const first = el ? el.getAttribute("x1") : null;
+          setTimeout(() => {
+            const again = document.querySelector(
+              "code.language-abc svg .mdm-play-cursor"
+            );
+            resolve({
+              first: first,
+              later: again ? again.getAttribute("x1") : null,
+            });
+          }, 300);
+        }, 200);
+      })
+  );
+  assert.ok(frozen.first !== null, "the pause took the cursor away");
+  assert.equal(frozen.later, frozen.first, "the cursor kept walking while paused");
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .mdm-audio-stop").click()
+  );
+  await h.page.waitForFunction(
+    () => !document.querySelector("code.language-abc svg .mdm-play-cursor"),
+    { timeout: 5000 }
+  );
+  await pressPlay(h.page);
+  await h.page.waitForFunction(
+    () => document.querySelector("code.language-abc svg .mdm-play-cursor"),
+    { timeout: 15000 }
+  );
+  await clickToggle(h.page, 2);
+  await h.page.waitForFunction(
+    () =>
+      !document.querySelector(".mdm-audio") &&
+      !document.querySelector(".mdm-play-cursor"),
+    { timeout: 5000 }
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A head dropped before the first play parks the cursor where the music
+// would begin, without a sound: the seek primes the tune, moves its clock,
+// and the line stands inside the note the head landed in, placed by musical
+// time and not by the drawing (an unjustified single measure leaves most of
+// the staff width empty, so the two disagree wildly). Dropped at 44% of
+// eight even eighths the clock sits halfway through the fourth, so the line
+// stands strictly between the fourth and fifth noteheads. Home from there
+// walks it back to the first note, where the clock reads nought and it is
+// the ink (a seek lights the attack it lands on) that keeps the line from
+// reading as stopped.
+test("a head dropped before play parks the cursor where the music would start", { skip }, async () => {
+  const h = await open({ text: TIMING_FIXTURE });
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await dropHead(h.page, 0.44);
+  await h.page.waitForFunction(
+    () => document.querySelector("code.language-abc svg .mdm-play-cursor"),
+    { timeout: 15000 }
+  );
+  const parked = await h.page.evaluate(() => {
+    const el = document.querySelector("code.language-abc svg .mdm-play-cursor");
+    const notes = Array.from(
+      document.querySelectorAll(
+        "#app [data-mdm-audio] code.language-abc svg .abcjs-note"
+      )
+    )
+      .map((n) => n.getBBox().x)
+      .sort((a, b) => a - b);
+    return {
+      x: parseFloat(el.getAttribute("x1")),
+      notes: notes,
+      sounding: !!document.querySelector(".abcjs-midi-start.abcjs-pushed"),
+    };
+  });
+  assert.equal(parked.sounding, false, "the drop started playback");
+  assert.equal(parked.notes.length, 8, "the fixture is not eight note groups");
+  assert.ok(
+    parked.x > parked.notes[3] + 2 && parked.x < parked.notes[4] - 2,
+    "the cursor is not inside the fourth note: " +
+      parked.x +
+      " against heads at " +
+      parked.notes.join(", ")
+  );
+  await h.page.evaluate(() => {
+    const track = document.querySelector(
+      ".mdm-audio .abcjs-midi-progress-background"
+    );
+    track.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Home",
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+  });
+  await h.page.waitForFunction(
+    (was) => {
+      const el = document.querySelector(
+        "code.language-abc svg .mdm-play-cursor"
+      );
+      return el && parseFloat(el.getAttribute("x1")) < was * 0.6;
+    },
+    { timeout: 15000 },
+    parked.x
+  );
+  const home = await h.page.evaluate(() => {
+    const el = document.querySelector("code.language-abc svg .mdm-play-cursor");
+    return {
+      x: parseFloat(el.getAttribute("x1")),
+      lit: document.querySelectorAll(
+        "code.language-abc svg .abcjs-note_selected"
+      ).length,
+    };
+  });
+  assert.ok(
+    home.x <= parked.notes[0] + 8,
+    "Home left the cursor at " + home.x + ", past the first head at " + parked.notes[0]
+  );
+  assert.ok(home.lit > 0, "the first note is not lit under the parked cursor");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// While a hand holds the progress head, the cursor follows it, both ways and
+// live, the way scrubbing moves the playhead in any sequencer; the engine is
+// only seeked on release (midiBuffer.seek stutters at pointermove rate), so
+// the line reads the hand, not the clock, and holds the spot through the
+// seek that lands after the release. That works before the tune has ever
+// been primed, when there is no clock at all, and paused mid-tune alike.
+// Regions are read in musical time against the eight noteheads of the first
+// fixture score: at p of the track the clock stands p*8 eighths in, so the
+// line falls strictly between heads floor(p*8) and the next.
+test("the cursor follows the head while it is held, before the seek lands", { skip }, async () => {
+  const h = await open({ text: TIMING_FIXTURE });
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  const cursorX = () =>
+    h.page.evaluate(() => {
+      const el = document.querySelector(
+        "code.language-abc svg .mdm-play-cursor"
+      );
+      return el ? parseFloat(el.getAttribute("x1")) : null;
+    });
+  const settle = () => new Promise((r) => setTimeout(r, 120));
+  const notes = await h.page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll(
+        "#app [data-mdm-audio] code.language-abc svg .abcjs-note"
+      )
+    )
+      .map((n) => n.getBBox().x)
+      .sort((a, b) => a - b)
+  );
+  assert.equal(notes.length, 8, "the fixture is not eight note groups");
+  const between = (x, i, what) =>
+    assert.ok(
+      x !== null && x > notes[i] + 2 && x < notes[i + 1] - 2,
+      what + ": the cursor at " + x + " is not between heads " + i + " and " +
+        (i + 1) + " (" + notes[i] + ", " + notes[i + 1] + ")"
+    );
+  // Held before the tune was ever primed: no clock exists, the hand alone
+  // places the line.
+  await headEvent(h.page, 0.2, "pointerdown");
+  await h.page.waitForFunction(
+    () => document.querySelector("code.language-abc svg .mdm-play-cursor"),
+    { timeout: 5000 }
+  );
+  between(await cursorX(), 1, "held at 20%");
+  await headEvent(h.page, 0.6, "pointermove");
+  await settle();
+  between(await cursorX(), 4, "dragged to 60%");
+  await headEvent(h.page, 0.3, "pointermove");
+  await settle();
+  between(await cursorX(), 2, "dragged back to 30%");
+  // The release seeks, which primes the tune first, and the line must hold
+  // the spot right through: handed back to a clock that has not landed yet
+  // (it reads nought until the seek is served) it would blink out until the
+  // priming ends and come back. The priming can be quick here (a small tune,
+  // a local soundfont, a warm browser), so presence is sampled every frame
+  // from the release itself: a blink of one frame is a blink seen.
+  const heldThrough = await h.page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const track = document.querySelector(
+          ".mdm-audio .abcjs-midi-progress-background"
+        );
+        const box = track.getBoundingClientRect();
+        track.dispatchEvent(
+          new PointerEvent("pointerup", {
+            button: 0,
+            bubbles: true,
+            pointerId: 7,
+            clientX: box.x + box.width * 0.3,
+            clientY: box.y + box.height / 2,
+          })
+        );
+        const seen = [];
+        const t0 = performance.now();
+        (function tick() {
+          seen.push(
+            !!document.querySelector("code.language-abc svg .mdm-play-cursor")
+          );
+          if (performance.now() - t0 > 400) resolve(seen);
+          else requestAnimationFrame(tick);
+        })();
+      })
+  );
+  assert.ok(
+    heldThrough.every(Boolean),
+    "the line blinked out after the release: [" + heldThrough.join(",") + "]"
+  );
+  // Once served, the clock stands where the hand left it and the line must
+  // not move off the spot.
+  await h.page.waitForFunction(
+    () => {
+      const p = window.__mdm.player;
+      return !!(p && p.controller && p.controller.timer);
+    },
+    { timeout: 15000 }
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  between(await cursorX(), 2, "after the release");
+  assert.equal(
+    await h.page.evaluate(
+      () => !!document.querySelector(".abcjs-midi-start.abcjs-pushed")
+    ),
+    false,
+    "the drag started playback"
+  );
+  // The same hold, paused mid-tune: play a moment, pause, and the line
+  // follows the hand off the spot the pause left it on.
+  await pressPlay(h.page);
+  await new Promise((r) => setTimeout(r, 250));
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await h.page.waitForFunction(
+    () =>
+      !document
+        .querySelector(".mdm-audio .abcjs-midi-start")
+        .classList.contains("abcjs-pushed"),
+    { timeout: 5000 }
+  );
+  await settle();
+  await headEvent(h.page, 0.8, "pointerdown");
+  await settle();
+  between(await cursorX(), 6, "held at 80% while paused");
+  await headEvent(h.page, 0.06, "pointermove");
+  await settle();
+  between(await cursorX(), 0, "dragged to 6% while paused");
+  await headEvent(h.page, 0.06, "pointerup");
+  await new Promise((r) => setTimeout(r, 300));
+  between(await cursorX(), 0, "after the paused release");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A hand on the head takes the sound and the ink with it. The engine cannot
+// seek at pointermove rate, and pausing it on the grab races the release's
+// seek through abcjs's promise chains (a quick click landed the pause after
+// the seek and came back sounding the old spot under a clock on the new
+// one), so what the grab does is mute the output while the transport runs
+// on: silence for the whole drag, and the release's seek lands the sound
+// under the new head with the silent gap the sounding path always had. The
+// brass goes out on the grab too, and stays out for the drag, whether the
+// tune was sounding or was paused with its last note still lit: what is lit
+// is where the music stands, and the head is leaving. A tune the user paused
+// themselves stays paused after the release.
+test("a grab on the head silences the tune and puts the ink out; the release plays on", { skip }, async () => {
+  const h = await open({ audioSpy: true, text: TIMING_FIXTURE });
+  await clickToggle(h.page, 2);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  await installAudioProbe(h.page);
+  const state = () =>
+    h.page.evaluate(() => ({
+      pushed: !!document.querySelector(".abcjs-midi-start.abcjs-pushed"),
+      lit: document.querySelectorAll(
+        "code.language-abc svg .abcjs-note_selected"
+      ).length,
+      cursor: !!document.querySelector("code.language-abc svg .mdm-play-cursor"),
+      mute: window.__mute(),
+    }));
+  const settle = () => new Promise((r) => setTimeout(r, 200));
+  await pressPlay(h.page);
+  await h.page.waitForFunction(
+    () =>
+      document.querySelector(
+        "code.language-abc svg .abcjs-note_selected"
+      ),
+    { timeout: 15000 }
+  );
+  // The grab, mid-play: the output goes quiet and the brass goes out, while
+  // the line stays with the hand.
+  await headEvent(h.page, 0.5, "pointerdown");
+  await settle();
+  let s = await state();
+  assert.equal(s.mute, 0, "the tune kept sounding under the grab");
+  assert.equal(s.lit, 0, "the ink stayed lit under the grab");
+  assert.equal(s.cursor, true, "the grab lost the cursor");
+  await headEvent(h.page, 0.25, "pointermove");
+  await settle();
+  s = await state();
+  assert.equal(s.mute, 0, "the drag lifted the mute");
+  assert.equal(s.lit, 0, "the ink came back mid-drag");
+  // The release: the seek lands, the gap passes, and the tune sounds on from
+  // under the new head, ink and gain back together.
+  await headEvent(h.page, 0.25, "pointerup");
+  await h.page.waitForFunction(
+    () =>
+      window.__mute() === 1 &&
+      !!document.querySelector("code.language-abc svg .abcjs-note_selected"),
+    { timeout: 15000 }
+  );
+  s = await state();
+  assert.equal(s.pushed, true, "the release left the tune stopped");
+  // The same grab on a tune the user paused: the lit note goes out, nothing
+  // is muted (nothing sounds), and the release starts nothing.
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await h.page.waitForFunction(
+    () =>
+      !document
+        .querySelector(".mdm-audio .abcjs-midi-start")
+        .classList.contains("abcjs-pushed"),
+    { timeout: 5000 }
+  );
+  await settle();
+  s = await state();
+  assert.ok(s.lit > 0, "the pause left no note lit to put out");
+  await headEvent(h.page, 0.7, "pointerdown");
+  await settle();
+  s = await state();
+  assert.equal(s.lit, 0, "the grab left the paused note lit");
+  assert.equal(s.pushed, false, "the grab started a paused tune");
+  assert.equal(s.mute, 1, "a grab on a paused tune muted the output");
+  await headEvent(h.page, 0.7, "pointerup");
+  await new Promise((r) => setTimeout(r, 500));
+  s = await state();
+  assert.equal(s.pushed, false, "the release played a tune the user had paused");
+  assert.equal(s.cursor, true, "the parked cursor is gone");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("stop halts the tune and takes it back to the top", { skip }, async () => {
   const h = await open({});
   await clickToggle(h.page, 0);
@@ -2312,7 +2822,10 @@ test("a head dropped inside a chord marks nothing, and play waits out its remain
 // sets is its own: scrubbing in the middle of a resume gap does not wait out
 // the gap it interrupted, it waits out the chord under the new head. What
 // tells the two apart is the note that lights, one near the head that was
-// dropped and not one near the point the tune was paused at.
+// dropped and not one near the point the tune was paused at. The grab also
+// mutes the output for as long as the drag lasts (makeProgressDraggable),
+// so the probe does not read at a fixed delay: it waits for the source that
+// starts under the new head and reads the gap right then.
 test("a scrub while the tune sounds waits out the chord under the new head", { skip }, async () => {
   const h = await open({ audioSpy: true, text: TIMING_FIXTURE });
   await clickToggle(h.page, 2);
@@ -2346,12 +2859,26 @@ test("a scrub while the tune sounds waits out the chord under the new head", { s
     document.querySelector(".mdm-audio .abcjs-midi-start").click()
   );
   await dropHead(h.page, 7650 / grid.total);
-  await new Promise((r) => setTimeout(r, 80));
-  const gap = await h.page.evaluate(() => ({
-    lit: window.__lit(),
-    mute: window.__mute(),
-    offset: (window.__sources[window.__sources.length - 1] || {}).offset,
-  }));
+  const gap = await h.page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const read = () => {
+          const s = window.__sources[window.__sources.length - 1] || {};
+          return { lit: window.__lit(), mute: window.__mute(), offset: s.offset };
+        };
+        const timer = setInterval(() => {
+          const s = window.__sources[window.__sources.length - 1];
+          if (s && Math.abs(s.offset - 7.65) <= 0.06) {
+            clearInterval(timer);
+            resolve(read());
+          }
+        }, 10);
+        setTimeout(() => {
+          clearInterval(timer);
+          resolve(read());
+        }, 5000);
+      })
+  );
   assert.equal(gap.mute, 0, "the chord under the new head is not waited out");
   assert.equal(gap.lit, -1, "ink lit during the silent gap: note " + gap.lit);
   assert.ok(

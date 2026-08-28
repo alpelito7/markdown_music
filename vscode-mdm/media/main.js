@@ -955,6 +955,16 @@
     return percent < 0 ? 0 : percent > 1 ? 1 : percent;
   }
 
+  // The percent a hand is holding the progress head at, and null the rest of
+  // the time. The playing cursor reads it (cursorFrame): while the head is
+  // held, and until the engine's seek lands after the release, the line on
+  // the score follows the hand instead of the clock, so scrubbing moves the
+  // two together the way it does in any sequencer. Written by the drag
+  // below; the engine is deliberately not seeked during the drag (see the
+  // note on midiBuffer.seek), which is why the line cannot read the clock
+  // for this.
+  let cursorDrag = null;
+
   function makeProgressDraggable(bar, controller) {
     const track = bar.querySelector(".abcjs-midi-progress-background");
     const control = controller.control;
@@ -1047,7 +1057,13 @@
         // Nothing was served: there is no tune to seek in, and asking again
         // would only spin.
         if (!served) asked = null;
-        else if (asked !== null) runSeek();
+        else if (asked !== null) return runSeek();
+        // The queue is spent (or was never servable): the clock now stands
+        // where the last gesture asked, so the playing cursor is handed back
+        // to it. Not a frame sooner: cleared on the release itself, the line
+        // fell back to the old clock for the beat the seek takes to land and
+        // flicked there and back.
+        cursorDrag = null;
       }
       controller
         .runWhenReady(function () {
@@ -1071,7 +1087,38 @@
     track.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
       dragging = true;
-      paint(pointerPercent(e.clientX), totalMs());
+      // A hand on the head silences the score. The engine cannot seek at
+      // pointermove rate (see above), and pausing it here is no good either:
+      // the pause and the release's seek travel separate abcjs promise
+      // chains, and on a quick click (down and up milliseconds apart, the
+      // plain jump gesture) the pause landed AFTER the seek and the resume
+      // picked up a stale position, sound at the old spot under a clock
+      // standing on the new one (measured on the timing fixture). So the
+      // transport is left running and the OUTPUT is muted for the drag, on
+      // the same mute stage the resume gap uses; the release's seek then
+      // goes down the sounding path it always did, and its silent gap takes
+      // the stage over and lifts it on the next attack (scheduleSilentGap).
+      //
+      // The ink goes out with the sound, and stays out for the drag (the
+      // cursorDrag guard in onEvent keeps the muted notes passing under the
+      // old position from lighting): what is lit is where the music stands,
+      // and the head is leaving it. The seek of the release marks whatever
+      // it lands on, so the ink comes back the moment it means something.
+      // clearResumeHold first: it puts the mute stage back to one and
+      // cancels paints deferred by a resume gap, which would land after
+      // this clear and light a note the head has left.
+      clearResumeHold();
+      clearPlayingHighlight();
+      if (isSounding(bar) && audioMute && audioCtx) {
+        try {
+          audioMute.gain.cancelScheduledValues(audioCtx.currentTime);
+          audioMute.gain.setValueAtTime(0, audioCtx.currentTime);
+        } catch (err) {
+          // a context torn down mid-flight
+        }
+      }
+      cursorDrag = pointerPercent(e.clientX);
+      paint(cursorDrag, totalMs());
       // Moves that leave the bar keep arriving here, the way the browser goes
       // on feeding a range input it has taken hold of.
       try {
@@ -1082,7 +1129,8 @@
     });
     track.addEventListener("pointermove", function (e) {
       if (!dragging) return;
-      paint(pointerPercent(e.clientX), totalMs());
+      cursorDrag = pointerPercent(e.clientX);
+      paint(cursorDrag, totalMs());
     });
     track.addEventListener("pointerup", function (e) {
       if (!dragging) return;
@@ -1092,7 +1140,11 @@
     track.addEventListener("pointercancel", function () {
       if (!dragging) return;
       dragging = false;
+      cursorDrag = null; // the line goes back onto the clock with the head
       paint(controller.percent || 0, totalMs()); // back onto the playhead
+      // An abandoned drag seeks nothing: the mute the grab set is lifted and
+      // the tune goes on sounding from wherever it has silently got to.
+      clearResumeHold();
     });
     // abcjs's listener on the same element cannot be outrun by another added
     // to it, since at the target the two are called in the order they were
@@ -1334,6 +1386,167 @@
     if (engraver) clearEngraverSelection(engraver);
   }
 
+  // ---- The playing cursor ----
+  //
+  // A brass line that walks the score while the tune runs, the way tab
+  // editors and sequencers draw their playhead: gliding, never hopping, so a
+  // note reads as being inked the moment the line reaches it
+  // (highlightPlaying lights it on the same clock). The path is abcjs's own:
+  // setTiming hands every event the x it sits at (left) and the x its
+  // stretch of time walks to (endX: the next attack, the end of the staff
+  // before a line break, or the repeat bar it goes back from), so between
+  // attacks the line moves through left..endX linearly, the same
+  // interpolation the engine's beat callback does. Rests are events too, so
+  // the line keeps walking through them while the ink stays off.
+  //
+  // Drawn on the engraving on screen, clocked by the synth, which plays an
+  // engraving of its own (mountSynth): the synth's positions belong to that
+  // invisible layout, laid out with other paddings, so only its clock is
+  // read, and carried over as a fraction of the whole. That mapping is
+  // exact, not approximate: the two timings come from one tempo map scaled
+  // uniformly, so every event sits at the same fraction of the total in
+  // both.
+  //
+  // The line is an element inside the score's own SVG, placed in its user
+  // units, so the scale that fits a wide score to the pane (fitScores)
+  // moves it with the notes for free. It is found or made again every frame
+  // because CodeMirror rebuilds the widget, SVG and all, whenever the block
+  // comes back into the viewport or its source changes.
+  const CURSOR_TIMINGS = new WeakMap(); // on-screen visual -> events and total
+
+  // The walkable events of the on-screen engraving, and the length of its
+  // clock. Type "event" with a real x: a measure that begins with nothing
+  // attacking gets a placeholder with left null, which the engine's own
+  // callback skips the same way. Computed once per engraving; an edit puts
+  // a new visual in SCORE_VISUALS and the walk is done again.
+  function cursorTimings(visual) {
+    if (CURSOR_TIMINGS.has(visual)) return CURSOR_TIMINGS.get(visual);
+    if (!visual.engraver || !visual.engraver.staffgroups) return null;
+    let timings = [];
+    try {
+      timings = visual.setTiming() || [];
+    } catch (e) {
+      // a tune the walker cannot time is a cursor that stays away
+    }
+    const events = timings.filter(function (t) {
+      return t.type === "event" && typeof t.left === "number";
+    });
+    const last = timings[timings.length - 1];
+    const total = last && last.type === "end" ? last.milliseconds : 0;
+    const out =
+      events.length && total > 0 ? { events: events, total: total } : null;
+    CURSOR_TIMINGS.set(visual, out);
+    return out;
+  }
+
+  // Where the line stands at a moment of the on-screen clock: the event the
+  // moment falls in, its x walked forward by the share of the event's
+  // stretch that has passed, and the vertical reach of the system it sits
+  // on (every event carries the top and bottom of its whole staff group, so
+  // on a duet one line crosses both staves).
+  function cursorPlace(timing, at) {
+    const events = timing.events;
+    let lo = 0;
+    let hi = events.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (events[mid].milliseconds <= at) lo = mid;
+      else hi = mid - 1;
+    }
+    const ev = events[lo];
+    const next =
+      lo + 1 < events.length ? events[lo + 1].milliseconds : timing.total;
+    const span = next - ev.milliseconds;
+    let frac = span > 0 ? (at - ev.milliseconds) / span : 1;
+    if (frac < 0) frac = 0;
+    if (frac > 1) frac = 1;
+    const endX = typeof ev.endX === "number" ? ev.endX : ev.left;
+    return {
+      x: ev.left + (endX - ev.left) * frac,
+      top: ev.top,
+      bottom: ev.top + ev.height,
+    };
+  }
+
+  // Whether the ink is standing on something. With the clock at nought that
+  // is what tells a head parked on the very top (a Home while paused, which
+  // lights the first note) from a tune stopped or never started, where the
+  // cursor has no business showing.
+  function inkOn() {
+    const engraver = playerDisplayEngraver();
+    return !!(engraver && engraver.selected && engraver.selected.length);
+  }
+
+  let cursorLoop = 0; // the rAF handle while a player is open
+
+  function cursorFrame() {
+    cursorLoop = requestAnimationFrame(cursorFrame);
+    if (!player) return;
+    const block = playerBlock();
+    const code = block && block.querySelector("code.language-abc");
+    const svg = code && code.querySelector("svg");
+    if (!svg) return; // scrolled out: nothing to draw on
+    const line = svg.querySelector(".mdm-play-cursor");
+    const timer = player.controller && player.controller.timer;
+    const total = (timer && timer.lastMoment) || 0;
+    let ms = timer && timer.currentMillisecond();
+    if (typeof ms !== "number" || !isFinite(ms)) ms = 0;
+    // Shown while the tune runs, and wherever a head stands mid-tune: a
+    // pause leaves the line where the music stopped, a seek puts it where
+    // the music would begin, played yet or not. Gone past either end, since
+    // a stop rewinds the clock to nought and a finished tune parks it on
+    // the total, and neither is a place the music is standing. A held head
+    // outranks all of that: while a hand is on the progress bar (and until
+    // the seek it asked for lands) the line follows the hand, wherever the
+    // clock stands and whether there is a clock yet at all.
+    const show =
+      cursorDrag !== null ||
+      (total > 0 &&
+        (isSounding(player.bar) ||
+          (ms > 0 && ms < total) ||
+          (ms === 0 && inkOn())));
+    const visual = show && SCORE_VISUALS.get(code);
+    const timing = visual && cursorTimings(visual);
+    if (!timing) {
+      if (line && line.parentNode) line.parentNode.removeChild(line);
+      return;
+    }
+    const at =
+      cursorDrag !== null
+        ? cursorDrag * timing.total
+        : (ms * timing.total) / total;
+    const place = cursorPlace(timing, at);
+    const el = line || cursorEl(svg);
+    el.setAttribute("x1", place.x);
+    el.setAttribute("x2", place.x);
+    el.setAttribute("y1", place.top);
+    el.setAttribute("y2", place.bottom);
+  }
+
+  function cursorEl(svg) {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("class", "mdm-play-cursor");
+    // The stroke keeps its screen width while the SVG is scaled to fit.
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.appendChild(line);
+    return line;
+  }
+
+  // The loop runs for as long as a player is open, and only then: what it
+  // does each frame is a couple of lookups when there is nothing to draw.
+  function startCursor() {
+    if (!cursorLoop) cursorFrame();
+  }
+
+  function stopCursor() {
+    if (cursorLoop) cancelAnimationFrame(cursorLoop);
+    cursorLoop = 0;
+    cursorDrag = null; // a drag cannot outlive the player it was made in
+    document.querySelectorAll("#app .mdm-play-cursor").forEach(function (el) {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    });
+  }
+
   // The score widgets on screen, in document order (ScoreWidget above).
   function scoreBlocks() {
     return Array.prototype.slice.call(
@@ -1379,6 +1592,7 @@
     } catch (e) {
       // a score already re-engraved without the old elements
     }
+    stopCursor();
     const p = player;
     player = null;
     if (p.controller) {
@@ -1528,6 +1742,11 @@
             onEvent: function (ev) {
               try {
                 if (!ev || typeof ev.startChar !== "number") return;
+                // A hand holding the progress head has put the ink out
+                // (makeProgressDraggable) and muted the output, while the
+                // transport runs on underneath: the notes passing under the
+                // old position sound nothing and must light nothing.
+                if (cursorDrag !== null) return;
                 // Inside a resume gap the sound is muted and this event is the
                 // one the timer reported early: abcjs advances its pointer the
                 // moment it is told to move, so what it hands over is the note
@@ -1617,6 +1836,7 @@
           return out;
         };
         player.controller = controller;
+        startCursor();
       })
       .catch(function () {
         if (player && player.bar === bar) {
