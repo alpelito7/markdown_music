@@ -11,6 +11,10 @@ vendor-src/**
 # Notes for whoever works on the extension, not for whoever installs it.
 docs/**
 
+# Nothing lives here today; the guard keeps a future abcm2ps drop-in (LGPL,
+# deliberately not shipped) out of the package.
+tools/**
+
 .vscode/**
 .gitignore
 .vscodeignore

@@ -414,8 +414,7 @@ is MIT per the npm registry entry for that exact version; Musyng Kite is CC
 BY-SA 3.0 per the README of `gleitz/midi-js-soundfonts` on its gh-pages
 branch, quoted in the notices; and abcm2ps is **LGPL-3.0-or-later**, not the
 GPL-2.0 an earlier note in this project claimed, per the header of
-`abcm2ps.c` in `lewdlime/abcm2ps`, which is the fork `tools/bin/abcm2ps` was
-built from.
+`abcm2ps.c` in `lewdlime/abcm2ps`, the fork the notices point at.
 
 ## Pending
 

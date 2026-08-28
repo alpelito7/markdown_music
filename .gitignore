@@ -12,3 +12,6 @@ tests/tmp/
 # The packaged extension, built from vscode-mdm/ with @vscode/vsce
 *.vsix
 
+# A local abcm2ps build, if one is dropped here; the binary is not distributed
+# with the repository (see THIRD-PARTY-NOTICES.md).
+tools/bin/abcm2ps

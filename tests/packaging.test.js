@@ -74,10 +74,13 @@ test("the notices name a licence for everything the extension ships", () => {
   );
 });
 
-test("the repository's own notices cover the binary it does ship", () => {
+test("the notices cover a local abcm2ps build when one is present", () => {
+  // The binary is not tracked (LGPL object code stays out of the repo), but
+  // a local build may sit in tools/bin/ for the render tests; while one is
+  // there, the notices naming it have to hold.
   const notices = read(ROOT, "THIRD-PARTY-NOTICES.md");
   const binary = path.join(ROOT, "tools", "bin", "abcm2ps");
-  if (!fs.existsSync(binary)) return; // taken out of the tree: nothing to cover
+  if (!fs.existsSync(binary)) return; // no local build: nothing to cover
   assert.match(notices, /abcm2ps 8\.14\.15/);
   assert.match(notices, /Jean-Francois\s+Moine/);
   assert.match(notices, /Lesser\s+General\s+Public\s+License/);

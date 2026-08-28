@@ -143,9 +143,11 @@ the look for the HTML format alone.
 
 - Quarto >= 1.4 and a TeX installation (for PDF; `epstopdf` ships with
   TeX Live).
-- `abcm2ps` (for PDF). A build is included in `tools/bin/abcm2ps`
-  (v8.14.15, built from <https://github.com/lewdlime/abcm2ps>); the filter
-  looks there first and then in the PATH. Another path can be set in the
+- `abcm2ps` (for PDF). Not included: install it from the system's packages
+  (Debian and Ubuntu `apt install abcm2ps`, macOS `brew install abcm2ps`) or
+  build it from <https://github.com/lewdlime/abcm2ps>. The filter looks for
+  it at `tools/bin/abcm2ps` beside the document first and then in the PATH,
+  so a local build can be dropped there; another path can be set in the
   YAML header of the document:
 
   ```yaml
@@ -679,13 +681,13 @@ MIT; the piano the editor plays with is the Musyng Kite soundfont, which is
 CC BY-SA 3.0 and is included unmodified, so the notice is the attribution the
 licence asks for.
 
-`tools/bin/abcm2ps` is the one binary in the tree, and it is somebody else's
-program: abcm2ps 8.14.15, LGPL-3.0-or-later, copyright Jean-Francois Moine,
-adapted from Michael Methfessel's abc2ps. It is called as a separate process,
-never linked into anything here. Its licence texts are in `licenses/`, and
-the source it was built from is <https://github.com/lewdlime/abcm2ps>. The VS
-Code extension does not carry it: it looks for abcm2ps on the PATH, so the
-`.vsix` is MIT throughout except for the soundfont.
+The one program that is not vendored is abcm2ps, which engraves the scores
+of a PDF: somebody else's work (LGPL-3.0-or-later, copyright Jean-Francois
+Moine, adapted from Michael Methfessel's abc2ps), called as a separate
+process and never linked into anything here. Neither the repository nor the
+`.vsix` carries the binary; the search order and the source are in
+`THIRD-PARTY-NOTICES.md`, and the LGPL and GPL texts are kept in `licenses/`
+for reference. So the `.vsix` is MIT throughout except for the soundfont.
 
 ## Known limitations (prototype)
 

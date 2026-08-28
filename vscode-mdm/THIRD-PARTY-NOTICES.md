@@ -105,6 +105,8 @@ themselves, apart from this collection, does so under CC BY-SA 3.0.
 
 An export calls Quarto, and a PDF of a document with scores calls abcm2ps.
 Neither is part of this package: they are looked for on the machine when an
-export is asked for, and the editor works without them. abcm2ps is licensed
-under the GNU Lesser General Public License version 3 or later, copyright (C)
-1998-2019 Jean-Francois Moine, <http://moinejf.free.fr>.
+export is asked for (abcm2ps at a path named in the document's YAML header,
+then at `tools/bin/abcm2ps` beside the document, then on the PATH), and the
+editor works without them. abcm2ps is
+licensed under the GNU Lesser General Public License version 3 or later,
+copyright (C) 1998-2019 Jean-Francois Moine, <http://moinejf.free.fr>.

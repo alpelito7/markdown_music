@@ -114,10 +114,10 @@ Licence: GNU Lesser General Public License, either version 3 or (at the
 reader's option) any later version. The texts are in `licenses/LGPL-3.0.txt`
 and `licenses/GPL-3.0.txt`, which the LGPL refers to.
 
-The build in `tools/bin/abcm2ps` is a Linux x86-64 binary compiled from
-<https://github.com/lewdlime/abcm2ps> at version 8.14.15 (2024-01-08); that
-repository is the corresponding source. abcm2ps is a separate executable that
-`_extensions/mdm/mdm.lua` runs over a pipe, not linked into anything here.
-
-It is NOT part of the VS Code extension package: the extension looks for
-abcm2ps on the PATH instead.
+The binary itself is NOT distributed here: neither the repository nor the VS
+Code extension package carries it. Both search for abcm2ps in the same order:
+a path named in the document's YAML header, then `tools/bin/abcm2ps` beside
+the document being rendered (where a local build may be dropped), then the
+PATH. abcm2ps 8.14.15 (2024-01-08) is available from
+<https://github.com/lewdlime/abcm2ps>, and it is run over a pipe as a separate
+executable, not linked into anything here.
