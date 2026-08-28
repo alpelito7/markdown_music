@@ -100,9 +100,9 @@ K:Am
 V:1
 G2 G2 A2 | B2 B2 B2 | B2 c B c2 | B4 z2 | z2 A G A2 | G4 z2 |
 A2 B2 c2 | d2 d2 d2 | e2 d c B2 | A2 z4 |
-A2 B2 c2 | d2 d2 d2 | e2 f e d2 | c2 z2 e d | c2 B2 z2 | d c B2 A2 |]
+A2 B2 c2 | d2 d2 d2 | e2 f e d2 | c2 z2 e d | c2 B2 z2 | d c B2 A2- | A6 |]
 V:2 clef=bass
 [G,,B,,D,]4 [G,,B,,D,]2 | [E,G,B,]4 [E,G,B,]2 | [C,E,G,]4 [C,E,G,]2 | [G,,B,,D,]6 | [A,,C,E,]4 [A,,C,E,]2 | [E,G,B,]6 |
 [E,A,,C]2 [E,A,C]4 | D,,4 [D,F,A,]2 | E,,2 [E,^G,B,]2 [E,^G,B,]2 | A,,2 E,2 C2 |
-A,,2 C,2 E,,2 | [D,,F,]4 [D,F,A,]2 | [C,E,G,]4 [G,,B,,D,]2 | C,,4 [E,G,C]2 | E,,2 [E,,^G,B,]4 | D,,2 B,,2 A,,2 |]
+A,,2 C,2 E,,2 | [D,,F,]4 [D,F,A,]2 | [C,E,G,]4 [G,,B,,D,]2 | C,,4 [E,G,C]2 | E,,2 [E,,^G,B,]4 | D,,2 B,,2 A,,2- | A,,6 |]
 ```
