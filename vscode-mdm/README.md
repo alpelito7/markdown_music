@@ -43,10 +43,11 @@ with heading and list buttons beside them.
 A fenced block with the class `abc` renders as a score; with `{.abc .play}`
 it also carries a player: play, pause, stop, repeat, a draggable progress
 bar, volume and mute. The piano is the Musyng Kite soundfont, all 88 notes
-vendored with the extension, so playback touches no network. While a tune
-plays, the notes light up on the score as they sound:
+vendored with the extension, so playback touches no network. A caret in
+the block opens its ABC above the engraving, and while a tune plays the
+notes light up on the score as they sound, every voice of them:
 
-![A duet playing, light side: the two sounding notes lit in brass, one on each staff, the player bar under the score](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
+![A duet playing with its ABC source open above the engraving: both sounding notes lit in brass, one on each staff, and the player bar underneath](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
 
     ```{.abc .play}
     X:1

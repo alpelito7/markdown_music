@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.1
+
+- Search terms on the listing: `notation` on its own, `staff`, `music
+  notation` and `partitura` join the keywords. Measured against the
+  Marketplace's own search before and after: a reader typing `notation`
+  or `staff`, both of them natural words for this, found nothing of this
+  extension, while `abc notation` and `sheet music` already placed it
+  seventh and fourth. Nothing else changes; the editor is the 0.2.0 one.
+- Both images on the listing are remade, each from a document kept beside
+  it (`docs/eq_staff.mdm` and `docs/staff_sound.mdm`). The first is an
+  equation with the score that draws it underneath; the second shows a
+  score block as it is while somebody writes it: the ABC source open above
+  the engraving it produces, both voices of a duet lit in brass as they
+  sound, and the player bar under them. The one it replaces was the
+  engraving alone, and its crop stopped short of the bar.
+
 ## 0.2.0
 
 First public release.

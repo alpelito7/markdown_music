@@ -26,20 +26,19 @@ $$
 
 Because $f_n = n f_1$, every mode is a note, and the ratio between two neighbours, $(n+1)/n$, is the musical interval between them: $2{:}1$ the octave, $3{:}2$ the fifth, $4{:}3$ the fourth, $5{:}4$ the major third.
 
-That is what the score below draws. The upper system is the first eight partials of a low C, the lower one pairs each partial with the next and names the ratio underneath; the seventh is the odd one out, $31$ cents flat of the tempered minor seventh, hence the mark over the B flat.
+That is what the score below draws, one note per mode: each $n$ is a partial, the name acoustics gives to a single component of a complex sound. The upper system is the first eight partials of a low C, the lower one pairs each partial with the next and names the ratio underneath; the seventh is the odd one out, $31$ cents flat of the tempered minor seventh, hence the mark over the B flat.
 
 ```abc
 %%stretchlast 1
 X:1
 T:Partials of a vibrating string
-M:C
 L:1/4
 K:C clef=treble
 P:partials
-C, C G c | e g "^-31c"_b c' |
+C, C G c e g "^-31c"_b c' |
 w: n=1 2 3 4 5 6 7 8
 P:ratios
-[C,C] [CG] [Gc] [ce] | [eg] [g_b] [_bc'] |]
+[C,C] [CG] [Gc] [ce] [eg] [g_b] [_bc'] |
 w: 2:1 3:2 4:3 5:4 6:5 7:6 8:7
 ```
 
