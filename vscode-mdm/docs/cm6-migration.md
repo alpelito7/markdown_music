@@ -1,6 +1,7 @@
 # Moving the MDM editor to CodeMirror 6
 
-Status: implemented on branch `feat/text-editing` (2026-08-20). The nine
+Status: implemented (2026-08-20) and merged into `main`, tagged
+`v0.2.0-cm6-editor` (2026-08-24). The nine
 decisions below lean towards Obsidian's live preview and towards what the
 MDM editor already did; each says what was chosen, and each is open to
 revision. Everything under "Measured" was observed on 2026-08-20 on this
@@ -20,8 +21,8 @@ whose text is the file text gives both directly.
 
 ## Measured
 
-Spike in the scratchpad (`cm6-spike/`: `entry.js`, `harness.html`,
-`probe.js`, `probe2.js`), CM6 6.0.2 (`@codemirror/view` 6.43.9, `state`
+A throwaway spike, not kept in the tree (an entry module, a harness page and
+two probe scripts), CM6 6.0.2 (`@codemirror/view` 6.43.9, `state`
 6.7.1, `lang-markdown` 6.5.2, `search` 6.7.1, `@lezer/markdown` 1.7.2), KaTeX
 0.18.4, bundled with esbuild 0.28.2 into one IIFE:
 
@@ -54,11 +55,13 @@ Spike in the scratchpad (`cm6-spike/`: `entry.js`, `harness.html`,
   `TextDocument`. Not needed for this design, but it means a "open as text"
   escape hatch is cheap to keep alongside.
 
-Not yet measured: whether Ctrl+D / Alt+click / Ctrl+Alt+Up/Down reach the
-webview unmodified inside a real VS Code window (hypothesis: yes, the webview
-iframe sees the keydown first and VS Code's own bindings for those keys are
-gated on `editorTextFocus`). To be checked with the Extension Development
-Host probe as soon as the new editor boots in the webview.
+Answered since, by use inside a real VS Code window: Ctrl+D, Alt+click and
+Ctrl+Alt+Up/Down do reach the webview (the iframe sees the keydown first and
+VS Code's own bindings for those keys are gated on `editorTextFocus`). What
+the real window added was around the edges: a held Alt read by the workbench
+as a menu-bar tap, and the workbench replaying its `undo` into the page as
+`execCommand("undo")`; both are handled and recorded in `tests/README.md`
+(the parity rounds).
 
 ## Prior art (surveyed 2026-08-20)
 

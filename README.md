@@ -1,4 +1,4 @@
-# MDM (Markdown Music)
+# <img src="vscode-mdm/media/icon.png" alt="" width="96" align="absmiddle"> Markdown Music
 
 A document format for technical writing that mixes mathematics and music:
 standard Markdown (with LaTeX equations) plus music blocks in ABC notation
@@ -8,6 +8,21 @@ about the format shows them as code and nothing breaks.
 
 Implemented as a Quarto extension, which brings everything else for free
 (HTML + PDF, theorems, cross-references, bibliography).
+
+## Installation
+
+The Quarto filter installs into a project the way any Quarto extension does:
+
+```sh
+quarto add alpelito7/markdown_music
+```
+
+after which a `.qmd` in that project renders music blocks by declaring
+`filters: [mdm]` in its header. The visual editor is a VS Code extension
+(below) and installs from the Marketplace or from a `.vsix`; it carries the
+filter with it, so it exports with no clone of this repository anywhere.
+Cloning the repository is only needed for `bin/mdm`, the render CLI, and for
+working on MDM itself.
 
 ## Usage
 
@@ -166,9 +181,12 @@ view of the Markdown text (vendored, works with no network); the scores are
 engraved and played by the vendored abcjs 6.7.0, the same engine the Quarto
 HTML output uses, and the equations by KaTeX 0.18.
 
-Installation: symlink the directory into
-`~/.vscode/extensions/alpelito7.mdm-editor-0.1.0` and reload the window
-(`Developer: Reload Window`). The editor needs nothing else; an export needs
+Installation: from the VS Code Marketplace (search "Markdown Music"), or
+build the package with `npx @vscode/vsce package` inside `vscode-mdm/` and
+install the `.vsix` it leaves there (Extensions panel > "..." > "Install from
+VSIX..."). For working on the extension itself, a symlink of the directory
+into `~/.vscode/extensions/alpelito7.mdm-editor-0.2.0` and a reload
+(`Developer: Reload Window`) does the same. The editor needs nothing else; an export needs
 Quarto, and a PDF of a document with scores in it needs TeX and abcm2ps. To go back to the plain text editor: right
 click the file, `Open With...`. Both can be open at once on the same file
 (Reopen Editor With... in a second group): they share the document.

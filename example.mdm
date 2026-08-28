@@ -1,6 +1,6 @@
 ---
 title: "Markdown and scores in one file"
-subtitle: "An MDM (Markdown Music) prototype"
+subtitle: "A Markdown Music prototype"
 author: alpelito7
 lang: en
 format:
@@ -12,7 +12,7 @@ filters:
   - mdm
 ---
 
-This document is ordinary Markdown: text, **emphasis**, LaTeX equations, source code and, on top of that, music blocks that render as a score.
+This document is ordinary Markdown, rendered and editable at once: text, **emphasis**, LaTeX equations, source code and, on top of that, music blocks that render as a score and play, with multicursor, an outline, a look set from the toolbar and export options.
 
 ## From equations to score
 
