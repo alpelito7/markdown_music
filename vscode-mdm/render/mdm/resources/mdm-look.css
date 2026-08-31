@@ -48,8 +48,13 @@
   --mdm-link: #0969da;
   --mdm-error: #c94f4f;
   /* The note sounding under the player, and the black abcjs engraves with,
-     which is repainted on the dark side and left alone on the light one. */
+     which is repainted on the dark side and left alone on the light one.
+     The -ink companion is the same brass carried deep enough to read as a
+     glyph or a line rather than as a notehead (4.7:1 on the code card against
+     the accent's 3.5:1); on the dark side the accent already reads and the
+     two are one value. The filter writes both per side. */
   --mdm-play-accent: #a0740f;
+  --mdm-play-accent-ink: #8a5f00;
   --mdm-svg-ink: #000000;
   /* Guitar-Pro-style gray staff lines. In ink they take the colour the score
      is drawn in. */
@@ -350,13 +355,18 @@ body .code-copy-button:hover {
    for the quiet parts, and one accent, the same brass the notes light up in
    while they sound. */
 body .mdm-audio {
-  /* The bar is drawn in the ink of the document at four weights: the hairline
-     of a track, the disc under a button, the disc of a button that holds a
-     state, and the ink itself for what is being pointed at. */
+  /* The quiet bar is drawn in the ink of the document: the hairline of a
+     track, the glyphs, the clock. The brass is the language of use, on a
+     ladder of two weights: a light wash (12%) under whatever is being pointed
+     at, and the state weight (22%) for what is held or sounding, with the
+     glyph gone to the deep brass on that disc alone. What is set rather than
+     held, the played half of the progress and the volume, wears -hot, the
+     deep form of the brass, one colour for fill and head alike. The editor's
+     bar, rule for rule (media/style.css). */
   --mdm-audio-track: color-mix(in srgb, var(--mdm-syn-base) 18%, transparent);
-  --mdm-audio-played: color-mix(in srgb, var(--mdm-syn-base) 52%, transparent);
-  --mdm-audio-disc: color-mix(in srgb, var(--mdm-syn-base) 10%, transparent);
-  --mdm-audio-disc-on: color-mix(in srgb, var(--mdm-syn-base) 20%, transparent);
+  --mdm-audio-disc: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
+  --mdm-audio-disc-on: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
+  --mdm-audio-hot: var(--mdm-play-accent-ink);
   white-space: normal;
   line-height: normal;
   font-size: 13px;
@@ -415,16 +425,22 @@ body .mdm-audio .abcjs-inline-audio .abcjs-btn:hover g {
   fill: var(--mdm-syn-base);
   stroke: var(--mdm-syn-base);
 }
-/* Repeat is the one button that holds a state, so it is the one that takes
-   the lit disc. */
-body .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed {
+/* The two buttons that hold a state take the lit disc: repeat while it loops,
+   and play while the tune sounds (abcjs marks both with abcjs-pushed, the
+   play through its pushPlay). Each sits on the brass disc with its glyph gone
+   to the deep brass; a hovered button keeps its glyph in ink, so only a held
+   state writes its glyph in brass. */
+body .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed,
+body .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed {
   border: none;
   background-color: var(--mdm-audio-disc-on) !important;
 }
 body .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed g,
-body .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed:hover g {
-  fill: var(--mdm-syn-base);
-  stroke: var(--mdm-syn-base);
+body .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed:hover g,
+body .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed g,
+body .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed:hover g {
+  fill: var(--mdm-play-accent-ink);
+  stroke: var(--mdm-play-accent-ink);
 }
 /* A hairline track with a round head, in place of the outlined trough. The
    part already played is filled in: --mdm-progress is written by the same
@@ -436,7 +452,7 @@ body .mdm-audio .abcjs-midi-progress-background {
   border-radius: 2px;
   background: linear-gradient(
     to right,
-    var(--mdm-audio-played) var(--mdm-progress, 0%),
+    var(--mdm-audio-hot) var(--mdm-progress, 0%),
     var(--mdm-audio-track) var(--mdm-progress, 0%)
   );
   cursor: pointer;
@@ -467,7 +483,9 @@ body .mdm-audio .abcjs-midi-progress-indicator {
   margin-left: -5.5px;
   top: -3.5px;
   border-radius: 50%;
-  background-color: var(--mdm-syn-base);
+  /* The same colour as the fill it rides: head and played track are one mark,
+     where the tune is. */
+  background-color: var(--mdm-audio-hot);
   transition: transform 0.12s ease;
 }
 body .mdm-audio .abcjs-midi-progress-background:hover .abcjs-midi-progress-indicator,
@@ -544,7 +562,7 @@ body .mdm-audio .mdm-audio-vol input[type="range"]::-webkit-slider-runnable-trac
   border-radius: 1.5px;
   background: linear-gradient(
     to right,
-    var(--mdm-audio-played) var(--mdm-vol, 100%),
+    var(--mdm-audio-hot) var(--mdm-vol, 100%),
     var(--mdm-audio-track) var(--mdm-vol, 100%)
   );
 }
@@ -554,18 +572,18 @@ body .mdm-audio .mdm-audio-vol input[type="range"]::-webkit-slider-thumb {
   margin-top: -3px;
   border: none;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--mdm-syn-base) 72%, transparent);
+  background: var(--mdm-audio-hot);
   -webkit-appearance: none;
   appearance: none;
 }
 body .mdm-audio .mdm-audio-vol input[type="range"]:hover::-webkit-slider-thumb {
-  background: var(--mdm-syn-base);
+  background: var(--mdm-play-accent);
 }
 body .mdm-audio .mdm-audio-vol input[type="range"]:focus {
   outline: none;
 }
 body .mdm-audio .mdm-audio-vol input[type="range"]:focus-visible::-webkit-slider-thumb {
-  background: var(--mdm-syn-base);
+  background: var(--mdm-play-accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-syn-base) 30%, transparent);
 }
 body .mdm-audio .abcjs-loading-svg circle {

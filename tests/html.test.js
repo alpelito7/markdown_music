@@ -378,6 +378,24 @@ function looks(page) {
         const t = document.querySelector(".abcjs-midi-progress-background");
         return t ? t.style.getPropertyValue("--mdm-progress") : null;
       })(),
+      // The brass ladder the chrome is drawn on, mixed by the browser from
+      // the properties in force, so a value that stops taking them is what
+      // fails rather than a colour spelt out here.
+      headFill: css(".abcjs-midi-progress-indicator", "backgroundColor"),
+      accentInk: getComputedStyle(document.documentElement)
+        .getPropertyValue("--mdm-play-accent-ink")
+        .trim(),
+      brass22: bar
+        ? (() => {
+            const probe = document.createElement("span");
+            probe.style.backgroundColor =
+              "color-mix(in srgb, var(--mdm-play-accent) 22%, transparent)";
+            bar.appendChild(probe);
+            const v = getComputedStyle(probe).backgroundColor;
+            probe.remove();
+            return v;
+          })()
+        : null,
     };
   });
 }
@@ -446,6 +464,38 @@ test("the player bar is the editor's", { skip }, async () => {
     Math.abs(luma(l.barGround) - luma(l.card)) < 1,
     "the bar is not on the card ground: " + l.barGround
   );
+  // And the brass of the editor's own bar: the state disc is the accent at
+  // 22%, the played half of the progress and its head are the deep form of
+  // the same brass, and so is the volume. A page that fell back to the ink of
+  // the document would miss all four.
+  assert.equal(l.accentInk, "#8a5f00", "the deep brass never reached the page");
+  assert.equal(l.headFill, "rgb(138, 95, 0)", "the progress head is not brass");
+  // And the held state as it is really painted: the class abcjs writes when
+  // the repeat is on, put on by hand, so what is measured is the rule that
+  // has to win the !important fight with abcjs's own `background: none`. Read
+  // after the disc has faded in: the buttons carry a transition, and a
+  // computed value taken on the same turn as the class is still the old one.
+  await h.page.evaluate(() => {
+    document
+      .querySelector(".mdm-block.mdm-play .mdm-audio .abcjs-midi-loop")
+      .classList.add("abcjs-pushed");
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  const pushed = await h.page.evaluate(() => {
+    const loop = document.querySelector(
+      ".mdm-block.mdm-play .mdm-audio .abcjs-midi-loop"
+    );
+    return {
+      disc: getComputedStyle(loop).backgroundColor,
+      ink: getComputedStyle(loop.querySelector("g")).fill,
+    };
+  });
+  assert.equal(
+    pushed.disc,
+    l.brass22,
+    "a held button does not sit on the brass at 22%: " + pushed.disc
+  );
+  assert.equal(pushed.ink, "rgb(138, 95, 0)", "the held glyph is not brass");
   await h.close();
 });
 

@@ -40,6 +40,7 @@ local SIDES = {
     ink = "#24292e",
     link = "#0969da",
     accent = "#a0740f",
+    accent_ink = "#8a5f00",
     svg_ink = "#000000",
     staff = "#a3a3a3",
     card = "var(--mdm-syn-tint)",
@@ -51,6 +52,7 @@ local SIDES = {
     ink = "#d4d4d4",
     link = "#58a6ff",
     accent = "#d9a94f",
+    accent_ink = "#d9a94f",
     svg_ink = "#d4d4d4",
     staff = "#6f6f6f",
     card = "var(--mdm-syn-bg)",
@@ -62,6 +64,7 @@ local SIDES = {
     ink = "#24292e",
     link = "#0969da",
     accent = "#a0740f",
+    accent_ink = "#8a5f00",
     svg_ink = "#000000",
     staff = "#a3a3a3",
     card = "var(--mdm-syn-tint)",
@@ -151,6 +154,9 @@ local function look_css(l)
   -- side the document is on, not the one the reader's system is set to.
   if dark then put("scheme", "dark") end
   put("play-accent", side.accent)
+  -- The deep form of the accent, which the chrome writes its held states in.
+  -- On the dark side it is the accent itself: it already reads there.
+  put("play-accent-ink", side.accent_ink)
   put("svg-ink", side.svg_ink)
   put("syn-card", side.card)
   put("syn-page", side.page)

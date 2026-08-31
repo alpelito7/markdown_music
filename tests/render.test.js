@@ -184,6 +184,11 @@ test("the look rides on every HTML render, music or no music", () => {
   assert.equal(look["--mdm-ink"], "#24292e");
   assert.equal(look["--mdm-syn-page"], "var(--mdm-syn-wash)");
   assert.equal(look["--mdm-staff-fill"], "#a3a3a3");
+  // Both forms of the accent travel: the one the sounding note takes, and the
+  // deep one the chrome writes its held states in, which on the light side is
+  // a colour of its own.
+  assert.equal(look["--mdm-play-accent"], "#a0740f");
+  assert.equal(look["--mdm-play-accent-ink"], "#8a5f00");
   assert.ok(!("--mdm-syn-string" in look), "a palette came from nowhere");
   assert.ok(!("--mdm-score-fill" in look), "a score fill came from nowhere");
 });
@@ -218,6 +223,10 @@ test("the look metadata is read, and only what is on the list gets through", () 
   assert.equal(look["--mdm-score-fill"], "#332c1c", "brass, on its dark value");
   assert.equal(look["--mdm-score-margin"], "0");
   assert.equal(look["--mdm-staff-fill"], "currentColor");
+  // On the dark side the accent already reads as a glyph, so the two forms
+  // are one value.
+  assert.equal(look["--mdm-play-accent"], "#d9a94f");
+  assert.equal(look["--mdm-play-accent-ink"], "#d9a94f");
   // A colour that is not six hex digits is dropped whole, and the fallback of
   // the stylesheet paints that slot instead.
   assert.ok(!("--mdm-syn-base" in look), "a colour name reached the page");
