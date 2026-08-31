@@ -150,11 +150,13 @@ body {
   background: color-mix(in srgb, var(--mdm-ink) 8%, transparent);
   color: var(--mdm-ink);
 }
-/* The section the caret is in, marked with an accent bar and a touch of tint. */
+/* The section the caret is in, marked with a brass bar and a touch of the
+   same tint: where the caret is held is a state, and state is what the
+   accent means (hover above stays ink). */
 #app .mdm-outline__row--current {
   color: var(--mdm-ink);
-  background: color-mix(in srgb, var(--mdm-ink) 6%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  background: color-mix(in srgb, var(--mdm-play-accent) 8%, transparent);
+  box-shadow: inset 2px 0 0 var(--mdm-play-accent-ink);
 }
 #app .mdm-outline__l1 {
   font-weight: 600;
@@ -199,7 +201,10 @@ body {
   margin: 0 auto;
   padding: 18px 0 40vh;
   cursor: text;
-  caret-color: var(--mdm-ink);
+  /* The caret in the brass of the accent: one warm mark that follows the
+     live point of the document, invisible when nothing moves. The deep form,
+     so it reads as a line on the light page. */
+  caret-color: var(--mdm-play-accent-ink);
 }
 #app .cm-line {
   padding: 0;
@@ -208,7 +213,9 @@ body {
    their ranges read as they do in the text editor beside this one. */
 #app .cm-cursor,
 #app .cm-dropCursor {
-  border-left: 1.5px solid var(--mdm-ink);
+  /* drawSelection paints its own caret, so the colour is stated twice: here
+     and as caret-color on .cm-content above. Both carry the accent. */
+  border-left: 1.5px solid var(--mdm-play-accent-ink);
 }
 #app .cm-selectionBackground,
 #app .cm-content ::selection {
@@ -277,8 +284,11 @@ body {
   color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
   cursor: pointer;
 }
+/* Hover is the light brass wash everywhere a button is pointed at, the same
+   first step of the ladder the player bar climbs; the glyph brightens to
+   full ink, and only a held state writes its glyph in brass. */
 #app .mdm-btn:hover {
-  background: color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+  background: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
   color: var(--mdm-ink);
 }
 #app .mdm-btn:focus {
@@ -288,10 +298,13 @@ body {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-ink) 30%, transparent);
 }
 /* A button that holds a state (ink staff lines, header shown) sits on a
-   disc, the way the repeat button of the player does. */
+   disc, the way the repeat button of the player does, and the disc is
+   brass: held state is what the accent means in this editor (hover stays
+   ink, since pointing is not state). The glyph goes to the ink form of the
+   accent, measured at 3.9:1 on its disc over the light page. */
 #app .mdm-btn--on {
-  background: color-mix(in srgb, var(--mdm-ink) 16%, transparent);
-  color: var(--mdm-ink);
+  background: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
+  color: var(--mdm-play-accent-ink);
 }
 /* Nothing to do: undo with no history, the header button of a file without
    one. */
@@ -675,7 +688,7 @@ body {
    by them. The strip is the height of a button and its 4px of clearance, and
    it is what the drawing starts under. */
 #app .mdm-score .mdm-chrome {
-  height: 26px;
+  height: 28px;
   opacity: 0;
   transition: opacity 0.12s ease;
 }
@@ -686,8 +699,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   color: #586069;
   cursor: pointer;
@@ -696,30 +709,37 @@ body {
   right: 8px;
 }
 #app .mdm-chrome .mdm-audio-toggle {
-  right: 32px;
+  right: 34px;
 }
 #app .mdm-chrome svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   display: block;
   fill: currentColor;
 }
 #app .mdm-chrome .mdm-audio-toggle svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
+/* The same light brass wash every hovered button wears, toolbar and player
+   bar alike. */
 #app .mdm-chrome .mdm-copy:hover,
 #app .mdm-chrome .mdm-audio-toggle:hover {
   color: var(--mdm-ink);
-  background-color: color-mix(in srgb, currentColor 12%, transparent);
+  background-color: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
 }
 #app.mdm--dark .mdm-chrome .mdm-copy,
 #app.mdm--dark .mdm-chrome .mdm-audio-toggle {
   color: #9aa2aa;
 }
-/* The lit disc under the headphones while this block's player is open. */
+/* The lit disc under the headphones while this block's player is open: an
+   open player is a held state, so the disc is the brass of the repeat and
+   the active toolbar toggle, and the glyph goes with it. Stated after the
+   hover rules above and at the same specificity, so the open colours hold
+   under the pointer too. */
 #app .mdm-score[data-mdm-audio] .mdm-audio-toggle {
-  background-color: color-mix(in srgb, currentColor 20%, transparent);
+  background-color: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
+  color: var(--mdm-play-accent-ink);
 }
 
 /* ---------- Scores ---------- */
@@ -770,12 +790,23 @@ body {
 /* The note sounding under the player. abcjs marks it with a class and a fill
    attribute (highlightPlaying in main.js); the colour comes from here, so it
    can carry one value per side, as the score fills do. Brass, the colour of
-   the note in the extension's own icon. */
+   the note in the extension's own icon.
+
+   The -ink companion is the same brass carried deep enough to read as text
+   or as an icon on the light grounds (4.7:1 on the code card, measured; the
+   accent itself is 3.5:1, enough for a note, thin for a glyph). On the dark
+   side the accent already reads, so the two are one value. Everything the
+   chrome marks as held or sounding is drawn from this pair: the active
+   toolbar toggle, the repeat state, the played half of the progress and its
+   head, the open-player disc, the current outline section, the caret.
+   applyPalette() never writes either, so they hold under any theme. */
 #app {
   --mdm-play-accent: #a0740f;
+  --mdm-play-accent-ink: #8a5f00;
 }
 #app.mdm--dark {
   --mdm-play-accent: #d9a94f;
+  --mdm-play-accent-ink: #d9a94f;
 }
 #app code.language-abc svg .abcjs-note_selected,
 #app code.language-abc svg .abcjs-note_selected *,
@@ -953,16 +984,22 @@ body {
    Nothing takes a syntax colour: those change hue from theme to theme, and
    under a dark one the buttons came out red on hover. */
 #app .mdm-audio {
-  /* The whole bar is drawn in the ink of the editor, at four weights: the
-     hairline of a track, the disc under a button, the disc of a button that
-     holds a state, and the ink itself for what is being pointed at. No hue
-     of its own: the brass accent belongs to the score, where it marks the
-     note that is sounding, and a bar full of coloured discs read as an
-     alarm. */
+  /* The quiet bar is drawn in the ink of the editor: the hairline of a
+     track, the glyphs, the clock. The brass is the language of use, on a
+     ladder of two weights: a light wash (12%) under whatever is being
+     pointed at, and the state weight (22%) for what is held or sounding,
+     with the glyph gone to the deep brass on that disc alone: repeat while
+     it loops, play while the tune sounds, a button under the press. What
+     is set rather than held, the played half of the progress and the
+     volume, wears -hot, the deep form of the brass, one colour for fill
+     and head alike on both sliders. The old bar had no hue at all ("brass
+     belongs to the score"); what it marked with a heavier ink disc it now
+     marks with the brass of the note, the same statement in the editor's
+     own colour. */
   --mdm-audio-track: color-mix(in srgb, var(--mdm-syn-base) 18%, transparent);
-  --mdm-audio-played: color-mix(in srgb, var(--mdm-syn-base) 52%, transparent);
-  --mdm-audio-disc: color-mix(in srgb, var(--mdm-syn-base) 10%, transparent);
-  --mdm-audio-disc-on: color-mix(in srgb, var(--mdm-syn-base) 20%, transparent);
+  --mdm-audio-disc: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
+  --mdm-audio-disc-on: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
+  --mdm-audio-hot: var(--mdm-play-accent-ink);
   white-space: normal;
   line-height: normal;
   font-size: 13px;
@@ -1004,12 +1041,11 @@ body {
   fill: color-mix(in srgb, var(--mdm-syn-base) 78%, transparent);
   stroke: color-mix(in srgb, var(--mdm-syn-base) 78%, transparent);
 }
-/* Hover brightens the ink and lays a disc under it, in the one accent of the
-   bar: the brass of the note in the extension's icon, the same colour the
-   repeat state and the sounding notes take, so every disc in the bar is the
-   same hue and only its weight says which is which. Never a syntax colour:
-   this used to take the keyword colour of the theme, which is Monokai's pink
-   on the dark side, and the buttons read as an error state. */
+/* Hover brightens the ink and lays the light brass wash under it, the first
+   step of the ladder; the glyph stays ink, so only a held state writes its
+   glyph in brass. Never a syntax colour: this used to take the keyword
+   colour of the theme, which is Monokai's pink on the dark side, and the
+   buttons read as an error state. */
 /* !important, and not for the usual bad reason: abcjs declares
    `background: none !important` on every one of its buttons, so a plain
    declaration here never painted. That is what made the repeat button look
@@ -1040,19 +1076,21 @@ body {
   fill: var(--mdm-syn-base);
   stroke: var(--mdm-syn-base);
 }
-/* Repeat is the one button that holds a state, so it is the one that takes
-   the accent: with it on, the loop sits lit in the bar. */
-#app .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed {
+/* The two buttons that hold a state take the accent: repeat while it loops,
+   and play while the tune sounds (abcjs marks both with abcjs-pushed, the
+   play through its pushPlay). Each sits lit on the brass disc with its
+   glyph gone to the deep brass. */
+#app .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed,
+#app .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed {
   border: none;
   background-color: var(--mdm-audio-disc-on) !important;
 }
-/* The glyph stays in the ink of the bar; the disc under it is what carries
-   the colour, so the state is read the same way on every button and no icon
-   changes hue. */
 #app .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed g,
-#app .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed:hover g {
-  fill: var(--mdm-syn-base);
-  stroke: var(--mdm-syn-base);
+#app .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed:hover g,
+#app .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed g,
+#app .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed:hover g {
+  fill: var(--mdm-play-accent-ink);
+  stroke: var(--mdm-play-accent-ink);
 }
 /* A hairline track with a round head, in place of the outlined trough. */
 /* The part already played is filled in, which is how a progress bar says
@@ -1066,7 +1104,7 @@ body {
   border-radius: 2px;
   background: linear-gradient(
     to right,
-    var(--mdm-audio-played) var(--mdm-progress, 0%),
+    var(--mdm-audio-hot) var(--mdm-progress, 0%),
     var(--mdm-audio-track) var(--mdm-progress, 0%)
   );
   cursor: pointer;
@@ -1111,7 +1149,9 @@ body {
   margin-left: -5.5px;
   top: -3.5px;
   border-radius: 50%;
-  background-color: var(--mdm-syn-base);
+  /* The same colour as the fill it rides, on both sides: head and played
+     track are one mark, where the tune is. */
+  background-color: var(--mdm-audio-hot);
   transition: transform 0.12s ease;
 }
 /* Under the pointer, and while it is being dragged, the head swells a little:
@@ -1150,8 +1190,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   cursor: pointer;
   transition: background-color 0.12s ease;
@@ -1163,8 +1203,8 @@ body {
   background-color: var(--mdm-audio-disc-on);
 }
 #app .mdm-audio .mdm-audio-vol svg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   fill: color-mix(in srgb, var(--mdm-syn-base) 62%, transparent);
   flex: none;
 }
@@ -1191,12 +1231,15 @@ body {
   -webkit-appearance: none;
   appearance: none;
 }
+/* The set level in the same deep brass as the progress, fill and thumb one
+   colour, so the two sliders of the bar tell where they stand in the same
+   voice. */
 #app .mdm-audio .mdm-audio-vol input[type="range"]::-webkit-slider-runnable-track {
   height: 3px;
   border-radius: 1.5px;
   background: linear-gradient(
     to right,
-    var(--mdm-audio-played) var(--mdm-vol, 100%),
+    var(--mdm-audio-hot) var(--mdm-vol, 100%),
     var(--mdm-audio-track) var(--mdm-vol, 100%)
   );
 }
@@ -1206,12 +1249,12 @@ body {
   margin-top: -3px;
   border: none;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--mdm-syn-base) 72%, transparent);
+  background: var(--mdm-audio-hot);
   -webkit-appearance: none;
   appearance: none;
 }
 #app .mdm-audio .mdm-audio-vol input[type="range"]:hover::-webkit-slider-thumb {
-  background: var(--mdm-syn-base);
+  background: var(--mdm-play-accent);
 }
 /* No focus box while the volume is set. VS Code hands every webview a sheet
    of its own with `a:focus, input:focus, select:focus, textarea:focus {
@@ -1223,7 +1266,7 @@ body {
   outline: none;
 }
 #app .mdm-audio .mdm-audio-vol input[type="range"]:focus-visible::-webkit-slider-thumb {
-  background: var(--mdm-syn-base);
+  background: var(--mdm-play-accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-syn-base) 30%, transparent);
 }
 #app .mdm-audio .abcjs-loading-svg circle {

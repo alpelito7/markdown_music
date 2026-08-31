@@ -883,6 +883,18 @@ test("the sounding notes light up on the score, and the ink comes back", { skip 
       ).length
   );
   assert.ok(lit > 0, "no element carries the playing class");
+  // While the tune sounds the play button is a held state like the repeat:
+  // abcjs marks it pushed (pushPlay), and the mark has to land as the brass
+  // disc, through the same !important fight as every background in the bar.
+  const playing = await h.page.evaluate(() => {
+    const start = document.querySelector(".mdm-audio .abcjs-midi-start");
+    return {
+      pushed: start.classList.contains("abcjs-pushed"),
+      disc: getComputedStyle(start).backgroundColor,
+    };
+  });
+  assert.equal(playing.pushed, true, "abcjs did not mark the playing button");
+  assert.notEqual(playing.disc, "rgba(0, 0, 0, 0)", "the sounding play sits on no disc");
   // The mark has to survive as a colour, not just as an attribute: the dark
   // content theme paints the shapes of a score with `fill: currentColor`, and
   // a declaration outranks the attribute abcjs writes, so on that side the
@@ -1163,12 +1175,12 @@ test("the player chrome takes no syntax colour, so no theme can turn it red", { 
   // The fallback dark palette is Monokai, whose keyword is #f92672.
   assert.equal(colours.keyword, "#f92672", "the fixture must carry a red keyword");
   assert.notEqual(colours.fill, "rgb(249, 38, 114)", "the hovered button went red");
-  // Every disc in the bar is the ink of the editor at some weight: one under
-  // the pointer, a stronger one for the state the repeat button holds, and
-  // no hue anywhere, neither a syntax colour nor the brass the score marks
-  // the sounding note with. The expected values are mixed by the browser
-  // from the ink in force, so the test follows a change of theme and only
-  // fails if a disc stops taking it.
+  // The discs climb a ladder of the accent, never of a syntax colour: a
+  // light wash (12%) under the pointed-at button, the state weight (22%)
+  // under the held repeat, the same brass the sounding note takes. The
+  // expected values are mixed by the browser from the properties in force,
+  // so the test follows a change of theme and only fails if a disc stops
+  // taking them.
   await h.page.evaluate(() =>
     document.querySelector(".mdm-audio .abcjs-midi-loop").click()
   );
@@ -1189,14 +1201,13 @@ test("the player chrome takes no syntax colour, so no theme can turn it red", { 
         .backgroundColor,
       pushed: getComputedStyle(bar.querySelector(".abcjs-midi-loop"))
         .backgroundColor,
-      ink10: mix("--mdm-syn-base", 10),
-      ink20: mix("--mdm-syn-base", 20),
-      brass10: mix("--mdm-play-accent", 10),
+      brass12: mix("--mdm-play-accent", 12),
+      brass22: mix("--mdm-play-accent", 22),
     };
   });
-  assert.equal(discs.hover, discs.ink10, "the hovered disc is not the ink of the bar");
-  assert.equal(discs.pushed, discs.ink20, "the repeat disc is not the ink of the bar");
-  assert.notEqual(discs.hover, discs.brass10, "the disc took the brass of the score");
+  assert.equal(discs.hover, discs.brass12, "the hovered disc is not the light brass wash");
+  assert.equal(discs.pushed, discs.brass22, "the repeat disc is not the brass of the accent");
+  assert.notEqual(discs.hover, discs.brass22, "hover took the disc of a held state");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1999,7 +2010,7 @@ test("the speaker silences the score, and the level it was set to survives", { s
   await h.close();
 });
 
-test("what a button of the bar holds is drawn on its disc, never on its glyph", { skip }, async () => {
+test("the repeat state is drawn in the brass of the accent, disc and glyph together", { skip }, async () => {
   const h = await open({});
   await clickToggle(h.page, 2);
   await h.page.waitForFunction(
@@ -2021,10 +2032,13 @@ test("what a button of the bar holds is drawn on its disc, never on its glyph", 
       };
       const out = {
         ink: resolve("--mdm-syn-base"),
-        // The brass the score marks the sounding note with. No disc of the
-        // bar may be drawn in it: a row of coloured circles reads as an
-        // alarm, and the colour belongs to the music.
+        // The brass the score marks the sounding note with, and its deep
+        // form. Held state is the one thing of the bar drawn in it: the
+        // repeat sits on the accent disc with its glyph in the accent ink,
+        // while everything idle or merely pointed at stays in the ink of
+        // the editor.
         accent: resolve("--mdm-play-accent"),
+        accentInk: resolve("--mdm-play-accent-ink"),
         glyph: getComputedStyle(loop.querySelector("g")).fill,
         disc: getComputedStyle(loop).backgroundColor,
       };
@@ -2040,25 +2054,25 @@ test("what a button of the bar holds is drawn on its disc, never on its glyph", 
   const on = await read();
   assert.notEqual(on.disc, "rgba(0, 0, 0, 0)", "the repeat state is not drawn");
   assert.notEqual(on.disc, off.disc);
-  assert.equal(on.glyph, on.ink, "the glyph took a colour of its own");
-  assert.notEqual(on.glyph, on.accent);
-  // The disc is the ink of the editor at some weight, never the brass: it is
-  // a mix of that ink with transparency, so its channels are the ink's. A
-  // color-mix() computes to color(srgb …) with channels from 0 to 1, while a
-  // plain colour reads as rgb() from 0 to 255; both are brought to the same
-  // scale before they are compared.
+  assert.equal(on.glyph, on.accentInk, "the held glyph is not the accent ink");
+  assert.notEqual(on.glyph, on.ink);
+  // The disc is the accent at some weight, never the ink or a syntax colour:
+  // it is a mix of the accent with transparency, so its channels are the
+  // accent's. A color-mix() computes to color(srgb …) with channels from 0
+  // to 1, while a plain colour reads as rgb() from 0 to 255; both are
+  // brought to the same scale before they are compared.
   const channels = (colour) =>
     (colour.match(/[\d.]+/g) || [])
       .slice(0, 3)
       .map((n) => (Number(n) > 1 ? Number(n) / 255 : Number(n)));
   const near = (a, b) => a.every((n, i) => Math.abs(n - b[i]) < 0.01);
   assert.ok(
-    near(channels(on.disc), channels(on.ink)),
-    "the state disc is not drawn in the ink of the bar: " + on.disc
+    near(channels(on.disc), channels(on.accent)),
+    "the state disc is not drawn in the brass of the accent: " + on.disc
   );
   assert.ok(
-    !near(channels(on.disc), channels(on.accent)),
-    "the state disc took the brass of the score: " + on.disc
+    !near(channels(on.disc), channels(on.ink)),
+    "the state disc stayed in the ink of the bar: " + on.disc
   );
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -2259,7 +2273,7 @@ test("the two little buttons of a score are sized to be read", { skip }, async (
         ) <= 1.5,
     };
   });
-  assert.equal(sizes.toggle, 16);
+  assert.equal(sizes.toggle, 18);
   assert.ok(sizes.toggle > sizes.copy, "the toggle is not the larger of the two");
   assert.equal(sizes.sameLine, true, "the two buttons are off each other's line");
 
