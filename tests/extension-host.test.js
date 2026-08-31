@@ -682,14 +682,21 @@ test("the copy names the filter by absolute path, and the .mdm is left alone", a
     "the bare mdm entry is still there, so Quarto would go looking for an _extensions folder"
   );
   assert.ok(copy.includes("title: T"), "the rest of the header did not survive");
+  assert.ok(
+    copy.includes("from: " + ext.READER),
+    "the copy is read in Pandoc's own dialect, not the editor's"
+  );
   assert.equal(fs.readFileSync(doc, "utf8"), SOURCE, "the document itself was rewritten");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test("exporting both formats passes no --to and offers both files", async () => {
+test("exporting both formats asks for both and offers both files", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const restore = usePath(fakeBin(tmp, { abcm2ps: true }));
   const doc = path.join(tmp, "doc.mdm");
+  // A header that declares no format at all, which is what the button used to
+  // come back from with the HTML alone: Quarto renders the formats the header
+  // names, and a header that names none is HTML.
   fs.writeFileSync(doc, SOURCE);
   const h = boot("Body\n", {}, null, "file://" + doc);
   vscode._state.workspaceFolder = tmp;
@@ -697,12 +704,38 @@ test("exporting both formats passes no --to and offers both files", async () => 
   await h.receive({ type: "export", to: "both" });
   restore();
 
-  // Clean documents skip the save; Quarto's default is already HTML + PDF.
-  assert.deepEqual(vscode._state.savedUris, []);
+  assert.deepEqual(vscode._state.savedUris, []); // a clean document skips the save
   const args = fs.readFileSync(path.join(tmp, "args.txt"), "utf8").trim().split("\n")[0];
-  assert.ok(!args.includes("--to "), "both formats should not name one");
+  assert.ok(args.includes("--to html,pdf"), "both formats were left to the document");
   assert.deepEqual(vscode._state.infoMessages[0].buttons, ["Open HTML", "Open PDF"]);
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("the copy is read in the dialect of the editor, and a document that names one keeps it", () => {
+  const from = "markdown-x";
+
+  // No header: one is written, with the dialect and nothing else in it.
+  const none = ext.withReader("plain body\n", from);
+  assert.equal(none, "---\nfrom: markdown-x\n---\n\nplain body\n");
+
+  // A header: the dialect joins it and the rest of it is left alone.
+  const some = ext.withReader("---\ntitle: T\n---\n\nb\n", from);
+  assert.equal(some, "---\nfrom: markdown-x\ntitle: T\n---\n\nb\n");
+
+  // A document that names a dialect itself is obeyed, at the top level and
+  // under a format, and is not given a second `from`.
+  const own = "---\nfrom: gfm\n---\nb\n";
+  assert.equal(ext.withReader(own, from), own);
+  const nested = "---\nformat:\n  html:\n    from: gfm\n---\nb\n";
+  assert.equal(ext.withReader(nested, from), nested);
+
+  // Only the header is read: a body line that opens with `from:` is prose.
+  const prose = "---\ntitle: T\n---\n\nfrom: the top\n";
+  assert.ok(ext.withReader(prose, from).startsWith("---\nfrom: markdown-x\ntitle: T\n"));
+
+  // What the export actually asks for: Pandoc's Markdown without the two
+  // rules that make it disagree with the CommonMark the editor reads.
+  assert.match(ext.READER, /^markdown-blank_before_header-blank_before_blockquote$/);
 });
 
 test("a document that asks for the format links keeps them", async () => {
@@ -932,6 +965,7 @@ test("the export carries the look the editor is showing", async () => {
       "mdm.scoreFill": "brass",
       "mdm.staffLines": "ink",
       "mdm.scoreAlign": "left",
+      "mdm.frontMatter": "shown",
     },
     seedTheme("#e6db74")
   );
@@ -940,6 +974,11 @@ test("the export carries the look the editor is showing", async () => {
   assert.equal(look["mdm-score-fill"], "brass");
   assert.equal(look["mdm-staff-lines"], "ink");
   assert.equal(look["mdm-score-align"], "left");
+  // What the editor is showing of the header travels too: the title block
+  // Quarto draws from the YAML comes out only when the YAML is on screen.
+  assert.equal(look["mdm-front-matter"], "shown");
+  const hidden = lookOf(await exportWith("html", {}, seedTheme("#e6db74")));
+  assert.equal(hidden["mdm-front-matter"], "hidden", "the default is a hidden header");
   // The palette of that same theme, spelt without the `#` a -M value cannot
   // carry (it would open a YAML comment).
   assert.equal(look["mdm-syn-string"], "e6db74");

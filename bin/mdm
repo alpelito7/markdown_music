@@ -21,7 +21,34 @@ if [[ -e "$tmp" ]]; then
   echo "error: $tmp already exists; refusing to overwrite it" >&2
   exit 1
 fi
-cp "$file" "$tmp"
+# The dialect the copy is read as. The MDM editor reads CommonMark and Quarto
+# reads Pandoc's Markdown, and Pandoc asks for a blank line before a heading
+# and before a block quote where CommonMark asks for none: a `### Title` under
+# the last line of a paragraph, or under the closing fence of a score, came out
+# as a line of text with three hashes on it. Turning the two rules off costs
+# nothing measurable (the Pandoc tree of example.mdm comes out identical), and
+# it is the same dialect the VS Code export renders with (extension.js, READER).
+#
+# It goes in the header of the copy and not in a `--from`, which Quarto 1.9.37
+# does not survive: it dies in its own readqmd.lua before reading the document.
+# A file that names a dialect itself keeps it; only its YAML header is searched,
+# so a line of prose that opens with `from:` is not mistaken for one.
+reader='markdown-blank_before_header-blank_before_blockquote'
+names_reader() {
+  awk '
+    NR == 1 && $0 !~ /^---[[:blank:]]*$/ { exit }
+    NR > 1 && /^---[[:blank:]]*$/ { exit }
+    NR > 1 && /^[[:blank:]]*from[[:blank:]]*:/ { named = 1; exit }
+    END { if (named) exit 0; exit 1 }
+  ' "$1"
+}
+if names_reader "$file"; then
+  cp "$file" "$tmp"
+elif head -n 1 "$file" | grep -qE '^---[[:blank:]]*$'; then
+  { head -n 1 "$file"; printf 'from: %s\n' "$reader"; tail -n +2 "$file"; } > "$tmp"
+else
+  { printf -- '---\nfrom: %s\n---\n\n' "$reader"; cat "$file"; } > "$tmp"
+fi
 trap 'rm -f "$tmp"' EXIT
 
 # Quarto offers the document's other formats in the margin of the HTML ("Other

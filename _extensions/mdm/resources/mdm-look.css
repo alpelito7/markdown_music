@@ -2,6 +2,8 @@
 
    A port of the editor's own stylesheet (vscode-mdm/media/style.css) onto the
    HTML Quarto produces, so that what the export shows is what was on screen:
+   the PDF is dressed from the same metadata by look_tex in mdm.lua, which is
+   this sheet written as a LaTeX preamble.
    the same two grounds, the same ink, the same syntax colours over the same
    code cards, scores drawn and filled the same way, and the same player bar
    under them.

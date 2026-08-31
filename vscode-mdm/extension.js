@@ -167,19 +167,27 @@ async function writeSetting(key, value) {
 // ---------- Export ----------
 
 // What each export entry asks Quarto for, and what it leaves on disk.
+//
+// The two formats are named on the command line rather than left to the
+// document. Quarto renders the formats the header declares, and a header that
+// declares none, or none at all, is HTML and nothing else: the button said
+// HTML + PDF and one file came out. Naming them takes nothing away from a
+// document that does declare both, since `--to` picks the formats and the
+// options written under each one still apply.
 const EXPORT_TARGETS = {
   html: { args: ["--to", "html"], outputs: [".html"] },
   pdf: { args: ["--to", "pdf"], outputs: [".pdf"] },
-  both: { args: [], outputs: [".html", ".pdf"] },
+  both: { args: ["--to", "html,pdf"], outputs: [".html", ".pdf"] },
 };
 
 // ---------- The look the export is dressed in ----------
 //
-// The exported HTML reads as the editor does (the page's ground, the ink, the
-// code cards and their colours, the scores and the player bar), and what the
-// editor is showing right now travels to the renderer as metadata the Lua
-// filter reads: see the look section of _extensions/mdm/mdm.lua, which holds
-// the other end of this. A render with none of it, `bin/mdm render` from a
+// What comes out reads as the editor does, on the page and on paper alike (the
+// ground, the ink, the code cards and their colours, the scores, the player
+// bar in the HTML and the heading sizes in the PDF), and what the editor is
+// showing right now travels to the renderer as metadata the Lua filter reads:
+// see the look section of _extensions/mdm/mdm.lua, which holds the other end
+// of this in look_css for the page and look_tex for the paper. A render with none of it, `bin/mdm render` from a
 // terminal, comes out in the editor's default look with the palette it falls
 // back to.
 
@@ -250,6 +258,12 @@ function exportLook() {
       "mdm-score-fill:" + settings.scoreFill,
       "-M",
       "mdm-score-align:" + settings.scoreAlign,
+      // Not a colour, but the same kind of thing: what the editor is showing.
+      // The title block Quarto draws from the YAML belongs to the header, so
+      // an export from an editor that is hiding the header renders a document
+      // that does not open with it either (the TITLE_BLOCK of mdm.lua).
+      "-M",
+      "mdm-front-matter:" + settings.frontMatter,
     ];
     const palette = readPalette(installed).palette;
     const usable =
@@ -401,6 +415,43 @@ function withFilter(text, lua) {
   return "---\n" + lines.join("\n") + "\n---\n" + text.slice(header[0].length);
 }
 
+// ---------- The dialect the copy is read as ----------
+
+// The editor reads CommonMark (the Lezer parser under CodeMirror) and Quarto
+// reads Pandoc's Markdown, and the two disagree on what opens a block. Pandoc
+// asks for a blank line before a heading and before a block quote, where
+// CommonMark, and GitHub with it, asks for none. A `### Title` written under
+// the last line of a paragraph, or under the closing fence of a score, came
+// out of the export as a line of text with three hashes on it while the
+// editor showed a heading.
+//
+// Turning the two rules off costs nothing: the Pandoc tree of example.mdm, of
+// both documents under vscode-mdm/docs and of the README comes out identical
+// with them and without them (measured on Pandoc 3.8.3).
+//
+// One difference is left standing, and no reader option governs it: Pandoc
+// wants the `#` in the first column, while CommonMark lets up to three spaces
+// stand before it. A heading written with a space in front of it is a heading
+// in the editor and a paragraph in the export.
+const READER = "markdown-blank_before_header-blank_before_blockquote";
+
+// The dialect goes in the header of the copy rather than in a `--from` on the
+// command line, which Quarto 1.9.37 does not survive: it dies in its own
+// readqmd.lua on a nil metadata table before the document is read.
+//
+// A document that names a dialect itself keeps it, whether at the top level
+// or under a format; only the header is searched, so a line of prose or of
+// code that opens with `from:` is not mistaken for that.
+function withReader(text, from) {
+  const line = "from: " + from;
+  const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  if (!header) return "---\n" + line + "\n---\n\n" + text;
+  if (/^[ \t]*from[ \t]*:/m.test(header[1])) return text;
+  return (
+    "---\n" + line + "\n" + header[1] + "\n---\n" + text.slice(header[0].length)
+  );
+}
+
 // The render itself, which is what bin/mdm does from a terminal: copy the
 // .mdm to a .qmd beside it, point the copy at the filter, call Quarto, and
 // take the copy away again. Done here rather than shelled out to that script
@@ -497,7 +548,7 @@ async function exportDocument(document, to) {
         let log = "";
         let child;
         try {
-          fs.writeFileSync(copy, withFilter(text, FILTER));
+          fs.writeFileSync(copy, withReader(withFilter(text, FILTER), READER));
           child = cp.spawn(quarto, args, { cwd: dir });
         } catch (e) {
           resolve({ code: -1, log: String(e.message || e) });
@@ -725,7 +776,16 @@ window.MDM_PALETTE = ${inlineJson(readPalette())};
 
 function deactivate() {}
 
-// withFilter, hasScores and renderArgs are pure and are exported for the
-// tests: they decide what Quarto is handed, which is the half of the export
-// that can be checked without running anything.
-module.exports = { activate, deactivate, withFilter, hasScores, renderArgs, FILTER };
+// withFilter, withReader, hasScores and renderArgs are pure and are exported
+// for the tests: they decide what Quarto is handed, which is the half of the
+// export that can be checked without running anything.
+module.exports = {
+  activate,
+  deactivate,
+  withFilter,
+  withReader,
+  hasScores,
+  renderArgs,
+  FILTER,
+  READER,
+};

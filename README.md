@@ -69,6 +69,12 @@ since abcm2ps ignores a value without one (abcjs reads it as px):
     ...
     ```
 
+A block that names neither its reference number (`X:`) nor its key (`K:`) is
+engraved all the same: abcjs, which draws the HTML and the editor, falls back
+to the empty key signature on a treble staff, and the filter hands abcm2ps the
+`X:1` and the `K:C` that draw the same thing, since the standard makes both
+compulsory and abcm2ps engraves nothing without them.
+
 There is no *inline* music notation inside a paragraph (Markdown fences are
 blocks); a compact width is the practical equivalent.
 
@@ -79,6 +85,23 @@ abcjs reserves the width of the text for it, which opens an extra gap right
 there (measured in `example.mdm`: 75 units between the first and the second
 note, against 42 everywhere else). With `P:` the notes sit exactly where
 they would with no label at all.
+
+### The dialect
+
+The editor reads CommonMark and Quarto reads Pandoc's Markdown, which asks for
+a blank line before a heading and before a block quote where CommonMark asks
+for none. `bin/mdm` and the export button of the editor render the copy with
+those two rules off, so a `### Title` written straight under a paragraph or
+under the closing fence of a score is a heading on screen and a heading in the
+output. A document that declares a `from:` of its own is rendered in the
+dialect it names.
+
+One difference is left standing, and no Pandoc option governs it: Pandoc wants
+the `#` in the first column, while CommonMark allows up to three spaces before
+it. A heading written with a space in front of it is a heading in the editor
+and a paragraph of text in the HTML and the PDF. Rendering a `.qmd` with
+`filters: [mdm]` straight from Quarto, rather than through `bin/mdm` or the
+editor, gets Pandoc's own dialect and its blank lines.
 
 ## How it works
 
@@ -93,7 +116,7 @@ they would with no label at all.
   natural size and centred if it is narrow (< 330 pt). Results are cached
   by a hash of the content in `mdm_cache/`.
 
-### The HTML looks like the editor
+### The output looks like the editor
 
 The page a render produces is dressed as the VS Code editor rather than as a
 stock Quarto document: the same ground under the document and the same ink on
@@ -138,6 +161,74 @@ here and by Lezer in the editor, so the palette is shared but the cut into
 tokens is not, and a line the two read differently comes out coloured
 differently. The equations are set by MathJax here, Quarto's own, against
 KaTeX in the editor.
+
+The PDF is dressed from the same metadata, by a LaTeX preamble the filter
+writes (`look_tex` in `mdm.lua`, the other half of the stylesheet): the page
+takes the ground of the side the editor is on, the text its ink, the headings
+its sizes and weight with the hairline under the first two levels, and code
+the same card with the same ten slots over it. The sans is TeX Gyre Heros,
+which is the Helvetica the editor's own font stack falls back to when the
+platform has no interface font to give it.
+
+The measure travels in ems: the editor's column is 820 px of text set at
+16 px, which is 51.25 of its own ems whatever the body size is, and that is
+what the page is given, centred. On paper too narrow to hold it, the text
+keeps 3 cm of margin instead. A document that sets a `geometry` of its own
+keeps the page it asked for.
+
+The same measure does not break the same lines on its own. The editor sets its
+text ragged right, as a browser does, and squeezes no glyph to fit one more
+word into a line; LaTeX justifies and lets microtype expand the font, which
+took a word more per line at the very same width (measured on the opening
+paragraph of `example.mdm`: the editor breaks after `source`, the PDF was
+carrying `source code`). The PDF is set ragged right too and microtype's
+expansion is off, so a paragraph of prose breaks where the editor breaks it. A
+line carrying inline code or an equation can still break elsewhere: the editor
+sets those with KaTeX and the system's monospace, the PDF with LaTeX and DejaVu
+Sans Mono, and the two do not measure a formula the same way.
+
+Two sizes come from the stylesheet and not from LaTeX's defaults. Code at 0.88
+of the text, which is what `mdm-look.css` gives it. And mathematics at 1.21,
+which is what KaTeX sets its own at (`.katex{font: normal 1.21em KaTeX_Main}`):
+both draw formulas with Computer Modern shapes, and 1.21 is the compensation
+both need beside a sans with the x-height of Helvetica. Without it the inline
+letters came out visibly thinner than the words around them and a `\sqrt` over
+a fraction came out cramped. A document that names a `mathfont` of its own is
+left alone.
+
+A score is engraved in the colours of the look, and they are painted into the
+EPS on the way through: abcm2ps writes no colour of its own, and ghostscript,
+which turns the EPS into the PDF, bakes the default black into everything it
+converts. Black is what the score used to come out, whatever the page under
+it: on the dark side it was a shadow, while the words abcm2ps sets around the
+staff, which are shown and not stroked, came out in the ink like the rest of
+the text. So the ink of the side goes in at the head of the page and the grey
+of the staff lines around the run of horizontals that draws them, which is
+what `mdm.staffLines` turns on and off. The ledger lines under a low note are
+drawn another way and stay in the ink, exactly as in the browser, where the
+stylesheet paints `.abcjs-staff` and nothing else. A cached engraving is
+therefore named after the block *and* the two colours it was drawn in.
+
+The fill and the alignment a score can be given (`mdm.scoreFill`,
+`mdm.scoreAlign`) travel as well, as a box around the engraving rather than
+anything on the page: the fill in the colour of the side, the alignment
+centring the score like a display equation or lining it up with the text. The
+4 px the browser rounds the corner by is the one thing left square, which
+would take a package for the sake of two pixels on paper.
+
+One thing of the editor stays behind: the card behind inline code, which in
+LaTeX would take a `\colorbox` and stop the line breaking inside it. The body
+size is the document's to set (`fontsize: 12pt` is the editor's 16 px); the
+headings and the measure are multiples of whatever it is.
+
+The block Quarto draws at the top from the YAML (the title, the subtitle,
+whoever wrote it and when) belongs to the header, so it comes out only when
+the header does. The editor can keep the YAML out of the text it shows
+(`mdm.frontMatter`), and an export from an editor that is hiding it renders a
+document that does not open with the block either; a `bin/mdm render` has no
+editor behind it and keeps whatever the document declares. Quarto normalises
+the author into three keys of its own before a filter sees the metadata, so
+all three are taken away, not just the one the YAML wrote.
 
 One thing the render drops rather than dresses: the margin block Quarto adds
 with the document's other formats ("Other Formats", one link per format the

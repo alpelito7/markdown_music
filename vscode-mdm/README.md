@@ -86,8 +86,14 @@ left.
 ## Export
 
 The export button renders the document to HTML, PDF or both through
-[Quarto](https://quarto.org), and the HTML comes out dressed as the editor
-it was exported from, theme, palette and players included. The editor itself
+[Quarto](https://quarto.org), and both come out dressed as the editor they
+were exported from: the HTML with its theme, palette and players, the PDF with
+the same ground, ink, headings, measure and code cards on the page, and its
+scores engraved in the same colours, staff lines and fill included. The title
+block belongs to the YAML header: it comes out only if the header is on screen
+when the export is asked for. The document is
+read in the dialect the editor reads, so a heading written straight under a
+paragraph or under a score is a heading in the output as well. The editor itself
 needs nothing installed: Quarto (>= 1.4) is looked for only when an export
 is asked for, a PDF needs a TeX installation, and a PDF of a document with
 scores needs [abcm2ps](https://github.com/lewdlime/abcm2ps) (Debian and

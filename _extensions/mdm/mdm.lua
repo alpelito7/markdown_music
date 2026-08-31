@@ -44,6 +44,8 @@ local SIDES = {
     staff = "#a3a3a3",
     card = "var(--mdm-syn-tint)",
     page = "var(--mdm-syn-wash)",
+    card_tex = "mdmtint",
+    page_tex = "mdmwash",
   },
   dark = {
     ink = "#d4d4d4",
@@ -53,6 +55,8 @@ local SIDES = {
     staff = "#6f6f6f",
     card = "var(--mdm-syn-bg)",
     page = "var(--mdm-syn-tint)",
+    card_tex = "mdmsynbg",
+    page_tex = "mdmtint",
   },
   white = {
     ink = "#24292e",
@@ -62,6 +66,8 @@ local SIDES = {
     staff = "#a3a3a3",
     card = "var(--mdm-syn-tint)",
     page = "#fff",
+    card_tex = "mdmtint",
+    page_tex = "white",
   },
 }
 
@@ -112,6 +118,9 @@ local function read_look(meta)
     staff_lines = meta_word(meta, "mdm-staff-lines", { gray = true, ink = true }, "gray"),
     score_fill = meta_word(meta, "mdm-score-fill", SCORE_FILLS, "none"),
     score_align = meta_word(meta, "mdm-score-align", { center = true, left = true }, "center"),
+    -- Not a look of the editor's: whether the document names a maths font of
+    -- its own, which the scale below leaves alone.
+    mathfont = meta_string(meta, "mathfont") ~= nil,
     colors = {},
   }
   for _, slot in ipairs(SYNTAX_SLOTS) do
@@ -162,6 +171,237 @@ local function look_css(l)
 end
 
 
+-- ---------- The same look, on paper ----------
+
+-- What the stylesheet leaves to its own `:root` block, the fallback palette a
+-- render with no editor behind it gets (stackoverflow-light, the editor's own
+-- when it cannot read a theme). LaTeX has no cascade to fall back through, so
+-- the ten slots and the error colour are written out whether they arrived or
+-- not.
+local FALLBACK_COLORS = {
+  base = "#2f3337",
+  bg = "#f6f6f6",
+  comment = "#656e77",
+  string = "#54790d",
+  number = "#b75501",
+  keyword = "#015692",
+  attr = "#015692",
+  name = "#b75501",
+  type = "#b75501",
+  variable = "#54790d",
+}
+local ERROR_COLOR = "#c94f4f"
+
+-- Every token class Pandoc paints code with, on the slot the stylesheet gives
+-- it (the `body code span.xx` rules of mdm-look.css, class for class). What is
+-- not named here Pandoc leaves to \NormalTok, which is the base slot.
+local TOKENS = {
+  { "AlertTok", "error" }, { "AnnotationTok", "comment" },
+  { "AttributeTok", "attr" }, { "BaseNTok", "number" },
+  { "BuiltInTok", "name" }, { "CharTok", "string" },
+  { "CommentTok", "comment" }, { "CommentVarTok", "comment" },
+  { "ConstantTok", "number" }, { "ControlFlowTok", "keyword" },
+  { "DataTypeTok", "type" }, { "DecValTok", "number" },
+  { "DocumentationTok", "comment" }, { "ErrorTok", "error" },
+  { "ExtensionTok", "base" }, { "FloatTok", "number" },
+  { "FunctionTok", "name" }, { "ImportTok", "keyword" },
+  { "InformationTok", "comment" }, { "KeywordTok", "keyword" },
+  { "NormalTok", "base" }, { "OperatorTok", "base" },
+  { "OtherTok", "base" }, { "PreprocessorTok", "keyword" },
+  { "RegionMarkerTok", "comment" }, { "SpecialCharTok", "string" },
+  { "SpecialStringTok", "string" }, { "StringTok", "string" },
+  { "VariableTok", "variable" }, { "VerbatimStringTok", "string" },
+  { "WarningTok", "error" },
+}
+
+-- A colour on its way into \definecolor: the six hex digits, no `#`.
+local function tex_hex(value)
+  return (value or "#000000"):gsub("^#", ""):upper()
+end
+
+-- The preamble the PDF is dressed with: the LaTeX half of mdm-look.css, and
+-- the same look travels to both. The page takes the ground of the side the
+-- editor is on, the text its ink, code the card with the ten slots over it,
+-- and the headings the sizes, the weight and the hairlines of the editor.
+--
+-- What the browser computes from the custom properties, the two mixes of the
+-- palette, is computed here by xcolor, which mixes the same way (`A!6!B` is
+-- six parts of A in a hundred, as `color-mix(in srgb, A 6%, B)` is).
+--
+-- The measure travels as well, in ems: the editor's column is 820 px of text
+-- set at 16 px, which is 51.25 of its own ems whatever the body size turns out
+-- to be. What the paper cannot hold it clamps (see the geometry block below).
+--
+-- One thing of the editor does not travel: the card behind inline code, which
+-- would take a \colorbox and stop the line from breaking inside it. The fill
+-- and the alignment a score can be given are the score's and not the page's,
+-- and are written around the engraving instead (the \mdmscore below).
+--
+-- The colours of an engraving are not written here but into the EPS itself,
+-- since what the page says has no bearing on a graphic that carries its own
+-- (paint_eps, further down).
+local function look_tex(l)
+  local side = SIDES[l.side] or SIDES.light
+  local out = {}
+  local function put(line) out[#out + 1] = line end
+  local function color(name, value)
+    put("\\definecolor{" .. name .. "}{HTML}{" .. tex_hex(value) .. "}")
+  end
+
+  put("%% ---------- MDM: the page dressed as the editor ----------")
+  for _, slot in ipairs(SYNTAX_SLOTS) do
+    color("mdmsyn" .. slot, l.colors[slot] or FALLBACK_COLORS[slot])
+  end
+  color("mdmerror", ERROR_COLOR)
+  color("mdmink", side.ink)
+  color("mdmlink", side.link)
+  put("\\colorlet{mdmtint}{mdmsynbase!6!mdmsynbg}")
+  put("\\colorlet{mdmwash}{mdmsynbase!2!mdmsynbg}")
+  put("\\colorlet{mdmcard}{" .. side.card_tex .. "}")
+  put("\\colorlet{mdmpage}{" .. side.page_tex .. "}")
+  put("\\colorlet{mdmrule}{mdmink!14!mdmpage}")
+  put("\\colorlet{mdmquiet}{mdmink!72!mdmpage}")
+
+  -- The editor asks the platform for its own interface font and falls back to
+  -- Helvetica, which is what TeX Gyre Heros is. Under pdfTeX it comes as an
+  -- NFSS family, under XeTeX and LuaTeX through fontspec, since the Unicode
+  -- engines look for a font by name and would otherwise fall back to the
+  -- roman. A distribution without it keeps whatever it has.
+  put("\\ifPDFTeX")
+  put("  \\IfFileExists{tgheros.sty}{\\usepackage{tgheros}}{\\usepackage{helvet}}")
+  put("  \\renewcommand{\\familydefault}{\\sfdefault}")
+  put("  \\IfFileExists{DejaVuSansMono.sty}{\\usepackage[scaled=0.88]{DejaVuSansMono}}{}")
+  put("\\else")
+  put("  \\usepackage{fontspec}")
+  put("  \\IfFontExistsTF{TeX Gyre Heros}{\\setmainfont{TeX Gyre Heros}\\setsansfont{TeX Gyre Heros}}{}")
+  -- Code at 0.88 of the text, which is the size the stylesheet gives it.
+  put("  \\IfFontExistsTF{DejaVu Sans Mono}{\\setmonofont{DejaVu Sans Mono}[Scale=0.88]}{}")
+  -- The maths at 1.21 of the text, which is what KaTeX sets its own at
+  -- (`.katex{font: normal 1.21em KaTeX_Main}`): it draws with Computer Modern
+  -- shapes as LaTeX does, and 1.21 is the compensation both need beside a sans
+  -- with the x-height of Helvetica. Without it the maths came out visibly
+  -- smaller than the words around it and a \\sqrt over a fraction came out
+  -- cramped. A document that names a `mathfont` of its own is left alone:
+  -- Quarto writes that into the preamble before this block is read.
+  if not l.mathfont then
+    put("  \\IfFontExistsTF{Latin Modern Math}" ..
+        "{\\setmathfont{Latin Modern Math}[Scale=1.21]}{}")
+  end
+  put("\\fi")
+
+  -- The editor sets its text at 1.7 line heights, LaTeX at 1.2 of its own.
+  put("\\linespread{1.417}")
+  put("\\pagecolor{mdmpage}")
+  put("\\colorlet{shadecolor}{mdmcard}")
+  put("\\AtBeginDocument{\\color{mdmink}}")
+  put("\\AtBeginDocument{\\hypersetup{colorlinks=true,linkcolor=mdmlink," ..
+      "urlcolor=mdmlink,citecolor=mdmlink,filecolor=mdmlink}}")
+
+  put("\\makeatletter")
+  -- The heading sizes are the editor's, which are multiples of the body size:
+  -- it is read off the class once, at the start of the document, since inside
+  -- a heading the size in force is already the heading's own.
+  put("\\newlength{\\mdmem}")
+  put("\\newlength{\\mdmmeasure}")
+  put("\\AtBeginDocument{\\setlength{\\mdmem}{\\f@size pt}}")
+  -- The measure of the editor: its column is 820 px wide with the text at
+  -- 16 px, which is 51.25 of its own ems, and that is what the page is given,
+  -- centred on the sheet. The clamp is what keeps a narrow paper from losing
+  -- its margins to it. A document that sets a `geometry` of its own keeps the
+  -- page it asked for, which is why the whole block is asked first.
+  put("\\@ifpackageloaded{geometry}{}{%")
+  put("  \\RequirePackage{geometry}%")
+  put("  \\AtBeginDocument{%")
+  put("    \\setlength{\\mdmmeasure}{51.25\\mdmem}%")
+  put("    \\ifdim\\mdmmeasure>\\dimexpr\\paperwidth-3cm\\relax")
+  put("      \\setlength{\\mdmmeasure}{\\dimexpr\\paperwidth-3cm\\relax}%")
+  put("    \\fi")
+  put("    \\newgeometry{textwidth=\\mdmmeasure,vmargin=2.5cm,includefoot,centering}%")
+  put("  }%")
+  put("}")
+  -- The code font is already 0.88 of the text (above), so the blocks take the
+  -- body size and land where the editor puts them; \\small on top of that
+  -- would shrink them twice.
+  put("\\@ifundefined{fvset}{}{\\fvset{fontsize=\\normalsize}}")
+  -- The editor sets its text ragged right, as a browser does, and squeezes no
+  -- glyph to fit one more word into a line. Justified, and with microtype
+  -- expanding the font, the same paragraph at the same measure took a word
+  -- more per line than the editor showed (measured on the opening paragraph of
+  -- example.mdm: `source code` where the editor breaks after `source`).
+  put("\\@ifpackageloaded{microtype}{\\microtypesetup{expansion=false}}{}")
+  put("\\AtBeginDocument{\\raggedright}")
+  put("\\newcommand*{\\mdmheadrule}{\\par\\nobreak\\vskip 0.18\\mdmem" ..
+      "{\\color{mdmrule}\\hrule height 0.8pt}}")
+  -- Two ways in, since the class is the document's to choose: KOMA, which is
+  -- what Quarto gives a document that names none, restyles through its own
+  -- hooks, and a standard class through titlesec, which KOMA is not on
+  -- speaking terms with.
+  put("\\@ifundefined{sectionlinesformat}{%")
+  put("  \\RequirePackage{titlesec}%")
+  local function titled(cmd, counter, size, leading, rule)
+    put("  \\titleformat{\\" .. cmd .. "}{\\color{mdmink}\\bfseries\\fontsize{" ..
+        size .. "\\mdmem}{" .. leading .. "\\mdmem}\\selectfont}{\\" .. counter ..
+        "}{1em}{}" .. (rule and "[{\\color{mdmrule}\\titlerule[0.8pt]}]" or "") .. "%")
+  end
+  titled("section", "thesection", "2", "2.6", true)
+  titled("subsection", "thesubsection", "1.5", "1.95", true)
+  titled("subsubsection", "thesubsubsection", "1.25", "1.63", false)
+  titled("paragraph", "theparagraph", "1.1", "1.43", false)
+  put("}{%")
+  put("  \\setkomafont{disposition}{\\bfseries\\color{mdmink}}%")
+  local function komafont(cmd, size, leading)
+    put("  \\addtokomafont{" .. cmd .. "}{\\fontsize{" .. size ..
+        "\\mdmem}{" .. leading .. "\\mdmem}\\selectfont}%")
+  end
+  komafont("section", "2", "2.6")
+  komafont("subsection", "1.5", "1.95")
+  komafont("subsubsection", "1.25", "1.63")
+  komafont("paragraph", "1.1", "1.43")
+  put("  \\renewcommand*{\\sectionlinesformat}[4]{%")
+  put("    \\@hangfrom{\\hskip #2#3}{#4}%")
+  put("    \\Ifstr{#1}{section}{\\mdmheadrule}{\\Ifstr{#1}{subsection}{\\mdmheadrule}{}}%")
+  put("  }%")
+  put("}")
+  put("\\makeatother")
+
+  -- A document with no code block at all is written with none of these
+  -- commands defined, so the whole group is asked for first.
+  put("\\makeatletter")
+  put("\\@ifundefined{KeywordTok}{}{%")
+  for _, token in ipairs(TOKENS) do
+    -- Weight and slant go with the colour: the editor paints its code with
+    -- ten colours and nothing else, where Pandoc bolds a keyword and slants a
+    -- comment (the `font-weight: inherit` of the stylesheet). The error slot
+    -- is not one of the ten and carries its own name.
+    local slot = token[2] == "error" and "mdmerror" or ("mdmsyn" .. token[2])
+    put("  \\renewcommand{\\" .. token[1] .. "}[1]{\\textcolor{" .. slot .. "}{#1}}%")
+  end
+  put("}")
+  put("\\makeatother")
+  put("\\usepackage{etoolbox}")
+  put("\\AtBeginEnvironment{quote}{\\color{mdmquiet}}")
+
+  -- The fill a score can be given (mdm.scoreFill), one colour per side, as a
+  -- box the block below puts the engraving in. With no fill the box is the
+  -- engraving and nothing else, so the two cases read the same further down.
+  -- The corner the browser rounds by 4 px is not rounded here, which would
+  -- take a package for the sake of two pixels on paper.
+  local fill = SCORE_FILLS[l.score_fill]
+  if fill then
+    color("mdmscorefill", (l.side == "dark") and fill.dark or fill.light)
+    put("\\newcommand{\\mdmscore}[1]{{\\setlength{\\fboxsep}{0.7em}" ..
+        "\\colorbox{mdmscorefill}{#1}}}")
+    -- A score at the text width has to give the padding back, or the box it
+    -- sits in would hang 0.7 em over either margin.
+    put("\\newcommand{\\mdmscorewidth}{\\dimexpr\\linewidth-1.4em\\relax}")
+  else
+    put("\\newcommand{\\mdmscore}[1]{#1}")
+    put("\\newcommand{\\mdmscorewidth}{\\linewidth}")
+  end
+  return table.concat(out, "\n")
+end
+
+
 local function is_abc_block(el)
   return el.classes:includes("abc")
 end
@@ -202,6 +442,10 @@ end
 local function ensure_look()
   if look_added then return end
   look_added = true
+  if quarto.doc.is_format("latex") then
+    quarto.doc.include_text("in-header", look_tex(look))
+    return
+  end
   quarto.doc.add_html_dependency({
     name = "mdm-look",
     version = "0.1.0",
@@ -240,24 +484,121 @@ local function run(cmd)
   return ok == true or code == 0
 end
 
+-- abcjs engraves a tune that names neither its number nor its key; abcm2ps,
+-- which goes by the standard, engraves nothing at all from one, and it says so
+-- by leaving with a status of 0 and no EPS behind it. The same block would
+-- then be a staff in the editor and in the HTML and a paragraph of ABC source
+-- in the PDF, so what the engraver insists on is supplied here when the block
+-- has not got it: `X:1` for the reference number, and `K:C` for the key, which
+-- draws the empty key signature and the treble clef abcjs falls back to
+-- (measured on abcjs 6.7.0: clef treble, no accidentals). A block that names
+-- either of them itself is passed through untouched.
+--
+-- The key is the field that closes the header, so it goes in front of the
+-- first line that is none of them: not a comment or a directive (both open
+-- with a `%`), not blank, and not a field of its own (a letter and a colon).
+local function with_engraver_header(source)
+  local has_x, has_k = false, false
+  for line in source:gmatch("(.-)\n") do
+    if line:match("^X%s*:") then has_x = true end
+    if line:match("^K%s*:") then has_k = true end
+  end
+  if has_x and has_k then return source end
+  local out = {}
+  if not has_x then out[#out + 1] = "X:1" end
+  local keyed = has_k
+  for line in source:gmatch("(.-)\n") do
+    if not keyed
+      and not line:match("^%%")
+      and not line:match("^%s*$")
+      and not line:match("^%a%s*:")
+    then
+      out[#out + 1] = "K:C"
+      keyed = true
+    end
+    out[#out + 1] = line
+  end
+  if not keyed then out[#out + 1] = "K:C" end
+  return table.concat(out, "\n") .. "\n"
+end
+
+-- The two colours an engraving is drawn in, read off the look the way the
+-- stylesheet reads them: the score takes the ink of the side (black on paper,
+-- the editor's own light ink on the dark side), and the staff lines take the
+-- grey of the side unless the editor was set to draw them in ink, where they
+-- take the colour of the score itself (`currentColor` in the browser).
+local function engraving_colors()
+  local l = look or { side = "light", staff_lines = "gray" }
+  local side = SIDES[l.side] or SIDES.light
+  local ink = side.svg_ink
+  if l.staff_lines == "gray" then return ink, side.staff end
+  return ink, ink
+end
+
+-- The colours painted into the EPS, before it is turned into a PDF.
+--
+-- abcm2ps writes no colour of its own, and Ghostscript, which is what makes
+-- the PDF of it, bakes the default black into everything it converts. So the
+-- engraving arrived black whatever the page under it was: on the dark side the
+-- score came out a shadow while the words abcm2ps sets around it, which are
+-- shown and not stroked, came out in the ink like the rest of the text.
+--
+-- The ink goes in once, at the head of the page. The staff lines are the only
+-- thing the engraver draws as a run of horizontals opened by `dlw` and closed
+-- by `stroke`, and that run is what the grey wraps; the ledger lines under a
+-- low note are `hl` and stay in the ink, exactly as in the browser, where the
+-- stylesheet paints `.abcjs-staff` and nothing else.
+local function ps_color(hex)
+  local r, g, b = hex:match("^#(%x%x)(%x%x)(%x%x)$")
+  if not r then return "0 0 0 setrgbcolor" end
+  return string.format(
+    "%.3f %.3f %.3f setrgbcolor",
+    tonumber(r, 16) / 255, tonumber(g, 16) / 255, tonumber(b, 16) / 255)
+end
+
+local function paint_eps(text, ink, staff)
+  local painted = text:gsub("(%%%%EndSetup\n)", "%1" .. ps_color(ink) .. "\n", 1)
+  if staff ~= ink then
+    painted = painted:gsub(
+      "\n(dlw [^\n]-stroke)", "\n" .. ps_color(staff) .. " %1 " .. ps_color(ink))
+  end
+  return painted
+end
+
 local function render_latex(el)
   local source = el.text
   if not source:match("\n$") then source = source .. "\n" end
-  local digest = sha1(source)
+  -- The engraving carries its own colours now, so what names the cache entry
+  -- is the block and the two colours it was drawn in: the same score on the
+  -- two sides of the look is two engravings and cannot share one file. What
+  -- the fields above add for the engraver is not part of the name, so a block
+  -- that needed them keeps the name it would have had without them.
+  local ink, staff = engraving_colors()
+  local digest = sha1(source .. "\n" .. ink .. " " .. staff)
   local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
 
   if not file_exists(pdf) then
     run("mkdir -p " .. CACHE_DIR)
     local abc = CACHE_DIR .. "/" .. digest .. ".abc"
     local f = assert(io.open(abc, "w"))
-    f:write(source)
+    f:write(with_engraver_header(source))
     f:close()
     local prefix = CACHE_DIR .. "/" .. digest .. "_"
     local eps = prefix .. "001.eps"
-    if not run(string.format("%s -E -q -O %s %s", abcm2ps_path, prefix, abc)) then
-      quarto.log.warning("mdm: abcm2ps failed on a music block; its source is left as it is.")
+    -- A tune abcm2ps will not have is refused with a status of 0 and no EPS
+    -- written, so the file is what says whether it engraved anything.
+    if not run(string.format("%s -E -q -O %s %s", abcm2ps_path, prefix, abc))
+      or not file_exists(eps)
+    then
+      quarto.log.warning("mdm: abcm2ps engraved nothing from a music block; its source is left as it is.")
       return nil
     end
+    local ef = assert(io.open(eps, "r"))
+    local engraved = ef:read("*a")
+    ef:close()
+    ef = assert(io.open(eps, "w"))
+    ef:write(paint_eps(engraved, ink, staff))
+    ef:close()
     -- abcm2ps writes the EPS at the full page width even when the staff is
     -- shorter than that (%%staffwidth, say). The BoundingBox is trimmed to
     -- the real ink with ghostscript, and the width that comes out is kept in
@@ -305,13 +646,33 @@ local function render_latex(el)
     width_pt = tonumber(wf:read("*a"))
     wf:close()
   end
+  -- Centred like a display equation, unless the editor was set to line the
+  -- scores up with the text (mdm.scoreAlign).
+  local left = look and look.score_align == "left"
   if width_pt and width_pt < 330 then
     return pandoc.RawBlock("latex", string.format(
-      "\\begin{center}\\includegraphics{%s}\\end{center}", pdf))
+      left and "\\noindent\\mdmscore{\\includegraphics{%s}}"
+        or "\\begin{center}\\mdmscore{\\includegraphics{%s}}\\end{center}",
+      pdf))
   end
-  local img = pandoc.Image({}, pdf, "", pandoc.Attr("", {}, { width = "100%" }))
-  return pandoc.Para({ img })
+  return pandoc.RawBlock("latex", string.format(
+    "\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{%s}}", pdf))
 end
+
+-- The block Quarto draws at the top of a rendered document from the YAML: the
+-- title, the subtitle, whoever wrote it and when. It belongs to the header, so
+-- it comes out only when the header does. The editor can keep the YAML out of
+-- the text it shows (mdm.frontMatter), and an export from an editor that is
+-- hiding it renders a document that does not open with it either; what the
+-- editor is showing travels as the metadata read here. A render from the
+-- command line has no editor behind it and keeps what the document declares.
+-- Quarto normalises whoever wrote the document into three keys of its own
+-- before a filter sees the metadata, so taking `author` away and leaving the
+-- other two behind still draws the block, with the name under it (measured).
+local TITLE_BLOCK = {
+  "title", "subtitle", "author", "authors", "by-author",
+  "date", "abstract", "doi", "keywords",
+}
 
 function Meta(meta)
   local opt = meta.mdm
@@ -321,7 +682,17 @@ function Meta(meta)
     abcm2ps_path = find_abcm2ps(nil)
   end
   look = read_look(meta)
-  if quarto.doc.is_format("html") then ensure_look() end
+  -- The look rides on every render, HTML or PDF, music in the document or
+  -- none: the ground, the ink and the code cards are the document's.
+  if quarto.doc.is_format("html") or quarto.doc.is_format("latex") then
+    ensure_look()
+  end
+  local header = meta_word(
+    meta, "mdm-front-matter", { shown = true, hidden = true }, "shown")
+  if header == "hidden" then
+    for _, key in ipairs(TITLE_BLOCK) do meta[key] = nil end
+    return meta
+  end
   return nil
 end
 
