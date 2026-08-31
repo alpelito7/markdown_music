@@ -99,6 +99,33 @@ const DUET_FIXTURE = [
   "",
 ].join("\n");
 
+// A duet with a written silence in it, for the ink over a rest. The treble
+// holds a half note and then a quarter rest while the bass holds a dotted
+// half through the whole measure, so the rest is a moment of the tune where
+// nothing at all attacks; the measure after it starts with a rest that DOES
+// share its moment with a bass chord, which is the case that always worked.
+// Three measures at 110 are about 4.9 seconds.
+const REST_FIXTURE = [
+  "---",
+  'title: "Rest"',
+  "---",
+  "",
+  "A rest one hand holds alone.",
+  "",
+  "```{.abc .play}",
+  "X:1",
+  "M:3/4",
+  "L:1/8",
+  "Q:1/4=110",
+  "K:Am",
+  "V:1 clef=treble",
+  "V:2 clef=bass",
+  "[V:1] B4 z2 | z2 A G A2 | G4 z2 |",
+  "[V:2] [G,,B,,D,]6 | [A,,C,E,]4 [A,,C,E,]2 | [E,G,B,]6 |",
+  "```",
+  "",
+].join("\n");
+
 // A file that opens on a score: no front matter, the fence on the first line.
 // The selection an untouched document carries sits at character 0, which is
 // inside this block, so anything that wakes that selection shows the ABC of a
@@ -464,6 +491,7 @@ module.exports = {
   EXAMPLE,
   TIMING_FIXTURE,
   DUET_FIXTURE,
+  REST_FIXTURE,
   TOP_SCORE_FIXTURE,
   typedIntoFirstParagraph,
   open,

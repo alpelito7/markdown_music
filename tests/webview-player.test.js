@@ -21,6 +21,7 @@ const {
   EXAMPLE,
   TIMING_FIXTURE,
   DUET_FIXTURE,
+  REST_FIXTURE,
   TOP_SCORE_FIXTURE,
   typedIntoFirstParagraph,
   open,
@@ -1009,6 +1010,152 @@ test("every voice of a duet lights up, on its own staff", { skip }, async () => 
         .length
   );
   assert.equal(leftoverDuet, 0);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A written silence takes the ink like a note while the cursor is on it. It
+// always did when the tune was played from the top, where the synth reports
+// the rest as an event of its own and the highlight lights it. What it did
+// not do was after a seek: the silent gap that carries a head dropped inside
+// a note runs to the next SOUNDING attack, and a rest attacks nothing, so the
+// gap ran straight over it and every event inside the gap waited for its end.
+// The rest was painted after its own moment had gone by, and the cursor
+// walked over it in ink.
+//
+// A rest one hand holds alone is what shows it: a rest that shares its moment
+// with a note on another staff belongs to an event that sounds, and it was
+// lit with that note all along, which is why a two-hand score lit some of its
+// rests and not others.
+test("a rest is lit while the cursor crosses it, after a seek too", { skip }, async () => {
+  const h = await open({ text: REST_FIXTURE, scores: 1 });
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
+    { timeout: 15000 }
+  );
+  // A first drop primes the tune, which is what puts its timings on the timer.
+  await dropHead(h.page, 0);
+  await h.page.waitForFunction(
+    () => {
+      const p = window.__mdm.player;
+      return !!(p && p.controller && p.controller.timer && p.controller.timer.noteTimings);
+    },
+    { timeout: 15000 }
+  );
+  // The moment nothing at all attacks: the quarter rest the treble holds while
+  // the bass is inside its dotted half. Read off the timer and not counted by
+  // hand, so the fixture can be re-voiced without silently aiming elsewhere.
+  const grid = await h.page.evaluate(() => {
+    const timer = window.__mdm.player.controller.timer;
+    const events = (timer.noteTimings || []).filter(
+      (t) => t.type === "event" && typeof t.startChar === "number"
+    );
+    const silent = events.filter((t) => !(t.midiPitches && t.midiPitches.length));
+    const rest = silent[0];
+    const before = events.filter((t) => t.milliseconds < rest.milliseconds).pop();
+    return {
+      total: timer.lastMoment,
+      rest: rest ? rest.milliseconds : null,
+      before: before ? before.milliseconds : null,
+    };
+  });
+  assert.ok(
+    grid.rest > 0 && grid.before !== null && grid.before < grid.rest,
+    "the fixture must hold a rest with nothing sounding under it: " +
+      JSON.stringify(grid)
+  );
+
+  // Every moment of the crossing, sampled: the lit elements, what they are
+  // painted, and where the line stands. A single reading would land wherever
+  // the sampling happened to fall.
+  const watch = () =>
+    h.page.evaluate(() => {
+      window.__ink = [];
+      window.__inkTimer = setInterval(function () {
+        const line = document.querySelector(
+          "#app code.language-abc svg .mdm-play-cursor"
+        );
+        const lit = Array.from(
+          document.querySelectorAll(
+            "#app [data-mdm-audio] code.language-abc svg .abcjs-note_selected"
+          )
+        ).map(function (el) {
+          const box = el.getBBox();
+          return {
+            rest: (el.getAttribute("class") || "").split(" ").indexOf("abcjs-rest") >= 0,
+            fill: getComputedStyle(el).fill,
+            from: box.x,
+            to: box.x + box.width,
+          };
+        });
+        window.__ink.push({
+          x: line ? parseFloat(line.getAttribute("x1")) : null,
+          lit: lit,
+        });
+      }, 25);
+    });
+
+  // The head dropped inside the note before the rest, which is the gesture
+  // that used to lose it: the gap starts there and ends past the rest.
+  await dropHead(h.page, (grid.before + grid.rest) / 2 / grid.total);
+  await watch();
+  await pressPlay(h.page);
+  await new Promise((r) => setTimeout(r, (grid.rest - grid.before) * 1.5 + 800));
+  const seeked = await h.page.evaluate(() => {
+    clearInterval(window.__inkTimer);
+    document.querySelector(".mdm-audio .mdm-audio-stop").click();
+    return window.__ink;
+  });
+  const onRest = seeked.filter(
+    (m) => m.lit.length === 1 && m.lit[0].rest && m.x !== null
+  );
+  assert.ok(
+    onRest.length > 0,
+    "the rest was never lit while the cursor crossed it: " +
+      JSON.stringify(seeked.map((m) => m.lit.length))
+  );
+  assert.deepEqual(
+    Array.from(new Set(onRest.map((m) => m.lit[0].fill))),
+    ["rgb(160, 116, 15)"], // the light brass of --mdm-play-accent
+    "the rest was marked without being accented"
+  );
+  // And lit where it stands: the line never runs behind the rest's drawing
+  // while the rest is lit, and passes over it somewhere in the crossing, which
+  // is the moment the ink was missing from. Past the glyph it keeps walking,
+  // to the x of the note that ends the silence, so the far edge is no bound.
+  const behind = onRest.filter((m) => m.x < m.lit[0].from - 2);
+  assert.equal(
+    behind.length,
+    0,
+    "the rest was lit before the cursor reached it: " + JSON.stringify(behind[0])
+  );
+  const over = onRest.filter(
+    (m) => m.x >= m.lit[0].from - 2 && m.x <= m.lit[0].to + 2
+  );
+  assert.ok(over.length > 0, "the cursor never passed over the lit rest");
+
+  // A head parked on the rest, with nothing playing: the same ink, since the
+  // rest's own event went by before the head arrived and nothing reports it
+  // again.
+  await h.page.evaluate(() => {
+    window.__ink = [];
+  });
+  await dropHead(h.page, (grid.rest + 30) / grid.total);
+  await new Promise((r) => setTimeout(r, 400));
+  const parked = await h.page.evaluate(() => {
+    const lit = Array.from(
+      document.querySelectorAll(
+        "#app [data-mdm-audio] code.language-abc svg .abcjs-note_selected"
+      )
+    ).map((el) => (el.getAttribute("class") || "").split(" ").indexOf("abcjs-rest") >= 0);
+    return {
+      lit: lit,
+      sounding: !!document.querySelector(".abcjs-midi-start.abcjs-pushed"),
+    };
+  });
+  assert.equal(parked.sounding, false, "the drop started playback");
+  assert.deepEqual(parked.lit, [true], "a head parked on a rest lights nothing");
   assert.deepEqual(h.errors, []);
   await h.close();
 });

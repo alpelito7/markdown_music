@@ -2027,10 +2027,17 @@
   }
 
   // A stretch of source lit at the moment the tune clock reaches `ms`, and at
-  // once when that moment has gone by. Never before the gap ends: what the ink
-  // says and what is coming out have to agree.
+  // once when that moment has gone by. A sounding note waits for the end of
+  // the gap however early its moment falls, since what the ink says and what
+  // is coming out have to agree. A written silence agrees with the gap
+  // already: it sounds nothing whether the gain is up or down, so it is lit on
+  // its own beat, which is the only beat it has. Held back with the notes, a
+  // rest inside the gap was painted after its own moment had gone by, and the
+  // cursor walked over it in ink.
   function paintInkAt(note, ms) {
-    const wait = inkClockZero + Math.max(ms, inkEndsAt) - performance.now();
+    const sounds = !!(note && note.midiPitches && note.midiPitches.length);
+    const due = sounds ? Math.max(ms, inkEndsAt) : ms;
+    const wait = inkClockZero + due - performance.now();
     if (wait <= 0) {
       highlightPlaying(note);
       return;
@@ -2166,15 +2173,44 @@
     return { note: after ? after.note : null, wait: wait <= 0.03 ? 0 : wait };
   }
 
+  // The written silence a moment of the clock falls in, and nothing when it
+  // falls in a sound. soundFrom cannot answer this: a rest attacks nothing, so
+  // it is not in the walk attacks() makes, and the stretch of tune it holds
+  // reads there as the tail of the note before it. What the score shows at
+  // that moment is the rest, and so is what comes out of the speakers, so the
+  // ink reads the same timings for itself.
+  //
+  // A moment where nothing at all attacks, and only that: a rest one voice
+  // holds while another plays belongs to an event that sounds, and soundFrom
+  // names it, with the rest in the same group and lit with it.
+  function restAt(timer, at) {
+    const timings = (timer && timer.noteTimings) || [];
+    let here = null;
+    for (let i = 0; i < timings.length; i++) {
+      const t = timings[i];
+      if (!t || t.type !== "event") continue;
+      if (typeof t.milliseconds !== "number") continue;
+      // A measure that begins with nothing attacking gets a placeholder that
+      // names no source; it is no more the ink's than the walker's.
+      if (typeof t.startChar !== "number") continue;
+      if (t.milliseconds > at + 1) break;
+      here = t;
+    }
+    return here && !(here.midiPitches && here.midiPitches.length) ? here : null;
+  }
+
   // The ink under the head, once the head has been moved: the note that sounds
-  // from there, and none at all when what comes first is the silence.
+  // from there, the rest the head landed inside when it landed in one, and
+  // none at all when what comes first is the silence of a note cut short.
   function markNoteAt(timer, at) {
     const from = soundFrom(timer, at);
     if (from && !from.wait && from.note) {
       highlightPlaying(from.note);
-    } else {
-      clearPlayingHighlight();
+      return;
     }
+    const rest = restAt(timer, at);
+    if (rest) highlightPlaying(rest);
+    else clearPlayingHighlight();
   }
 
   function scheduleSilentGap(timer, at) {
@@ -2204,6 +2240,12 @@
     inkClockZero = performance.now() - at;
     inkEndsAt = at + remaining * 1000;
     inkHoldUntil = performance.now() + remaining * 1000;
+    // Unless the head landed inside a written silence, which the gap is not
+    // muting: that rest is lit at once, since its own event went by before the
+    // head arrived and nothing will report it again. The rests the gap runs
+    // over after this one are lit by their events, on their own beat.
+    const rest = restAt(timer, at);
+    if (rest) highlightPlaying(rest);
     if (from.note) paintInkAt(from.note, inkEndsAt);
   }
 
