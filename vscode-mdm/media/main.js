@@ -4039,9 +4039,6 @@
     return out;
   }
 
-  // One row per heading, indented by level, the current section (the last
-  // heading at or above the caret) marked. A click takes the caret to the top
-  // of that heading and scrolls it into view.
   // The outline is a panel down the left edge of the editor, the way the
   // Vditor version had it: a list of the headings, indented by level, the
   // section the caret is in marked, each one a jump. It is a toggle, not a
@@ -4057,9 +4054,21 @@
     return document.querySelector("#app .mdm-outline__list");
   }
 
+  // A few pixels of air over a heading jumped to, so the line does not sit
+  // flush against the toolbar.
+  const OUTLINE_JUMP_AIR = 8;
+
   // Fills the panel from the current headings, only while it is open. Called
   // when it opens and on every edit or caret move, so the list and the mark on
   // the section in view stay current.
+  //
+  // One row per heading, indented by level, the current section (the last
+  // heading at or above the caret) marked. A click takes the caret to the top
+  // of that heading and pulls the heading up to the top of the pane, so the
+  // section starts where the eye already is, the way a table of contents lands
+  // on a page. Near the foot of the document, where what is left below a
+  // heading cannot fill the pane, the scroll clamps on its own: the heading
+  // lands as high as it can and the document ends at the bottom edge.
   function refreshOutline() {
     const list = outlineList();
     if (!list || !outlineOpen || !view) return;
@@ -4088,7 +4097,13 @@
       row.title = h.text;
       row.addEventListener("click", function () {
         if (!view) return;
-        view.dispatch({ selection: { anchor: h.pos }, scrollIntoView: true });
+        view.dispatch({
+          selection: { anchor: h.pos },
+          effects: EditorView.scrollIntoView(h.pos, {
+            y: "start",
+            yMargin: OUTLINE_JUMP_AIR,
+          }),
+        });
         view.focus();
       });
       list.appendChild(row);

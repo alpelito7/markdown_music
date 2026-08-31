@@ -892,15 +892,44 @@ test("the outline panel lists the headings, marks the section and jumps", { skip
     1,
     "the section in view is not marked"
   );
-  // Picking the last heading jumps there and leaves the panel open.
-  await h.page.click("#app .mdm-outline__row:nth-child(3)");
-  await sleep(150);
-  const landed = await h.page.evaluate(() => ({
-    text: window.__mdm.view.state.doc.lineAt(window.__mdm.view.state.selection.main.head).text,
-    open: document.getElementById("app").classList.contains("mdm-outline--open"),
-  }));
-  assert.equal(landed.text, "## From score to sound");
-  assert.equal(landed.open, true, "the panel closed after a pick");
+  // A pick does not merely bring the heading into view: it pulls it up to the
+  // top of the pane, so the section starts where the eye already is. Read on
+  // the middle heading, which has document enough under it to fill the pane.
+  const landing = async (nth) => {
+    await h.page.click("#app .mdm-outline__row:nth-child(" + nth + ")");
+    await sleep(250);
+    return h.page.evaluate(() => {
+      const { view } = window.__mdm;
+      const head = view.state.selection.main.head;
+      const pane = view.scrollDOM;
+      const box = pane.getBoundingClientRect();
+      return {
+        text: view.state.doc.lineAt(head).text,
+        top: Math.round(view.coordsAtPos(head).top - box.top),
+        bottomed: pane.scrollTop >= pane.scrollHeight - pane.clientHeight - 2,
+        open: document.getElementById("app").classList.contains("mdm-outline--open"),
+      };
+    });
+  };
+  const middle = await landing(2);
+  assert.equal(middle.text, "## From code to scores");
+  assert.equal(middle.open, true, "the panel closed after a pick");
+  assert.ok(!middle.bottomed, "the pane ran to its end on a heading with room under it");
+  assert.ok(
+    middle.top >= 0 && middle.top <= 24,
+    "the heading landed " + middle.top + "px from the top of the pane, not at it"
+  );
+  // Picking the last heading jumps there and leaves the panel open. There is
+  // not enough document under it to fill the pane, so the scroll clamps: the
+  // heading lands as high as it can and the document ends at the bottom edge,
+  // which is the whole of what "as high as it can" means here.
+  const last = await landing(3);
+  assert.equal(last.text, "## From score to sound");
+  assert.equal(last.open, true, "the panel closed after a pick");
+  assert.ok(
+    last.bottomed || (last.top >= 0 && last.top <= 24),
+    "the last heading neither reached the top nor ran the pane to its end"
+  );
   // A document with no headings shows the empty note.
   await h.page.evaluate(() =>
     window.__mdm.view.dispatch({
