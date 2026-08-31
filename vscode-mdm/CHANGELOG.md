@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.4
+
+- The editor spends its own brass on what is held or sounding. It used to
+  draw its chrome in four weights of the theme's ink, on the argument that
+  the accent belongs to the score, which left it with no way of saying
+  "this is on": a heavier grey disc is not a statement. There is one
+  ladder now, two steps of the same brass: a light wash under whatever the
+  pointer is on, and a heavier disc, with the glyph in brass, for what is
+  held. Play wears it while the tune sounds, repeat while it loops, the
+  headphones while their player is open, the toolbar toggles while they
+  are on. The played half of the progress, its head and the volume take
+  the deep form of the brass, so the two sliders say where they stand in
+  one voice, and so do the caret and the section of the outline the caret
+  is in. The exported HTML is drawn from the same ladder: the page and the
+  editor are one bar.
+- A rest stayed in ink under the playing cursor when the tune was reached
+  by dragging the head or by pressing play from inside a note, while a
+  rest sounding against a note on another staff lit as it always had. On a
+  two-hand score that read as the highlight losing its place. The silence
+  a seek opens runs to the next note that sounds, which is right for the
+  sound and was carrying the ink with it; a written silence is lit on its
+  own beat now, and a head dropped on a rest lights it where it lands.
+- Picking a heading in the outline pulls it to the top of the pane instead
+  of merely bringing it into view, so the section starts where the eye
+  already is. Near the foot of a document the heading lands as high as
+  what is left below it allows.
+
 ## 0.2.3
 
 - An export comes out as the editor reads it. The editor reads CommonMark,
