@@ -50,7 +50,12 @@ test("example.mdm: front matter spans lines 1-13 with YAML inside", () => {
     `FrontMatterContent@${lineStart(example, 2)}-${lineEnd(example, 12)}`,
     `FrontMatterMark@${lineStart(example, 13)}-${lineEnd(example, 13)}`
   ])
-  assert.equal(lineEnd(example, 13), 214)
+  // The two fences by content, not by an absolute offset: example.mdm is a
+  // living document and its header is rewritten with it. The literal that
+  // used to stand here went stale the day the title line was reworded, and
+  // said nothing the ranges above do not already say.
+  assert.equal(example.slice(0, lineEnd(example, 1)), "---")
+  assert.equal(example.slice(lineStart(example, 13), lineEnd(example, 13)), "---")
   // The YAML overlay is reachable at positions inside the content.
   const key = tree.resolveInner(lineStart(example, 2) + 1, 1)
   assert.equal(key.name, "Literal")
