@@ -375,7 +375,19 @@ local function look_tex(l)
   -- what Quarto gives a document that names none, restyles through its own
   -- hooks, and a standard class through titlesec, which KOMA is not on
   -- speaking terms with.
+  -- The folio is set by the output routine, which the \AtBeginDocument ink
+  -- above does not reach: on the dark side the page number came out black
+  -- on the dark ground (measured, article and KOMA alike). The standard
+  -- classes get their \ps@plain rebuilt with the ink in it (redefining
+  -- \@oddfoot alone would not last: \maketitle's \thispagestyle{plain}
+  -- runs \ps@plain again and puts the black one back); KOMA fonts its
+  -- footer through an element of its own.
   put("\\@ifundefined{sectionlinesformat}{%")
+  put("  \\def\\ps@plain{\\let\\@mkboth\\@gobbletwo")
+  put("    \\let\\@oddhead\\@empty\\let\\@evenhead\\@empty")
+  put("    \\def\\@oddfoot{{\\color{mdmink}\\reset@font\\hfil\\thepage\\hfil}}%")
+  put("    \\let\\@evenfoot\\@oddfoot}%")
+  put("  \\pagestyle{plain}%")
   put("  \\RequirePackage{titlesec}%")
   local function titled(cmd, counter, size, leading, rule)
     put("  \\titleformat{\\" .. cmd .. "}{\\color{mdmink}\\bfseries\\fontsize{" ..
@@ -388,6 +400,11 @@ local function look_tex(l)
   titled("paragraph", "theparagraph", "1.1", "1.43", false)
   put("}{%")
   put("  \\setkomafont{disposition}{\\bfseries\\color{mdmink}}%")
+  -- pagenumber and not pageheadfoot alone: KOMA's pagenumber element opens
+  -- with \normalcolor, which threw away any ink the head-and-foot element
+  -- set before it (measured: the folio stayed black on the dark side).
+  put("  \\setkomafont{pageheadfoot}{\\color{mdmink}}%")
+  put("  \\addtokomafont{pagenumber}{\\color{mdmink}}%")
   local function komafont(cmd, size, leading)
     put("  \\addtokomafont{" .. cmd .. "}{\\fontsize{" .. size ..
         "\\mdmem}{" .. leading .. "\\mdmem}\\selectfont}%")
