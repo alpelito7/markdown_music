@@ -289,10 +289,43 @@ local function look_tex(l)
   -- smaller than the words around it and a \\sqrt over a fraction came out
   -- cramped. A document that names a `mathfont` of its own is left alone:
   -- Quarto writes that into the preamble before this block is read.
+  --
+  -- The face is New Computer Modern in its Book weight, not Latin Modern:
+  -- KaTeX's fonts are Computer Modern thickened for the screen, and NewCM
+  -- Book is the same correction cut for paper, where Latin Modern beside a
+  -- sans with the weight of Helvetica came out starved of ink, and its
+  -- radical sign met the vinculum with a visible gap at this scale (measured
+  -- on the \\sqrt of example.mdm). Latin Modern stays as the fallback for a
+  -- distribution without NewCM.
+  --
+  -- \\setmathrm besides: unicode-math takes the words of an operator (\\sin,
+  -- \\cos, \\mathrm) from the text font, which here is the sans, where KaTeX
+  -- sets them in its upright serif; the roman of the same family puts them
+  -- back.
   if not l.mathfont then
-    put("  \\IfFontExistsTF{Latin Modern Math}" ..
-        "{\\setmathfont{Latin Modern Math}[Scale=1.21]}{}")
+    put("  \\IfFontExistsTF{NewCMMath-Book.otf}{%")
+    put("    \\setmathfont{NewCMMath-Book.otf}[Scale=1.21]%")
+    put("    \\IfFontExistsTF{NewCM10-Book.otf}" ..
+        "{\\setmathrm{NewCM10-Book.otf}[Scale=1.21]}{}%")
+    put("  }{%")
+    put("    \\IfFontExistsTF{Latin Modern Math}{%")
+    put("      \\setmathfont{Latin Modern Math}[Scale=1.21]%")
+    put("      \\setmathrm{Latin Modern Roman}[Scale=1.21]}{}%")
+    put("  }")
   end
+  -- Inline code sits on a chip of the card material, as in the editor. A
+  -- \\colorbox would refuse to break at the end of a line, which is why the
+  -- chip did not travel at first; lua-ul paints the ground under the glyphs
+  -- without boxing them, so a long piece of code wraps as it does in the
+  -- browser. LuaTeX only, which is the engine Quarto renders with unless the
+  -- document names another; under XeTeX the code keeps its bare mono, as
+  -- before. The \\hspace on either side is the 0.3em padding of the chip.
+  put("  \\ifLuaTeX")
+  put("    \\usepackage{luacolor}\\usepackage{lua-ul}")
+  put("    \\NewCommandCopy{\\mdmtexttt}{\\texttt}")
+  put("    \\renewcommand{\\texttt}[1]{\\highLight[mdmcard]" ..
+      "{\\textcolor{mdmsynbase}{\\mdmtexttt{\\hspace{0.3em}#1\\hspace{0.3em}}}}}")
+  put("  \\fi")
   put("\\fi")
 
   -- The editor sets its text at 1.7 line heights, LaTeX at 1.2 of its own.
@@ -384,8 +417,29 @@ local function look_tex(l)
   end
   put("}")
   put("\\makeatother")
+  -- A quote carries the editor's left border as well as its quieter ink: 3px
+  -- of the rule colour at 22% (0.19em at a 16px text), 14px of air after it
+  -- (0.88em), and the 40px the browser indents a blockquote by on either side
+  -- (2.5em). framed draws the rule, so a long quote still breaks across
+  -- pages; without framed the colour travels alone, as it did before.
+  put("\\colorlet{mdmquoterule}{mdmink!22!mdmpage}")
   put("\\usepackage{etoolbox}")
-  put("\\AtBeginEnvironment{quote}{\\color{mdmquiet}}")
+  put("\\IfFileExists{framed.sty}{%")
+  put("  \\usepackage{framed}%")
+  put("  \\renewenvironment{quote}{%")
+  put("    \\def\\FrameCommand{\\hspace{2.5\\mdmem}" ..
+      "{\\color{mdmquoterule}\\vrule width 0.19\\mdmem}\\hspace{0.88\\mdmem}}%")
+  put("    \\MakeFramed{\\advance\\hsize-\\width" ..
+      "\\advance\\hsize-2.5\\mdmem\\FrameRestore}\\color{mdmquiet}}%")
+  put("  {\\endMakeFramed}%")
+  put("}{\\AtBeginEnvironment{quote}{\\color{mdmquiet}}}")
+  -- A thematic break the way the editor draws it: a hairline of the ink at
+  -- 16%, the full measure wide, 0.6em of air on either side (the 2px and the
+  -- margins of `body hr` in mdm-look.css), where LaTeX's own is a black rule
+  -- half the line long. The HorizontalRule filter below spends it.
+  put("\\colorlet{mdmhrrule}{mdmink!16!mdmpage}")
+  put("\\newcommand{\\mdmthematicbreak}{\\par\\vspace{0.6\\mdmem}" ..
+      "{\\color{mdmhrrule}\\hrule height 0.125\\mdmem}\\vspace{0.6\\mdmem}}")
 
   -- The fill a score can be given (mdm.scoreFill), one colour per side, as a
   -- box the block below puts the engraving in. With no fill the box is the
@@ -404,6 +458,15 @@ local function look_tex(l)
     put("\\newcommand{\\mdmscore}[1]{#1}")
     put("\\newcommand{\\mdmscorewidth}{\\linewidth}")
   end
+  -- The band of air around a score: the editor gives every block 1.5em of
+  -- vertical margin (`.mdm-block` in mdm.css), where the PDF set one down
+  -- with no more than the gap of a paragraph. The page already puts its
+  -- \\parskip in front of the engraving (KOMA's parskip=half, about 0.85em
+  -- here), and the \\addvspace tops it up to the editor's 1.5; being
+  -- \\addvspace and not \\vspace, it does not pile onto the skip of a heading
+  -- just above. The group keeps a \\centering to the engraving it centres.
+  put("\\newcommand{\\mdmscoreband}[1]{\\par\\addvspace{0.65\\mdmem}" ..
+      "{#1\\par}\\addvspace{0.65\\mdmem}}")
   return table.concat(out, "\n")
 end
 
@@ -653,16 +716,30 @@ local function render_latex(el)
     wf:close()
   end
   -- Centred like a display equation, unless the editor was set to line the
-  -- scores up with the text (mdm.scoreAlign).
+  -- scores up with the text (mdm.scoreAlign). Every score goes down inside
+  -- the band (\mdmscoreband, in the preamble), which is what gives it the
+  -- editor's 1.5em of air above and below; the centred one takes a plain
+  -- \centering rather than the center environment, whose own topsep would
+  -- stack a second gap onto the band's.
   local left = look and look.score_align == "left"
   if width_pt and width_pt < 330 then
     return pandoc.RawBlock("latex", string.format(
-      left and "\\noindent\\mdmscore{\\includegraphics{%s}}"
-        or "\\begin{center}\\mdmscore{\\includegraphics{%s}}\\end{center}",
+      left and "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics{%s}}}"
+        or "\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{%s}}}",
       pdf))
   end
   return pandoc.RawBlock("latex", string.format(
-    "\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{%s}}", pdf))
+    "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{%s}}}", pdf))
+end
+
+-- A thematic break (`---`), drawn as the editor draws its <hr>: the hairline
+-- the preamble defines. HTML keeps Quarto's own <hr>, which mdm-look.css
+-- already paints; any other format keeps Pandoc's.
+local function horizontal_rule()
+  if quarto.doc.is_format("latex") then
+    return pandoc.RawBlock("latex", "\\mdmthematicbreak")
+  end
+  return nil
 end
 
 -- The block Quarto draws at the top of a rendered document from the YAML: the
@@ -715,5 +792,5 @@ end
 -- Meta has to run before the CodeBlocks, since it settles the abcm2ps path.
 return {
   { Meta = Meta },
-  { CodeBlock = CodeBlock },
+  { CodeBlock = CodeBlock, HorizontalRule = horizontal_rule },
 }

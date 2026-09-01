@@ -330,11 +330,28 @@ test("the look rides on every PDF render, and reads the same metadata", () => {
   assert.ok(tex.includes("{2\\mdmem}"), "the h1 is not two ems");
   assert.ok(tex.includes("\\colorlet{mdmrule}{mdmink!14!mdmpage}"), "the hairline is missing");
   // The maths at the 1.21 KaTeX sets its own at, and code at the 0.88 the
-  // stylesheet gives it.
+  // stylesheet gives it. The face is NewCM Book, the correction for paper of
+  // the same thickening KaTeX's fonts carry for the screen; Latin Modern
+  // stays behind it for a distribution without NewCM.
+  assert.ok(
+    tex.includes("\\setmathfont{NewCMMath-Book.otf}[Scale=1.21]"),
+    "the maths is not the Book weight at the KaTeX scale"
+  );
   assert.ok(
     tex.includes("\\setmathfont{Latin Modern Math}[Scale=1.21]"),
-    "the maths is left at the scale of the roman"
+    "the Latin Modern fallback is gone"
   );
+  // The words of an operator (\sin, \mathrm) in the upright serif of the same
+  // family, as KaTeX sets them, not in the sans of the page.
+  assert.ok(tex.includes("\\setmathrm{NewCM10-Book.otf}[Scale=1.21]"), "the operators stay sans");
+  // Inline code on its chip of the card material, breakable at the line's
+  // end, which is what lua-ul is for; and the band of air around a score.
+  assert.ok(tex.includes("\\highLight[mdmcard]"), "inline code lost its chip");
+  assert.ok(tex.includes("\\newcommand{\\mdmscoreband}[1]"), "the band around a score is missing");
+  // The quote with the editor's left border, and the thematic break as its
+  // hairline.
+  assert.ok(tex.includes("\\colorlet{mdmquoterule}{mdmink!22!mdmpage}"), "the quote border is missing");
+  assert.ok(tex.includes("\\newcommand{\\mdmthematicbreak}"), "the thematic break is missing");
   assert.ok(tex.includes("[Scale=0.88]"), "code is not at the size the editor sets it");
   // The size command must not shrink it a second time (the template carries a
   // commented-out `fontsize=\\small` of its own, which is why this names the
@@ -486,7 +503,10 @@ test("the fill and the alignment of a score travel to the PDF", () => {
   assert.equal(r.status, 0, r.stderr);
   let tex = texOf(dir);
   assert.ok(tex.includes("\\newcommand{\\mdmscore}[1]{#1}"), "an empty fill still boxes");
-  assert.ok(tex.includes("\\begin{center}\\mdmscore{\\includegraphics{"), "the narrow score is not centred");
+  assert.ok(
+    tex.includes("\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{"),
+    "the narrow score is not centred inside the band"
+  );
 
   // Paper, on the light side, and the score lined up with the text.
   r = runMdm(
@@ -498,8 +518,11 @@ test("the fill and the alignment of a score travel to the PDF", () => {
   tex = texOf(dir);
   assert.ok(tex.includes("\\definecolor{mdmscorefill}{HTML}{F4EFE2}"), "the paper fill is not the light one");
   assert.ok(tex.includes("\\colorbox{mdmscorefill}"), "the fill does not reach the engraving");
-  assert.ok(!tex.includes("\\begin{center}\\mdmscore"), "the score is still centred");
-  assert.ok(tex.includes("\\noindent\\mdmscore{\\includegraphics{"), "the score is not lined up left");
+  assert.ok(!tex.includes("\\centering\\mdmscore"), "the score is still centred");
+  assert.ok(
+    tex.includes("\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics{"),
+    "the score is not lined up left"
+  );
   // A score at the text width gives the padding back, so the box fits the
   // measure instead of hanging over both margins.
   assert.ok(tex.includes("width=\\mdmscorewidth"), "the wide score does not take the box into account");
@@ -762,15 +785,15 @@ test("PDF render: sha1 cache, bbox crop, .w sidecars, narrow centring", () => {
   // the engraving itself when there is none.
   assert.ok(
     tex.includes(
-      "\\begin{center}\\mdmscore{\\includegraphics{mdm_cache/" +
-        narrowHash + ".pdf}}\\end{center}"
+      "\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{mdm_cache/" +
+        narrowHash + ".pdf}}}"
     ),
     "narrow score not centred in TeX"
   );
   assert.ok(
     tex.includes(
-      "\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{mdm_cache/" +
-        wideHash + ".pdf}}"
+      "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{mdm_cache/" +
+        wideHash + ".pdf}}}"
     ),
     "wide score not at the text width in TeX"
   );
