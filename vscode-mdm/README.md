@@ -6,11 +6,15 @@ as a score and play it back. The editor around them is a full one, with
 multicursor, an outline down the left edge, a look set from the toolbar and
 an export to HTML or PDF.
 
-The music is written in
-[ABC notation](https://abcnotation.com/wiki/abc:standard:v2.1) inside
-ordinary fenced blocks, so an `.mdm` file is valid Markdown throughout and
-any other editor shows it as code with nothing broken. Every part is drawn
-in place and every part is still plain text underneath.
+The music is written in [ABC notation](https://abcnotation.com/wiki/abc:standard:v2.1) inside ordinary fenced blocks, so an
+`.mdm` file is valid Markdown throughout and any other editor shows it as
+code with nothing broken. Every part is drawn in place and every part is still
+plain text underneath.
+
+A document to open it on: **[example.mdm](https://github.com/alpelito7/markdown_music/blob/main/example.mdm)**, the sample of the project, with
+equations, code, scores and player. Download it from the [raw file](https://raw.githubusercontent.com/alpelito7/markdown_music/main/example.mdm), save it
+anywhere with the `.mdm` extension and open it in VS Code: it comes up
+in this editor.
 
 ![An equation and a score rendered in the editor, dark side](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-dark.png)
 
@@ -48,7 +52,7 @@ the block opens its ABC above the engraving, and while a tune plays a
 brass cursor glides across the score and the notes light up under it as
 they sound, every voice of them:
 
-![A duet playing with its ABC source open above the engraving: the brass cursor standing across both staves, the two notes it has just reached lit in brass under it, one on each staff, and the player bar underneath](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
+![A duet playing with its ABC source open above the engraving: the brass cursor standing across both staves, the two notes it has just reached lit in brass under it, one on each staff, and the player bar underneath, its play button, its progress and its open headphones lit in that same brass](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
 
     ```{.abc .play}
     X:1
@@ -103,16 +107,17 @@ away.
 
 ## Settings
 
-| Setting | What it holds |
-|---|---|
-| `mdm.theme` | `auto`, `light`, `dark`, `white`, or the name of an installed colour theme |
-| `mdm.staffLines` | `gray` or `ink` |
-| `mdm.scoreFill` | `none`, `paper`, `slate`, `brass` |
-| `mdm.scoreAlign` | `center` or `left` |
-| `mdm.frontMatter` | whether the YAML header is shown in the document |
-| `mdm.outline` | whether the outline panel is open |
-| `mdm.outlineWidth` | the outline panel's width in pixels |
-| `mdm.multicursorMatch` | whether `Ctrl+D` matches whole words or inside them |
+
+| Setting                | What it holds                                                              |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `mdm.theme`            | `auto`, `light`, `dark`, `white`, or the name of an installed colour theme |
+| `mdm.staffLines`       | `gray` or `ink`                                                            |
+| `mdm.scoreFill`        | `none`, `paper`, `slate`, `brass`                                          |
+| `mdm.scoreAlign`       | `center` or `left`                                                         |
+| `mdm.frontMatter`      | whether the YAML header is shown in the document                           |
+| `mdm.outline`          | whether the outline panel is open                                          |
+| `mdm.outlineWidth`     | the outline panel's width in pixels                                        |
+| `mdm.multicursorMatch` | whether `Ctrl+D` matches whole words or inside them                        |
 
 ## Notes
 

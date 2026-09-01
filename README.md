@@ -1,4 +1,4 @@
-# <img src="vscode-mdm/media/icon.png" alt="" width="96" align="absmiddle"> Markdown Music
+# Markdown Music
 
 A document format for technical writing that mixes mathematics and music:
 standard Markdown (with LaTeX equations) plus music blocks in ABC notation
@@ -8,6 +8,14 @@ about the format shows them as code and nothing breaks.
 
 Implemented as a Quarto extension, which brings everything else for free
 (HTML + PDF, theorems, cross-references, bibliography).
+
+The editor for it is a **VS Code extension**, "Markdown Music", published on
+the [Marketplace](https://marketplace.visualstudio.com/items?itemName=alpelito7.mdm-editor): it opens an `.mdm` file as a rendered, editable document,
+with the equations as KaTeX, the scores engraved in place and a player on the
+ones that ask for one, and every part still plain Markdown underneath. Its
+source is in [`vscode-mdm/`](vscode-mdm/) and it has [a section of its own below](#visual-editor-for-vs-code-vscode-mdm). The format
+does not depend on it: the Quarto filter renders an `.mdm` from the command
+line with no editor anywhere.
 
 ## Installation
 
@@ -131,13 +139,14 @@ What varies travels as plain metadata, which the VS Code extension passes
 when it exports (`exportLook` in `vscode-mdm/extension.js`) and a plain
 `bin/mdm render` does not pass at all:
 
-| Key | Values |
-|---|---|
-| `mdm-look` | `light`, `dark`, `white`: the side the editor is on, and with it the two grounds, the ink and the accents |
-| `mdm-staff-lines` | `gray`, `ink` |
-| `mdm-score-fill` | `none`, `paper`, `slate`, `brass` |
-| `mdm-score-align` | `center`, `left` |
-| `mdm-syn-*` | the ten syntax slots (`base`, `bg`, `comment`, `string`, `number`, `keyword`, `attr`, `name`, `type`, `variable`), as six hex digits **without** the `#`, which would open a YAML comment |
+
+| Key               | Values                                                                                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mdm-look`        | `light`, `dark`, `white`: the side the editor is on, and with it the two grounds, the ink and the accents                                                                                 |
+| `mdm-staff-lines` | `gray`, `ink`                                                                                                                                                                             |
+| `mdm-score-fill`  | `none`, `paper`, `slate`, `brass`                                                                                                                                                         |
+| `mdm-score-align` | `center`, `left`                                                                                                                                                                          |
+| `mdm-syn-*`       | the ten syntax slots (`base`, `bg`, `comment`, `string`, `number`, `keyword`, `attr`, `name`, `type`, `variable`), as six hex digits **without** the `#`, which would open a YAML comment |
 
 So a render from a terminal comes out in the editor's default look with the
 palette the editor itself falls back to (stackoverflow-light), and one from
@@ -251,7 +260,7 @@ the look for the HTML format alone.
   TeX Live).
 - `abcm2ps` (for PDF). Not included: install it from the system's packages
   (Debian and Ubuntu `apt install abcm2ps`, macOS `brew install abcm2ps`) or
-  build it from <https://github.com/lewdlime/abcm2ps>. The filter looks for
+  build it from [https://github.com/lewdlime/abcm2ps](https://github.com/lewdlime/abcm2ps). The filter looks for
   it at `tools/bin/abcm2ps` beside the document first and then in the PATH,
   so a local build can be dropped there; another path can be set in the
   YAML header of the document:
@@ -436,6 +445,7 @@ How the editing works:
   the widget and the player reopens on it, paused and on the new source.
   Only the piano is vendored: a different `%%MIDI program` will not find
   its notes.
+
   - **Resuming after a pause keeps the beat**: the resuming play restarts
     the sound exactly where it stopped but MUTED, what was left of the cut
     note passes in real silence with the clock running, and the gain comes
@@ -610,8 +620,7 @@ How the editing works:
     shown; the CSS tooltip of the editor (`.mdm-tip`, drawn from
     `aria-label`) is used instead, the same one the copy button has. The
     volume slider carries `outline: none`: VS Code injects a sheet of its
-    own into every webview with `a:focus, input:focus, select:focus,
-    textarea:focus { outline: 1px solid -webkit-focus-ring-color }` (it is
+    own into every webview with `a:focus, input:focus, select:focus, textarea:focus { outline: 1px solid -webkit-focus-ring-color }` (it is
     in the preload of the installed build), and that system colour is
     amber in Chromium, so setting the volume drew a yellow box. Keyboard
     focus keeps a mark, in the ink of the bar.
@@ -635,6 +644,7 @@ How the editing works:
   Everything comes from two mixes of the theme's own colours: the *tint*,
   which is `editor.background` taken 6% towards the foreground, and the
   *wash*, the same mix at 2%.
+
   - *Light*: the code keeps its usual slate (the tint) and the page takes
     the wash, so it sits a step below the white the theme gives. Measured
     with the stackoverflow-light fallback palette: page rgb(242,242,242),
