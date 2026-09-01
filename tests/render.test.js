@@ -38,8 +38,10 @@ function sha1(s) {
 // light side, and the grey the staff lines take unless the editor asks for ink.
 const LIGHT_INK = "#000000";
 const GRAY_STAFF = "#a3a3a3";
+// The 0.9 is the width the staff lines are rewritten to (STAFF_LINE_WIDTH in
+// mdm.lua), which is part of the cache key: a width change re-engraves.
 function cacheName(abc, ink, staff) {
-  return sha1(abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF));
+  return sha1(abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF) + " 0.9");
 }
 
 function runMdm(args, cwd) {
@@ -841,7 +843,9 @@ test("a score is engraved in the colours of the look", () => {
   const dir = freshDir("pdf-colour");
   fs.writeFileSync(path.join(dir, "doc.mdm"), PDF_DOC);
   const cache = path.join(dir, "mdm_cache");
-  const staffRun = /\n0\.435 0\.435 0\.435 setrgbcolor dlw [^\n]*stroke 0\.831/;
+  // The grey wraps the staff run, whose `dlw` (0.7 pt) is rewritten to the
+  // 0.9 pt that cannot fall between the pixel rows of a screen.
+  const staffRun = /\n0\.435 0\.435 0\.435 setrgbcolor 0\.9 SLW [^\n]*stroke 0\.831/;
 
   // The dark side: the score in the editor's light ink, the staff lines in the
   // grey of that side, and an entry of its own in the cache.
@@ -866,7 +870,9 @@ test("a score is engraved in the colours of the look", () => {
   assert.notEqual(inked, dark, "the two looks share a cache entry");
   const inkedEps = fs.readFileSync(path.join(cache, inked + "_001.eps"), "utf8");
   assert.match(inkedEps, /%%EndSetup\n0\.831 0\.831 0\.831 setrgbcolor\n/);
-  assert.doesNotMatch(inkedEps, /setrgbcolor dlw/, "the staff lines were greyed");
+  assert.doesNotMatch(inkedEps, /setrgbcolor 0\.9 SLW/, "the staff lines were greyed");
+  // In ink the lines keep the colour of the score but still take the width.
+  assert.match(inkedEps, /\n0\.9 SLW [^\n]*stroke/, "the staff lines kept the hairline width");
 
   // And the light side is the black it always was, with grey staff lines.
   r = runMdm(["render", "doc.mdm", "--to", "pdf"], dir);
@@ -874,7 +880,7 @@ test("a score is engraved in the colours of the look", () => {
   const light = fs.readFileSync(
     path.join(cache, cacheName(NARROW_ABC) + "_001.eps"), "utf8");
   assert.match(light, /%%EndSetup\n0\.000 0\.000 0\.000 setrgbcolor\n/);
-  assert.match(light, /\n0\.639 0\.639 0\.639 setrgbcolor dlw [^\n]*stroke 0\.000/);
+  assert.match(light, /\n0\.639 0\.639 0\.639 setrgbcolor 0\.9 SLW [^\n]*stroke 0\.000/);
 });
 
 test("PDF render reuses the cache (abcm2ps not rerun on a warm cache)", () => {

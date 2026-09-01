@@ -617,6 +617,21 @@ end
 -- by `stroke`, and that run is what the grey wraps; the ledger lines under a
 -- low note are `hl` and stay in the ink, exactly as in the browser, where the
 -- stylesheet paints `.abcjs-staff` and nothing else.
+--
+-- The same run also has its width rewritten. abcm2ps strokes the staff at
+-- `dlw`, 0.7 pt, which on a 96 dpi screen is 0.93 of a pixel: a viewer that
+-- snaps thin strokes instead of anti-aliasing them then keeps or drops each
+-- line by where it lands on the pixel grid, and whole staves came out with
+-- one line left (reproduced with poppler at 96 dpi with anti-aliasing off:
+-- the lower staff of the piano score in example.mdm lost four of its five).
+-- The editor never shows this, since the browser gives an SVG stroke its
+-- pixel whatever its width. 0.9 pt is 1.2 px at 96 dpi, a row of pixels at
+-- any landing; against the 6 pt between lines it is a little heavier than
+-- the editor's own ratio (0.7 over 7.75 SVG units, measured on abcjs 6.7.0),
+-- which is the price of a line that cannot vanish. It goes into the cache
+-- key below, so a width change re-engraves.
+local STAFF_LINE_WIDTH = "0.9"
+
 local function ps_color(hex)
   local r, g, b = hex:match("^#(%x%x)(%x%x)(%x%x)$")
   if not r then return "0 0 0 setrgbcolor" end
@@ -627,10 +642,17 @@ end
 
 local function paint_eps(text, ink, staff)
   local painted = text:gsub("(%%%%EndSetup\n)", "%1" .. ps_color(ink) .. "\n", 1)
+  local open, close = "", ""
   if staff ~= ink then
-    painted = painted:gsub(
-      "\n(dlw [^\n]-stroke)", "\n" .. ps_color(staff) .. " %1 " .. ps_color(ink))
+    open = ps_color(staff) .. " "
+    close = " " .. ps_color(ink)
   end
+  -- The run keeps everything but its `dlw`, whose width is replaced by the
+  -- one above; the procedures that draw after it set their own before they
+  -- stroke, so nothing needs putting back.
+  painted = painted:gsub(
+    "\ndlw ([^\n]-stroke)",
+    "\n" .. open .. STAFF_LINE_WIDTH .. " SLW %1" .. close)
   return painted
 end
 
@@ -638,12 +660,14 @@ local function render_latex(el)
   local source = el.text
   if not source:match("\n$") then source = source .. "\n" end
   -- The engraving carries its own colours now, so what names the cache entry
-  -- is the block and the two colours it was drawn in: the same score on the
-  -- two sides of the look is two engravings and cannot share one file. What
-  -- the fields above add for the engraver is not part of the name, so a block
-  -- that needed them keeps the name it would have had without them.
+  -- is the block, the two colours it was drawn in and the width of its staff
+  -- lines: the same score on the two sides of the look is two engravings and
+  -- cannot share one file. What the fields above add for the engraver is not
+  -- part of the name, so a block that needed them keeps the name it would
+  -- have had without them.
   local ink, staff = engraving_colors()
-  local digest = sha1(source .. "\n" .. ink .. " " .. staff)
+  local digest = sha1(
+    source .. "\n" .. ink .. " " .. staff .. " " .. STAFF_LINE_WIDTH)
   local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
 
   if not file_exists(pdf) then
