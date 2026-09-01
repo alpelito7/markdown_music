@@ -68,8 +68,11 @@ in the browser through abcjs; the PDF shows the score alone):
 A short score (an interval, a chord) can fix its own width with the ABC
 directive `%%staffwidth` as the first line of the block, and it is then
 inserted compact and centred, the way a display equation is, in the editor,
-in HTML and in PDF. Careful: with an explicit unit (`%%staffwidth 200pt`),
-since abcm2ps ignores a value without one (abcjs reads it as px):
+in HTML and in PDF. The unit is best written out (`%%staffwidth 200pt`),
+though both engravers read the bare number the same way (measured: abcjs
+lays the staff out at about a point per unit, and abcm2ps takes the value
+as points and prints it at its default 0.75 scale, so the same directive
+comes out a shade smaller under the fallback):
 
     ```abc
     %%staffwidth 200pt
@@ -78,10 +81,11 @@ since abcm2ps ignores a value without one (abcjs reads it as px):
     ```
 
 A block that names neither its reference number (`X:`) nor its key (`K:`) is
-engraved all the same: abcjs, which draws the HTML and the editor, falls back
-to the empty key signature on a treble staff, and the filter hands abcm2ps the
-`X:1` and the `K:C` that draw the same thing, since the standard makes both
-compulsory and abcm2ps engraves nothing without them.
+engraved all the same: abcjs, which draws the HTML, the editor and the PDF,
+falls back to the empty key signature on a treble staff, and when abcm2ps is
+the one engraving the PDF the filter hands it the `X:1` and the `K:C` that
+draw the same thing, since the standard makes both compulsory and abcm2ps
+engraves nothing without them.
 
 There is no *inline* music notation inside a paragraph (Markdown fences are
 blocks); a compact width is the practical equivalent.
@@ -117,12 +121,23 @@ editor, gets Pandoc's own dialect and its blank lines.
   and `_extensions/mdm/resources/mdm.js` renders it to SVG with
   [abcjs](https://github.com/paulrosen/abcjs) (vendored, v6.7.0) once the
   page has loaded, on a page dressed as the visual editor (below).
-- **PDF**: the filter engraves each block with `abcm2ps` to EPS, trims the
-  BoundingBox to the real ink with ghostscript (abcm2ps writes it at the
-  full page width, which shrank the scores when they were scaled), converts
-  it with `epstopdf` and inserts it: at text width if it is wide, at its
-  natural size and centred if it is narrow (< 330 pt). Results are cached
-  by a hash of the content in `mdm_cache/`.
+- **PDF**: the filter engraves each block with the same vendored abcjs,
+  loaded into a headless Chrome and printed to a vector PDF (fonts
+  embedded), then trimmed to the ink with `pdfcrop`; the engraving in the
+  PDF is the drawing the editor and the HTML show, printed with whatever
+  faces the machine's font stack resolves for its labels. The PDF is
+  inserted at text width if it is wide, at its natural size and centred if
+  it is narrow (< 330 pt). The equations go the same way: every formula of
+  the document is set by the vendored KaTeX in one Chrome run, one exactly
+  sized pagelet each, and put back on the line it came from, lowered by the
+  depth the browser measured, so a `\sqrt` in the PDF is KaTeX's own
+  drawing and an inline formula sits on the text's baseline. Results are
+  cached by a hash of the content in `mdm_cache/`. Without a Chrome (or
+  without `pdfcrop`) the filter falls back, and says which tool it missed
+  in the render log: the scores to `abcm2ps` -> EPS, the BoundingBox
+  trimmed to the real ink with ghostscript and converted with `epstopdf`
+  (abcm2ps draws with glyphs of its own, and the scores read differently),
+  and the equations to LaTeX's own setting (the NewCM face below).
 
 ### The output looks like the editor
 
@@ -135,9 +150,10 @@ port of the editor's own stylesheet (`vscode-mdm/media/style.css`) onto the
 HTML Quarto produces; it spends a handful of custom properties, and the
 filter writes them into the page from what it is told.
 
-What varies travels as plain metadata, which the VS Code extension passes
-when it exports (`exportLook` in `vscode-mdm/extension.js`) and a plain
-`bin/mdm render` does not pass at all:
+What varies travels as plain metadata. The look keys and the front matter
+are what the VS Code extension passes when it exports (`exportLook` in
+`vscode-mdm/extension.js`) and a plain `bin/mdm render` does not pass at
+all; `mdm-engraver` is the document's own to write:
 
 
 | Key               | Values                                                                                                                                                                                    |
@@ -146,6 +162,8 @@ when it exports (`exportLook` in `vscode-mdm/extension.js`) and a plain
 | `mdm-staff-lines` | `gray`, `ink`                                                                                                                                                                             |
 | `mdm-score-fill`  | `none`, `paper`, `slate`, `brass`                                                                                                                                                         |
 | `mdm-score-align` | `center`, `left`                                                                                                                                                                          |
+| `mdm-engraver`    | `abcjs` (the default: the editor's engines, abcjs and KaTeX, through a headless Chrome), `abcm2ps` (the fallback for scores and LaTeX's own maths, picked outright)                       |
+| `mdm-front-matter`| `shown`, `hidden`: whether the title block is drawn from the YAML                                                                                                                         |
 | `mdm-syn-*`       | the ten syntax slots (`base`, `bg`, `comment`, `string`, `number`, `keyword`, `attr`, `name`, `type`, `variable`), as six hex digits **without** the `#`, which would open a YAML comment |
 
 So a render from a terminal comes out in the editor's default look with the
@@ -191,32 +209,41 @@ word into a line; LaTeX justifies and lets microtype expand the font, which
 took a word more per line at the very same width (measured on the opening
 paragraph of `example.mdm`: the editor breaks after `source`, the PDF was
 carrying `source code`). The PDF is set ragged right too and microtype's
-expansion is off, so a paragraph of prose breaks where the editor breaks it. A
-line carrying inline code or an equation can still break elsewhere: the editor
-sets those with KaTeX and the system's monospace, the PDF with LaTeX and DejaVu
-Sans Mono, and the two do not measure a formula the same way.
+expansion is off, so a paragraph of prose breaks where the editor breaks it.
+An equation now takes the very width the browser measured for it, so it no
+longer moves the break; a line carrying inline code still can, since the
+editor sets code in the system's monospace and the PDF in DejaVu Sans Mono.
 
 Two sizes come from the stylesheet and not from LaTeX's defaults. Code at 0.88
 of the text, which is what `mdm-look.css` gives it. And mathematics at 1.21,
-which is what KaTeX sets its own at (`.katex{font: normal 1.21em KaTeX_Main}`):
-both draw formulas with Computer Modern shapes, and 1.21 is the compensation
-both need beside a sans with the x-height of Helvetica. Without it the inline
-letters came out visibly thinner than the words around them and a `\sqrt` over
-a fraction came out cramped. A document that names a `mathfont` of its own is
-left alone.
+which is what KaTeX sets its own at (`.katex{font: normal 1.21em KaTeX_Main}`).
 
-A score is engraved in the colours of the look, and they are painted into the
-EPS on the way through: abcm2ps writes no colour of its own, and ghostscript,
-which turns the EPS into the PDF, bakes the default black into everything it
-converts. Black is what the score used to come out, whatever the page under
-it: on the dark side it was a shadow, while the words abcm2ps sets around the
-staff, which are shown and not stroked, came out in the ink like the rest of
-the text. So the ink of the side goes in at the head of the page and the grey
-of the staff lines around the run of horizontals that draws them, which is
-what `mdm.staffLines` turns on and off. The ledger lines under a low note are
-drawn another way and stay in the ink, exactly as in the browser, where the
-stylesheet paints `.abcjs-staff` and nothing else. A cached engraving is
-therefore named after the block *and* the two colours it was drawn in.
+The equations themselves are KaTeX's, as above: with a Chrome at hand the PDF
+carries the same drawing the editor shows, radical for radical. What follows
+is the shape of the *fallback*, the face LaTeX sets a formula in when there
+is no Chrome to print with (or when the document asked for abcm2ps): New
+Computer Modern in its Book weight, at the same 1.21. KaTeX's fonts are
+Computer Modern thickened for the screen, and NewCM Book is that correction
+cut for paper, where Latin Modern (kept behind it for a TeX without NewCM)
+came out starved of ink beside a sans with the weight of Helvetica, and its
+radical met the vinculum with a visible gap. The words of an operator
+(`\sin`, `\mathrm`) go in the upright serif of the same family, as KaTeX
+sets them, not in the sans of the page. A document that names a `mathfont`
+of its own is left alone.
+
+A score is engraved in the colours of the look. The abcjs engraving takes
+them the way the browser does: the page Chrome prints from carries the svg
+slice of this very stylesheet, the ink of the side on the drawing and the
+grey of `mdm.staffLines` on the staff lines, with one rule of its own, a
+hairline stroke on those lines that lifts them from the 0.53 pt abcjs fills
+them at to about 0.9 pt, past the pixel grid of a screen. When abcm2ps
+engraves instead, the colours are painted into the EPS on the way through
+(abcm2ps writes no colour of its own, and ghostscript, which turns the EPS
+into the PDF, bakes the default black into everything it converts): the ink
+of the side at the head of the page, the grey around the run of horizontals
+that draws the staff, and the same 0.9 pt on that run. A cached engraving is
+therefore named after the engraver, the block *and* the two colours it was
+drawn in.
 
 The fill and the alignment a score can be given (`mdm.scoreFill`,
 `mdm.scoreAlign`) travel as well, as a box around the engraving rather than
@@ -225,10 +252,11 @@ centring the score like a display equation or lining it up with the text. The
 4 px the browser rounds the corner by is the one thing left square, which
 would take a package for the sake of two pixels on paper.
 
-One thing of the editor stays behind: the card behind inline code, which in
-LaTeX would take a `\colorbox` and stop the line breaking inside it. The body
-size is the document's to set (`fontsize: 12pt` is the editor's 16 px); the
-headings and the measure are multiples of whatever it is.
+The card behind inline code travels as a chip painted under the glyphs
+(lua-ul), not as a `\colorbox`, which would stop the line breaking inside
+it; under XeTeX, which lua-ul does not serve, the code keeps its bare mono.
+The body size is the document's to set (`fontsize: 12pt` is the editor's
+16 px); the headings and the measure are multiples of whatever it is.
 
 The block Quarto draws at the top from the YAML (the title, the subtitle,
 whoever wrote it and when) belongs to the header, so it comes out only when
@@ -256,11 +284,22 @@ the look for the HTML format alone.
 
 ## Requirements
 
-- Quarto >= 1.4 and a TeX installation (for PDF; `epstopdf` ships with
-  TeX Live).
-- `abcm2ps` (for PDF). Not included: install it from the system's packages
-  (Debian and Ubuntu `apt install abcm2ps`, macOS `brew install abcm2ps`) or
-  build it from [https://github.com/lewdlime/abcm2ps](https://github.com/lewdlime/abcm2ps). The filter looks for
+- Quarto >= 1.4 and a TeX installation (for PDF; `pdfcrop`, `epstopdf` and
+  the ghostscript they and the filter lean on all ship with TeX Live).
+- Chrome or Chromium (for PDF): it is what draws the scores and the
+  equations with the editor's own abcjs and KaTeX. The filter looks for it
+  under its common names in the PATH (and in `/Applications` on macOS);
+  another binary can be named in the YAML header, and `mdm-engraver:
+  abcm2ps` picks the fallbacks outright:
+
+  ```yaml
+  mdm:
+    chrome: /path/to/chrome
+  ```
+- `abcm2ps` (for PDF on a machine without a Chrome). Not included: install
+  it from the system's packages (Debian and Ubuntu `apt install abcm2ps`,
+  macOS `brew install abcm2ps`) or build it from
+  [https://github.com/lewdlime/abcm2ps](https://github.com/lewdlime/abcm2ps). The filter looks for
   it at `tools/bin/abcm2ps` beside the document first and then in the PATH,
   so a local build can be dropped there; another path can be set in the
   YAML header of the document:
@@ -287,7 +326,8 @@ install the `.vsix` it leaves there (Extensions panel > "..." > "Install from
 VSIX..."). For working on the extension itself, a symlink of the directory
 into `~/.vscode/extensions/alpelito7.mdm-editor-0.2.0` and a reload
 (`Developer: Reload Window`) does the same. The editor needs nothing else; an export needs
-Quarto, and a PDF of a document with scores in it needs TeX and abcm2ps. To go back to the plain text editor: right
+Quarto, and a PDF of a document with scores in it needs TeX and a Chrome (or
+abcm2ps, the fallback engraver). To go back to the plain text editor: right
 click the file, `Open With...`. Both can be open at once on the same file
 (Reopen Editor With... in a second group): they share the document.
 
@@ -419,12 +459,13 @@ How the editing works:
   repository anywhere.
 - **Nothing but the export needs anything installed.** The editor carries
   everything it draws and plays, so it opens and works on a machine with no
-  Quarto, no TeX and no abcm2ps. Those are looked for the moment an export is
-  asked for and never at start-up: whichever is missing is named in the
-  notification, with the whole story (the command, Quarto's own output) in
-  the MDM output channel, one "Show log" away. A PDF asks for abcm2ps only
-  when the document actually holds a score, since without it the scores would
-  come out as text and the export would look like it had worked.
+  Quarto, no TeX, no Chrome and no abcm2ps. Those are looked for the moment
+  an export is asked for and never at start-up: whichever is missing is named
+  in the notification, with the whole story (the command, Quarto's own
+  output) in the MDM output channel, one "Show log" away. A PDF asks for an
+  engraver (a Chrome, or abcm2ps to fall back to) only when the document
+  actually holds a score, since without one the scores would come out as
+  text and the export would look like it had worked.
 - **Playback**: beside the copy button of every score (both appear on
   hover) there is a pair of headphones that unfolds a player bar under the
   score, with play/pause, stop, repeat, a draggable progress bar and
@@ -801,11 +842,12 @@ CC BY-SA 3.0 and is included unmodified, so the notice is the attribution the
 licence asks for.
 
 The one program that is not vendored is abcm2ps, which engraves the scores
-of a PDF: somebody else's work (LGPL-3.0-or-later, copyright Jean-Francois
-Moine, adapted from Michael Methfessel's abc2ps), called as a separate
-process and never linked into anything here. Neither the repository nor the
-`.vsix` carries the binary; the search order and the source are in
-`THIRD-PARTY-NOTICES.md`, and the LGPL and GPL texts are kept in `licenses/`
+of a PDF on a machine without a Chrome: somebody else's work
+(LGPL-3.0-or-later, copyright Jean-Francois Moine, adapted from Michael
+Methfessel's abc2ps), called as a separate process and never linked into
+anything here. Neither the repository nor the `.vsix` carries the binary;
+the search order and the source are in `THIRD-PARTY-NOTICES.md`, and the
+LGPL and GPL texts are kept in `licenses/`
 for reference. So the `.vsix` is MIT throughout except for the soundfont.
 
 ## Known limitations (prototype)

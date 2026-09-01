@@ -56,11 +56,15 @@ The build script and its lockfile are in the repository, under `vscode-mdm/vendo
 
 ## KaTeX 0.18.4
 
-Renders the equations. Copyright (c) 2013-2020 Khan Academy and other
-contributors, <https://katex.org>. Licensed under the MIT licence.
+Renders the equations, in the editor and in a PDF export (where the bundled
+Quarto filter loads it into a headless Chrome and prints). Copyright (c)
+2013-2020 Khan Academy and other contributors, <https://katex.org>. Licensed
+under the MIT licence.
 
 Inside `media/vendor/cm6/cm6.bundle.js`, with its stylesheet
-`katex.min.css` and its fonts under `media/vendor/cm6/fonts/`.
+`katex.min.css` and its fonts under `media/vendor/cm6/fonts/`; and
+standalone (`katex.min.js`, `katex.min.css`, the woff2 fonts) under
+`render/mdm/resources/katex/`.
 
 ## The MIT licence
 
@@ -103,10 +107,14 @@ themselves, apart from this collection, does so under CC BY-SA 3.0.
 
 ## Not shipped, but needed for an export
 
-An export calls Quarto, and a PDF of a document with scores calls abcm2ps.
-Neither is part of this package: they are looked for on the machine when an
-export is asked for (abcm2ps at a path named in the document's YAML header,
-then at `tools/bin/abcm2ps` beside the document, then on the PATH), and the
+An export calls Quarto, and a PDF of a document with scores calls a Chrome
+or Chromium, into which the filter loads the vendored abcjs and KaTeX so
+the PDF shows the very drawings the editor does; on a machine without one
+it calls abcm2ps instead. None of the three is part of this package: they
+are looked for on the machine when an export is asked for (Chrome by its
+common names on the PATH, or at a path the document's YAML names in
+`mdm.chrome`; abcm2ps at a path named in the document's YAML header, then
+at `tools/bin/abcm2ps` beside the document, then on the PATH), and the
 editor works without them. abcm2ps is
 licensed under the GNU Lesser General Public License version 3 or later,
 copyright (C) 1998-2019 Jean-Francois Moine, <http://moinejf.free.fr>.

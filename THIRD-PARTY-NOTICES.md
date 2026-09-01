@@ -59,11 +59,16 @@ The build script and its lockfile are in `vscode-mdm/vendor-src/`.
 
 ## KaTeX 0.18.4
 
-Renders the equations. Copyright (c) 2013-2020 Khan Academy and other
-contributors, <https://katex.org>. Licensed under the MIT licence.
+Renders the equations, in the editor and in a PDF export (where the Quarto
+filter loads it into a headless Chrome and prints). Copyright (c) 2013-2020
+Khan Academy and other contributors, <https://katex.org>. Licensed under the
+MIT licence.
 
 Inside `vscode-mdm/media/vendor/cm6/cm6.bundle.js`, with its stylesheet
-`katex.min.css` and its fonts under `vscode-mdm/media/vendor/cm6/fonts/`.
+`katex.min.css` and its fonts under `vscode-mdm/media/vendor/cm6/fonts/`;
+and standalone (`katex.min.js`, `katex.min.css`, the woff2 fonts) under
+`_extensions/mdm/resources/katex/` and the extension's copy of the filter,
+`vscode-mdm/render/mdm/resources/katex/`.
 
 ## The MIT licence
 
@@ -106,18 +111,22 @@ themselves, apart from this collection, does so under CC BY-SA 3.0.
 
 ## abcm2ps 8.14.15
 
-Engraves the scores of a PDF export, called as a separate program. Copyright
-(C) 1998-2019 Jean-Francois Moine, <http://moinejf.free.fr>, adapted from
-abc2ps, Copyright (C) 1996-1998 Michael Methfessel.
+Engraves the scores of a PDF export when no Chrome is at hand (the default
+engraver is the vendored abcjs, which the filter loads into a Chrome or
+Chromium found on the machine; the browser is somebody else's separate
+program too and is not distributed here). Called as a separate program.
+Copyright (C) 1998-2019 Jean-Francois Moine, <http://moinejf.free.fr>,
+adapted from abc2ps, Copyright (C) 1996-1998 Michael Methfessel.
 
 Licence: GNU Lesser General Public License, either version 3 or (at the
 reader's option) any later version. The texts are in `licenses/LGPL-3.0.txt`
 and `licenses/GPL-3.0.txt`, which the LGPL refers to.
 
 The binary itself is NOT distributed here: neither the repository nor the VS
-Code extension package carries it. Both search for abcm2ps in the same order:
-a path named in the document's YAML header, then `tools/bin/abcm2ps` beside
-the document being rendered (where a local build may be dropped), then the
-PATH. abcm2ps 8.14.15 (2024-01-08) is available from
+Code extension package carries it. The Quarto filter searches for abcm2ps in
+this order: a path named in the document's YAML header (`mdm.abcm2ps`), then
+`tools/bin/abcm2ps` beside the document being rendered (where a local build
+may be dropped), then the PATH; the VS Code extension's export pre-flight
+checks the last two. abcm2ps 8.14.15 (2024-01-08) is available from
 <https://github.com/lewdlime/abcm2ps>, and it is run over a pipe as a separate
 executable, not linked into anything here.

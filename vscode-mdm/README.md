@@ -100,8 +100,12 @@ read in the dialect the editor reads, so a heading written straight under a
 paragraph or under a score is a heading in the output as well. The editor itself
 needs nothing installed: Quarto (>= 1.4) is looked for only when an export
 is asked for, a PDF needs a TeX installation, and a PDF of a document with
-scores needs [abcm2ps](https://github.com/lewdlime/abcm2ps) (Debian and
-Ubuntu `apt install abcm2ps`, macOS `brew install abcm2ps`). Whichever is
+scores needs Chrome or Chromium, into which the export loads the editor's
+own abcjs and KaTeX, so the scores and the equations in the PDF are the
+very drawings the editor shows (without a Chrome the scores fall back to
+[abcm2ps](https://github.com/lewdlime/abcm2ps), Debian and Ubuntu
+`apt install abcm2ps`, macOS `brew install abcm2ps`, whose engraving reads
+differently, and the equations to LaTeX's own setting). Whichever is
 missing is named in a notification, with the full story one "Show log"
 away.
 
