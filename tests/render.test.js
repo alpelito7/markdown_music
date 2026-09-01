@@ -44,6 +44,21 @@ function cacheName(abc, ink, staff) {
   return sha1(abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF) + " 0.9");
 }
 
+// What an abcjs engraving is named after: the engraver with its recipe
+// version and staff width (`abcjs 1 703` in mdm.lua), then the block and the
+// colours, as above. The default engraver on a machine with a Chrome, which
+// this one is: the webview suites already need it.
+function abcjsCacheName(abc, ink, staff) {
+  return sha1(
+    "abcjs 1 703\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF));
+}
+
+// And a KaTeX formula: the recipe, the mode (I inline, D display), the TeX
+// and the ink of the side (the body ink, not the svg ink of an engraving).
+function katexCacheName(mode, tex, ink) {
+  return sha1("katex 2 " + mode + "\n" + tex + "\n" + (ink || "#24292e"));
+}
+
 function runMdm(args, cwd) {
   return spawnSync(MDM, args, { cwd, encoding: "utf8" });
 }
@@ -739,11 +754,15 @@ Wide, at full text width:
 ${WIDE_ABC}\`\`\`
 `;
 
+// Forced to abcm2ps: this test pins the EPS pipeline itself (the .abc the
+// engraver reads, the crop written back into the EPS), which the default
+// abcjs engraver never writes.
 test("PDF render: sha1 cache, bbox crop, .w sidecars, narrow centring", () => {
   const dir = freshDir("pdf");
   fs.writeFileSync(path.join(dir, "doc.mdm"), PDF_DOC);
   const r = runMdm(
-    ["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"],
+    ["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true",
+      "-M", "mdm-engraver:abcm2ps"],
     dir
   );
   assert.equal(r.status, 0, r.stderr);
@@ -816,7 +835,12 @@ test("a tune with no X: and no K: is engraved all the same", () => {
     path.join(dir, "doc.mdm"),
     PDF_DOC.replace(/```abc\n[\s\S]*$/, "```abc\n" + BARE_ABC + "```\n")
   );
-  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  // Forced to abcm2ps: abcjs falls back to X:1 and K:C by itself, and the
+  // injected header this test pins is for the engraver that will not.
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true",
+      "-M", "mdm-engraver:abcm2ps"],
+    dir);
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!/engraved nothing/.test(r.stderr), r.stderr);
 
@@ -841,7 +865,10 @@ test("a tune with no X: and no K: is engraved all the same", () => {
 // the staff lines unless the editor asks for them in ink.
 test("a score is engraved in the colours of the look", () => {
   const dir = freshDir("pdf-colour");
-  fs.writeFileSync(path.join(dir, "doc.mdm"), PDF_DOC);
+  // Forced to abcm2ps throughout: what is read back is the painted EPS.
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    PDF_DOC.replace("filters:", "mdm-engraver: abcm2ps\nfilters:"));
   const cache = path.join(dir, "mdm_cache");
   // The grey wraps the staff run, whose `dlw` (0.7 pt) is rewritten to the
   // 0.9 pt that cannot fall between the pixel rows of a screen.
@@ -889,7 +916,154 @@ test("PDF render reuses the cache (abcm2ps not rerun on a warm cache)", () => {
   assert.ok(fs.existsSync(cache), "run after the PDF test above");
   const stampFile = path.join(cache, cacheName(NARROW_ABC) + ".pdf");
   const before = fs.statSync(stampFile).mtimeMs;
-  const r = runMdm(["render", "doc.mdm", "--to", "pdf"], dir);
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "mdm-engraver:abcm2ps"], dir);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fs.statSync(stampFile).mtimeMs, before);
+});
+
+// ---------- The editor's engraver ----------
+
+// The default: the same abcjs that draws the editor and the HTML, loaded
+// into a headless Chrome and printed to a vector PDF, so a score in the PDF
+// is the score the editor shows, glyph for glyph. abcm2ps stays behind it
+// for a machine without a Chrome; that degrade is a plain nil-check in the
+// filter and is not staged here, since blinding the render to the real
+// Chrome would mean starving its PATH, and quarto and latex live there too.
+test("the PDF is engraved by the editor's abcjs when a Chrome is at hand", () => {
+  const dir = freshDir("pdf-abcjs");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), PDF_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const cache = path.join(dir, "mdm_cache");
+  const narrow = abcjsCacheName(NARROW_ABC);
+  const wide = abcjsCacheName(WIDE_ABC);
+  for (const h of [narrow, wide]) {
+    assert.ok(fs.existsSync(path.join(cache, h + ".pdf")), h + ".pdf missing");
+    assert.ok(fs.existsSync(path.join(cache, h + ".w")), h + ".w missing");
+    // Nothing of the abcm2ps pipeline, and the page Chrome printed from and
+    // its untrimmed print are cleaned away.
+    for (const suffix of [".abc", "_001.eps", ".html", ".chrome.pdf"]) {
+      assert.ok(
+        !fs.existsSync(path.join(cache, h + suffix)),
+        h + suffix + " left behind");
+    }
+  }
+  // And no abcm2ps engraving happened on the side: the fallback stayed put.
+  assert.ok(
+    !fs.existsSync(path.join(cache, cacheName(NARROW_ABC) + ".pdf")),
+    "the render fell back to abcm2ps");
+  // The %%staffwidth 200pt score comes out well under the 330 pt threshold
+  // (132 pt of ink, measured: the one sparse bar does not fill even that):
+  // narrow, centred at natural size. The wide one takes the text width.
+  const wNarrow = Number(fs.readFileSync(path.join(cache, narrow + ".w"), "utf8"));
+  const wWide = Number(fs.readFileSync(path.join(cache, wide + ".w"), "utf8"));
+  assert.ok(wNarrow > 0 && wNarrow < 330, "narrow width: " + wNarrow);
+  assert.ok(wWide >= 330, "wide width: " + wWide);
+  const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
+  assert.ok(
+    tex.includes(
+      "\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{mdm_cache/" +
+        narrow + ".pdf}}}"),
+    "narrow abcjs score not centred in TeX");
+  assert.ok(
+    tex.includes(
+      "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{mdm_cache/" +
+        wide + ".pdf}}}"),
+    "wide abcjs score not at the text width in TeX");
+});
+
+// A block abcjs draws nothing from (directives alone, or nothing at all)
+// prints an inkless page, which pdfcrop cannot trim: the filter has to see
+// the zero-ink box and refuse it, or a blank 900 x 4500 pt sheet was cached
+// and inserted at natural size (nine-odd pages of nothing, measured before
+// the guard). The refusal falls through to abcm2ps, which also refuses, and
+// the block stays source text, exactly as it did before the Chrome engraver.
+test("a block with no ink in it falls all the way back to source text", () => {
+  const dir = freshDir("pdf-inkless");
+  const BLANK_ABC = "%%staffwidth 200pt\n% nothing here\n";
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    PDF_DOC.replace(/```abc\n[\s\S]*$/, "```abc\n" + BLANK_ABC + "```\n")
+  );
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /engraved nothing/, "the fallback chain did not end in the warning");
+  const cache = path.join(dir, "mdm_cache");
+  assert.ok(
+    !fs.existsSync(path.join(cache, abcjsCacheName(BLANK_ABC) + ".pdf")),
+    "the inkless engraving was cached");
+  const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
+  assert.ok(!tex.includes("\\mdmscore{"), "an engraving was inserted for an inkless block");
+  // Skylighting escapes the percent signs (`\%\%staffwidth`), so what is
+  // asked for is the bare directive.
+  assert.ok(tex.includes("staffwidth 200pt"), "the source text of the block is gone");
+});
+
+// ---------- The editor's equations ----------
+
+const MATH_DOC = `---
+title: "Math"
+format:
+  pdf:
+    documentclass: article
+filters:
+  - mdm
+---
+
+Inline $L$ math.
+
+$$f_n = \\frac{n}{2L}\\sqrt{\\frac{T}{\\mu}} = n f_1.$$
+`;
+const INLINE_TEX = "L";
+const DISPLAY_TEX = "f_n = \\frac{n}{2L}\\sqrt{\\frac{T}{\\mu}} = n f_1.";
+
+test("the equations are set by the editor's KaTeX when a Chrome is at hand", () => {
+  const dir = freshDir("pdf-katex");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), MATH_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const cache = path.join(dir, "mdm_cache");
+  const inline = katexCacheName("I", INLINE_TEX);
+  const display = katexCacheName("D", DISPLAY_TEX);
+  for (const h of [inline, display]) {
+    assert.ok(fs.existsSync(path.join(cache, h + ".pdf")), h + ".pdf missing");
+    assert.ok(fs.existsSync(path.join(cache, h + ".dim")), h + ".dim missing");
+  }
+  // The .dim sidecar carries "w h d pw ph" in the editor's pixels, the
+  // pagelet padded to the 8 px grid Chrome prints exactly.
+  const dim = fs.readFileSync(path.join(cache, inline + ".dim"), "utf8");
+  const [w, h, d, pw, ph] = dim.trim().split(" ").map(Number);
+  assert.ok(w > 1 && h > w && d > 0, "inline dims look wrong: " + dim);
+  assert.ok(pw % 8 === 0 && ph % 8 === 0 && pw > w && ph > h, "pagelet not on the 8px grid: " + dim);
+  const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
+  // The inline formula rides a \makebox of its true width around a
+  // \raisebox that drops the padded pagelet to the baseline and reports
+  // the real ascent and depth; the display one is centred in its band.
+  assert.match(
+    tex,
+    new RegExp("\\\\makebox\\[[\\d.]+\\\\mdmem\\]\\[l\\]\\{\\\\raisebox\\{-[\\d.]+\\\\mdmem\\}" +
+      "\\[[\\d.]+\\\\mdmem\\]\\[[\\d.]+\\\\mdmem\\]\\{\\\\includegraphics\\[width=[\\d.]+\\\\mdmem\\]" +
+      "\\{mdm_cache/" + inline + "\\.pdf\\}\\}\\}"),
+    "the inline formula is not inserted on the baseline");
+  assert.ok(
+    tex.includes("{\\centering\\makebox") && tex.includes(display + ".pdf"),
+    "the display formula is not centred in its band");
+  assert.ok(!tex.includes("\\(L\\)"), "the inline formula was left to LaTeX");
+});
+
+test("mdm-engraver: abcm2ps leaves the equations to LaTeX", () => {
+  const dir = freshDir("pdf-katex-off");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), MATH_DOC);
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true",
+      "-M", "mdm-engraver:abcm2ps"],
+    dir);
+  assert.equal(r.status, 0, r.stderr);
+  const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
+  assert.ok(tex.includes("\\(L\\)"), "the inline formula is not LaTeX's");
+  assert.ok(!tex.includes("\\makebox["), "a KaTeX insertion slipped through");
+  assert.ok(
+    !fs.existsSync(path.join(dir, "mdm_cache", katexCacheName("I", INLINE_TEX) + ".pdf")),
+    "a KaTeX engraving was cached under abcm2ps");
 });

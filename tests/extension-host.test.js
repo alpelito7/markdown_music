@@ -606,6 +606,11 @@ function fakeBin(tmp, opts) {
     fs.writeFileSync(engraver, "#!/bin/sh\nexit 0\n");
     fs.chmodSync(engraver, 0o755);
   }
+  if (options.chrome) {
+    const chrome = path.join(bin, "google-chrome");
+    fs.writeFileSync(chrome, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(chrome, 0o755);
+  }
   return bin;
 }
 
@@ -787,7 +792,7 @@ test("without Quarto the export says which tool is missing and logs where to get
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test("a PDF of a document with scores says abcm2ps is missing before rendering", async () => {
+test("a PDF of a document with scores says both engravers are missing before rendering", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const restore = usePath(fakeBin(tmp));
   const doc = path.join(tmp, "doc.mdm");
@@ -799,9 +804,54 @@ test("a PDF of a document with scores says abcm2ps is missing before rendering",
   restore();
 
   assert.equal(vscode._state.errorMessages.length, 1);
-  assert.match(vscode._state.errorMessages[0].message, /abcm2ps is not installed/);
+  assert.match(
+    vscode._state.errorMessages[0].message,
+    /neither Chrome nor abcm2ps is installed/);
   assert.match(exportLog().lines.join("\n"), /apt install abcm2ps/);
   assert.equal(vscode._state.progressTitles.length, 0, "the PDF would have come out with no scores");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// A document that points mdm.chrome somewhere is waved through even when
+// the pre-flight sees neither engraver: the filter is the one that resolves
+// that path (and degrades with a log line if it is wrong), and the
+// pre-flight used to refuse the export for a Chrome it could not see.
+test("a document that names mdm.chrome is left to the filter", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(
+    doc,
+    "---\ntitle: T\nmdm:\n  chrome: /opt/somewhere/chrome\nfilters:\n  - mdm\n---\n\n" +
+      "```{.abc}\nX:1\nK:C\nCDEF|\n```\n"
+  );
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "pdf" });
+  restore();
+
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.equal(vscode._state.progressTitles.length, 1, "the export did not start");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// Chrome alone carries the export: it is the engraver the filter prefers,
+// and abcm2ps is only the fallback, so neither being on the machine is the
+// one state that stops a PDF.
+test("a PDF of a document with scores exports with Chrome alone", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp, { chrome: true }));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE + "\n```{.abc}\nX:1\nK:C\nCDEF|\n```\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "pdf" });
+  restore();
+
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.equal(vscode._state.progressTitles.length, 1, "the export did not start");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
