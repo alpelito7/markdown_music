@@ -312,12 +312,37 @@ function onPath(name) {
 // the extension was installed from a .vsix or symlinked from a clone.
 const FILTER = path.join(__dirname, "render", "mdm", "mdm.lua");
 
-// abcm2ps engraves the scores of a PDF, and it is not shipped: it is a
-// separate LGPL-3.0-or-later program, credited in THIRD-PARTY-NOTICES.md.
-// This is the same search mdm.lua does (find_abcm2ps), run before Quarto so
-// a missing one is said out loud.
-// Without it the filter only warns and the PDF comes out with its scores left
-// as text, which is worse than not exporting.
+// What engraves the scores of a PDF: a Chrome, into which the filter loads
+// the editor's own abcjs and prints, or failing that abcm2ps, a separate
+// LGPL-3.0-or-later program credited in THIRD-PARTY-NOTICES.md. Neither is
+// shipped. These searches mirror mdm.lua's (find_chrome and find_abcm2ps)
+// as far as they can from here: the filter alone resolves a `mdm.chrome`
+// or a `mdm.abcm2ps` named in the YAML header, which is why a document
+// that names a chrome of its own is waved through below rather than
+// refused for a Chrome this search cannot see. Run before Quarto so a
+// machine with neither engraver is told out loud: with only one of the two
+// the filter manages by itself, and without both it only warns and the
+// PDF comes out with its scores left as text, which is worse than not
+// exporting.
+function findChrome() {
+  const names = [
+    "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+  ];
+  for (const name of names) {
+    const hit = onPath(name);
+    if (hit) return hit;
+  }
+  if (process.platform === "darwin") {
+    const app = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    try {
+      if (fs.existsSync(app)) return app;
+    } catch (e) {
+      // unreadable: then it is not the export's to spend
+    }
+  }
+  return null;
+}
+
 function findAbcm2ps(dir) {
   const local = path.join(dir, "tools", "bin", "abcm2ps");
   try {
@@ -330,9 +355,16 @@ function findAbcm2ps(dir) {
 
 // Whether the document holds a score at all, in either of the two forms that
 // give Pandoc the class: ```abc and ```{.abc}. One that holds none never
-// calls abcm2ps, so it exports to PDF without it.
+// engraves, so it exports to PDF with neither Chrome nor abcm2ps.
 function hasScores(text) {
   return /^[ \t]*(?:`{3,}|~{3,})[ \t]*(?:\{[^}\n]*\.abc\b|abc\b)/m.test(text);
+}
+
+// Whether the YAML header names a chrome of its own (mdm.chrome). The
+// filter resolves it, so the export is let through to it.
+function namesChrome(text) {
+  const header = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  return !!header && /^[ \t]+chrome[ \t]*:/m.test(header[1]);
 }
 
 // One way out for every export that cannot go on, and for every one that
@@ -511,14 +543,23 @@ async function exportDocument(document, to) {
     );
     return;
   }
-  if (target.outputs.indexOf(".pdf") !== -1 && hasScores(text) && !findAbcm2ps(dir)) {
+  if (
+    target.outputs.indexOf(".pdf") !== -1 &&
+    hasScores(text) &&
+    !findChrome() &&
+    !findAbcm2ps(dir) &&
+    !namesChrome(text)
+  ) {
     exportFailed(
-      "abcm2ps is not installed, and a PDF needs it to engrave the scores.",
-      "abcm2ps was not found in " +
+      "neither Chrome nor abcm2ps is installed, and a PDF needs one of them to engrave the scores.",
+      "No Chrome or Chromium was found on the PATH to engrave the scores " +
+        "with the editor's own abcjs, and no abcm2ps in " +
         path.join(dir, "tools", "bin") +
-        " nor on the PATH, and this document has scores in it. Without it the " +
-        "PDF would come out with them left as text.\nDebian and Ubuntu: apt " +
-        "install abcm2ps. macOS: brew install abcm2ps."
+        " nor on the PATH to fall back to, and this document has scores in " +
+        "it. Without either the PDF would come out with them left as text.\n" +
+        "Install Chrome or Chromium (preferred: the PDF then shows the very " +
+        "scores the editor does), or Debian and Ubuntu: apt install " +
+        "abcm2ps. macOS: brew install abcm2ps."
     );
     return;
   }

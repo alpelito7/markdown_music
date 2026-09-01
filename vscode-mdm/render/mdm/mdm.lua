@@ -1,8 +1,10 @@
 -- mdm.lua: Quarto filter for music blocks (ABC notation).
 -- HTML: rendered by abcjs in the browser (SVG, playback optional), on a page
 -- dressed as the VS Code editor (see the look section below).
--- PDF (LaTeX): engraved by abcm2ps to EPS, turned into PDF by epstopdf and
--- inserted as an image, cached by a hash of the source.
+-- PDF (LaTeX): engraved by the same abcjs, loaded into a headless Chrome and
+-- printed to a vector PDF (see the engraver section); a machine without a
+-- Chrome falls back to abcm2ps -> EPS -> epstopdf. Either way the engraving
+-- is inserted as an image, cached by a hash of the source.
 
 local CACHE_DIR = "mdm_cache"
 
@@ -121,6 +123,9 @@ local function read_look(meta)
     staff_lines = meta_word(meta, "mdm-staff-lines", { gray = true, ink = true }, "gray"),
     score_fill = meta_word(meta, "mdm-score-fill", SCORE_FILLS, "none"),
     score_align = meta_word(meta, "mdm-score-align", { center = true, left = true }, "center"),
+    -- Which engraver draws the PDF: the editor's own abcjs through Chrome,
+    -- unless the document asks for abcm2ps (or no Chrome is found).
+    engraver = meta_word(meta, "mdm-engraver", { abcjs = true, abcm2ps = true }, "abcjs"),
     -- Not a look of the editor's: whether the document names a maths font of
     -- its own, which the scale below leaves alone.
     mathfont = meta_string(meta, "mathfont") ~= nil,
@@ -673,95 +678,535 @@ local function paint_eps(text, ink, staff)
   return painted
 end
 
-local function render_latex(el)
-  local source = el.text
-  if not source:match("\n$") then source = source .. "\n" end
-  -- The engraving carries its own colours now, so what names the cache entry
-  -- is the block, the two colours it was drawn in and the width of its staff
-  -- lines: the same score on the two sides of the look is two engravings and
-  -- cannot share one file. What the fields above add for the engraver is not
-  -- part of the name, so a block that needed them keeps the name it would
-  -- have had without them.
-  local ink, staff = engraving_colors()
-  local digest = sha1(
-    source .. "\n" .. ink .. " " .. staff .. " " .. STAFF_LINE_WIDTH)
-  local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
+-- The four corners of the ink of a graphic, EPS or PDF alike, measured by
+-- ghostscript. What is read is text: the bbox device reports on stderr.
+local function ink_bbox(path)
+  local gs = io.popen(string.format(
+    "gs -q -dBATCH -dNOPAUSE -sDEVICE=bbox %s 2>&1", path))
+  local bbox_out = gs and gs:read("*a") or ""
+  if gs then gs:close() end
+  return bbox_out:match(
+    "%%%%BoundingBox:%s+(%-?%d+)%s+(%-?%d+)%s+(%-?%d+)%s+(%-?%d+)")
+end
 
-  if not file_exists(pdf) then
-    run("mkdir -p " .. CACHE_DIR)
-    local abc = CACHE_DIR .. "/" .. digest .. ".abc"
-    local f = assert(io.open(abc, "w"))
-    f:write(with_engraver_header(source))
+-- ---------- The editor's engraver, on paper ----------
+--
+-- What engraves the editor and the HTML is abcjs, and abcm2ps is another
+-- engraver with glyphs of its own: the figures of its time signatures, its
+-- clefs, every sign drawn by its own PostScript procedures, so however the
+-- page around it was dressed, a score in the PDF did not read as the one in
+-- the editor. So the PDF is engraved by the same abcjs: the bundled script
+-- the HTML ships is loaded into a page in a headless Chrome, the page is
+-- printed to PDF (vector, with the fonts of the browser embedded, which are
+-- the faces the editor resolves), and the sheet is trimmed to the ink with
+-- pdfcrop. A machine without a Chrome, or a document that asks for it
+-- (mdm-engraver: abcm2ps), keeps the abcm2ps engraving: the render degrades
+-- rather than dying, and says so in the log.
+
+-- Chrome by any of its common names, or wherever the document points
+-- (mdm.chrome in the YAML header). macOS keeps its browser out of the PATH.
+local CHROME_NAMES = {
+  "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+}
+local MAC_CHROME =
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+local function command_exists(name)
+  local p = io.popen("command -v " .. name .. " 2>/dev/null")
+  if not p then return false end
+  local out = p:read("*a") or ""
+  p:close()
+  return out ~= ""
+end
+
+-- mdm.chrome names a file, and only an existing file is taken: the value
+-- comes from the document's YAML and is never handed to a shell to resolve
+-- (quoting a name for `command -v` is how a crafted header would smuggle a
+-- command of its own into the render).
+local function find_chrome(meta_path)
+  if meta_path and file_exists(meta_path) then return meta_path end
+  for _, name in ipairs(CHROME_NAMES) do
+    if command_exists(name) then return name end
+  end
+  if file_exists(MAC_CHROME) then return MAC_CHROME end
+  return nil
+end
+
+local chrome_path = nil
+local has_pdfcrop = nil
+
+-- The engraving is asked for at the measure of the page: 51.25 ems at the
+-- default 11 pt, clamped by letter paper, is 527.4 pt of text, and a CSS px
+-- is 0.75 pt. A document set to another measure only rescales the drawing
+-- (width=\mdmscorewidth below), which is the same shrink `responsive:
+-- resize` performs in the browser, so the line breaks of the engraving are
+-- the ones the exported HTML shows.
+local ABCJS_STAFFWIDTH = 703
+
+-- The bundle rides inside the page rather than beside it, so nothing depends
+-- on where Chrome resolves a relative src from. What closes a <script> is
+-- the literal tag, so a build that ever carried one cannot be embedded and
+-- says so by failing over to abcm2ps.
+local FILTER_DIR = (debug.getinfo(1, "S").source or ""):match("^@(.*)[/\\]") or "."
+local abcjs_bundle = nil
+local function read_abcjs()
+  if abcjs_bundle ~= nil then return abcjs_bundle end
+  abcjs_bundle = false
+  local f = io.open(FILTER_DIR .. "/resources/abcjs-basic-min.js", "r")
+  if f then
+    local text = f:read("*a")
     f:close()
-    local prefix = CACHE_DIR .. "/" .. digest .. "_"
-    local eps = prefix .. "001.eps"
-    -- A tune abcm2ps will not have is refused with a status of 0 and no EPS
-    -- written, so the file is what says whether it engraved anything.
-    if not run(string.format("%s -E -q -O %s %s", abcm2ps_path, prefix, abc))
-      or not file_exists(eps)
-    then
-      quarto.log.warning("mdm: abcm2ps engraved nothing from a music block; its source is left as it is.")
-      return nil
+    if text and text ~= "" and not text:find("</script>", 1, true) then
+      abcjs_bundle = text
     end
-    local ef = assert(io.open(eps, "r"))
-    local engraved = ef:read("*a")
-    ef:close()
-    ef = assert(io.open(eps, "w"))
-    ef:write(paint_eps(engraved, ink, staff))
-    ef:close()
-    -- abcm2ps writes the EPS at the full page width even when the staff is
-    -- shorter than that (%%staffwidth, say). The BoundingBox is trimmed to
-    -- the real ink with ghostscript, and the width that comes out is kept in
-    -- a sidecar file, so the inserted size can be decided from the cache.
-    local gs = io.popen(string.format(
-      "gs -q -dBATCH -dNOPAUSE -sDEVICE=bbox %s 2>&1", eps))
-    local bbox_out = gs and gs:read("*a") or ""
-    if gs then gs:close() end
-    local x0, y0, x1, y1 = bbox_out:match(
-      "%%%%BoundingBox:%s+(%-?%d+)%s+(%-?%d+)%s+(%-?%d+)%s+(%-?%d+)")
-    if x0 then
-      local ef = assert(io.open(eps, "r"))
-      local content = ef:read("*a")
-      ef:close()
-      -- Replaced through a function: a replacement string would have its %%
-      -- read again, and "%%BoundingBox" would come out as "%BoundingBox",
-      -- which breaks the DSC header.
-      local bbox_line = "%%BoundingBox: " .. x0 .. " " .. y0 .. " " .. x1 .. " " .. y1
-      content = content:gsub("%%%%BoundingBox:[^\n]*", function()
-        return bbox_line
-      end, 1)
-      content = content:gsub("%%%%HiResBoundingBox:[^\n]*", function()
-        return "%%HiRes" .. bbox_line:sub(3)
-      end, 1)
-      ef = assert(io.open(eps, "w"))
-      ef:write(content)
-      ef:close()
+  end
+  return abcjs_bundle
+end
+
+-- The ABC source on its way into a <script>: a JS string literal, with the
+-- sequences the HTML parser would act on inside it broken up: `</` (which
+-- could close the script) and `<!` (which can open the script-data escaped
+-- state and carry the real closer past the parser). A NUL is dropped
+-- outright: the tokenizer would turn it into U+FFFD and corrupt the source.
+local function js_string(s)
+  s = s:gsub("%z", "")
+  s = s:gsub("\\", "\\\\"):gsub('"', '\\"')
+  s = s:gsub("\r", "\\r"):gsub("\n", "\\n")
+  s = s:gsub("</", "<\\/")
+  s = s:gsub("<!", "<\\!")
+  return '"' .. s .. '"'
+end
+
+-- Chrome refuses to start as root without --no-sandbox, which is the normal
+-- state of a container. The flag is added there and only there: the print
+-- is a local, throwaway page of the user's own document.
+local sandbox_flag = nil
+local function chrome_sandbox_flag()
+  if sandbox_flag ~= nil then return sandbox_flag end
+  sandbox_flag = ""
+  local p = io.popen("id -u 2>/dev/null")
+  if p then
+    local uid = p:read("*a") or ""
+    p:close()
+    if uid:match("^0%s*$") then sandbox_flag = " --no-sandbox" end
+  end
+  return sandbox_flag
+end
+
+-- The page Chrome prints: the engraving alone, drawn exactly as the export
+-- draws it (mdm.js, renderBlock: the same options), on a sheet big enough
+-- for any score and trimmed to the ink afterwards. The stylesheet is the
+-- svg slice of mdm-look.css, rule for rule, with one addition: the staff
+-- lines take a hairline stroke of their own colour, which lifts them from
+-- the 0.7 px abcjs fills them at (0.53 pt) to about the 0.9 pt the abcm2ps
+-- engraving is guarded to, past the pixel grid of a screen. The body is
+-- left transparent and Chrome is not asked to print backgrounds, so the
+-- page colour of the document shows through, as it does under an EPS.
+local function chrome_page(source, ink, staff)
+  local abcjs = read_abcjs()
+  if not abcjs then return nil end
+  return table.concat({
+    '<!doctype html><meta charset="utf-8">',
+    "<style>",
+    "  html, body { margin: 0; padding: 0; background: transparent; }",
+    "  @page { margin: 0; size: 1200px 6000px; }",
+    -- `color` besides `fill`: abcjs fills a good part of the drawing with
+    -- currentColor, which reads the CSS colour, not the fill. The editor
+    -- gets it from the body ink; here there is no body ink to inherit.
+    "  .mdm-paper { width: " .. ABCJS_STAFFWIDTH .. "px; color: " .. ink .. "; }",
+    "  .mdm-paper svg { fill: " .. ink .. "; }",
+    '  .mdm-paper svg [fill="#000000"] { fill: ' .. ink .. "; }",
+    '  .mdm-paper svg [stroke="#000000"] { stroke: ' .. ink .. "; }",
+    '  .mdm-paper svg [fill="none"],',
+    '  .mdm-paper svg [fill="transparent"],',
+    '  .mdm-paper svg [fill="rgba(0,0,0,0)"] { fill: none; }',
+    "  .mdm-paper svg .abcjs-staff,",
+    "  .mdm-paper svg .abcjs-staff path { fill: " .. staff ..
+      "; stroke: " .. staff .. "; stroke-width: 0.5; }",
+    "</style>",
+    '<div class="mdm-paper" id="paper"></div>',
+    "<script>",
+    abcjs,
+    "</script>",
+    "<script>",
+    'ABCJS.renderAbc(document.getElementById("paper"), ' ..
+      js_string(source) .. ", {",
+    "  add_classes: true,",
+    "  staffwidth: " .. ABCJS_STAFFWIDTH .. ",",
+    "  paddingtop: 2, paddingbottom: 2, paddingleft: 0, paddingright: 0,",
+    "});",
+    "</script>",
+  }, "\n")
+end
+
+-- One engraving through Chrome: the page written into the cache, printed,
+-- trimmed, measured. True when the cached PDF and its width sidecar are in
+-- place. The sheet is 6000 px tall and Chrome paginates what will not fit
+-- one sheet, of which only the first is inserted, exactly the one page
+-- abcm2ps -E writes; a score that long has outgrown a paragraph anyway.
+local function engrave_abcjs(source, ink, staff, digest)
+  local page = chrome_page(source, ink, staff)
+  if not page or not chrome_path or not has_pdfcrop then return false end
+  local html = CACHE_DIR .. "/" .. digest .. ".html"
+  local raw = CACHE_DIR .. "/" .. digest .. ".chrome.pdf"
+  local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
+  local f = io.open(html, "w")
+  if not f then return false end
+  f:write(page)
+  f:close()
+  -- The virtual time budget is what lets the render script run to its end
+  -- before the print; with the bundle inline it is settled at load, and the
+  -- budget is a ceiling, not a wait.
+  local printed = run(string.format(
+    '"%s" --headless=new --disable-gpu --no-pdf-header-footer%s' ..
+    " --virtual-time-budget=4000 --print-to-pdf=%s %s >/dev/null 2>&1",
+    chrome_path, chrome_sandbox_flag(), raw, html))
+  local ok = printed and file_exists(raw)
+    and run(string.format("pdfcrop --margins 0 %s %s >/dev/null 2>&1", raw, pdf))
+    and file_exists(pdf)
+  if ok then
+    -- A block abcjs drew nothing from (empty, or directives alone) still
+    -- prints a page, which pdfcrop cannot trim ("Empty Bounding Box", the
+    -- sheet kept whole): a degenerate box is refused here, or a blank
+    -- 900 x 4500 pt page would be cached and inserted at natural size.
+    local x0, _, x1 = ink_bbox(pdf)
+    if x0 and tonumber(x1) > tonumber(x0) then
       local wf = io.open(CACHE_DIR .. "/" .. digest .. ".w", "w")
       if wf then
         wf:write(tostring(tonumber(x1) - tonumber(x0)))
         wf:close()
       end
-    end
-    if not run(string.format("epstopdf %s --outfile=%s", eps, pdf)) then
-      quarto.log.warning("mdm: epstopdf failed on a music block; its source is left as it is.")
-      return nil
+    else
+      os.remove(pdf)
+      ok = false
     end
   end
+  os.remove(html)
+  os.remove(raw)
+  return ok
+end
 
-  -- A narrow score (%%staffwidth, say) is set at its natural size and
-  -- centred, the way a display equation is. A wide one takes the text width.
+-- ---------- The editor's equations, on paper ----------
+--
+-- The same argument as the scores, for the maths: the editor and the HTML
+-- set every formula with KaTeX, and KaTeX draws things no TeX font carries,
+-- the radical above all, which it builds from paths of its own past a
+-- certain height. However close a Computer Modern came (NewCM Book, below),
+-- a \sqrt in the PDF was visibly another drawing. So the PDF sets its
+-- formulas with the same vendored KaTeX: every formula of the document goes
+-- into one page in the same headless Chrome, each on a named @page cut to
+-- its exact size, the whole batch is printed in one run, and the pages are
+-- split into one cached PDF per formula. The run also reports each
+-- formula's width, height and depth below the baseline (measured in the
+-- page, from a zero-size inline marker that sits on the very baseline), and
+-- an inline formula is put back into the line lowered by that depth, so it
+-- sits on the text's own baseline. Everything is measured in the editor's
+-- CSS pixels at its 16 px body and inserted in ems of the body (\mdmem),
+-- which is what keeps the proportion whatever size the document is set at.
+--
+-- A formula KaTeX refuses (throwOnError, as the editor calls it) makes no
+-- page and keeps LaTeX's own setting, as does the whole document when there
+-- is no Chrome or when the document asked for abcm2ps: NewCM Book below is
+-- that fallback's face.
+
+-- Bumped whenever the page below changes shape: a warm cache would
+-- otherwise keep serving formulas measured under the old recipe.
+local KATEX_RECIPE = "katex 2"
+
+-- The fonts are named by absolute URL, and the filter's own directory is
+-- absolute only when Quarto handed it so: rooted here otherwise, on the
+-- working directory the render runs in.
+local function abs_path(p)
+  if p:sub(1, 1) == "/" then return p end
+  return pandoc.system.get_working_directory() .. "/" .. p
+end
+
+local katex_assets = nil
+local function read_katex()
+  if katex_assets ~= nil then return katex_assets end
+  katex_assets = false
+  local dir = abs_path(FILTER_DIR) .. "/resources/katex"
+  local jsf = io.open(dir .. "/katex.min.js", "r")
+  local cssf = io.open(dir .. "/katex.min.css", "r")
+  local js = jsf and jsf:read("*a") or nil
+  local css = cssf and cssf:read("*a") or nil
+  if jsf then jsf:close() end
+  if cssf then cssf:close() end
+  if js and css and js ~= "" and not js:find("</script>", 1, true) then
+    -- The fonts by absolute URL (quoted, for a path with spaces in it), so
+    -- the page can live in the cache directory and still find them.
+    css = css:gsub('url%(fonts/([^%)]+)%)', 'url("file://' .. dir .. '/fonts/%1")')
+    katex_assets = { js = js, css = css }
+  end
+  return katex_assets
+end
+
+local function math_digest(mode, tex, ink)
+  return sha1(KATEX_RECIPE .. " " .. mode .. "\n" .. tex .. "\n" .. ink)
+end
+
+-- The one page the whole batch renders in. Each formula lands in a flex
+-- div of its own, put on a named @page: flex is what anchors the drawing
+-- to the very top-left of its pagelet, and the nowrap on the span keeps an
+-- inline formula from folding into two lines of it (which fragmented it
+-- across two pages). The pagelet is padded out to a multiple of 8 px:
+-- Chrome quantises a page size to 1/300 in, and a page that came out a
+-- hair SMALLER than its content was shrunk whole to fit, notes, letters
+-- and baseline alike; every multiple of 8 px is a whole number of 300ths
+-- (8 px = 25/300 in), so the printed page is exactly the asked-for one and
+-- the drawing goes down at scale 1. The slack the padding leaves is blank,
+-- and the insertion below hides it behind the true measures.
+--
+-- Everything is measured only once document.fonts is ready: before the
+-- KaTeX faces arrive the line is set in fallback metrics, and the height
+-- and depth read then were about 2 px off the printed truth (measured on
+-- the `L` of example.mdm). The print fires after load, so the styles the
+-- callback injects are in force by then. A formula KaTeX refuses takes its
+-- div away and reports null: the printed pages are exactly the rendered
+-- formulas, in order.
+local function katex_page(formulas, ink)
+  local assets = read_katex()
+  if not assets then return nil end
+  local list = {}
+  for _, f in ipairs(formulas) do
+    list[#list + 1] = "[" .. js_string(f.mode) .. "," .. js_string(f.tex) .. "]"
+  end
+  return table.concat({
+    '<!doctype html><meta charset="utf-8">',
+    "<style>",
+    "html, body { margin: 0; padding: 0; background: transparent; }",
+    "body { font-size: 16px; color: " .. ink .. "; }",
+    assets.css,
+    -- The display margin is the band's to give, not the graphic's; the
+    -- band below spends it in \mdmem, as the scores do.
+    ".katex-display { margin: 0; }",
+    ".mdm-math { display: flex; align-items: flex-start; }",
+    ".mdm-math > span { white-space: nowrap; }",
+    "</style>",
+    '<div id="mdm-root"></div>',
+    "<script>",
+    assets.js,
+    "</script>",
+    "<script>",
+    "var FORMULAS = [" .. table.concat(list, ",") .. "];",
+    'var root = document.getElementById("mdm-root");',
+    "var CELLS = [];",
+    "function pad8(x) { return Math.ceil((x + 2) / 8) * 8; }",
+    "FORMULAS.forEach(function (f, i) {",
+    '  var div = document.createElement("div");',
+    '  div.className = "mdm-math";',
+    '  div.style.setProperty("page", "m" + i);',
+    '  var span = document.createElement("span");',
+    "  div.appendChild(span);",
+    "  root.appendChild(div);",
+    "  var ok = true;",
+    "  try {",
+    '    katex.render(f[1], span, { displayMode: f[0] === "D", throwOnError: true });',
+    "  } catch (e) { ok = false; }",
+    "  if (!ok) { CELLS.push(null); root.removeChild(div); return; }",
+    '  var mark = document.createElement("span");',
+    '  mark.style.display = "inline-block";',
+    '  mark.style.width = "0";',
+    '  mark.style.height = "0";',
+    "  span.appendChild(mark);",
+    "  CELLS.push({ div: div, span: span, mark: mark, i: i });",
+    "});",
+    "document.fonts.ready.then(function () {",
+    "  var dims = [];",
+    "  var rules = [];",
+    "  CELLS.forEach(function (c) {",
+    "    if (!c) { dims.push(null); return; }",
+    "    var r = c.span.getBoundingClientRect();",
+    "    if (r.width < 1 || r.height < 1) { dims.push(null); root.removeChild(c.div); return; }",
+    "    var m = c.mark.getBoundingClientRect();",
+    "    var pw = pad8(r.width);",
+    "    var ph = pad8(r.height);",
+    "    dims.push({ w: r.width, h: r.height, d: r.bottom - m.top, pw: pw, ph: ph });",
+    '    c.div.style.width = pw + "px";',
+    '    c.div.style.height = ph + "px";',
+    '    rules.push("@page m" + c.i + "{size:" + pw + "px " + ph + "px;margin:0}");',
+    "  });",
+    '  var style = document.createElement("style");',
+    '  style.textContent = rules.join(" ");',
+    "  document.head.appendChild(style);",
+    '  document.documentElement.setAttribute("data-mdm-dims", JSON.stringify(dims));',
+    "});",
+    "</script>",
+  }, "\n")
+end
+
+-- The dims attribute out of the dumped DOM: a JSON array of {w,h,d} and
+-- null, parsed positionally (a null is turned into an empty object first,
+-- so the balanced-braces walk keeps the order). Nothing of the document's
+-- own text is in it, only numbers, so the one entity the serialiser writes
+-- into an attribute that matters here is the quote.
+local function parse_dims(dom_line)
+  local raw = dom_line and dom_line:match('data%-mdm%-dims="([^"]*)"')
+  if not raw then return nil end
+  raw = raw:gsub("&quot;", '"'):gsub("&amp;", "&")
+  local out = {}
+  for token in raw:gsub("null", "{}"):gmatch("%b{}") do
+    local w, h, d, pw, ph = token:match(
+      '"w":([%d%.]+),"h":([%d%.]+),"d":(%-?[%d%.]+),"pw":(%d+),"ph":(%d+)')
+    out[#out + 1] = w and {
+      w = tonumber(w), h = tonumber(h), d = tonumber(d),
+      pw = tonumber(pw), ph = tonumber(ph),
+    } or false
+  end
+  return out
+end
+
+-- One batch through Chrome: print and measure in the same run (Chrome
+-- honours --print-to-pdf and --dump-dom together), then split the pages
+-- with ghostscript into one cached PDF per formula, each beside a .dim
+-- sidecar carrying "w h d" in the editor's pixels.
+local function engrave_math(formulas, ink)
+  local page = katex_page(formulas, ink)
+  if not page or not chrome_path then return end
+  -- The batch files are named after the batch, so two renders sharing one
+  -- cache do not print over each other's page.
+  local names = {}
+  for _, f in ipairs(formulas) do names[#names + 1] = f.digest end
+  local bid = sha1(table.concat(names, " "))
+  local html = CACHE_DIR .. "/" .. bid .. ".batch.html"
+  local batch = CACHE_DIR .. "/" .. bid .. ".batch.pdf"
+  local f = io.open(html, "w")
+  if not f then return end
+  f:write(page)
+  f:close()
+  local pipe = io.popen(string.format(
+    '"%s" --headless=new --disable-gpu --no-pdf-header-footer%s' ..
+    " --allow-file-access-from-files --virtual-time-budget=6000" ..
+    " --print-to-pdf=%s --dump-dom %s 2>/dev/null" ..
+    ' | grep -o \'data-mdm-dims="[^"]*"\'',
+    chrome_path, chrome_sandbox_flag(), batch, html))
+  local dom_line = pipe and pipe:read("*a") or ""
+  if pipe then pipe:close() end
+  local dims = parse_dims(dom_line)
+  if dims and #dims == #formulas and file_exists(batch) then
+    local at = 0
+    for i, f in ipairs(formulas) do
+      local dim = dims[i]
+      if dim then
+        at = at + 1
+        local pdf = CACHE_DIR .. "/" .. f.digest .. ".pdf"
+        if run(string.format(
+          "gs -q -dBATCH -dNOPAUSE -sDEVICE=pdfwrite" ..
+          " -dFirstPage=%d -dLastPage=%d -o %s %s", at, at, pdf, batch))
+          and file_exists(pdf)
+        then
+          local df = io.open(CACHE_DIR .. "/" .. f.digest .. ".dim", "w")
+          if df then
+            df:write(string.format(
+              "%.6g %.6g %.6g %d %d", dim.w, dim.h, dim.d, dim.pw, dim.ph))
+            df:close()
+          end
+        end
+      end
+    end
+  else
+    quarto.log.warning(
+      "mdm: Chrome could not set the equations with KaTeX;" ..
+      " they keep LaTeX's own faces.")
+  end
+  os.remove(html)
+  os.remove(batch)
+end
+
+-- A formula from the cache, into the line or onto one of its own. The
+-- widths and the drop below the baseline travel in ems of the body: what
+-- was w pixels beside the editor's 16 px text is w/16 of an em beside any
+-- text. A display formula goes down centred inside a small band, as the
+-- editor gives its block a breath of padding; one wider than the measure
+-- takes the text width instead, the shrink the editor's sideways scroll
+-- stands in for.
+local function insert_math(mathtype, digest)
+  local df = io.open(CACHE_DIR .. "/" .. digest .. ".dim", "r")
+  if not df then return nil end
+  local w, h, d, pw, ph = df:read("*a"):match(
+    "([%d%.]+) ([%d%.]+) (%-?[%d%.]+) (%d+) (%d+)")
+  df:close()
+  if not w then return nil end
+  local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
+  w, h, d, pw, ph = tonumber(w), tonumber(h), tonumber(d), tonumber(pw), tonumber(ph)
+  -- The graphic is the padded pagelet; the line is told the truth. The
+  -- \makebox takes the formula's own width, so the pagelet's blank slack
+  -- overhangs to the right where there is no ink to show; the \raisebox
+  -- drops the graphic until the drawing's baseline (h - d below its top)
+  -- meets the line's, and its optional arguments report the formula's real
+  -- ascent and depth, so the leading is what the formula would take, not
+  -- what the padding would.
+  local ascent = (h - d) / 16
+  local drop = (ph - (h - d)) / 16
+  local graphic = string.format(
+    "\\makebox[%.4f\\mdmem][l]{\\raisebox{-%.4f\\mdmem}[%.4f\\mdmem][%.4f\\mdmem]" ..
+    "{\\includegraphics[width=%.4f\\mdmem]{%s}}}",
+    w / 16, drop, ascent, d / 16, pw / 16, pdf)
+  if mathtype == "DisplayMath" then
+    -- A display wider than the measure takes the text width instead, the
+    -- shrink the editor's sideways scroll stands in for.
+    if w / 16 > 51 then
+      graphic = string.format("\\includegraphics[width=\\linewidth]{%s}", pdf)
+    end
+    return pandoc.RawInline("latex", string.format(
+      "\\par\\addvspace{0.25\\mdmem}{\\centering%s\\par}\\addvspace{0.25\\mdmem}",
+      graphic))
+  end
+  return pandoc.RawInline("latex", graphic)
+end
+
+-- The maths pass over the whole document: collect what is not yet in the
+-- cache, engrave it all in the one Chrome run, then put every formula the
+-- cache now holds into the page. What the cache has not got (a formula
+-- KaTeX refused, a batch that failed) stays a Math element, and LaTeX sets
+-- it as before.
+local function render_math_pass(doc)
+  local side = SIDES[(look and look.side)] or SIDES.light
+  local ink = side.ink
+  local jobs, seen = {}, {}
+  doc:walk({
+    Math = function(m)
+      local mode = m.mathtype == "DisplayMath" and "D" or "I"
+      local digest = math_digest(mode, m.text, ink)
+      if not seen[digest] and not file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
+        seen[digest] = true
+        jobs[#jobs + 1] = { mode = mode, tex = m.text, digest = digest }
+      end
+    end,
+  })
+  if #jobs > 0 then
+    run("mkdir -p " .. CACHE_DIR)
+    engrave_math(jobs, ink)
+  end
+  return doc:walk({
+    Math = function(m)
+      local mode = m.mathtype == "DisplayMath" and "D" or "I"
+      local digest = math_digest(mode, m.text, ink)
+      if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
+        return insert_math(m.mathtype, digest)
+      end
+      return nil
+    end,
+  })
+end
+
+-- The engraving inserted into the page, from the cache: a narrow score
+-- (%%staffwidth, say) is set at its natural size and centred, the way a
+-- display equation is, and a wide one takes the text width. Centred like a
+-- display equation, unless the editor was set to line the scores up with
+-- the text (mdm.scoreAlign). Every score goes down inside the band
+-- (\mdmscoreband, in the preamble), which is what gives it the editor's
+-- 1.5em of air above and below; the centred one takes a plain \centering
+-- rather than the center environment, whose own topsep would stack a
+-- second gap onto the band's.
+local function insert_score(digest)
+  local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
   local width_pt = nil
   local wf = io.open(CACHE_DIR .. "/" .. digest .. ".w", "r")
   if wf then
     width_pt = tonumber(wf:read("*a"))
     wf:close()
   end
-  -- Centred like a display equation, unless the editor was set to line the
-  -- scores up with the text (mdm.scoreAlign). Every score goes down inside
-  -- the band (\mdmscoreband, in the preamble), which is what gives it the
-  -- editor's 1.5em of air above and below; the centred one takes a plain
-  -- \centering rather than the center environment, whose own topsep would
-  -- stack a second gap onto the band's.
   local left = look and look.score_align == "left"
   if width_pt and width_pt < 330 then
     return pandoc.RawBlock("latex", string.format(
@@ -771,6 +1216,131 @@ local function render_latex(el)
   end
   return pandoc.RawBlock("latex", string.format(
     "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{%s}}}", pdf))
+end
+
+-- The abcm2ps engraving, EPS to PDF, painted on the way. True when the
+-- cached PDF is in place.
+local function engrave_abcm2ps(source, ink, staff, digest)
+  local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
+  local abc = CACHE_DIR .. "/" .. digest .. ".abc"
+  local f = assert(io.open(abc, "w"))
+  f:write(with_engraver_header(source))
+  f:close()
+  local prefix = CACHE_DIR .. "/" .. digest .. "_"
+  local eps = prefix .. "001.eps"
+  -- A tune abcm2ps will not have is refused with a status of 0 and no EPS
+  -- written, so the file is what says whether it engraved anything.
+  if not run(string.format("%s -E -q -O %s %s", abcm2ps_path, prefix, abc))
+    or not file_exists(eps)
+  then
+    quarto.log.warning("mdm: abcm2ps engraved nothing from a music block; its source is left as it is.")
+    return false
+  end
+  local ef = assert(io.open(eps, "r"))
+  local engraved = ef:read("*a")
+  ef:close()
+  ef = assert(io.open(eps, "w"))
+  ef:write(paint_eps(engraved, ink, staff))
+  ef:close()
+  -- abcm2ps writes the EPS at the full page width even when the staff is
+  -- shorter than that (%%staffwidth, say). The BoundingBox is trimmed to
+  -- the real ink with ghostscript, and the width that comes out is kept in
+  -- a sidecar file, so the inserted size can be decided from the cache.
+  local x0, y0, x1, y1 = ink_bbox(eps)
+  -- A tune with a header but nothing to draw (the injected X:/K: over an
+  -- empty body, say) comes back as an EPS with no ink in it: writing its
+  -- zero box into the header sent ghostscript a [0 0] page and epstopdf
+  -- died of it. It is the same refusal as no EPS at all.
+  if not x0 or tonumber(x1) <= tonumber(x0) then
+    quarto.log.warning("mdm: abcm2ps engraved nothing from a music block; its source is left as it is.")
+    return false
+  end
+  if x0 then
+    local ef = assert(io.open(eps, "r"))
+    local content = ef:read("*a")
+    ef:close()
+    -- Replaced through a function: a replacement string would have its %%
+    -- read again, and "%%BoundingBox" would come out as "%BoundingBox",
+    -- which breaks the DSC header.
+    local bbox_line = "%%BoundingBox: " .. x0 .. " " .. y0 .. " " .. x1 .. " " .. y1
+    content = content:gsub("%%%%BoundingBox:[^\n]*", function()
+      return bbox_line
+    end, 1)
+    content = content:gsub("%%%%HiResBoundingBox:[^\n]*", function()
+      return "%%HiRes" .. bbox_line:sub(3)
+    end, 1)
+    ef = assert(io.open(eps, "w"))
+    ef:write(content)
+    ef:close()
+    local wf = io.open(CACHE_DIR .. "/" .. digest .. ".w", "w")
+    if wf then
+      wf:write(tostring(tonumber(x1) - tonumber(x0)))
+      wf:close()
+    end
+  end
+  if not run(string.format("epstopdf %s --outfile=%s", eps, pdf)) then
+    quarto.log.warning("mdm: epstopdf failed on a music block; its source is left as it is.")
+    return false
+  end
+  return true
+end
+
+local chrome_warned = false
+
+local function render_latex(el)
+  local source = el.text
+  if not source:match("\n$") then source = source .. "\n" end
+  -- What names a cache entry is the engraver, its parameters, the block and
+  -- the two colours it was drawn in: the same score on the two sides of the
+  -- look is two engravings and cannot share one file, and the two engravers
+  -- cannot share one either. What with_engraver_header adds for abcm2ps is
+  -- not part of the name, so a block that needed it keeps the name it would
+  -- have had without it.
+  local ink, staff = engraving_colors()
+  local wants_abcjs = not (look and look.engraver == "abcm2ps")
+
+  if wants_abcjs and chrome_path and has_pdfcrop then
+    -- The leading `abcjs 1` is the engraver and the recipe: a change to the
+    -- page it prints from (chrome_page) has to bump it, or a warm cache
+    -- would keep serving the old drawing.
+    local digest = sha1(
+      "abcjs 1 " .. ABCJS_STAFFWIDTH .. "\n" .. source .. "\n" .. ink .. " " .. staff)
+    if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
+      return insert_score(digest)
+    end
+    run("mkdir -p " .. CACHE_DIR)
+    if engrave_abcjs(source, ink, staff, digest) then
+      return insert_score(digest)
+    end
+    quarto.log.warning(
+      "mdm: Chrome could not print a music block; it falls back to abcm2ps.")
+  elseif wants_abcjs and not chrome_warned then
+    chrome_warned = true
+    -- What is missing is named: pdfcrop can be the absent one on a machine
+    -- with a perfectly good Chrome, and "no Chrome found" then sent its
+    -- reader hunting the wrong tool.
+    if chrome_path then
+      quarto.log.warning(
+        "mdm: pdfcrop was not found (it ships with TeX Live), so the scores" ..
+        " cannot be engraved with the editor's abcjs; they fall back to abcm2ps.")
+    else
+      quarto.log.warning(
+        "mdm: no Chrome found to engrave the scores with the editor's abcjs;" ..
+        " they fall back to abcm2ps. Point mdm.chrome at a Chrome, or set" ..
+        " mdm-engraver: abcm2ps to quiet this.")
+    end
+  end
+
+  local digest = sha1(
+    source .. "\n" .. ink .. " " .. staff .. " " .. STAFF_LINE_WIDTH)
+  if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
+    return insert_score(digest)
+  end
+  run("mkdir -p " .. CACHE_DIR)
+  if engrave_abcm2ps(source, ink, staff, digest) then
+    return insert_score(digest)
+  end
+  return nil
 end
 
 -- A thematic break (`---`), drawn as the editor draws its <hr>: the hairline
@@ -805,6 +1375,14 @@ function Meta(meta)
   else
     abcm2ps_path = find_abcm2ps(nil)
   end
+  -- The engraver's browser and its trimmer, looked for once and only where
+  -- they could be spent: a render to HTML engraves in the reader's browser
+  -- and needs neither.
+  if quarto.doc.is_format("latex") then
+    chrome_path = find_chrome(opt and opt.chrome and
+      pandoc.utils.stringify(opt.chrome) or nil)
+    has_pdfcrop = command_exists("pdfcrop")
+  end
   look = read_look(meta)
   -- The look rides on every render, HTML or PDF, music in the document or
   -- none: the ground, the ink and the code cards are the document's.
@@ -830,8 +1408,20 @@ function CodeBlock(el)
   return nil -- any other format: leave the block alone
 end
 
+-- The maths pass, over the whole document at once so the batch is one
+-- Chrome run. It rides the same switch as the scores: the editor's engines
+-- through Chrome unless the document asked for abcm2ps or there is no
+-- Chrome to run, where every Math element stays LaTeX's.
+local function document(doc)
+  if not quarto.doc.is_format("latex") then return nil end
+  if look and look.engraver == "abcm2ps" then return nil end
+  if not chrome_path then return nil end
+  return render_math_pass(doc)
+end
+
 -- Meta has to run before the CodeBlocks, since it settles the abcm2ps path.
+-- Within the second table the Pandoc function runs after the element ones.
 return {
   { Meta = Meta },
-  { CodeBlock = CodeBlock, HorizontalRule = horizontal_rule },
+  { CodeBlock = CodeBlock, HorizontalRule = horizontal_rule, Pandoc = document },
 }
