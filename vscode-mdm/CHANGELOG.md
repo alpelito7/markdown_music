@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.0
+
+- A PDF export is engraved by the engines the editor itself draws with. The
+  scores used to go through abcm2ps and the equations through LaTeX, both
+  somebody else's shapes, so the paper and the screen disagreed about what
+  the same source looks like: different figures on a time signature,
+  different weight on a radical. The filter now loads the vendored abcjs and
+  KaTeX into a headless Chrome and prints, so the score in the PDF is the
+  drawing the editor shows and the formula is KaTeX's own, radical for
+  radical. Vector throughout, with the fonts embedded.
+- An inline formula takes the width the browser measured for it and sits on
+  the text's baseline, lowered by the depth KaTeX reports, so it no longer
+  pushes a line break somewhere the editor does not break.
+- Neither Chrome nor anything else is required to keep working. Without a
+  Chrome, or without `pdfcrop`, the render says in the log which tool it
+  missed and falls back to what it did before: abcm2ps for the scores, LaTeX
+  for the maths. `mdm-engraver: abcm2ps` in the YAML picks that path
+  outright, and `mdm.chrome` points at a browser the PATH does not carry.
+  The export's pre-flight stops a PDF with scores in it only when the
+  machine has neither engraver.
+- The page number came out black on the dark side, on the dark ground. The
+  folio is set by the output routine, which the ink of the look did not
+  reach; it takes the ink of the side now, under both the standard classes
+  and KOMA.
+- The staff lines were stroked at 0.7 pt, which is 0.93 of a pixel at 96 dpi:
+  a viewer that snaps thin strokes kept or dropped each line by where it
+  landed, and whole staves came out of the PDF with a line or two missing.
+  They are 0.9 pt now, past that grid, and the width is part of the cache key.
+- The rest of the page moved closer to the editor as well: the maths in New
+  Computer Modern Book at KaTeX's 1.21 scale, with operators in the upright
+  serif of the family; inline code on a breakable chip of the card material;
+  every score inside a band with the editor's 1.5 em of air; the quote with
+  the editor's left border; and the thematic break as its full-measure
+  hairline.
+
 ## 0.2.4
 
 - The editor spends its own brass on what is held or sounding. It used to
