@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.4.0
+
+- Tables are drawn. A pipe table was the one block the editor still showed
+  as its source; it is a block widget now, under its source lines the way a
+  score or a display equation is. The cells are set with the marks and the
+  maths they carry, each column takes the alignment the second row asks for,
+  and a caret in the table brings the pipes back, in the monospace grid the
+  columns line up in, with the drawing left below as the live preview. A
+  click lands on the cell it was on.
+- An image named by an absolute path is shown. A figure drawn by the code of
+  another project lives wherever that project keeps it, and every path that
+  was not a URL used to hang from the folder of the document, so an absolute
+  one came out as that folder with the path glued behind it. The webview is
+  handed the root of the document's filesystem as a second base, and is
+  allowed to read from it, whenever the document is a file on disk.
+- A figure carries the pointer, since a click on it opens its source, as it
+  does on a score or an equation.
+- Opening a drawing no longer scrolls the document out from under the click.
+  The source that opens is line after line of text the drawing did not take,
+  so everything under it moved down: on a table of eight rows whose head was
+  off the top of the pane, the line the click landed on opened 182 px from
+  where the cell had been. The height of the click is held instead.
+- A copy is answered in the brass the chrome is drawn in. The pulse was a
+  blue of its own, the last colour left in the editor that came from
+  somewhere else; it is the top step of the same ladder now, at the weight
+  the old tint carried, so a copy speaks the colour of the button that asked
+  for it.
+- A thematic break with a line of text straight under it no longer breaks
+  the export. The editor draws a rule there and Pandoc read the opening
+  fence of a YAML metadata block, which ran to the next `---` and took a
+  score into it; the render died in Quarto's reader. The copy that is
+  rendered gets the blank line the two dialects need, and the document never
+  does.
+- A long score goes down the page as one clipped image per staff system,
+  stacked into the drawing it was cut from, so a page break can fall between
+  two systems instead of throwing the whole engraving onto the next page. A
+  score taller than the page used to have nowhere to go at all.
+- The word AUTHOR that Quarto sets over the name is gone from the HTML.
+  LaTeX's title block writes no such word, so the two exports disagreed
+  about what the page says, and its height was most of what left the author
+  adrift under the subtitle.
+
 ## 0.3.0
 
 - A PDF export is engraved by the engines the editor itself draws with. The
