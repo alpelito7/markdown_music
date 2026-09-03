@@ -484,6 +484,72 @@ function withReader(text, from) {
   );
 }
 
+// ---------- The rules the copy draws ----------
+
+// A line of nothing but dashes, which is how a thematic break is written, and
+// the fence a fenced block opens with. Only dashes, and only in an unbroken
+// run: `***` and `___` are a rule to Pandoc whatever follows them, and a rule
+// written spaced out (`- - -`) is also how Pandoc rules the columns of a
+// simple table, which the copy has no business taking apart.
+const DASH_BREAK = /^ {0,3}-{3,}[ \t]*$/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+// A thematic break with a line of text straight under it. In the CommonMark
+// the editor reads, a line of dashes is a rule and nothing else (the
+// HorizontalRule branch of media/main.js, drawn by the RULE widget). Pandoc
+// reads that same line as the opening fence of a YAML metadata block as soon
+// as what follows it is not blank, and the block runs to the next `---` and
+// swallows everything in between: a `---` written straight above a ```abc
+// fence took the score into one, and the render died in Quarto's own reader
+// with "Error parsing YAML metadata"; the same thing closed by a `...` was
+// dropped without a word (measured on Pandoc 3.8.3 through Quarto 1.9.37).
+//
+// The blank line that makes the two dialects agree goes into the copy Quarto
+// renders and never into the document: it only spells out what the editor
+// already draws there, and the copy is taken away when the render is over.
+// This is the same bargain as READER above, one rule further on: what comes
+// out is what the editor showed.
+//
+// Every line of dashes outside a fence is served, and the line above it is not
+// consulted, because there is no case where the blank line costs anything. On
+// a rule it is what Pandoc was missing; on a setext underline, which is what a
+// line of dashes under a paragraph is in both dialects, the underline has
+// already taken the paragraph above it and a blank line under it changes
+// nothing. Inside a fence the dashes are code, and a blank line in an ABC
+// block would end the tune, so a fence is stepped over whole.
+function withBreaks(text) {
+  const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  const head = header ? text.slice(0, header[0].length) : "";
+  const lines = (header ? text.slice(header[0].length) : text).split(/\r?\n/);
+  // The document's own line ending, so a copy of a CRLF file stays CRLF.
+  const eol = /\r\n/.test(text) ? "\r\n" : "\n";
+  const out = [];
+  let open = null; // the run of ` or ~ the fence now standing was opened with
+  for (let i = 0; i < lines.length; i++) {
+    out.push(lines[i]);
+    const fence = FENCE.exec(lines[i]);
+    if (open) {
+      // A closing fence: the same character, no shorter, and nothing after it.
+      const closes =
+        fence &&
+        fence[1][0] === open[0] &&
+        fence[1].length >= open.length &&
+        !fence[2].trim();
+      if (closes) open = null;
+      continue;
+    }
+    if (fence) {
+      open = fence[1];
+      continue;
+    }
+    if (!DASH_BREAK.test(lines[i])) continue;
+    const below = i + 1 < lines.length ? lines[i + 1] : "";
+    if (!below.trim()) continue; // the blank line is already there
+    out.push("");
+  }
+  return head + out.join(eol);
+}
+
 // The render itself, which is what bin/mdm does from a terminal: copy the
 // .mdm to a .qmd beside it, point the copy at the filter, call Quarto, and
 // take the copy away again. Done here rather than shelled out to that script
@@ -589,7 +655,10 @@ async function exportDocument(document, to) {
         let log = "";
         let child;
         try {
-          fs.writeFileSync(copy, withReader(withFilter(text, FILTER), READER));
+          fs.writeFileSync(
+            copy,
+            withReader(withFilter(withBreaks(text), FILTER), READER)
+          );
           child = cp.spawn(quarto, args, { cwd: dir });
         } catch (e) {
           resolve({ code: -1, log: String(e.message || e) });
@@ -817,14 +886,15 @@ window.MDM_PALETTE = ${inlineJson(readPalette())};
 
 function deactivate() {}
 
-// withFilter, withReader, hasScores and renderArgs are pure and are exported
-// for the tests: they decide what Quarto is handed, which is the half of the
-// export that can be checked without running anything.
+// withFilter, withReader, withBreaks, hasScores and renderArgs are pure and
+// are exported for the tests: they decide what Quarto is handed, which is the
+// half of the export that can be checked without running anything.
 module.exports = {
   activate,
   deactivate,
   withFilter,
   withReader,
+  withBreaks,
   hasScores,
   renderArgs,
   FILTER,

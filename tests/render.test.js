@@ -154,6 +154,57 @@ test("HTML render: figures, playback, escaping, deps, and no music alias", () =>
   }
 });
 
+// ---------- The rules the copy draws ----------
+
+// A `---` written straight above a score. The editor draws a rule there and
+// Pandoc read the same line as the opening fence of a YAML metadata block,
+// which ran to the next `---`, took the score into it and killed the render in
+// Quarto's own reader ("Error parsing YAML metadata"). The blank line the two
+// dialects need goes into the .qmd twin and never into the .mdm: see the
+// breaks() pass of bin/mdm and withBreaks in vscode-mdm/extension.js, which
+// the host suite holds to the same cases.
+const RULE_DOC = `---
+title: "Rules"
+format:
+  html: {}
+filters:
+  - mdm
+---
+
+Intro paragraph.
+
+---
+\`\`\`abc
+X:1
+K:C
+CDEF|
+\`\`\`
+
+---
+
+Last paragraph.
+`;
+
+test("a rule written straight above a score does not swallow it", () => {
+  const dir = freshDir("rules");
+  const doc = path.join(dir, "doc.mdm");
+  fs.writeFileSync(doc, RULE_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!fs.existsSync(path.join(dir, "doc.qmd")), "the copy was left behind");
+  // The blank line went into the copy, so the file on disk is untouched.
+  assert.equal(fs.readFileSync(doc, "utf8"), RULE_DOC, "the document itself was rewritten");
+
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  assert.equal(
+    (html.match(/class="mdm-block/g) || []).length,
+    1,
+    "the score under the rule never reached the filter"
+  );
+  assert.equal((html.match(/<hr/g) || []).length, 2, "a rule came out as something else");
+  assert.match(html, /Last paragraph\./);
+});
+
 // ---------- The look of the editor ----------
 
 // The block of custom properties the filter writes for the look in force, as

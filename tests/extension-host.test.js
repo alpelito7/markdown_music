@@ -743,6 +743,76 @@ test("the copy is read in the dialect of the editor, and a document that names o
   assert.match(ext.READER, /^markdown-blank_before_header-blank_before_blockquote$/);
 });
 
+test("a rule with a line straight under it gets the blank line the copy needs", () => {
+  // The bug this settles: the editor draws a rule, Pandoc reads the fence of a
+  // YAML metadata block that runs to the next `---` and takes the score with
+  // it, and Quarto dies in its own reader with "Error parsing YAML metadata".
+  assert.equal(
+    ext.withBreaks("Intro\n\n---\n```abc\nX:1\n```\n"),
+    "Intro\n\n---\n\n```abc\nX:1\n```\n"
+  );
+  // A rule that already has its blank line, and one at the end of the file,
+  // are left exactly as they are.
+  const clean = "a\n\n---\n\nb\n";
+  assert.equal(ext.withBreaks(clean), clean);
+  assert.equal(ext.withBreaks("a\n\n---\n"), "a\n\n---\n");
+
+  // Two rules running into each other: the second one is served as well.
+  assert.equal(ext.withBreaks("a\n\n---\n---\nb\n"), "a\n\n---\n\n---\n\nb\n");
+
+  // Inside a fence the dashes are code, and a blank line in an ABC block would
+  // end the tune. Backticks and tildes both, and the fence that closes is the
+  // one of the same character.
+  const fenced = "```md\nA\n---\nB\n```\n";
+  assert.equal(ext.withBreaks(fenced), fenced);
+  const tilde = "~~~md\n```\n---\nB\n~~~\n";
+  assert.equal(ext.withBreaks(tilde), tilde);
+
+  // Only an unbroken run of dashes: a spaced rule is how Pandoc rules the
+  // columns of a simple table, and `***` is a rule to Pandoc whatever follows.
+  const spaced = "a\n\n- - -\nb\n";
+  assert.equal(ext.withBreaks(spaced), spaced);
+  const stars = "a\n\n***\nb\n";
+  assert.equal(ext.withBreaks(stars), stars);
+  // Four spaces in is an indented code block, not a rule.
+  const code = "a\n\n    ---\n    b\n";
+  assert.equal(ext.withBreaks(code), code);
+
+  // The header is not the body: its own fences are left where they are, and
+  // the first line under it counts as the start of the document.
+  assert.equal(
+    ext.withBreaks("---\ntitle: T\n---\n---\nb\n"),
+    "---\ntitle: T\n---\n---\n\nb\n"
+  );
+
+  // A CRLF document comes back CRLF, blank line included.
+  assert.equal(
+    ext.withBreaks("a\r\n\r\n---\r\nb\r\n"),
+    "a\r\n\r\n---\r\n\r\nb\r\n"
+  );
+});
+
+test("the blank line a rule needs goes into the copy and not into the document", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  const source = "---\ntitle: T\nfilters:\n  - mdm\n---\n\nIntro\n\n---\n```abc\nX:1\nK:C\nCDEF|\n```\n";
+  fs.writeFileSync(doc, source);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "html" });
+  restore();
+
+  const copy = fs.readFileSync(path.join(tmp, "copy.qmd"), "utf8");
+  assert.ok(
+    copy.includes("Intro\n\n---\n\n```abc\n"),
+    "Quarto was handed the rule with the score still glued under it"
+  );
+  assert.equal(fs.readFileSync(doc, "utf8"), source, "the document itself was rewritten");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test("a document that asks for the format links keeps them", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const restore = usePath(fakeBin(tmp));

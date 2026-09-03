@@ -42,12 +42,61 @@ names_reader() {
     END { if (named) exit 0; exit 1 }
   ' "$1"
 }
+# The blank line a thematic break needs under it. The MDM editor reads a line
+# of dashes as a rule and nothing else; Pandoc reads it as the opening fence of
+# a YAML metadata block as soon as the line under it is not blank, and the
+# block runs to the next `---` and swallows what is in between. A `---` written
+# straight above a ```abc fence took the score into one and the render died in
+# Quarto's own reader ("Error parsing YAML metadata"). The blank line goes into
+# the copy and never into the file, which is what the VS Code export does too
+# (extension.js, withBreaks; the two are held to the same cases by the tests).
+#
+# Only an unbroken run of dashes, and only outside a fence: a spaced rule
+# (`- - -`) is also how Pandoc rules the columns of a simple table, and a blank
+# line inside an ABC block would end the tune. The line above is not consulted,
+# since a line of dashes under a paragraph is a setext underline to both
+# dialects and a blank line under it changes nothing (measured).
+breaks() {
+  awk '
+    function bare(s,   t) { t = s; sub(/^[[:blank:]]*/, "", t); return t }
+    function indent(s) { return length(s) - length(bare(s)) }
+    function runlen(s, c,   n) { n = 0; while (substr(s, n + 1, 1) == c) n++; return n }
+    { line[NR] = $0 }
+    END {
+      # The YAML header, printed as it came: only the body has rules in it.
+      head = 0
+      if (NR > 0 && line[1] ~ /^---[[:blank:]]*$/) {
+        for (i = 2; i <= NR; i++) if (line[i] ~ /^---[[:blank:]]*$/) { head = i; break }
+      }
+      open = ""   # the run of ` or ~ the fence now standing was opened with
+      for (i = 1; i <= NR; i++) {
+        print line[i]
+        if (i <= head) continue
+        t = bare(line[i]); c = substr(t, 1, 1)
+        fence = (indent(line[i]) <= 3 && (c == "`" || c == "~") && runlen(t, c) >= 3)
+        if (open != "") {
+          # A closing fence: the same character, no shorter, nothing after it.
+          if (fence && c == substr(open, 1, 1) && runlen(t, c) >= length(open) &&
+              bare(substr(t, runlen(t, c) + 1)) == "") open = ""
+          continue
+        }
+        if (fence) { open = substr(t, 1, runlen(t, c)); continue }
+        if (indent(line[i]) > 3 || runlen(t, "-") < 3) continue
+        if (bare(substr(t, runlen(t, "-") + 1)) != "") continue
+        below = (i < NR) ? line[i + 1] : ""
+        if (below ~ /^[[:space:]]*$/) continue   # the blank line is already there
+        print ""
+      }
+    }
+  '
+}
+
 if names_reader "$file"; then
-  cp "$file" "$tmp"
+  breaks < "$file" > "$tmp"
 elif head -n 1 "$file" | grep -qE '^---[[:blank:]]*$'; then
-  { head -n 1 "$file"; printf 'from: %s\n' "$reader"; tail -n +2 "$file"; } > "$tmp"
+  { head -n 1 "$file"; printf 'from: %s\n' "$reader"; tail -n +2 "$file"; } | breaks > "$tmp"
 else
-  { printf -- '---\nfrom: %s\n---\n\n' "$reader"; cat "$file"; } > "$tmp"
+  { printf -- '---\nfrom: %s\n---\n\n' "$reader"; cat "$file"; } | breaks > "$tmp"
 fi
 trap 'rm -f "$tmp"' EXIT
 
