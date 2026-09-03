@@ -1795,6 +1795,57 @@ test("clicking a drawn table opens its source at the cell that was clicked", { s
   await h.close();
 });
 
+// A table too tall for the pane, with prose above and below it, for the
+// scroll the reveal used to cause.
+const TALL_TABLE = [
+  ...Array.from({ length: 20 }, (_, i) => "Paragraph " + (i + 1) + " above.\n"),
+  "| $i$ | purpose |",
+  "| ---: | :--- |",
+  ...Array.from({ length: 14 }, (_, i) => "| " + (i + 1) + " | row " + (i + 1) + " |"),
+  "",
+  ...Array.from({ length: 20 }, (_, i) => "Paragraph " + (i + 1) + " below.\n"),
+].join("\n");
+
+test("opening a table from a click does not scroll the document out from under it", { skip }, async () => {
+  const h = await open({ text: TALL_TABLE, withFrontMatter: false, scores: 0, height: 600 });
+  // The head of the table off the top of the pane, which is the case the
+  // source used to grow into: its lines are added above the drawing, so
+  // everything under them moved down by the height they took.
+  await h.page.evaluate(() => {
+    const { EditorView } = window.__mdm.CM;
+    const view = window.__mdm.view;
+    const at = view.state.doc.toString().indexOf("| $i$");
+    view.dispatch({ effects: EditorView.scrollIntoView(at, { y: "start" }) });
+  });
+  await sleep(350);
+  const click = await h.page.evaluate(() => {
+    const scroller = window.__mdm.view.scrollDOM;
+    const box = scroller.getBoundingClientRect();
+    const table = document.querySelector("#app .mdm-table");
+    const r = table.getBoundingClientRect();
+    scroller.scrollTop += r.top - box.top + 100; // 100px of the table off the top
+    const rows = document.querySelectorAll("#app .mdm-table tbody tr");
+    const cell = rows[rows.length - 1].children[1].getBoundingClientRect();
+    return { x: cell.x + cell.width / 2, y: cell.y + cell.height / 2 };
+  });
+  await sleep(250);
+  await h.page.mouse.click(click.x, click.y);
+  await sleep(350);
+  const landed = await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    const coords = view.coordsAtPos(view.state.selection.main.head);
+    return coords ? (coords.top + coords.bottom) / 2 : null;
+  });
+  assert.ok(landed !== null, "the caret is not on the screen");
+  // The line of the cell that was clicked sits where that cell was.
+  assert.ok(
+    Math.abs(landed - click.y) <= 4,
+    "the source opened " + Math.round(landed - click.y) + "px from the click"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- Images ----------
 
 const IMAGE_DOC = [
@@ -1824,6 +1875,42 @@ test("a relative image hangs from the folder of the document, an absolute one fr
     // Not the folder of the document with the absolute path glued behind it.
     "https://vsc.test/data/runs/figures/far.svg",
   ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A figure small enough to write into the document, so the test has one that
+// really loads: a 100x70 white PNG.
+const PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABGCAYAAAAr1V1TAAAAKklEQVR4" +
+  "nO3BAQ0AAADCoPdPbQ8HFAAAAAAAAAAAAAAAAAAAAAAAAHwbLcQAAaHYVR0AAAAASUVORK5CYII=";
+
+test("a figure carries the pointer, and a click on it opens its source", { skip }, async () => {
+  const h = await open({
+    text: ["Above.", "", "![A figure.](" + PNG + ")", "", "Below.", ""].join("\n"),
+    withFrontMatter: false,
+    scores: 0,
+  });
+  const cursor = await h.page.evaluate(
+    () => getComputedStyle(document.querySelector("#app img.mdm-image")).cursor
+  );
+  // The caret of the text says "type here", and on a drawing that opens it
+  // said the wrong thing: a score, an equation and a table all point.
+  assert.equal(cursor, "pointer");
+  const box = await h.page.evaluate(() => {
+    const r = document.querySelector("#app img.mdm-image").getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await h.page.mouse.click(box.x, box.y);
+  await sleep(300);
+  const opened = await h.page.evaluate(() => ({
+    drawn: !!document.querySelector("#app img.mdm-image"),
+    line: window.__mdm.view.state.doc
+      .lineAt(window.__mdm.view.state.selection.main.head)
+      .text.slice(0, 13),
+  }));
+  assert.equal(opened.drawn, false, "the figure stayed drawn with a caret in it");
+  assert.equal(opened.line, "![A figure.](", "the caret is not in the source of the figure");
   assert.deepEqual(h.errors, []);
   await h.close();
 });

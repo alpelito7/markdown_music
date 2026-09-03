@@ -357,7 +357,8 @@ What it does:
   rendered and each column taking the alignment its second row asks for. A
   caret in one brings the pipes back, in a monospace grid the columns line up
   in, with the drawing below as the live preview; a click on a cell opens the
-  source at that cell.
+  source at that cell, and the page is held where it was instead of sliding
+  down by the height the source took.
 - **Outline panel**: the button leading the bar opens a column down the left
   edge with the headings of the document, indented by level, the section the
   caret is in marked and every row a jump to it. The grip on its edge sets

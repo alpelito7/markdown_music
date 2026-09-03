@@ -4008,7 +4008,7 @@
       // A table says where in its source the click was: the cell it landed
       // on, as an offset from the head of the table (TableWidget).
       const cell = e.target.closest("[data-mdm-at]");
-      revealBlock(drawing, addsCaret(e), cell ? Number(cell.dataset.mdmAt) : null);
+      revealBlock(drawing, addsCaret(e), cell ? Number(cell.dataset.mdmAt) : null, e.clientY);
     }
   }
 
@@ -4020,7 +4020,9 @@
   // With the multicursor modifier down the caret is ADDED, as it is anywhere
   // else in the document: this is a click like any other, and replacing the
   // selection here wiped every caret that was already out in the prose.
-  function revealBlock(el, adds, into) {
+  // `held` is the height on the screen the click was at, which the caret's
+  // line is put back to once the source has opened (see the measure below).
+  function revealBlock(el, adds, into, held) {
     if (!view) return;
     const pos = view.posAtDOM(el);
     const tree = CM.syntaxTree(view.state);
@@ -4050,6 +4052,29 @@
         : { anchor: at },
       scrollIntoView: true,
     });
+    // The source that opens is line after line of text the drawing did not
+    // take: the block grows by that much, everything under it moves down and
+    // the document seems to have scrolled away by itself. The click is held
+    // instead. Once the new lines are laid out, the scroller is moved by
+    // however far the caret's line has travelled from the height the click
+    // was at, which leaves the line that was clicked where the eye left it.
+    if (held != null) {
+      view.requestMeasure({
+        read: function (v) {
+          const coords = v.coordsAtPos(v.state.selection.main.head);
+          // The middle of the line against the middle of what was clicked, so
+          // that an inline equation, whose source takes the height its drawing
+          // took, is not nudged by half a line for nothing. Off the drawn
+          // viewport there are no coordinates: the scrollIntoView above is
+          // what puts the caret on the screen, and there is nothing to hold.
+          if (!coords) return 0;
+          return Math.round((coords.top + coords.bottom) / 2 - held);
+        },
+        write: function (moved, v) {
+          if (moved) v.scrollDOM.scrollTop += moved;
+        },
+      });
+    }
     view.focus();
   }
 

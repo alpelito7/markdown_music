@@ -132,7 +132,8 @@ away.
   their second row asks for; a caret in one brings back the pipes, in a
   monospace grid, with the drawing below as the preview.
 - Images render for `https:` addresses and for local paths, relative to the
-  document or absolute.
+  document or absolute. A click on a figure opens its source, as it does on a
+  score or an equation.
 - Only the piano is vendored: a different `%%MIDI program` will not find its
   notes.
 

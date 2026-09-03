@@ -512,10 +512,13 @@ body {
   padding: 0.6em 0;
   border-bottom: 2px solid color-mix(in srgb, var(--mdm-ink) 16%, transparent);
 }
+/* A click on a figure puts the caret in its source, the way it does on a
+   score or an equation, so the pointer says so. */
 #app .mdm-image {
   max-width: 100%;
   vertical-align: middle;
   border-radius: 3px;
+  cursor: pointer;
 }
 #app .cm-line.mdm-quote {
   border-left: 3px solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
