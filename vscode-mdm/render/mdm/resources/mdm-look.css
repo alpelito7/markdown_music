@@ -104,6 +104,14 @@ body #title-block-header .quarto-title-banner,
 body .quarto-title-block .quarto-title-meta {
   color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
 }
+/* The "AUTHOR" label Quarto sets over the name. LaTeX's title block writes no
+   such word, so the two exports disagreed about what the page says; the HTML
+   drops it. Its 22 px, and the 12.8 px of lead over it, were also most of
+   what stood between the subtitle and the name (46 px measured, 11 px of it
+   the subtitle's own margin), which is what left the author adrift. */
+body .quarto-title-block .quarto-title-meta-heading {
+  display: none;
+}
 
 /* ---------- Headings, quotes, rules, links ---------- */
 
