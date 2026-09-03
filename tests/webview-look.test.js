@@ -1261,8 +1261,9 @@ function fillState(page) {
       filled: root.classList.contains("mdm-score--filled"),
       variable: root.style.getPropertyValue("--mdm-score-fill"),
       background: getComputedStyle(code).backgroundColor,
-      // The pulse a copy plays on this card: the two are different animations,
-      // since a cleared card has no colour of its own to flash.
+      // The pulse a copy plays on this card: both wash the same brass over
+      // the block, and differ only in the ground they settle back onto,
+      // which a cleared card does not have.
       pulse: (function () {
         code.classList.add("mdm-copy-pulse");
         const name = getComputedStyle(code).animationName;
@@ -1302,7 +1303,7 @@ test("a score is cleared by default and the menu fills it", { skip }, async () =
   assert.equal(after.filled, true);
   assert.equal(after.variable, "#f7edd8", "the light brass value");
   assert.equal(after.background, "rgb(247, 237, 216)");
-  // A card with a colour of its own pulses that colour, not the accent tint.
+  // A card with a colour of its own settles the brass wash back onto that fill.
   assert.equal(after.pulse, "mdm-copy-pulse-filled");
   await h.close();
 });

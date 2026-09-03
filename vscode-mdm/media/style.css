@@ -874,32 +874,37 @@ body {
   border-radius: 4px;
 }
 
-/* Feedback when a block is copied: a brief pulse on the card only. A
-   cleared score card has no colour to pulse, so it borrows the accent tint
-   and fades it out. */
+/* Feedback when a block is copied: a brief wash of the accent over the card,
+   settling back to whatever ground the block sits on. It is the top step of
+   the brass ladder the chrome is drawn in (8% marks the outline section, 12%
+   is the hover wash, 22% the held disc), and the loudest, since a copy is an
+   event and not a state: 28%, the weight the old slate tint carried, in the
+   brass of the icon so a copy speaks the same colour as the button that
+   asked for it. The three keyframes differ only in the ground they settle
+   onto, which is why they cannot be one.
+
+   A cleared score card has no ground of its own, so its wash fades out. */
 @keyframes mdm-copy-pulse {
   0% {
-    background-color: rgba(76, 123, 208, 0.28);
+    background-color: color-mix(in srgb, var(--mdm-play-accent) 28%, transparent);
   }
   100% {
     background-color: transparent;
   }
 }
-/* A filled card already carries a colour of its own, so its pulse is that
-   same colour going off and easing back in. */
+/* A filled card settles back onto its fill. */
 @keyframes mdm-copy-pulse-filled {
   0% {
-    background-color: transparent;
+    background-color: color-mix(in srgb, var(--mdm-play-accent) 28%, var(--mdm-score-fill));
   }
   100% {
     background-color: var(--mdm-score-fill);
   }
 }
-/* A block of code already sits on a card: its pulse is that card brightened
-   towards the text colour and settling back. */
+/* A block of code already sits on a card, so it settles back onto that. */
 @keyframes mdm-copy-pulse-code {
   0% {
-    background-color: color-mix(in srgb, var(--mdm-syn-base) 22%, var(--mdm-syn-bg));
+    background-color: color-mix(in srgb, var(--mdm-play-accent) 28%, var(--mdm-syn-card));
   }
   100% {
     background-color: var(--mdm-syn-card);
