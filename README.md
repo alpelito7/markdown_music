@@ -353,6 +353,11 @@ What it does:
   (`mdm.scoreAlign`); staff lines grey Guitar Pro style or in ink
   (`mdm.staffLines`), with notes, clefs and barlines always in ink; scaled to
   the width of the panel, and narrow ones (`%%staffwidth`) centred.
+- **Tables drawn**: a pipe table is set as a table, the maths of its cells
+  rendered and each column taking the alignment its second row asks for. A
+  caret in one brings the pipes back, in a monospace grid the columns line up
+  in, with the drawing below as the live preview; a click on a cell opens the
+  source at that cell.
 - **Outline panel**: the button leading the bar opens a column down the left
   edge with the headings of the document, indented by level, the section the
   caret is in marked and every row a jump to it. The grip on its edge sets
@@ -399,8 +404,7 @@ says what went in. The decisions behind the engine change, and the ones
 still open for review, are in `vscode-mdm/docs/cm6-migration.md`.
 
 Editor limitations: no editing notes by dragging them with the mouse (the
-dragging API of abcjs is the identified route; untested); tables are edited
-as their source in a monospace grid (no rendered widget yet); CodeMirror draws
+dragging API of abcjs is the identified route; untested); CodeMirror draws
 only the part of the document in view, so a player whose score scrolls far
 off screen keeps sounding and its bar comes back with the score; if the
 file changes from outside (git, a search and replace) while you are typing

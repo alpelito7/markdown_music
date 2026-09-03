@@ -128,7 +128,9 @@ away.
 - The plain text editor stays available: right click the file, "Open
   With...". Both can be open at once on the same file; they share the
   document.
-- Tables are edited as their source, in a monospace grid.
+- Tables are drawn, with the maths of their cells set and the alignment
+  their second row asks for; a caret in one brings back the pipes, in a
+  monospace grid, with the drawing below as the preview.
 - Images render for `https:` addresses and for local paths, relative to the
   document or absolute.
 - Only the piano is vendored: a different `%%MIDI program` will not find its

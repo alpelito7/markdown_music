@@ -531,6 +531,53 @@ body {
   color: color-mix(in srgb, var(--mdm-ink) 60%, transparent);
 }
 
+/* A drawn table, the block widget the source lines give way to. Hairlines
+   and nothing else, the way a paper sets one: a rule under the head, a
+   fainter one between rows, no outer frame, so the columns sit on the page
+   instead of in a box. The first and last columns keep their outer padding
+   off, so the table starts and ends on the text margin like every other
+   block. Wider than the pane, it is pushed sideways inside the widget rather
+   than stretching the document; only sideways, for the reason the equations
+   carry above. */
+#app .mdm-table {
+  margin: 0;
+  padding: 0.3em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  cursor: pointer;
+}
+#app .mdm-table table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+#app .mdm-table th,
+#app .mdm-table td {
+  padding: 0.28em 0.85em;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+}
+#app .mdm-table th:first-child,
+#app .mdm-table td:first-child {
+  padding-left: 0;
+}
+#app .mdm-table th:last-child,
+#app .mdm-table td:last-child {
+  padding-right: 0;
+}
+#app .mdm-table thead th {
+  font-weight: 600;
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 34%, transparent);
+}
+#app .mdm-table tbody tr:last-child td {
+  border-bottom: none;
+}
+/* The equations in the cells are the table's own text: no chip, no pointer of
+   their own, the click belongs to the table. */
+#app .mdm-table .mdm-math {
+  cursor: inherit;
+}
+
 /* Inline code, the `like this` inside a sentence: a chip of the card
    material, carried by its hairline edge (card and page are only a few
    levels apart by design, see the grounds below). */

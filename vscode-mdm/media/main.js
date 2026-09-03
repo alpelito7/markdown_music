@@ -2628,6 +2628,230 @@
     return base.replace(/\/?$/, "/") + rest;
   }
 
+  // ---- Tables ----
+
+  // The inline marks a table cell may carry, and the element each is drawn
+  // in. The marks themselves (`**`, the backticks) are children whose name
+  // ends in Mark and are skipped wherever they turn up.
+  const CELL_TAGS = {
+    Emphasis: "em",
+    StrongEmphasis: "strong",
+    Strikethrough: "s",
+    InlineCode: "code",
+    Superscript: "sup",
+    Subscript: "sub",
+  };
+
+  // The parts of a link that are not its label: skipped when the label is
+  // read, so `[text](url "title")` draws as its text alone.
+  const LINK_SKIP = /^(URL|LinkTitle)$/;
+
+  // The inline content of a cell, read off the syntax tree once and kept as
+  // plain data: the widget is built while the tree is at hand and drawn
+  // later, when it is not. `skip` names the children that carry no text of
+  // their own (the URL of a link, its title).
+  function cellParts(node, text, skip) {
+    const parts = [];
+    const push = function (s) {
+      if (s) parts.push({ kind: "text", text: s });
+    };
+    let at = node.from;
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+      push(text(at, child.from));
+      at = child.to;
+      const name = child.name;
+      if (/Mark$/.test(name) || (skip && skip.test(name))) continue;
+      if (name === "InlineMath" || name === "InlineBlockMath") {
+        const display = name === "InlineBlockMath";
+        const content = child.getChild(
+          display ? "InlineBlockMathContent" : "InlineMathContent"
+        );
+        parts.push({
+          kind: "math",
+          tex: content ? text(content.from, content.to) : "",
+          display: display,
+          source: text(child.from, child.to),
+        });
+      } else if (name === "Escape") {
+        push(text(child.from + 1, child.to));
+      } else if (name === "Image") {
+        const url = child.getChild("URL");
+        const marks = child.getChildren("LinkMark");
+        parts.push({
+          kind: "image",
+          src: url ? imageSource(text(url.from, url.to)) : null,
+          alt: marks.length > 1 ? text(marks[0].to, marks[1].from) : "",
+        });
+      } else if (name === "Link" || name === "Autolink" || name === "URL") {
+        const url = child.getChild("URL");
+        const inner = cellParts(child, text, LINK_SKIP);
+        parts.push({
+          kind: "link",
+          href: url ? text(url.from, url.to) : partsText(inner),
+          parts: inner,
+        });
+      } else if (CELL_TAGS[name]) {
+        parts.push({ kind: "mark", tag: CELL_TAGS[name], parts: cellParts(child, text, skip) });
+      } else {
+        push(text(child.from, child.to));
+      }
+    }
+    push(text(at, node.to));
+    return parts;
+  }
+
+  // What a run of parts says, for the title of a link that carries its own
+  // address as its label.
+  function partsText(parts) {
+    return parts
+      .map(function (p) {
+        return p.kind === "text" ? p.text : p.parts ? partsText(p.parts) : "";
+      })
+      .join("");
+  }
+
+  function paintParts(el, parts) {
+    parts.forEach(function (p) {
+      if (p.kind === "text") {
+        el.appendChild(document.createTextNode(p.text));
+        return;
+      }
+      if (p.kind === "math") {
+        const out = renderTex(p.tex, p.display);
+        const span = document.createElement("span");
+        span.className = "mdm-math";
+        if (out.html) {
+          span.innerHTML = out.html;
+        } else {
+          // A cell whose LaTeX does not compile keeps the source it was
+          // written with, the way an inline equation in prose does.
+          span.className += " mdm-math--error";
+          span.textContent = p.source;
+        }
+        el.appendChild(span);
+        return;
+      }
+      if (p.kind === "image") {
+        if (!p.src) {
+          el.appendChild(document.createTextNode(p.alt));
+          return;
+        }
+        const img = document.createElement("img");
+        img.className = "mdm-image";
+        img.src = p.src;
+        img.alt = p.alt;
+        img.title = p.alt;
+        el.appendChild(img);
+        return;
+      }
+      if (p.kind === "link") {
+        // A span and not an anchor: the click belongs to the editor, which
+        // puts the caret in the source, as it does everywhere else.
+        const link = document.createElement("span");
+        link.className = "mdm-link";
+        if (p.href) link.title = p.href;
+        paintParts(link, p.parts);
+        el.appendChild(link);
+        return;
+      }
+      const mark = document.createElement(p.tag);
+      if (p.tag === "code") mark.className = "mdm-inline-code";
+      paintParts(mark, p.parts);
+      el.appendChild(mark);
+    });
+  }
+
+  // The rows of a pipe table and the alignment of its columns. The alignment
+  // row (`| ---: | :--- |`) is the one TableDelimiter that is a child of the
+  // table itself; the delimiters inside a row are the pipes between cells.
+  function tableModel(node, text) {
+    const rule = node.getChildren("TableDelimiter")[0];
+    const align = (rule ? text(rule.from, rule.to) : "")
+      .replace(/^\s*\|/, "")
+      .replace(/\|\s*$/, "")
+      .split("|")
+      .map(function (spec) {
+        const s = spec.trim();
+        const left = s.charAt(0) === ":";
+        const right = s.charAt(s.length - 1) === ":";
+        if (left && right) return "center";
+        if (right) return "right";
+        if (left) return "left";
+        return null;
+      });
+    // Where each cell starts, counted from the head of the table and not from
+    // the head of the document: the drawing outlives the edits made above it
+    // (it compares equal while its own source is the same), and an absolute
+    // position kept in the DOM would be stale by the time it is clicked. The
+    // head of the table is the node's own start, which is what revealBlock
+    // counts from when the click comes back.
+    const cells = function (row) {
+      return row.getChildren("TableCell").map(function (c) {
+        return { at: c.from - node.from, parts: cellParts(c, text, null) };
+      });
+    };
+    const head = node.getChild("TableHeader");
+    return {
+      align: align,
+      head: head ? cells(head) : [],
+      body: node.getChildren("TableRow").map(cells),
+    };
+  }
+
+  // A drawn table, a block widget under the source lines, which are hidden
+  // while no caret is in them. Equal while the source is the same, so the
+  // element survives carets going in and out of the document around it.
+  class TableWidget extends WidgetType {
+    constructor(source, model) {
+      super();
+      this.source = source;
+      this.model = model;
+    }
+    eq(other) {
+      return other.source === this.source;
+    }
+    toDOM() {
+      const model = this.model;
+      // The scroller is the widget itself: a table wider than the page is
+      // pushed around inside it instead of stretching the document.
+      const wrap = document.createElement("div");
+      wrap.className = "mdm-table";
+      const table = document.createElement("table");
+      const cell = function (c, i, tag) {
+        const el = document.createElement(tag);
+        if (model.align[i]) el.style.textAlign = model.align[i];
+        el.dataset.mdmAt = String(c.at);
+        paintParts(el, c.parts);
+        return el;
+      };
+      if (model.head.length) {
+        const head = document.createElement("thead");
+        const tr = document.createElement("tr");
+        model.head.forEach(function (c, i) {
+          tr.appendChild(cell(c, i, "th"));
+        });
+        head.appendChild(tr);
+        table.appendChild(head);
+      }
+      const body = document.createElement("tbody");
+      model.body.forEach(function (row) {
+        const tr = document.createElement("tr");
+        row.forEach(function (c, i) {
+          tr.appendChild(cell(c, i, "td"));
+        });
+        body.appendChild(tr);
+      });
+      table.appendChild(body);
+      wrap.appendChild(table);
+      return wrap;
+    }
+    // The click puts the caret at the source, which the editor's own handler
+    // does (revealBlock); CodeMirror leaves the event alone.
+    ignoreEvent() {
+      return true;
+    }
+  }
+
   // ---- The walk ----
 
   // Line-level classes are gathered per line and emitted once: a line can be
@@ -2938,7 +3162,25 @@
         }
 
         if (name === "Table") {
-          lines.add(n.from, n.to, "mdm-table-line");
+          const blockFrom = doc.lineAt(n.from).from;
+          const blockTo = doc.lineAt(n.to).to;
+          decos.push(
+            Decoration.widget({
+              widget: new TableWidget(text(blockFrom, blockTo), tableModel(node, text)),
+              block: true,
+              side: 1,
+            }).range(blockTo)
+          );
+          if (!touched(blockFrom, blockTo)) {
+            hideLines(blockFrom, blockTo);
+            return false;
+          }
+          // Open for editing: the pipes as they were typed, in a monospace
+          // grid so the columns line up under each other, with the drawn
+          // table below as the live preview. The cells keep their source,
+          // equations included: a rendered `$i$` in a column would move the
+          // pipe the row below is being aligned against.
+          lines.add(blockFrom, blockTo, "mdm-table-line mdm-src-line");
           return false;
         }
 
@@ -3668,7 +3910,7 @@
   // score, and an equation of either kind. Not the YAML header, and not
   // indented code: those are drawn the same way wherever the carets are, so
   // there is nothing to put away (see the decoration field below).
-  const OPEN_NODES = /^(FencedCode|BlockMath|InlineMath|InlineBlockMath)$/;
+  const OPEN_NODES = /^(FencedCode|BlockMath|InlineMath|InlineBlockMath|Table)$/;
 
   // Both sides of the position are asked, since a caret at either edge of a
   // node counts as being in it (touchedBy), and resolveInner only looks the
@@ -3760,10 +4002,13 @@
       return;
     }
     if (e.target.closest(".mdm-audio")) return; // the player bar's own
-    const drawing = e.target.closest(".mdm-score, .mdm-math");
+    const drawing = e.target.closest(".mdm-score, .mdm-math, .mdm-table");
     if (drawing) {
       e.preventDefault();
-      revealBlock(drawing, addsCaret(e));
+      // A table says where in its source the click was: the cell it landed
+      // on, as an offset from the head of the table (TableWidget).
+      const cell = e.target.closest("[data-mdm-at]");
+      revealBlock(drawing, addsCaret(e), cell ? Number(cell.dataset.mdmAt) : null);
     }
   }
 
@@ -3775,19 +4020,25 @@
   // With the multicursor modifier down the caret is ADDED, as it is anywhere
   // else in the document: this is a click like any other, and replacing the
   // selection here wiped every caret that was already out in the prose.
-  function revealBlock(el, adds) {
+  function revealBlock(el, adds, into) {
     if (!view) return;
     const pos = view.posAtDOM(el);
     const tree = CM.syntaxTree(view.state);
     // A block widget sits at the end of its block; the node is the one that
     // ends there. An inline widget sits in its own range.
-    const block = el.classList.contains("mdm-score") || el.classList.contains("mdm-math--block");
+    const block =
+      el.classList.contains("mdm-score") ||
+      el.classList.contains("mdm-table") ||
+      el.classList.contains("mdm-math--block");
     let node = tree.resolveInner(block ? Math.max(0, pos - 1) : pos, block ? -1 : 1);
-    while (node && !/^(FencedCode|BlockMath|InlineMath|InlineBlockMath)$/.test(node.name)) node = node.parent;
+    while (node && !OPEN_NODES.test(node.name)) node = node.parent;
     let at = pos;
     if (node) {
       const content = node.getChild("CodeText") || node.getChild("BlockMathContent") || node.getChild("InlineMathContent") || node.getChild("InlineBlockMathContent");
       at = content ? content.from : node.from;
+      // The offset a cell carries is counted from the head of the block, so
+      // it holds however far the block has travelled since it was drawn.
+      if (into != null) at = Math.min(node.from + into, node.to);
     }
     const sel = view.state.selection;
     view.dispatch({

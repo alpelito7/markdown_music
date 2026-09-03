@@ -174,7 +174,12 @@ D4. Toolbar: **the MDM buttons plus bold, italic, inline code, link,
   Outline, insert-before/after and the table button are gone.
 
 D5. Tables: **(a)**, the source as a monospace grid, editable with
-  multicursor; no widget.
+  multicursor; no widget. Revisited later: a table is drawn now, a block
+  widget under its source lines like a score or a display equation, and the
+  monospace grid is what a caret in it reveals. The cells are set with the
+  marks and the maths they carry, the columns take the alignment the second
+  row asks for, and a click lands on the cell it was on rather than at the
+  head of the table.
 
 D6. Gestures: **all of them**. Alt+click (or Ctrl+click, following VS
   Code's `editor.multiCursorModifier`, read by the host and sent with the

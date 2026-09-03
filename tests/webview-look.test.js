@@ -1673,6 +1673,128 @@ test("the LaTeX of a shown equation is syntax-highlighted", { skip }, async () =
   await h.close();
 });
 
+// ---------- Tables ----------
+
+// A pipe table with everything a table of a paper carries: maths in the
+// cells, the three alignments and a column that asked for none, an inline
+// mark and a piece of code.
+const TABLE_DOC = [
+  "---",
+  'title: "Tables"',
+  "---",
+  "",
+  "The fixtures of the chapter.",
+  "",
+  "| $i$ | $A_i$ | index and type | purpose |",
+  "| ---: | :---: | :--- | --- |",
+  "| 1 | $\\operatorname{diag}(-0.5)$ | 0, sink | **basic** attractor |",
+  "| 2 | $\\mathcal{S}(0.5,1.2)$ | 2, saddle | a `code` cell |",
+  "",
+  "After the table.",
+  "",
+].join("\n");
+
+test("a table is drawn, with the alignment of its columns and the maths in its cells", { skip }, async () => {
+  const h = await open({ text: TABLE_DOC, scores: 0 });
+  const drawn = await h.page.evaluate(() => {
+    const cells = (sel) =>
+      Array.from(document.querySelectorAll("#app .mdm-table " + sel)).map((c) => ({
+        align: c.style.textAlign,
+        katex: c.querySelectorAll(".katex").length,
+        strong: c.querySelectorAll("strong").length,
+        code: c.querySelectorAll("code").length,
+      }));
+    return {
+      tables: document.querySelectorAll("#app .mdm-table table").length,
+      head: cells("th"),
+      body: cells("tbody td"),
+      // The pipes are out of the flow while no caret is in them.
+      source: document.querySelectorAll("#app .cm-line.mdm-table-line").length,
+    };
+  });
+  assert.equal(drawn.tables, 1, "the table was not drawn");
+  assert.equal(drawn.source, 0, "the source of the table stayed in the flow");
+  assert.deepEqual(
+    drawn.head.map((c) => c.align),
+    ["right", "center", "left", ""],
+    "the alignment row was not read"
+  );
+  assert.deepEqual(
+    drawn.body.map((c) => c.align),
+    ["right", "center", "left", "", "right", "center", "left", ""],
+    "the body does not follow the alignment of its columns"
+  );
+  // The equations of the head and of the second column are rendered, and the
+  // marks of the last column with them.
+  assert.equal(drawn.head.filter((c) => c.katex === 1).length, 2);
+  assert.equal(drawn.body.filter((c) => c.katex === 1).length, 2);
+  assert.equal(drawn.body.filter((c) => c.strong === 1).length, 1);
+  assert.equal(drawn.body.filter((c) => c.code === 1).length, 1);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a caret in a table shows the pipes, and the drawing stays as its preview", { skip }, async () => {
+  const h = await open({ text: TABLE_DOC, scores: 0 });
+  const at = await posOf(h.page, "0, sink");
+  await setSelection(h.page, at);
+  await sleep(250);
+  const open1 = await h.page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll("#app .cm-line.mdm-table-line"));
+    return {
+      source: lines.map((l) => l.textContent),
+      // A monospace grid, so the columns of a row line up under the ones above.
+      mono: lines.length ? getComputedStyle(lines[0]).fontFamily : null,
+      table: document.querySelectorAll("#app .mdm-table table").length,
+    };
+  });
+  assert.equal(open1.source.length, 4, "the four lines of the table did not show");
+  assert.equal(open1.source[0], "| $i$ | $A_i$ | index and type | purpose |");
+  assert.match(open1.mono, /mono/i, "the source of the table is not monospaced");
+  assert.equal(open1.table, 1, "the drawing went away while its source was open");
+  // The caret out again and the source folds back under the drawing.
+  await setSelection(h.page, 0);
+  await sleep(250);
+  const closed = await h.page.evaluate(() => ({
+    source: document.querySelectorAll("#app .cm-line.mdm-table-line").length,
+    table: document.querySelectorAll("#app .mdm-table table").length,
+  }));
+  assert.deepEqual(closed, { source: 0, table: 1 });
+  assert.equal(await docText(h.page), TABLE_DOC, "the document was changed by looking at it");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("clicking a drawn table opens its source at the cell that was clicked", { skip }, async () => {
+  const h = await open({ text: TABLE_DOC, scores: 0 });
+  const box = await h.page.evaluate(() => {
+    const el = document.querySelector("#app .mdm-table td");
+    el.scrollIntoView();
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await sleep(150);
+  await h.page.mouse.click(box.x, box.y);
+  await sleep(300);
+  const ranges = await selectionRanges(h.page);
+  const caret = await lineAt(h.page, ranges[0][0]);
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0][0], ranges[0][1], "the click left a selection");
+  assert.match(caret.text, /^\| 1 \|/, "the caret did not land on the row that was clicked");
+  const cell = await h.page.evaluate(
+    (pos) => window.__mdm.view.state.doc.sliceString(pos, pos + 1),
+    ranges[0][0]
+  );
+  assert.equal(cell, "1", "the caret did not land on the first cell of that row");
+  assert.equal(
+    await h.page.evaluate(() => document.querySelectorAll("#app .cm-line.mdm-table-line").length),
+    4,
+    "the source did not open"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- Images ----------
 
 const IMAGE_DOC = [
