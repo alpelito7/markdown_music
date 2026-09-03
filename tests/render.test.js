@@ -45,12 +45,12 @@ function cacheName(abc, ink, staff) {
 }
 
 // What an abcjs engraving is named after: the engraver with its recipe
-// version and staff width (`abcjs 1 703` in mdm.lua), then the block and the
+// version and staff width (`abcjs 2 703` in mdm.lua), then the block and the
 // colours, as above. The default engraver on a machine with a Chrome, which
 // this one is: the webview suites already need it.
 function abcjsCacheName(abc, ink, staff) {
   return sha1(
-    "abcjs 1 703\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF));
+    "abcjs 2 703\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF));
 }
 
 // And a KaTeX formula: the recipe, the mode (I inline, D display), the TeX
@@ -1017,11 +1017,146 @@ test("the PDF is engraved by the editor's abcjs when a Chrome is at hand", () =>
       "\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{mdm_cache/" +
         narrow + ".pdf}}}"),
     "narrow abcjs score not centred in TeX");
+  // The wide score is two labelled systems, so it goes down as one clipped
+  // image per system (what the slices are and how they tile is pinned in the
+  // test below); what is asked for here is the text width they are set at.
+  const wideSlices = tex.match(
+    new RegExp(
+      String.raw`\\includegraphics\[trim=[^\]]*,clip,width=\\mdmscorewidth\]` +
+        String.raw`\{mdm_cache/` + wide + String.raw`\.pdf\}`,
+      "g"
+    )
+  );
+  assert.equal(
+    wideSlices && wideSlices.length, 2,
+    "wide abcjs score not two slices at the text width in TeX");
+});
+
+// A picture is atomic to LaTeX: whole, a score that does not fit the space
+// left on the page jumps to the next one entire and leaves the rest of this
+// one blank, and one taller than the page has nowhere to go at all (with the
+// slices off, below: the document grows a page, the score sits alone on it
+// and still runs past the bottom margin). Music is written to be read across
+// a page turn, so the engraver reports where its staff systems fell and the
+// score goes down as one clipped image per system, stacked with no glue:
+// they tile into the drawing they were cut from, and the page may break
+// between any two of them, where the engraving is already blank.
+//
+// Twelve systems, 856 pt of drawing against the 622.7 pt of text a page of
+// this document holds (both measured), so the break has to fall inside the
+// score whatever the geometry rounds to.
+const TALL_ABC =
+  "X:1\nT:Tall\nM:4/4\nL:1/8\nK:Am\n" +
+  Array.from(
+    { length: 12 },
+    (_, i) => "P:sys" + (i + 1) + "\nABcd ef^ga | a^gfe dcBA |"
+  ).join("\n") + "\n";
+
+const TALL_DOC = `---
+title: "Tall score"
+format:
+  pdf:
+    documentclass: article
+filters:
+  - mdm
+---
+
+A score taller than the page it starts on.
+
+\`\`\`abc
+${TALL_ABC}\`\`\`
+
+After the score.
+`;
+
+// The pages of a finished PDF, counted with the same ghostscript the
+// engravings are cropped with: the bbox device writes one box per page.
+function pageCount(pdf) {
+  const gs = spawnSync(
+    "gs",
+    ["-q", "-dBATCH", "-dNOPAUSE", "-sDEVICE=bbox", pdf],
+    { encoding: "utf8" }
+  );
+  const out = (gs.stdout || "") + (gs.stderr || "");
+  return (out.match(/^%%BoundingBox:/gm) || []).length;
+}
+
+test("a long score is cut so a page can break between two of its systems", () => {
+  const dir = freshDir("pdf-slices");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), TALL_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+
+  // The sidecar: the height of the cropped drawing first, then one position
+  // per gap between two systems, in points from its bottom edge and top to
+  // bottom, so each one is inside the drawing and below the one before it.
+  const digest = abcjsCacheName(TALL_ABC);
+  const numbers = fs
+    .readFileSync(path.join(dir, "mdm_cache", digest + ".cuts"), "utf8")
+    .trim()
+    .split(/\s+/)
+    .map(Number);
+  const height = numbers.shift();
+  assert.ok(height > 800, "the drawing is " + height + " pt tall");
+  assert.equal(numbers.length, 11, "twelve systems, eleven cuts: " + numbers.length);
+  let above = height;
+  for (const cut of numbers) {
+    assert.ok(
+      cut > 0 && cut < above,
+      "the cuts do not run down the drawing: " + numbers.join(" ")
+    );
+    above = cut;
+  }
+
+  // The .tex: one clipped image per system, every one of them the same
+  // drawing at the text width, and the trims tile it exactly, each slice
+  // starting where the one above it stopped.
+  const tex = texOf(dir);
+  const slices = [
+    ...tex.matchAll(
+      new RegExp(
+        String.raw`\\mdmslice\{\\includegraphics\[trim=0bp ([\d.]+)bp 0bp ([\d.]+)bp,` +
+          String.raw`clip,width=\\mdmscorewidth\]\{mdm_cache/` + digest + String.raw`\.pdf\}\}`,
+        "g"
+      )
+    ),
+  ];
+  assert.equal(slices.length, 12, "the score did not go down as twelve slices");
+  slices.forEach((slice, i) => {
+    const wanted = i < numbers.length ? numbers[i] : 0;
+    const above = i === 0 ? 0 : height - numbers[i - 1];
+    assert.ok(
+      Math.abs(Number(slice[1]) - wanted) < 0.01,
+      "slice " + (i + 1) + " is cut at " + slice[1] + ", not " + wanted
+    );
+    assert.ok(
+      Math.abs(Number(slice[2]) - above) < 0.01,
+      "slice " + (i + 1) + " starts at " + slice[2] + ", not " + above
+    );
+  });
+  // One band and one stack around the lot: the air above and below the score
+  // is the band's, and between the slices there is none of TeX's.
+  assert.equal(
+    (tex.match(/\\mdmscoreband\{\\mdmslicestack\{/g) || []).length,
+    1,
+    "the slices are not held in one band"
+  );
+
+  // And what it comes to on paper: two pages, which is the score starting on
+  // the first and finishing on the second.
+  assert.equal(pageCount(path.join(dir, "doc.pdf")), 2, "the score did not break");
+
+  // Verified to bite: with the sidecar taken away the score goes down whole,
+  // the way an abcm2ps engraving does (no browser measures that one), and
+  // the same document needs three pages, the score alone on the second.
+  fs.unlinkSync(path.join(dir, "mdm_cache", digest + ".cuts"));
+  const whole = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(whole.status, 0, whole.stderr);
   assert.ok(
-    tex.includes(
-      "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{mdm_cache/" +
-        wide + ".pdf}}}"),
-    "wide abcjs score not at the text width in TeX");
+    texOf(dir).includes("\\mdmscore{\\includegraphics[width=\\mdmscorewidth]"),
+    "the score is not one piece without its sidecar"
+  );
+  assert.equal(pageCount(path.join(dir, "doc.pdf")), 3, "the whole score fitted after all");
 });
 
 // A block abcjs draws nothing from (directives alone, or nothing at all)

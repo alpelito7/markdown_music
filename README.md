@@ -123,14 +123,17 @@ editor, gets Pandoc's own dialect and its blank lines.
   page has loaded, on a page dressed as the visual editor (below).
 - **PDF**: the filter engraves each block with the same vendored abcjs,
   loaded into a headless Chrome and printed to a vector PDF, then trimmed to
-  the ink with `pdfcrop`, so the engraving on paper is the drawing the editor
-  and the HTML show. It is inserted at text width if it is wide, at its
-  natural size and centred if it is narrow (< 330 pt). The equations go the
-  same way, set by the vendored KaTeX. Results are cached by a hash of the
-  content in `mdm_cache/`. Without a Chrome (or without `pdfcrop`) the filter
-  names in the render log the tool it missed and falls back: the scores to
-  `abcm2ps`, which draws with glyphs of its own and reads differently, and
-  the equations to LaTeX's own setting.
+  the ink with `pdfcrop`, so the engraving on paper is the drawing the
+  editor and the HTML show. It is inserted at text width if it is wide, at
+  its natural size and centred if it is narrow (< 330 pt). A score of more
+  than one staff system goes down as one clipped image per system, stacked
+  into the drawing it was cut from, so a page break can fall between two
+  systems instead of throwing the whole engraving onto the next page. The
+  equations go the same way, set by the vendored KaTeX. Results are cached
+  by a hash of the content in `mdm_cache/`. Without a Chrome (or without
+  `pdfcrop`) the filter names in the render log the tool it missed and falls
+  back: the scores to `abcm2ps`, which draws with glyphs of its own and
+  reads differently, and the equations to LaTeX's own setting.
 
 ### The output looks like the editor
 

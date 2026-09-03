@@ -387,6 +387,16 @@ local function look_tex(l)
   -- \@oddfoot alone would not last: \maketitle's \thispagestyle{plain}
   -- runs \ps@plain again and puts the black one back); KOMA fonts its
   -- footer through an element of its own.
+  -- The air over the author. Pandoc hangs the subtitle off \@title, so the
+  -- \vskip 1.5em that article.cls puts between the title and the author is
+  -- spent under the subtitle instead: 23.6 pt of it, against the 7.1 pt
+  -- between the title and the subtitle (measured on example.pdf), which read
+  -- as the name having come loose from the block it belongs to. Patched, not
+  -- redefined, so a class whose \@maketitle is shaped otherwise (KOMA's, for
+  -- one) is left with the spacing it has: the failure branch is deliberately
+  -- empty, and the patch is a no-op there rather than an error.
+  put("\\RequirePackage{etoolbox}")
+  put("\\patchcmd{\\@maketitle}{\\vskip 1.5em}{\\vskip 0.5em}{}{}")
   put("\\@ifundefined{sectionlinesformat}{%")
   put("  \\def\\ps@plain{\\let\\@mkboth\\@gobbletwo")
   put("    \\let\\@oddhead\\@empty\\let\\@evenhead\\@empty")
@@ -476,9 +486,21 @@ local function look_tex(l)
     -- A score at the text width has to give the padding back, or the box it
     -- sits in would hang 0.7 em over either margin.
     put("\\newcommand{\\mdmscorewidth}{\\dimexpr\\linewidth-1.4em\\relax}")
+    -- The same fill under a score that goes down in slices: the box hugs
+    -- each slice, with the 0.7 em of side padding written out instead of
+    -- left to \fboxsep, which would open a gap between one slice and the
+    -- next; the air above the first and below the last is a rule of the
+    -- fill. So the ground runs unbroken behind the whole score, and stops
+    -- at the foot of the page when the score is broken there.
+    put("\\newcommand{\\mdmslice}[1]{{\\setlength{\\fboxsep}{0pt}" ..
+        "\\colorbox{mdmscorefill}{\\hspace{0.7em}#1\\hspace{0.7em}}}}")
+    put("\\newcommand{\\mdmslicepad}[1]{\\noindent{\\color{mdmscorefill}" ..
+        "\\rule{#1}{0.7em}}\\par}")
   else
     put("\\newcommand{\\mdmscore}[1]{#1}")
     put("\\newcommand{\\mdmscorewidth}{\\linewidth}")
+    put("\\newcommand{\\mdmslice}[1]{#1}")
+    put("\\newcommand{\\mdmslicepad}[1]{}")
   end
   -- The band of air around a score: the editor gives every block 1.5em of
   -- vertical margin (`.mdm-block` in mdm.css), where the PDF set one down
@@ -489,6 +511,15 @@ local function look_tex(l)
   -- just above. The group keeps a \\centering to the engraving it centres.
   put("\\newcommand{\\mdmscoreband}[1]{\\par\\addvspace{0.65\\mdmem}" ..
       "{#1\\par}\\addvspace{0.65\\mdmem}}")
+  -- What holds the slices of a score together: every skip TeX would put
+  -- between two paragraphs and between two lines, zeroed. \parskip is half
+  -- a line here (KOMA's parskip=half) and \baselineskip a whole one, and
+  -- either would open a seam across the staff. What is left between two
+  -- slices is a legal breakpoint with no glue in it, which is the whole
+  -- point: the page may break there, and if it does not, the slices tile
+  -- into one drawing.
+  put("\\newcommand{\\mdmslicestack}[1]{{\\parskip=0pt\\parindent=0pt" ..
+      "\\baselineskip=0pt\\lineskip=0pt\\lineskiplimit=0pt\\relax#1\\par}}")
   return table.concat(out, "\n")
 end
 
@@ -743,6 +774,13 @@ local has_pdfcrop = nil
 -- the ones the exported HTML shows.
 local ABCJS_STAFFWIDTH = 703
 
+-- The sheet the engraving is printed on, and the scale it is printed at. A
+-- CSS pixel is 0.75 pt, so this page is 900 x 4500 pt. Both numbers are
+-- spent twice: in the page below, and in the arithmetic that turns a
+-- position measured in the browser into a position in the printed PDF.
+local CHROME_PAGE_PX = { w = 1200, h = 6000 }
+local PX_TO_PT = 0.75
+
 -- The bundle rides inside the page rather than beside it, so nothing depends
 -- on where Chrome resolves a relative src from. What closes a <script> is
 -- the literal tag, so a build that ever carried one cannot be embedded and
@@ -809,7 +847,8 @@ local function chrome_page(source, ink, staff)
     '<!doctype html><meta charset="utf-8">',
     "<style>",
     "  html, body { margin: 0; padding: 0; background: transparent; }",
-    "  @page { margin: 0; size: 1200px 6000px; }",
+    "  @page { margin: 0; size: " .. CHROME_PAGE_PX.w .. "px " ..
+      CHROME_PAGE_PX.h .. "px; }",
     -- `color` besides `fill`: abcjs fills a good part of the drawing with
     -- currentColor, which reads the CSS colour, not the fill. The editor
     -- gets it from the body ink; here there is no body ink to inherit.
@@ -835,15 +874,87 @@ local function chrome_page(source, ink, staff)
     "  staffwidth: " .. ABCJS_STAFFWIDTH .. ",",
     "  paddingtop: 2, paddingbottom: 2, paddingleft: 0, paddingright: 0,",
     "});",
+    -- Where one staff system ends and the next begins: the gaps the
+    -- engraving itself leaves, which is where the page may break the
+    -- drawing (insert_score cuts it there). abcjs wraps each system in a
+    -- <g> of its own directly under the svg, lyrics, part label and all,
+    -- so the boxes of those wrappers are the systems.
+    --
+    -- Measured once the faces are in, as the formulas are: the lyrics and
+    -- the annotations inside a wrapper are text, and before the fonts
+    -- arrive they are measured in fallback metrics. Nothing waits on this
+    -- attribute; a run that never writes it engraves a score in one piece,
+    -- which is what every score was until now.
+    "document.fonts.ready.then(function () {",
+    '  var svg = document.querySelector("#paper svg");',
+    "  var lines = [];",
+    "  if (svg) {",
+    '    svg.querySelectorAll(":scope > g.abcjs-staff-wrapper").forEach(',
+    "      function (g) {",
+    "        var r = g.getBoundingClientRect();",
+    "        lines.push([+r.top.toFixed(2), +r.bottom.toFixed(2)]);",
+    "      });",
+    "  }",
+    '  document.documentElement.setAttribute(',
+    '    "data-mdm-lines", JSON.stringify(lines));',
+    "});",
     "</script>",
   }, "\n")
 end
 
+-- The staff systems out of the dumped DOM: a JSON array of [top, bottom]
+-- pairs, in CSS pixels from the top of the printed page. Numbers alone, so
+-- nothing the serialiser escapes inside an attribute can reach this.
+local function parse_lines(dom_line)
+  local raw = dom_line and dom_line:match('data%-mdm%-lines="([^"]*)"')
+  if not raw then return nil end
+  local out = {}
+  for t, b in raw:gmatch("%[(%-?[%d%.]+),(%-?[%d%.]+)%]") do
+    out[#out + 1] = { t = tonumber(t), b = tonumber(b) }
+  end
+  return out
+end
+
+-- Where the drawing can be cut, from the systems measured in the page and
+-- the box the sheet was cropped to: one position per gap between two
+-- systems, in points from the bottom edge of the cropped drawing, top to
+-- bottom. The page is printed downwards and PDF coordinates count up from
+-- the bottom, hence the subtraction; `bottom` is the foot of the ink box
+-- pdfcrop cut to, which is where the cropped drawing's own coordinates
+-- start (it crops to the integer bounding box, measured).
+--
+-- The cut goes down the middle of a gap, so neither system loses ink to
+-- it. A pair that overlaps (a note hanging below the staff above a title,
+-- say) leaves no clean gap and is offered no break at all: the drawing is
+-- broken only where it is already blank.
+local function score_cuts(lines, bottom, height)
+  if not lines or #lines < 2 then return nil end
+  local cuts = {}
+  for i = 1, #lines - 1 do
+    local above, below = lines[i].b, lines[i + 1].t
+    if above and below and below > above then
+      local middle = (above + below) / 2
+      local pt = (CHROME_PAGE_PX.h - middle) * PX_TO_PT - bottom
+      -- Inside the drawing and below the cut before it: a position the
+      -- crop left outside would slice off a piece with no ink in it.
+      if pt > 0 and pt < height and (not cuts[#cuts] or pt < cuts[#cuts]) then
+        cuts[#cuts + 1] = pt
+      end
+    end
+  end
+  if #cuts == 0 then return nil end
+  return cuts
+end
+
 -- One engraving through Chrome: the page written into the cache, printed,
 -- trimmed, measured. True when the cached PDF and its width sidecar are in
--- place. The sheet is 6000 px tall and Chrome paginates what will not fit
--- one sheet, of which only the first is inserted, exactly the one page
--- abcm2ps -E writes; a score that long has outgrown a paragraph anyway.
+-- place; the run also reports where the staff systems fell, which goes
+-- beside them in a .cuts sidecar and is what lets a long score break
+-- across a page. Printing and measuring are the one run: Chrome honours
+-- --print-to-pdf and --dump-dom together. The sheet is 6000 px tall and
+-- Chrome paginates what will not fit one sheet, of which only the first is
+-- inserted, exactly the one page abcm2ps -E writes; a score that long has
+-- outgrown a paragraph anyway.
 local function engrave_abcjs(source, ink, staff, digest)
   local page = chrome_page(source, ink, staff)
   if not page or not chrome_path or not has_pdfcrop then return false end
@@ -857,11 +968,14 @@ local function engrave_abcjs(source, ink, staff, digest)
   -- The virtual time budget is what lets the render script run to its end
   -- before the print; with the bundle inline it is settled at load, and the
   -- budget is a ceiling, not a wait.
-  local printed = run(string.format(
+  local pipe = io.popen(string.format(
     '"%s" --headless=new --disable-gpu --no-pdf-header-footer%s' ..
-    " --virtual-time-budget=4000 --print-to-pdf=%s %s >/dev/null 2>&1",
+    " --virtual-time-budget=4000 --print-to-pdf=%s --dump-dom %s 2>/dev/null" ..
+    ' | grep -o \'data-mdm-lines="[^"]*"\'',
     chrome_path, chrome_sandbox_flag(), raw, html))
-  local ok = printed and file_exists(raw)
+  local dom_line = pipe and pipe:read("*a") or ""
+  if pipe then pipe:close() end
+  local ok = file_exists(raw)
     and run(string.format("pdfcrop --margins 0 %s %s >/dev/null 2>&1", raw, pdf))
     and file_exists(pdf)
   if ok then
@@ -875,6 +989,23 @@ local function engrave_abcjs(source, ink, staff, digest)
       if wf then
         wf:write(tostring(tonumber(x1) - tonumber(x0)))
         wf:close()
+      end
+      -- The cuts want the box on the sheet, not the cropped drawing: the
+      -- systems were measured on the sheet, and the foot of that box is
+      -- where the two coordinate systems meet.
+      local _, ry0, _, ry1 = ink_bbox(raw)
+      local cuts = ry0 and score_cuts(
+        parse_lines(dom_line), tonumber(ry0), tonumber(ry1) - tonumber(ry0))
+      if cuts then
+        local cf = io.open(CACHE_DIR .. "/" .. digest .. ".cuts", "w")
+        if cf then
+          local out = { string.format("%.3f", tonumber(ry1) - tonumber(ry0)) }
+          for _, c in ipairs(cuts) do
+            out[#out + 1] = string.format("%.3f", c)
+          end
+          cf:write(table.concat(out, " "))
+          cf:close()
+        end
       end
     else
       os.remove(pdf)
@@ -1190,6 +1321,23 @@ local function render_math_pass(doc)
   })
 end
 
+-- The positions the drawing may be broken at, from the sidecar the
+-- engraver wrote: the height of the cropped drawing first, then one
+-- position per gap between two staff systems. A score of one system, and
+-- one abcm2ps engraved (no browser measured it), has no sidecar and goes
+-- down whole.
+local function read_cuts(digest)
+  local f = io.open(CACHE_DIR .. "/" .. digest .. ".cuts", "r")
+  if not f then return nil end
+  local text = f:read("*a") or ""
+  f:close()
+  local nums = {}
+  for n in text:gmatch("[%d%.]+") do nums[#nums + 1] = tonumber(n) end
+  local height = table.remove(nums, 1)
+  if not height or height <= 0 or #nums == 0 then return nil end
+  return height, nums
+end
+
 -- The engraving inserted into the page, from the cache: a narrow score
 -- (%%staffwidth, say) is set at its natural size and centred, the way a
 -- display equation is, and a wide one takes the text width. Centred like a
@@ -1199,6 +1347,16 @@ end
 -- 1.5em of air above and below; the centred one takes a plain \centering
 -- rather than the center environment, whose own topsep would stack a
 -- second gap onto the band's.
+--
+-- A score of several staff systems goes down as one image per system, the
+-- one drawing clipped to each of them (trim + clip, at the cuts the
+-- engraver measured) and the pieces stacked with no glue between them, so
+-- they tile into the engraving they were cut from and the page can break
+-- between two systems. A picture is atomic to LaTeX: whole, a score longer
+-- than the space left on the page jumps to the next one entire and leaves
+-- the rest of the page blank, and a score longer than a page has nowhere
+-- to go at all. Music is written to be read across a page turn, so the
+-- break belongs where the engraving already leaves a gap.
 local function insert_score(digest)
   local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
   local width_pt = nil
@@ -1208,14 +1366,39 @@ local function insert_score(digest)
     wf:close()
   end
   local left = look and look.score_align == "left"
-  if width_pt and width_pt < 330 then
+  local narrow = width_pt and width_pt < 330
+  local height, cuts = read_cuts(digest)
+  if not height then
+    if narrow then
+      return pandoc.RawBlock("latex", string.format(
+        left and "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics{%s}}}"
+          or "\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{%s}}}",
+        pdf))
+    end
     return pandoc.RawBlock("latex", string.format(
-      left and "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics{%s}}}"
-        or "\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{%s}}}",
-      pdf))
+      "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{%s}}}", pdf))
   end
-  return pandoc.RawBlock("latex", string.format(
-    "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{%s}}}", pdf))
+  -- Centred, the paragraphs need no \noindent: \centering zeroes the
+  -- indent itself. The fill under the slices is padded out to the same
+  -- width the one-piece box has, the drawing plus its 0.7em on either
+  -- side, which is the measure when the score is set at the text width.
+  local centred = narrow and not left
+  local indent = centred and "" or "\\noindent"
+  local pad = narrow
+    and string.format("\\dimexpr %.3fbp+1.4em\\relax", width_pt)
+    or "\\linewidth"
+  local out = { "\\mdmscoreband{\\mdmslicestack{%" }
+  if centred then out[#out + 1] = "\\centering" end
+  out[#out + 1] = "\\mdmslicepad{" .. pad .. "}"
+  for i = 1, #cuts + 1 do
+    local trim = string.format("trim=0bp %.3fbp 0bp %.3fbp,clip",
+      cuts[i] or 0, i == 1 and 0 or (height - cuts[i - 1]))
+    out[#out + 1] = string.format("%s\\mdmslice{\\includegraphics[%s]{%s}}\\par",
+      indent, narrow and trim or (trim .. ",width=\\mdmscorewidth"), pdf)
+  end
+  out[#out + 1] = "\\mdmslicepad{" .. pad .. "}"
+  out[#out + 1] = "}}"
+  return pandoc.RawBlock("latex", table.concat(out, "\n"))
 end
 
 -- The abcm2ps engraving, EPS to PDF, painted on the way. True when the
@@ -1304,7 +1487,7 @@ local function render_latex(el)
     -- page it prints from (chrome_page) has to bump it, or a warm cache
     -- would keep serving the old drawing.
     local digest = sha1(
-      "abcjs 1 " .. ABCJS_STAFFWIDTH .. "\n" .. source .. "\n" .. ink .. " " .. staff)
+      "abcjs 2 " .. ABCJS_STAFFWIDTH .. "\n" .. source .. "\n" .. ink .. " " .. staff)
     if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
       return insert_score(digest)
     end
