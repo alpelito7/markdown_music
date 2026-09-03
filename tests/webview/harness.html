@@ -47,7 +47,10 @@
 <link rel="stylesheet" href="../../vscode-mdm/media/vendor/abcjs/abcjs-audio.css">
 <link rel="stylesheet" href="../../vscode-mdm/media/style.css">
 <script>
-window.MDM_DOC_BASE = "";
+// The two bases the host builds from the document's own URI: the folder it
+// is in and the root of its filesystem. A test that draws images seeds them.
+window.MDM_DOC_BASE = window.__docBase || "";
+window.MDM_FILE_BASE = window.__fileBase || "";
 window.MDM_SOUNDFONT = "../../vscode-mdm/media/vendor/soundfont/";
 window.MDM_SETTINGS = Object.assign(
   {

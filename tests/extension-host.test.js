@@ -47,7 +47,12 @@ function boot(initialText, settings, extensions, uriString) {
   let disposed = null;
   const webviewPanel = {
     webview: {
-      set options(v) {},
+      set options(v) {
+        this._options = v;
+      },
+      get options() {
+        return this._options;
+      },
       set html(v) {
         this._html = v;
       },
@@ -75,6 +80,7 @@ function boot(initialText, settings, extensions, uriString) {
     receive: (msg) => receive(msg),
     dispose: () => disposed(),
     html: webviewPanel.webview.html,
+    options: webviewPanel.webview.options,
   };
 }
 
@@ -195,6 +201,31 @@ test("the webview HTML carries a CSP without eval, and the editor bundle", () =>
   assert.ok(!/vditor/i.test(h.html));
   // The folder of the document is handed over for relative images.
   assert.match(h.html, /window\.MDM_DOC_BASE = "[^"]+"/);
+});
+
+test("both image bases are handed over, and the disk root is a resource root", () => {
+  const h = boot("Body\n", {}, undefined, "file:///home/me/papers/note.mdm");
+  // The folder for a relative path, the root of the filesystem for an
+  // absolute one: a figure written by another project is not under the
+  // folder of the document, and used to come out as that folder with the
+  // absolute path glued behind it.
+  const doc = /window\.MDM_DOC_BASE = "([^"]*)"/.exec(h.html)[1];
+  const root = /window\.MDM_FILE_BASE = "([^"]*)"/.exec(h.html)[1];
+  assert.equal(doc, "/home/me/papers");
+  assert.equal(root, "file:///");
+  // And the webview is allowed to load from that root, or the URI would be
+  // right and the picture still refused.
+  const roots = h.options.localResourceRoots.map((u) => u.toString());
+  assert.ok(roots.some((r) => /\/media$/.test(r)), "the media folder");
+  assert.ok(roots.includes("/home/me/papers"), "the folder of the document");
+  assert.ok(roots.includes("file:///"), "the root of the filesystem");
+});
+
+test("a document that is not a file on disk gets no filesystem root", () => {
+  const h = boot("Body\n", {}, undefined, "untitled:Untitled-1");
+  assert.match(h.html, /window\.MDM_FILE_BASE = ""/);
+  const roots = h.options.localResourceRoots.map((u) => u.toString());
+  assert.ok(!roots.includes("file:///"));
 });
 
 test("VS Code's multiCursorModifier is passed along, ctrlCmd or alt", () => {

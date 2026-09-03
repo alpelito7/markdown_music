@@ -114,6 +114,10 @@ const workspace = {
 function makeDocument(uriString) {
   return {
     uri: {
+      // The scheme decides whether the document is a file on disk, which is
+      // what says the webview may be given the root of its filesystem.
+      scheme: (/^([a-z][a-z0-9+.-]*):/i.exec(uriString) || [])[1] || "file",
+      path: uriString.replace(/^[a-z][a-z0-9+.-]*:(\/\/)?/i, "/").replace(/^\/+/, "/"),
       toString: () => uriString,
       fsPath: uriString.replace(/^file:\/\//, ""),
     },
@@ -144,9 +148,17 @@ class Range {
 }
 
 const Uri = {
+  // `..` is resolved, as the real joinPath does: the extension asks for the
+  // folder of a document that way.
   joinPath(base, ...parts) {
     const joined = [base.path || base.toString()].concat(parts).join("/");
-    return { path: joined, toString: () => joined };
+    const out = [];
+    joined.split("/").forEach((seg) => {
+      if (seg !== "..") out.push(seg);
+      else if (out.length > 1) out.pop(); // the root is never left behind
+    });
+    const path = out.join("/") || "/";
+    return { path, scheme: base.scheme || "file", toString: () => path };
   },
   file(p) {
     return { path: p, toString: () => "file://" + p };

@@ -186,6 +186,8 @@ async function open(options) {
     window.__palette = seed.palette || null;
     window.__side = seed.side || null;
     window.__themes = seed.themes || [];
+    window.__docBase = seed.docBase || null;
+    window.__fileBase = seed.fileBase || null;
   }, opts.seed || {});
   if (opts.clipboard) {
     // Headless has no clipboard to write to; what was copied is recorded.

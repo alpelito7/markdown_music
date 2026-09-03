@@ -720,14 +720,23 @@ class MdmEditorProvider {
     // The folder of the document is a resource root too: images the text
     // refers to by a relative path are shown from there.
     const docDir = vscode.Uri.joinPath(document.uri, "..");
+    // And so is the root of the document's own filesystem, for the images the
+    // text names by an absolute path: a figure written by the code of another
+    // project lives wherever that project keeps it, and the folder of the
+    // document says nothing about where that is. Only for a document on disk;
+    // anything else keeps its folder and nothing more.
+    const fileRoot =
+      document.uri.scheme === "file"
+        ? vscode.Uri.file(path.parse(document.uri.fsPath).root)
+        : null;
     webview.options = {
       enableScripts: true,
       localResourceRoots: [
         vscode.Uri.joinPath(this.context.extensionUri, "media"),
         docDir,
-      ],
+      ].concat(fileRoot ? [fileRoot] : []),
     };
-    webview.html = this.getHtml(webview, docDir);
+    webview.html = this.getHtml(webview, docDir, fileRoot);
 
     // >0 while we apply changes that came from the webview to the
     // TextDocument, so we do not send them back (infinite echo). A counter and
@@ -842,11 +851,14 @@ class MdmEditorProvider {
     });
   }
 
-  getHtml(webview, docDir) {
+  getHtml(webview, docDir, fileRoot) {
     const mediaUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, "media")
     );
     const docBase = docDir ? webview.asWebviewUri(docDir).toString() : "";
+    // The two bases an image path hangs from: the folder of the document for
+    // a relative one, the root of the filesystem for an absolute one.
+    const fileBase = fileRoot ? webview.asWebviewUri(fileRoot).toString() : "";
     // No 'unsafe-eval': CodeMirror, KaTeX and abcjs run without it.
     const csp = [
       "default-src 'none'",
@@ -868,6 +880,7 @@ class MdmEditorProvider {
 <link rel="stylesheet" href="${mediaUri}/style.css">
 <script>
 window.MDM_DOC_BASE = ${inlineJson(docBase)};
+window.MDM_FILE_BASE = ${inlineJson(fileBase)};
 window.MDM_SOUNDFONT = "${mediaUri}/vendor/soundfont/";
 window.MDM_SETTINGS = ${inlineJson(readSettings())};
 window.MDM_THEMES = ${inlineJson(themes())};

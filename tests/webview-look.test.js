@@ -1672,3 +1672,36 @@ test("the LaTeX of a shown equation is syntax-highlighted", { skip }, async () =
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// ---------- Images ----------
+
+const IMAGE_DOC = [
+  "Two figures.",
+  "",
+  "![One beside the text.](figures/near.svg)",
+  "",
+  "![One written by another project.](/data/runs/figures/far.svg)",
+  "",
+].join("\n");
+
+test("a relative image hangs from the folder of the document, an absolute one from the root", { skip }, async () => {
+  // The two bases the host hands over, as it builds them for a document in
+  // /home/me/papers: the folder for a relative path, the root of the
+  // filesystem for an absolute one.
+  const h = await open({
+    text: IMAGE_DOC,
+    withFrontMatter: false,
+    scores: 0,
+    seed: { docBase: "https://vsc.test/home/me/papers", fileBase: "https://vsc.test/" },
+  });
+  const srcs = await h.page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app img.mdm-image")).map((i) => i.getAttribute("src"))
+  );
+  assert.deepEqual(srcs, [
+    "https://vsc.test/home/me/papers/figures/near.svg",
+    // Not the folder of the document with the absolute path glued behind it.
+    "https://vsc.test/data/runs/figures/far.svg",
+  ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});

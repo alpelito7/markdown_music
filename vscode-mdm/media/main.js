@@ -2608,14 +2608,24 @@
     }
   }
 
-  // An image path as written in the file, resolved against the folder of the
-  // document (the host hands it over as a webview URI) or left as is when it
-  // is already absolute.
+  // An image path as written in the file, turned into a URI the webview may
+  // load. A URL is passed through; a relative path hangs from the folder of
+  // the document and an absolute one from the root of the filesystem, both
+  // handed over by the host as webview URIs (MDM_DOC_BASE, MDM_FILE_BASE).
+  // The two are told apart because a leading slash resolved against the
+  // folder of the document used to give a path with the document's own folder
+  // glued in front of it, which no server would find.
   function imageSource(src) {
     if (/^(https?:|data:|vscode-)/i.test(src)) return src;
-    const base = window.MDM_DOC_BASE || "";
+    const drive = /^[A-Za-z]:[/\\]/.exec(src); // C:\ and the like
+    const absolute = !!drive || src.charAt(0) === "/" || src.charAt(0) === "\\";
+    const base = absolute ? window.MDM_FILE_BASE || "" : window.MDM_DOC_BASE || "";
     if (!base) return null;
-    return base.replace(/\/?$/, "/") + src.replace(/^\.\//, "");
+    // The root is already in the base, whichever shape it has on this system.
+    const rest = absolute
+      ? src.slice(drive ? drive[0].length : 1).replace(/\\/g, "/")
+      : src.replace(/^\.\//, "");
+    return base.replace(/\/?$/, "/") + rest;
   }
 
   // ---- The walk ----

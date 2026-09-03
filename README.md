@@ -400,9 +400,7 @@ still open for review, are in `vscode-mdm/docs/cm6-migration.md`.
 
 Editor limitations: no editing notes by dragging them with the mouse (the
 dragging API of abcjs is the identified route; untested); tables are edited
-as their source in a monospace grid (no rendered widget yet); images are
-shown for paths relative to the document and for `https:` addresses, not
-for arbitrary local paths outside the document's folder; CodeMirror draws
+as their source in a monospace grid (no rendered widget yet); CodeMirror draws
 only the part of the document in view, so a player whose score scrolls far
 off screen keeps sounding and its bar comes back with the score; if the
 file changes from outside (git, a search and replace) while you are typing
