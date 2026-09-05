@@ -592,6 +592,31 @@ test("an external update keeps a caret outside the change in place and is not ec
   await h.close();
 });
 
+test("an update carrying CRs gains no line and moves no caret", { skip }, async () => {
+  // The host sends LF (see transforms.js), but a CR that got through used to
+  // rewrite the document from the first line break on: CodeMirror splits an
+  // inserted string on /\r\n?|\n/, so the CR left dangling at the end of the
+  // replacement came out as one more line, and the caret was mapped to the
+  // start of the change, which is the end of line 1.
+  const h = await open({ text: "alpha\nbeta\ngamma\n", scores: 0 });
+  await setSelection(h.page, 8); // after "be"
+  await hostUpdate(h.page, "alpha\r\nbeta\r\ngamma\r\n");
+  await sleep(100);
+  // The caret first: it is the half the text assertion would hide by failing
+  // ahead of it, and the half the bug was named after.
+  assert.deepEqual(await selectionRanges(h.page), [[8, 8]]);
+  assert.equal(await docText(h.page), "alpha\nbeta\ngamma\n");
+  // And a real change inside a CRLF text still lands, in LF.
+  await hostUpdate(h.page, "alpha\r\nbeta\r\ngammas\r\n");
+  await sleep(100);
+  assert.equal(await docText(h.page), "alpha\nbeta\ngammas\n");
+  assert.deepEqual(await selectionRanges(h.page), [[8, 8]]);
+  await sleep(500);
+  assert.deepEqual(await edits(h.page), []);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("with the header hidden the text has no front matter and edits say so", { skip }, async () => {
   const h = await open({
     text: "---\ntitle: A\n---\n\nBody.\n",

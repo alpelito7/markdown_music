@@ -282,8 +282,9 @@ What it does:
   backticks of a fence, the `#` of a heading, is an ordinary character: delete
   one `$` of a closing `$$` and the block is a paragraph with three dollar
   signs in it until the fourth is typed back. There is no serialization step
-  between what is typed and what is saved, the YAML header while it is hidden
-  aside.
+  between what is typed and what is saved, two things aside: the YAML header
+  while it is hidden, and the line endings, which are LF in the editor and go
+  back to the file's own on the way out.
 - **Rendering follows the carets.** A block no selection range touches is
   drawn: an equation as KaTeX, a score as its engraving, a fence as a card of
   highlighted code. A block a caret is in shows its source, with the rendered

@@ -9,6 +9,7 @@ const state = {
   settingsWorkspace: {}, // keys pinned at workspace level
   updates: [], // {key, value, target} written through config.update
   documents: new Map(), // uri -> text
+  documentEol: new Map(), // uri -> the EOL of the model, fixed when it is opened
   textDocumentListeners: [],
   configurationListeners: [],
   colorThemeListeners: [],
@@ -31,6 +32,7 @@ function reset() {
   state.settingsWorkspace = {};
   state.updates = [];
   state.documents = new Map();
+  state.documentEol = new Map();
   state.textDocumentListeners = [];
   state.configurationListeners = [];
   state.colorThemeListeners = [];
@@ -49,6 +51,7 @@ function reset() {
 }
 
 const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 };
+const EndOfLine = { LF: 1, CRLF: 2 };
 const ColorThemeKind = { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 };
 
 const workspace = {
@@ -111,7 +114,35 @@ const workspace = {
   },
 };
 
+// The EOL VS Code gives a file it opens: a vote, not the first line break it
+// finds. Every CR counts for CRLF and every lone LF against it, so a file with
+// five LF lines and one CRLF is an LF file. A file with no line break at all
+// takes the value of files.eol, which is LF here and, in VS Code on `auto`,
+// whatever the platform says; a test that needs the other one seeds
+// _state.documentEol itself.
+function voteEol(text) {
+  const crlf = (text.match(/\r\n/g) || []).length;
+  const cr = (text.match(/\r(?!\n)/g) || []).length;
+  const lf = (text.match(/(?<!\r)\n/g) || []).length;
+  const breaks = cr + lf + crlf;
+  if (breaks === 0) return "\n";
+  return cr + crlf > breaks / 2 ? "\r\n" : "\n";
+}
+
+// The EOL of the model. VS Code reads it off the file when it opens it, and
+// no edit of the text changes it after that (only the user does, through the
+// status bar or files.eol, which nothing here does).
+function eolOf(uriString) {
+  return state.documentEol.get(uriString) || "\n";
+}
+
 function makeDocument(uriString) {
+  // Opening the document is what fixes its EOL, so it is read here and not on
+  // the first call that wants it: a document seeded in LF and then written to
+  // in CRLF is an LF document, the way VS Code has it.
+  if (!state.documentEol.has(uriString)) {
+    state.documentEol.set(uriString, voteEol(state.documents.get(uriString) || ""));
+  }
   return {
     uri: {
       // The scheme decides whether the document is a file on disk, which is
@@ -124,9 +155,20 @@ function makeDocument(uriString) {
     get isDirty() {
       return state.dirtyDocuments.has(uriString);
     },
-    getText: () => state.documents.get(uriString) || "",
+    get eol() {
+      return eolOf(uriString) === "\r\n" ? EndOfLine.CRLF : EndOfLine.LF;
+    },
+    // What the extension host really hands an extension is a mirror of the
+    // buffer, not the buffer itself: its getText() is `lines.join(eol)`. A
+    // text written into a CRLF document therefore comes back CRLF, whatever
+    // was written, and an extension that ignores that never sees its own edit
+    // land.
+    getText: () =>
+      (state.documents.get(uriString) || "")
+        .split(/\r\n|\r|\n/)
+        .join(eolOf(uriString)),
     get lineCount() {
-      return (state.documents.get(uriString) || "").split("\n").length;
+      return (state.documents.get(uriString) || "").split(/\r\n|\r|\n/).length;
     },
   };
 }
@@ -261,6 +303,7 @@ module.exports = {
   Uri,
   ConfigurationTarget,
   ColorThemeKind,
+  EndOfLine,
   _state: state,
   _reset: reset,
   _makeDocument: makeDocument,

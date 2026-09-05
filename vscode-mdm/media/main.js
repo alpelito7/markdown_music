@@ -446,7 +446,13 @@
   // and tail are left alone, so the carets, the undo history and the rendered
   // widgets outside the change all survive an external edit (the text editor
   // open beside this one, a formatter, the header button).
-  function replaceText(next) {
+  function replaceText(incoming) {
+    // The text of this editor is LF (the host sends it that way, see
+    // transforms.js). A CR that got through would not survive the dispatch
+    // either: CodeMirror splits an inserted string on /\r\n?|\n/, so the lone
+    // CR left at the end of the replacement below would come out as one more
+    // line break, and the document would gain a blank line per update.
+    const next = incoming.replace(/\r\n?/g, "\n");
     const current = editorText();
     if (next === current) return;
     let head = 0;

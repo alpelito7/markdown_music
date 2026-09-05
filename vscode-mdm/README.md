@@ -23,7 +23,9 @@ in this editor.
 The editor holds the Markdown of the document and nothing else. Every
 character, the `$$` of an equation, the backticks of a fence, the `#` of a
 heading, is an ordinary character that can be typed and deleted; there is no
-serialization step between what is typed and what is saved. What is drawn
+serialization step between what is typed and what is saved, beyond the line
+endings, which are LF in the editor and go back to the file's own when it is
+written. What is drawn
 where follows the carets, the way Obsidian's live preview does:
 
 - A block no caret touches is rendered: an equation as KaTeX, a score as its

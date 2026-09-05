@@ -2,7 +2,7 @@ const vscode = require("vscode");
 const path = require("path");
 const fs = require("fs");
 const cp = require("child_process");
-const { toEditor, fromEditor, frontMatter } = require("./transforms");
+const { toEditor, fromEditor, frontMatter, toLf } = require("./transforms");
 const { syntaxPalette, listThemes } = require("./theme");
 
 // The log of every export, kept out of the notifications: a toast truncates,
@@ -759,13 +759,20 @@ class MdmEditorProvider {
     // webview only needs to know whether the file has one.
     const updateMsg = () => {
       const withFrontMatter = readSettings().frontMatter === "shown";
+      const text = document.getText();
       return {
         type: "update",
-        text: toEditor(document.getText(), withFrontMatter),
-        frontMatter: frontMatter(document.getText()),
+        text: toEditor(text, withFrontMatter),
+        frontMatter: toLf(frontMatter(text)),
         withFrontMatter: withFrontMatter,
       };
     };
+
+    // The line ending of the file, the one every text written back to it
+    // carries. Everything that travels to the webview is LF (see
+    // transforms.js), so this is the host's business alone.
+    const eol = () =>
+      document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
 
     const changeSub = vscode.workspace.onDidChangeTextDocument((e) => {
       if (
@@ -835,7 +842,8 @@ class MdmEditorProvider {
         const newText = fromEditor(
           msg.text,
           document.getText(),
-          !!msg.withFrontMatter
+          !!msg.withFrontMatter,
+          eol()
         );
         if (newText === document.getText()) return;
         applyingFromWebview++;

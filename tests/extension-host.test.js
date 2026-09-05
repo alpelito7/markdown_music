@@ -356,6 +356,77 @@ test("an edit that the host canonicalizes is echoed back once", async () => {
   assert.equal(echo.text, "Body\n");
 });
 
+// ---------- CRLF (the caret jump on Windows) ----------
+
+// A .mdm written on Windows has CRLF endings, and the editor is CodeMirror,
+// which holds no CR. Handed the file as it was, it sent LF back, and the
+// host's own view of the document (getText is the lines joined with the
+// document's EOL) came back CRLF: the edit never matched what was sent, so
+// every keystroke was echoed and the editor rewrote itself from the first CR
+// on. The caret landed at the end of line 1 and the document gained a blank
+// line per echo, which is what the user saw as "the cursor goes mad and types
+// Enter by itself".
+const CRLF_DOC = DOC.replace(/\n/g, "\r\n");
+
+test("a CRLF document reaches the editor in LF, header and all", async () => {
+  const h = boot(CRLF_DOC, {});
+  await h.receive({ type: "ready" });
+  assert.ok(!h.posted[0].text.includes("\r"));
+  assert.ok(!h.posted[0].frontMatter.includes("\r"));
+  const shown = boot(CRLF_DOC, { "mdm.frontMatter": "shown" });
+  await shown.receive({ type: "ready" });
+  assert.ok(!shown.posted[0].text.includes("\r"));
+});
+
+test("an edit on a CRLF document is written back with its CRLFs", async () => {
+  const h = boot(CRLF_DOC, {});
+  await h.receive({ type: "ready" });
+  const editorText = h.posted[0].text.replace("Intro", "Edited");
+  await h.receive({ type: "edit", text: editorText, withFrontMatter: false });
+  assert.equal(h.document.getText(), CRLF_DOC.replace("Intro", "Edited"));
+  // Read raw, out of the mock's store rather than through the document:
+  // getText() is the mirror, which glues the document's EOL back on and so
+  // says nothing about what the host actually wrote.
+  const written = vscode._state.documents.get(h.document.uri.toString());
+  assert.equal(written, CRLF_DOC.replace("Intro", "Edited"));
+  assert.ok(!/[^\r]\n/.test(written), "an LF was written into a CRLF file");
+});
+
+test("a converged edit on a CRLF document gets no echo", async () => {
+  const h = boot(CRLF_DOC, {});
+  await h.receive({ type: "ready" });
+  const before = h.posted.length;
+  const editorText = h.posted[0].text.replace("Intro", "Edited");
+  await h.receive({ type: "edit", text: editorText, withFrontMatter: false });
+  assert.equal(h.posted.length, before);
+});
+
+test("an identical edit does not touch a CRLF document either", async () => {
+  const h = boot(CRLF_DOC, {});
+  await h.receive({ type: "ready" });
+  const changes = [];
+  vscode._state.textDocumentListeners.push((e) => changes.push(e));
+  await h.receive({
+    type: "edit",
+    text: h.posted[0].text,
+    withFrontMatter: false,
+  });
+  assert.equal(changes.length, 0);
+});
+
+test("a CRLF document typed into over and over neither grows nor echoes", async () => {
+  const h = boot(CRLF_DOC, {});
+  await h.receive({ type: "ready" });
+  let text = h.posted[0].text;
+  const before = h.posted.length;
+  for (let i = 0; i < 5; i++) {
+    text = text + "x\n";
+    await h.receive({ type: "edit", text: text, withFrontMatter: false });
+  }
+  assert.equal(h.posted.length, before, "the host echoed");
+  assert.equal(h.document.getText(), CRLF_DOC + "x\r\n".repeat(5));
+});
+
 test("an edit made in shown mode is honoured after a toggle to hidden", async () => {
   // The withFrontMatter flag travels with the text: an edit written while the
   // header was shown must not be reinterpreted under the new setting.

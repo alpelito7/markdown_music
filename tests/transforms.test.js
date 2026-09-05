@@ -11,7 +11,13 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { toEditor, fromEditor, frontMatter } = require("../vscode-mdm/transforms.js");
+const {
+  toEditor,
+  fromEditor,
+  frontMatter,
+  toLf,
+  toEol,
+} = require("../vscode-mdm/transforms.js");
 
 const EXAMPLE = fs.readFileSync(
   path.join(__dirname, "..", "example.mdm"),
@@ -19,9 +25,15 @@ const EXAMPLE = fs.readFileSync(
 );
 
 // Round trip helper: what the file becomes after passing through the editor
-// untouched (toEditor, then fromEditor with the same disk text).
-function roundTrip(text, withFrontMatter) {
-  return fromEditor(toEditor(text, withFrontMatter), text, withFrontMatter);
+// untouched (toEditor, then fromEditor with the same disk text). `eol` is what
+// the host reads off document.eol; LF unless a test says otherwise.
+function roundTrip(text, withFrontMatter, eol) {
+  return fromEditor(
+    toEditor(text, withFrontMatter),
+    text,
+    withFrontMatter,
+    eol || "\n"
+  );
 }
 
 // ---------- Golden round trip ----------
@@ -54,11 +66,51 @@ test("fence info strings reach the editor as written, and come back as written",
   assert.equal(fromEditor(disk, disk, false), disk);
 });
 
+// ---------- Line endings ----------
+
+// The editor is CodeMirror, which holds no CR: a CRLF file that reached it as
+// it is came back LF, the host read every edit as a change and echoed the
+// document back, and the editor rewrote it from the first CR on (the caret to
+// line 1, and a blank line more at the end per echo). So the editor text is
+// LF and the file keeps its own endings, which only the host knows.
 test("CRLF files keep their line endings through both modes", () => {
   const disk = "---\r\ntitle: t\r\n---\r\n\r\nBody\r\n```abc\r\nX:1\r\n```\r\n";
-  assert.equal(roundTrip(disk, true), disk);
+  assert.equal(roundTrip(disk, true, "\r\n"), disk);
+  assert.equal(roundTrip(disk, false, "\r\n"), disk);
+});
+
+test("the editor text of a CRLF file is LF, header shown or hidden", () => {
+  const disk = "---\r\ntitle: t\r\n---\r\n\r\nBody\r\n```abc\r\nX:1\r\n```\r\n";
+  assert.equal(toEditor(disk, false), "Body\n```abc\nX:1\n```\n");
+  assert.equal(toEditor(disk, true), "---\ntitle: t\n---\n\nBody\n```abc\nX:1\n```\n");
+  assert.ok(!toEditor(disk, false).includes("\r"));
+  assert.ok(!toEditor(disk, true).includes("\r"));
+});
+
+test("an edit typed in the editor is written back with the file's endings", () => {
+  const disk = "---\r\ntitle: t\r\n---\r\n\r\nBody\r\n";
+  const edited = toEditor(disk, false) + "More\n";
+  assert.equal(
+    fromEditor(edited, disk, false, "\r\n"),
+    "---\r\ntitle: t\r\n---\r\n\r\nBody\r\nMore\r\n"
+  );
+  assert.equal(
+    fromEditor(edited, disk, true, "\r\n"),
+    "Body\r\nMore\r\n"
+  );
+});
+
+test("a lone CR is a line ending too, in both directions", () => {
+  assert.equal(toEditor("a\rb\r", true), "a\nb\n");
+  assert.equal(toEol("a\rb\r", "\r\n"), "a\r\nb\r\n");
+  assert.equal(toLf("a\r\nb\rc\n"), "a\nb\nc\n");
+});
+
+test("an LF file is left alone, and an absent eol means LF", () => {
+  const disk = "---\ntitle: t\n---\n\nBody\n";
   assert.equal(roundTrip(disk, false), disk);
-  assert.equal(toEditor(disk, false), "Body\r\n```abc\r\nX:1\r\n```\r\n");
+  assert.equal(fromEditor("Body\n", disk, false, undefined), disk);
+  assert.equal(toEol("Body\n", undefined), "Body\n");
 });
 
 // ---------- Front matter handling ----------
