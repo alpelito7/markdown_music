@@ -80,4 +80,17 @@ function frontMatter(text) {
   return splitFrontMatter(text)[0];
 }
 
-module.exports = { toEditor, fromEditor, frontMatter, toLf, toEol };
+// The lines of the file the editor never sees: with the header hidden, the
+// header and the blank lines under it, which is exactly the prefix toEditor
+// takes off. The editor's first line is the (n+1)th line of the file, and the
+// numbers the editor draws in its margin count from there, so that a line has
+// the number the text editor beside it gives the same line. Zero with the
+// header shown and zero for a file that has none, where the two agree already.
+function hiddenLines(text, withFrontMatter) {
+  if (withFrontMatter) return 0;
+  const fm = splitFrontMatter(text)[0];
+  if (!fm) return 0;
+  return (toLf(fm + gapAfter(text, fm)).match(/\n/g) || []).length;
+}
+
+module.exports = { toEditor, fromEditor, frontMatter, hiddenLines, toLf, toEol };

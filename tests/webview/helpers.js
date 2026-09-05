@@ -15,7 +15,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const { toEditor } = require("../../vscode-mdm/transforms.js");
+const { toEditor, hiddenLines } = require("../../vscode-mdm/transforms.js");
 
 const CHROME = "/usr/bin/google-chrome";
 const HARNESS = "file://" + path.join(__dirname, "harness.html");
@@ -332,16 +332,25 @@ test.after(async () => {
   }
 });
 
-// The host's update message, with the text mapped the way the host maps it.
+// The host's update message, with the text mapped the way the host maps it,
+// and with the count of the lines that mapping kept back, which is what the
+// numbers in the margin count from.
 async function update(page, disk, withFrontMatter, scores) {
   await page.evaluate(
-    (text, fm) =>
+    (text, fm, hidden) =>
       window.postMessage(
-        { type: "update", text: text, frontMatter: "x", withFrontMatter: fm },
+        {
+          type: "update",
+          text: text,
+          frontMatter: "x",
+          withFrontMatter: fm,
+          hiddenLines: hidden,
+        },
         "*"
       ),
     toEditor(disk, withFrontMatter),
-    withFrontMatter
+    withFrontMatter,
+    hiddenLines(disk, withFrontMatter)
   );
   // The scores are engraved as their widgets are built, and fitted on an
   // animation frame after; settle before measuring. A document with no score

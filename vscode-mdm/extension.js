@@ -2,7 +2,13 @@ const vscode = require("vscode");
 const path = require("path");
 const fs = require("fs");
 const cp = require("child_process");
-const { toEditor, fromEditor, frontMatter, toLf } = require("./transforms");
+const {
+  toEditor,
+  fromEditor,
+  frontMatter,
+  hiddenLines,
+  toLf,
+} = require("./transforms");
 const { syntaxPalette, listThemes } = require("./theme");
 
 // The log of every export, kept out of the notifications: a toast truncates,
@@ -756,7 +762,10 @@ class MdmEditorProvider {
     // `withFrontMatter` travels with the text it describes, so an edit written
     // under the previous setting is still read as what it was (see
     // transforms.js). `frontMatter` carries the header itself, which the
-    // webview only needs to know whether the file has one.
+    // webview only needs to know whether the file has one. `hiddenLines` says
+    // how many lines of the file are not in that text, which is what the
+    // numbers the editor draws in its margin count from: the host is the only
+    // side that has both texts to compare.
     const updateMsg = () => {
       const withFrontMatter = readSettings().frontMatter === "shown";
       const text = document.getText();
@@ -765,6 +774,7 @@ class MdmEditorProvider {
         text: toEditor(text, withFrontMatter),
         frontMatter: toLf(frontMatter(text)),
         withFrontMatter: withFrontMatter,
+        hiddenLines: hiddenLines(text, withFrontMatter),
       };
     };
 

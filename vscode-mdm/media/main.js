@@ -2300,6 +2300,27 @@
     },
   });
 
+  // What the host kept back. With the YAML header hidden the editor's first
+  // line is not the file's first line, and the numbers drawn in the margin
+  // count the file's lines, so that a line has the number the VS Code text
+  // editor gives the same line of the same file. The host is the only side
+  // that has both texts to compare, so it sends the count with the text; this
+  // holds it the way focusField holds the focus, in the state, so that the
+  // rendering is rebuilt when it changes.
+  let hiddenLines = 0;
+  const setHiddenLines = CM.StateEffect.define();
+  const hiddenLinesField = StateField.define({
+    create: function () {
+      return hiddenLines;
+    },
+    update: function (value, tr) {
+      for (let i = 0; i < tr.effects.length; i++) {
+        if (tr.effects[i].is(setHiddenLines)) value = tr.effects[i].value;
+      }
+      return value;
+    },
+  });
+
   // The carets the rendering answers to: none at all while the document is
   // unfocused, which is the whole of visual mode.
   const NO_RANGES = [];
@@ -2901,6 +2922,59 @@
     return /^(abc\b|\{\s*\.abc\b)/.test(info.trim());
   }
 
+  // The number of a source line, carried on the line itself rather than drawn
+  // in a gutter: a gutter of CodeMirror's is a column at the head of the
+  // scroller, and the text of this editor is a centred column, so the two
+  // stand as far apart as the pane is wide. The stylesheet prints the
+  // attribute in the margin of the text instead, where it travels with the
+  // column.
+  //
+  // One object per number, kept for the life of the view. The spec of a number
+  // never changes, so two rebuilds hand CodeMirror the same decoration for the
+  // same line and it can see that the line's attributes did not move.
+  const LINE_NUMBERS = [];
+  function lineNumber(n) {
+    return (
+      LINE_NUMBERS[n] ||
+      (LINE_NUMBERS[n] = Decoration.line({ attributes: { "data-mdm-line": String(n) } }))
+    );
+  }
+
+  // The cover over the source of a block that is drawn instead of it. It
+  // stands where CodeMirror would otherwise put an empty placeholder of its
+  // own: no height, hidden in the same way, and carrying the number of the
+  // first line it swallows. The lines under it are out of the flow and their
+  // own numbers are never reached, so without this a drawn block would be a
+  // hole in the numbering.
+  //
+  // The number is the whole of its state, so a block whose position changes
+  // updates the attribute and never the drawing beside it, which for a score
+  // is an engraving.
+  class BlockCoverWidget extends WidgetType {
+    constructor(n) {
+      super();
+      this.n = n;
+    }
+    eq(other) {
+      return other.n === this.n;
+    }
+    toDOM() {
+      const el = document.createElement("div");
+      el.className = "mdm-blockline";
+      el.setAttribute("data-mdm-line", String(this.n));
+      return el;
+    }
+    updateDOM(el) {
+      el.setAttribute("data-mdm-line", String(this.n));
+      return true;
+    }
+    // The same answer CodeMirror's own placeholder gives, so that mapping a
+    // position into the DOM meets what it met before.
+    get isHidden() {
+      return true;
+    }
+  }
+
   // Marks hidden while their node is not touched: the node name and the names
   // of its marker children.
   const INLINE_MARKS = {
@@ -2915,6 +2989,8 @@
   function buildDecorations(state) {
     const doc = state.doc;
     const ranges = activeRanges(state);
+    // What the host kept back, which every number counts from (hiddenLines).
+    const hidden = state.field(hiddenLinesField, false) || 0;
     const tree = CM.syntaxTree(state);
     const decos = [];
     const lines = lineClassCollector(doc);
@@ -2927,12 +3003,25 @@
     const hide = function (from, to) {
       if (to > from) decos.push(Decoration.replace({}).range(from, to));
     };
-    // Whole lines taken out of the flow (a fence, the source of a rendered
-    // block). Block replace decorations cover whole lines.
-    const hideLines = function (from, to) {
+    // Whole lines taken out of the flow. Block replace decorations cover whole
+    // lines, and there are two kinds of cover: over a block that is drawn
+    // instead of its source (a score, an equation, a table), which carries the
+    // number of the block's first line since every line under it is gone; and
+    // over lines a block keeps back while the rest of it stays on screen (the
+    // fences of a code block, the `===` under a Setext heading), where the
+    // lines still showing carry the numbering themselves and a number here
+    // would land on top of theirs.
+    const cover = function (from, to, widget) {
       const a = doc.lineAt(from).from;
       const b = doc.lineAt(to).to;
-      decos.push(Decoration.replace({ block: true }).range(a, b));
+      const spec = widget ? { block: true, widget: widget } : { block: true };
+      decos.push(Decoration.replace(spec).range(a, b));
+    };
+    const hideLines = function (from, to) {
+      cover(from, to, null);
+    };
+    const hideBlock = function (from, to) {
+      cover(from, to, new BlockCoverWidget(doc.lineAt(from).number + hidden));
     };
     // The mark plus the single space after it, the way `# `, `> ` and `- `
     // are written.
@@ -2976,7 +3065,7 @@
               }).range(blockTo)
             );
             if (!open) {
-              hideLines(blockFrom, blockTo);
+              hideBlock(blockFrom, blockTo);
               return false;
             }
             // mdm-abc-line: the source of a score is the one code whose
@@ -3045,7 +3134,7 @@
             );
           }
           if (!open && out.html) {
-            hideLines(blockFrom, blockTo);
+            hideBlock(blockFrom, blockTo);
             return false;
           }
           lines.add(blockFrom, blockTo, "mdm-math-line mdm-src-line" + (out.html ? "" : " mdm-math--broken"));
@@ -3178,7 +3267,7 @@
             }).range(blockTo)
           );
           if (!touched(blockFrom, blockTo)) {
-            hideLines(blockFrom, blockTo);
+            hideBlock(blockFrom, blockTo);
             return false;
           }
           // Open for editing: the pipes as they were typed, in a monospace
@@ -3254,6 +3343,8 @@
       },
     });
 
+    // Two things that want a walk of the whole document, taken in one.
+    //
     // The gap between two paragraphs is a blank line of Markdown, and drawn
     // at the height of a line of prose it left the paragraphs adrift: the
     // rendered document (Vditor, and the Office Viewer preview with it) puts
@@ -3261,11 +3352,21 @@
     // editor stands at 1.7 of one. The class is what the stylesheet draws
     // that em from. Only on prose: a blank line inside a fence or the front
     // matter is a line of the block and already carries its class.
+    //
+    // The number goes on every line of the source, with nothing said here
+    // about which of them are on screen. A line the editor has taken out of
+    // the flow carries a number that is never drawn: the source of a closed
+    // score, equation or table is covered by a block replacement, and a
+    // decoration inside one is never reached (the span iterator jumps to the
+    // end of the replaced range), so the numbers of a block appear the moment
+    // a caret opens it and go again when it closes. The rule that decides
+    // what a block shows is the one above; the numbering only follows it.
     for (let n = 1; n <= doc.lines; n++) {
       const line = doc.line(n);
       if (lines.bare(n) && /^\s*$/.test(line.text)) {
         lines.add(line.from, line.from, "mdm-blank");
       }
+      decos.push(lineNumber(n + hidden).range(line.from));
     }
 
     return Decoration.set(decos.concat(lines.decorations()), true);
@@ -3281,6 +3382,7 @@
         tr.docChanged ||
         tr.selection ||
         tr.state.field(focusField) !== tr.startState.field(focusField) ||
+        tr.state.field(hiddenLinesField) !== tr.startState.field(hiddenLinesField) ||
         CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState)
       ) {
         return buildDecorations(tr.state);
@@ -3541,7 +3643,16 @@
     if (!field) return null;
     let found = null;
     field.between(pos, pos, function (from, to, deco) {
-      if (deco.spec.block && !deco.spec.widget && from <= pos && pos <= to) found = { from: from, to: to };
+      // Source taken out of the flow: a block replacement carrying nothing of
+      // its own, or carrying the cover that says which line the block starts
+      // at. A block replacement that draws something instead (the rule) is not
+      // source behind a drawing, it is the drawing, and the arrow keys walk
+      // past it as they always have.
+      const hidden =
+        deco.block &&
+        deco.isReplace &&
+        (!deco.widget || deco.widget instanceof BlockCoverWidget);
+      if (hidden && from <= pos && pos <= to) found = { from: from, to: to };
     });
     return found;
   }
@@ -4223,6 +4334,7 @@
         // Before renderField, which reads it: a field only sees the fields
         // configured ahead of it already updated.
         focusField,
+        hiddenLinesField,
         renderField,
         EditorView.lineWrapping,
         EditorView.updateListener.of(function (update) {
@@ -4839,7 +4951,14 @@
     // the editor: for a file with no header both modes produce the same
     // text, and the flag still has to follow the setting.
     editorFrontMatter = !!msg.withFrontMatter;
+    hiddenLines = msg.hiddenLines || 0;
     updateFrontMatter();
+    // Before the text, so that one update never draws the new document under
+    // the old numbering. The first update has no view yet: the field takes the
+    // count from the variable as the state is created.
+    if (view && hiddenLines !== view.state.field(hiddenLinesField, false)) {
+      view.dispatch({ effects: setHiddenLines.of(hiddenLines) });
+    }
     if (!view) {
       init(msg.text);
       return;

@@ -1914,3 +1914,154 @@ test("a figure carries the pointer, and a click on it opens its source", { skip 
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// ---------- The numbers in the margin ----------
+
+test("the numbers stand in one column beside the text, out of its flow", { skip }, async () => {
+  const text = [
+    "# A heading",
+    "",
+    "A line of prose.",
+    "",
+    "> A quoted line.",
+    "",
+    "::: {.callout-warning}",
+    "Mind the gap.",
+    ":::",
+    "",
+    "$$",
+    "a^2 + b^2 = c^2",
+    "$$",
+    "",
+  ].join("\n");
+  const h = await open({ text, scores: 0, seed: { settings: { frontMatter: "hidden" } } });
+  const seen = await h.page.evaluate(() => {
+    // Every number, wherever it rides: the lines, and the cover over the
+    // source of the equation, which is drawn instead of it.
+    const lines = [...document.querySelectorAll("#app .cm-content [data-mdm-line]")];
+    const content = document.querySelector("#app .cm-content").getBoundingClientRect();
+    const scroller = document.querySelector("#app .cm-scroller").getBoundingClientRect();
+    return {
+      content: { left: content.left },
+      scroller: { left: scroller.left },
+      cover: lines.filter((l) => l.classList.contains("mdm-blockline")).length,
+      numbers: lines.map((l) => {
+        const before = getComputedStyle(l, "::before");
+        // A pseudo-element cannot be measured, so its right edge is computed
+        // the way the browser places it: `right: 100%` is the left edge of the
+        // padding box, which starts inside whatever border the line draws,
+        // less the margin the stylesheet sets. What is pinned is that the
+        // edges agree line to line, whatever a line draws to its left.
+        const r = l.getBoundingClientRect();
+        const border = parseFloat(getComputedStyle(l).borderLeftWidth);
+        return {
+          n: l.getAttribute("data-mdm-line"),
+          cls: l.className,
+          content: before.content,
+          right: r.left + border - parseFloat(before.marginRight),
+          position: before.position,
+          events: before.pointerEvents,
+          select: before.userSelect,
+          // Every number is drawn the same, whatever the line under it is
+          // written in: the heading's 600 used to reach the number through
+          // the pseudo-element.
+          face: [
+            before.color,
+            before.fontWeight,
+            before.fontStyle,
+            before.fontSize,
+            before.fontFamily,
+          ].join(" "),
+        };
+      }),
+      // What four digits would take in the face the numbers are set in, so
+      // the room in the margin is measured rather than guessed.
+      fourDigits: (() => {
+        const before = getComputedStyle(lines[0], "::before");
+        const probe = document.createElement("span");
+        probe.style.font = before.font;
+        probe.style.position = "absolute";
+        probe.textContent = "8888";
+        document.body.appendChild(probe);
+        const w = probe.getBoundingClientRect().width;
+        probe.remove();
+        return w;
+      })(),
+    };
+  });
+  const numbers = seen.numbers;
+  assert.equal(seen.cover, 1, "the equation's source is not covered by one number");
+  // The number is the line's own, and it carries alt text of nothing so that
+  // a screen reader does not read it before every line.
+  assert.deepEqual(
+    numbers.map((x) => x.content),
+    numbers.map((x) => '"' + x.n + '" / ""')
+  );
+  // One column: the quote and the callout draw a 3px bar of their own inside
+  // the box the number is placed against, and their margin gives it back.
+  const rights = numbers.map((x) => Math.round(x.right));
+  assert.deepEqual(
+    rights,
+    rights.map(() => rights[0]),
+    "the numbers are not in one column: " + JSON.stringify(numbers.map((x) => [x.cls, x.right]))
+  );
+  // Beside the text and inside the margin the scroller carries, never over
+  // the text itself.
+  assert.ok(rights[0] < seen.content.left, "a number sits inside the text column");
+  assert.ok(
+    rights[0] - seen.fourDigits > seen.scroller.left,
+    "a four-digit number would fall off the left edge of the pane: " +
+      (rights[0] - seen.fourDigits) +
+      " against " +
+      seen.scroller.left
+  );
+  // One face for all of them: a title's line is bold, a card's is monospace
+  // and smaller, a quote's is paler, and none of that reaches the number.
+  assert.deepEqual(
+    numbers.map((x) => x.face),
+    numbers.map(() => numbers[0].face),
+    "the numbers are not all drawn the same: " +
+      JSON.stringify(numbers.map((x) => [x.cls, x.face]))
+  );
+  // Out of the flow and out of the way: nothing about the number can be
+  // clicked, selected or measured into a line box.
+  for (const x of numbers) {
+    assert.equal(x.position, "absolute", "the number of line " + x.n + " is in the flow");
+    assert.equal(x.events, "none", "the number of line " + x.n + " takes the pointer");
+    assert.equal(x.select, "none", "the number of line " + x.n + " can be selected");
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+
+test("with the header hidden the numbers are the file's lines, not the editor's", { skip }, async () => {
+  const disk = ["---", "title: x", "author: y", "---", "", "First body line.", ""].join("\n");
+  // Hidden is the default of mdm.frontMatter: the host keeps the header and
+  // the blank line under it, so the editor's first line is the file's sixth,
+  // and the margin must say six, which is what the text editor beside it says.
+  const hidden = await open({ text: disk, withFrontMatter: false, scores: 0 });
+  assert.equal(await docText(hidden.page), "First body line.\n");
+  assert.deepEqual(
+    await hidden.page.evaluate(() =>
+      [...document.querySelectorAll("#app .cm-content .cm-line")].map((l) =>
+        l.getAttribute("data-mdm-line")
+      )
+    ),
+    ["6", "7"]
+  );
+  assert.deepEqual(hidden.errors, []);
+  await hidden.close();
+  // Shown, the editor holds the file and counts from one.
+  const shown = await open({ text: disk, withFrontMatter: true, scores: 0 });
+  assert.deepEqual(
+    await shown.page.evaluate(() =>
+      [...document.querySelectorAll("#app .cm-content .cm-line")].map((l) =>
+        l.getAttribute("data-mdm-line")
+      )
+    ),
+    ["1", "2", "3", "4", "5", "6", "7"]
+  );
+  assert.deepEqual(shown.errors, []);
+  await shown.close();
+});

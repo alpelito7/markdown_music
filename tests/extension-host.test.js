@@ -294,6 +294,24 @@ test("ready is answered with the text as written and the header kept aside", asy
   assert.ok(!msg.text.includes("title:"));
 });
 
+test("the update says how many lines of the file the editor is not being sent", async () => {
+  // The editor draws the file's line numbers in its margin, and only the host
+  // holds both texts: with the header hidden, DOC's editor text starts at the
+  // file's fifth line (three of header, one blank), so the count is four.
+  const hidden = boot(DOC, {});
+  await hidden.receive({ type: "ready" });
+  assert.equal(hidden.posted[0].hiddenLines, 4);
+  assert.ok(hidden.posted[0].text.startsWith("Intro\n"));
+  // Shown, the editor holds the file and there is nothing to count.
+  const shown = boot(DOC, { "mdm.frontMatter": "shown" });
+  await shown.receive({ type: "ready" });
+  assert.equal(shown.posted[0].hiddenLines, 0);
+  // A file with no header: the two modes agree and both count nothing.
+  const bare = boot("Intro\n", {});
+  await bare.receive({ type: "ready" });
+  assert.equal(bare.posted[0].hiddenLines, 0);
+});
+
 test("with mdm.frontMatter shown, the update carries the header inline", async () => {
   const h = boot(DOC, { "mdm.frontMatter": "shown" });
   await h.receive({ type: "ready" });

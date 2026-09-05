@@ -208,6 +208,81 @@ body {
 }
 #app .cm-line {
   padding: 0;
+  /* Every line is the frame its own furniture is placed against: the number
+     in the margin below, and the copy button of a code block, which is an
+     inline widget of the first line and asked for this on code lines alone
+     before the numbers arrived. Relative and nothing more, so no line moves
+     and no line box changes height. */
+  position: relative;
+}
+
+/* ---------- The number of the source line ----------
+
+   Printed from an attribute buildDecorations puts on every line, and printed
+   in the margin of the text column. Not a gutter of CodeMirror's: a gutter is
+   a column at the head of the scroller, and the text here is a column centred
+   in what the scroller leaves, so on a wide pane the numbers would stand a
+   couple of hundred pixels from the text they count.
+
+   A line the editor has taken out of the flow draws no number at all, which is
+   the whole of the rule for blocks: the source of a closed score, equation or
+   table is covered by a block replacement, decorations inside one are never
+   reached, and so a block shows the numbers of its source lines exactly while
+   a caret holds it open.
+
+   A block that is drawn instead of its source is the one place the number
+   does not ride on a line: every line of it is out of the flow, so the cover
+   over them carries the number of the first (BlockCoverWidget in main.js) and
+   the same rule prints it beside the drawing.
+
+   No `top`: the static position puts the number on the first line box of the
+   line, so a line carrying padding of its own (a heading, the first line of a
+   card) takes its number down with it, and a paragraph that wraps numbers its
+   first row alone. The box is out of the flow, so no line box grows and none
+   of the measuring CodeMirror does over these lines moves. */
+#app [data-mdm-line]::before {
+  content: attr(data-mdm-line);
+  /* The same, with alt text of nothing, for the engines that take the form
+     (Chromium does, and the webview is one). Generated content is read out by
+     a screen reader, and a number before the text of every line is noise over
+     a document being read aloud. Stated twice so that an engine without the
+     alt form keeps the plain number rather than losing the declaration. */
+  content: attr(data-mdm-line) / "";
+  position: absolute;
+  right: 100%;
+  margin-right: 14px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  /* Every number is drawn the same, so the face is stated whole rather than
+     left to the line: a heading's line is 600 and its number came out bold
+     with the weight unsaid. The height of the box is the one thing taken from
+     the line, which is what puts the number on the line's own first row. */
+  font-weight: 400;
+  font-style: normal;
+  line-height: inherit;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--mdm-ink) 65%, transparent);
+  /* An absolute box placed by its right edge against the left edge of the
+     line has no room to its right to be laid out in, so a two-digit number
+     was broken over two rows. Held on one line it takes the width it needs
+     and grows leftwards, into the margin the scroller carries. */
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+/* The cover itself: no height, so it takes nothing from the block it stands
+   over, and the frame its number is placed against. */
+#app .mdm-blockline {
+  position: relative;
+  height: 0;
+}
+/* The two lines that draw a bar of their own, the quote and the callout, are
+   the two whose numbers would come out of column: an absolute box is placed
+   against the padding box, which starts inside that 3px border. Three more of
+   margin puts them back in line with the rest. */
+#app .cm-line.mdm-quote[data-mdm-line]::before,
+#app .cm-line.mdm-co-line[data-mdm-line]::before {
+  margin-right: 17px;
 }
 /* The selection in the colours of the VS Code theme, so several carets and
    their ranges read as they do in the text editor beside this one. */
@@ -713,11 +788,9 @@ body {
   height: 0;
   z-index: 1;
 }
-/* The code chrome is an inline widget inside the first line of the block;
-   its buttons are placed against that line. */
-#app .cm-line.mdm-code-line {
-  position: relative;
-}
+/* The code chrome is an inline widget inside the first line of the block, and
+   its buttons are placed against that line, which is relative up in the
+   .cm-line rule. */
 #app .mdm-chrome--code {
   position: static;
 }

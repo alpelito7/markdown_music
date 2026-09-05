@@ -15,6 +15,7 @@ const {
   toEditor,
   fromEditor,
   frontMatter,
+  hiddenLines,
   toLf,
   toEol,
 } = require("../vscode-mdm/transforms.js");
@@ -194,4 +195,42 @@ test("toEditor is stable (mapping twice changes nothing)", () => {
   const once = toEditor(EXAMPLE, false);
   assert.equal(toEditor(once, false), once);
   assert.equal(toEditor(EXAMPLE, true), toEditor(toEditor(EXAMPLE, true), true));
+});
+
+// ---- The lines the editor never sees ----
+
+// The editor draws the file's line numbers in its margin, so it has to be told
+// how many lines the mapping kept back. Everything here counts the newlines of
+// the prefix toEditor takes off, which is the header plus the blank lines the
+// file has under it.
+
+test("hiddenLines counts the header and the gap the editor never receives", () => {
+  const disk = "---\ntitle: t\n---\n\nBody\n";
+  assert.equal(hiddenLines(disk, false), 4);
+  // Which is to say: the editor's first line is the file's fifth.
+  assert.equal(toEditor(disk, false), "Body\n");
+  assert.equal(disk.split("\n")[4], "Body");
+  // Two blank lines under the header are two lines of the file.
+  assert.equal(hiddenLines("---\na\n---\n\n\nBody\n", false), 5);
+  // A CRLF file counts its lines, not its characters.
+  assert.equal(hiddenLines("---\r\na\r\n---\r\n\r\nBody\r\n", false), 4);
+});
+
+test("hiddenLines is zero whenever the two texts already agree", () => {
+  const disk = "---\ntitle: t\n---\n\nBody\n";
+  // The header shown: the editor holds the file.
+  assert.equal(hiddenLines(disk, true), 0);
+  // No header to hide: both modes give the same text.
+  assert.equal(hiddenLines("Body\n", false), 0);
+  assert.equal(hiddenLines("", false), 0);
+  // A `---` that is not at the very start is not a header (splitFrontMatter).
+  assert.equal(hiddenLines("Body\n\n---\ntitle: t\n---\n", false), 0);
+});
+
+test("hiddenLines agrees with example.mdm line for line", () => {
+  const first = toEditor(EXAMPLE, false).split("\n")[0];
+  const lines = EXAMPLE.split("\n");
+  // The number the editor draws beside its first line is the number the text
+  // editor draws beside the same line of the file.
+  assert.equal(hiddenLines(EXAMPLE, false) + 1, lines.indexOf(first) + 1);
 });

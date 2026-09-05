@@ -278,9 +278,23 @@ test("a display equation is a widget over hidden source until a caret enters it"
   const hidden = await h.page.evaluate(() => {
     const w = document.querySelector("#app .mdm-math--block");
     const prev = w.previousElementSibling;
-    return { contenteditable: prev.getAttribute("contenteditable"), height: prev.offsetHeight, className: prev.className };
+    return {
+      contenteditable: prev.getAttribute("contenteditable"),
+      height: prev.offsetHeight,
+      className: prev.className,
+      line: prev.getAttribute("data-mdm-line"),
+    };
   });
-  assert.deepEqual(hidden, { contenteditable: "false", height: 0, className: "" });
+  // The cover over the source takes no height and is not editable, as
+  // CodeMirror's own placeholder was; what it adds is the number of the first
+  // line it swallows, drawn in the margin beside the drawing (the `$$` of MATH
+  // is line 3).
+  assert.deepEqual(hidden, {
+    contenteditable: "false",
+    height: 0,
+    className: "mdm-blockline",
+    line: "3",
+  });
   // A caret in the equation: the source shows, the widget stays as preview.
   await setSelection(h.page, await posOf(h.page, "a^2"));
   assert.equal(await count(h.page, ".cm-line.mdm-math-line.mdm-src-line"), 3);
@@ -1630,6 +1644,80 @@ test("the Ctrl+D toggle switches whole-word matching to substring", { skip }, as
   assert.deepEqual(await ranges(), [[0, 5], [10, 15], [23, 28]]);
   await h.page.keyboard.type("Q");
   assert.equal(await docText(h.page), "Q and Qs and a Q here\n");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// ---- The numbers in the margin ----
+
+// The number is an attribute on the line, printed by the stylesheet in the
+// margin of the text column, so what the tests read is the attribute (what a
+// line is numbered) and the class list (which must not have grown).
+
+test("every line carries its number, and a paragraph that wraps carries one", { skip }, async () => {
+  const long =
+    "A paragraph long enough to wrap over more than one row of the column, " +
+    "which is one line of the document and takes one number for all of it.";
+  const h = await open({ text: "Alpha.\n\n" + long + "\n\nOmega.\n", scores: 0 });
+  const seen = await h.page.evaluate(() => {
+    const lines = [...document.querySelectorAll("#app .cm-content .cm-line")];
+    return {
+      numbers: lines.map((l) => l.getAttribute("data-mdm-line")),
+      classes: lines.map((l) => l.className),
+      heights: lines.map((l) => l.getBoundingClientRect().height),
+    };
+  });
+  // Six: the file ends in a newline, so there is a last empty line.
+  assert.deepEqual(seen.numbers, ["1", "2", "3", "4", "5", "6"]);
+  // The long one really did wrap (a .cm-line is one box however many rows it
+  // draws, so what says it wrapped is its height), and it still took one
+  // number, at its first row.
+  assert.ok(
+    seen.heights[2] > seen.heights[0] * 1.5,
+    "the paragraph did not wrap: " + seen.heights[2] + " against " + seen.heights[0]
+  );
+  // The number rides on an attribute; the classes say what the line is and
+  // are what the rest of the suite reads.
+  assert.deepEqual(seen.classes, [
+    "cm-line",
+    "cm-line mdm-blank",
+    "cm-line",
+    "cm-line mdm-blank",
+    "cm-line",
+    "cm-line mdm-blank",
+  ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a drawn block is numbered by its first line, and by every line once a caret opens it", { skip }, async () => {
+  const h = await open({ text: MATH, scores: 0 });
+  // Every number on screen, in the order they are drawn, marking the ones
+  // that ride on the cover over hidden source rather than on a line.
+  const numbers = () =>
+    h.page.evaluate(() =>
+      [...document.querySelectorAll("#app .cm-content [data-mdm-line]")].map(
+        (e) =>
+          e.getAttribute("data-mdm-line") +
+          (e.classList.contains("mdm-blockline") ? "*" : "")
+      )
+    );
+  // Closed: the three lines of the equation are out of the flow and carry no
+  // number of their own, and the cover over them says where the block starts.
+  // Nothing here special-cases a block: a decoration inside a block
+  // replacement is never reached, so the cover is the only thing left to say
+  // it.
+  assert.deepEqual(await numbers(), ["1", "2", "3*", "6", "7", "8"]);
+  await setSelection(h.page, await posOf(h.page, "a^2"));
+  assert.deepEqual(await numbers(), ["1", "2", "3", "4", "5", "6", "7", "8"]);
+  // And back to the cover when the caret leaves.
+  await setSelection(h.page, 0);
+  assert.deepEqual(await numbers(), ["1", "2", "3*", "6", "7", "8"]);
+  // The numbering follows an edit above it, the cover included: the number is
+  // the whole state of the cover, so it is updated in place and the drawing
+  // beside it, an engraving in the case of a score, is never rebuilt for it.
+  await h.page.keyboard.type("New line.\n");
+  assert.deepEqual(await numbers(), ["1", "2", "3", "4*", "7", "8", "9"]);
   assert.deepEqual(h.errors, []);
   await h.close();
 });
