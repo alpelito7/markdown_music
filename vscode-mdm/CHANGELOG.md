@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.1
+
+- The export is named after the document, whatever its extension. The copy
+  the render works from, and everything it leaves behind, were named by
+  taking `.mdm` off the end of the document, which takes nothing off
+  anything else: a `.md` opened through "Open With" came out as
+  `notes.md.qmd`, `notes.md.html` and `notes.md.pdf`, its own extension in
+  the middle of every name. What comes off now is the extension that is
+  there, and a `.mdm` is named as it always was.
+- A figure named by an absolute path reaches the exported page. Quarto
+  rewrites the src of an image that sits outside the render directory into a
+  relative one by dropping its leading slash, so `/home/me/fig.svg` came out
+  of the HTML as `./home/me/fig.svg`, which points at nothing: the figure was
+  missing from the page and the PDF died in LaTeX looking for a file of that
+  name beside the document. That is what a figure drawn by another project
+  looks like from here. The filter copies the file into the cache it keeps
+  its own drawings in, under the digest of its contents, and points the image
+  at the copy, a path inside the render directory that both formats carry the
+  way they carry a figure written beside the document.
+
 ## 0.4.0
 
 - Tables are drawn. A pipe table was the one block the editor still showed
