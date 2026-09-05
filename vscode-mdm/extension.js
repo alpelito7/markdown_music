@@ -550,6 +550,16 @@ function withBreaks(text) {
   return head + out.join(eol);
 }
 
+// The path without its extension, which is what the copy and everything the
+// render leaves behind are named after. Whatever the extension is: the editor
+// opens a document of another name through "Open With", and a `.md` used to
+// keep its own extension in the middle of every name the export produced
+// (`notes.md.qmd`, `notes.md.html`, `notes.md.pdf`).
+function withoutExtension(file) {
+  const ext = path.extname(file);
+  return ext ? file.slice(0, file.length - ext.length) : file;
+}
+
 // The render itself, which is what bin/mdm does from a terminal: copy the
 // .mdm to a .qmd beside it, point the copy at the filter, call Quarto, and
 // take the copy away again. Done here rather than shelled out to that script
@@ -629,7 +639,7 @@ async function exportDocument(document, to) {
     );
     return;
   }
-  const copy = file.replace(/\.mdm$/i, "") + ".qmd";
+  const copy = withoutExtension(file) + ".qmd";
   if (fs.existsSync(copy)) {
     exportFailed(
       "a file named " + path.basename(copy) + " is in the way of the export.",
@@ -692,7 +702,7 @@ async function exportDocument(document, to) {
     );
     return;
   }
-  const base = file.replace(/\.mdm$/i, "");
+  const base = withoutExtension(file);
   const produced = target.outputs.map(function (ext) {
     return base + ext;
   });

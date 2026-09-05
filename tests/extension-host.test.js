@@ -697,6 +697,37 @@ test("export saves a dirty document and runs Quarto on a copy of it", async () =
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test("the export is named after the document, whatever its extension", async () => {
+  // A document opened through "Open With" need not be a .mdm, and the name of
+  // the copy and of everything the render leaves behind used to keep the
+  // extension it did have: notes.md came out as notes.md.qmd, notes.md.html.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "notes.md");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "html" });
+  restore();
+
+  const log = fs.readFileSync(path.join(tmp, "args.txt"), "utf8").trim().split("\n");
+  assert.equal(
+    log[0].split(" ")[1],
+    path.join(tmp, "notes.qmd"),
+    "the copy kept the document's own extension in its name"
+  );
+  assert.equal(vscode._state.infoMessages.length, 1);
+  assert.match(
+    vscode._state.infoMessages[0].message,
+    /notes\.html/,
+    "the file the export offers to open is not notes.html"
+  );
+  assert.ok(!/notes\.md\.html/.test(vscode._state.infoMessages[0].message));
+  assert.deepEqual(vscode._state.errorMessages, []);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test("the copy names the filter by absolute path, and the .mdm is left alone", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const restore = usePath(fakeBin(tmp));
