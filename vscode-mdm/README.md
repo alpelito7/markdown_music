@@ -46,15 +46,21 @@ with heading and list buttons beside them.
 
 ## Music that sounds
 
-A fenced block with the class `abc` renders as a score; with `{.abc .play}`
-it also carries a player: play, pause, stop, repeat, a draggable progress
-bar, volume and mute. The piano is the Musyng Kite soundfont, all 88 notes
-vendored with the extension, so playback touches no network. A caret in
-the block opens its ABC above the engraving, and while a tune plays a
-brass cursor glides across the score and the notes light up under it as
-they sound, every voice of them:
+A fenced block with the class `abc` renders as a score; the headphones in its
+corner open a player in the toolbar, as a row of its own under the buttons:
+play, pause, stop, repeat, a second pair of headphones that shuts the player
+again, a draggable progress bar, volume and mute. It sits up there rather than
+under the score because a score can be a page long, and the controls should
+not have to be scrolled to. Dragging the progress head brings the pane to the
+part that is sounding, so scrubbing through a long score is something you can
+watch, and a tune left to play is followed the same way: the page turns at the
+crossing from one staff system to the next, and only there, so it is still
+while a line of music is played and a pause hands it straight back. The piano is the Musyng Kite soundfont, all 88 notes vendored with the
+extension, so playback touches no network. A caret in the block opens its ABC
+above the engraving, and while a tune plays a brass cursor glides across the
+score and the notes light up under it as they sound, every voice of them:
 
-![A duet playing with its ABC source open above the engraving: the brass cursor standing across both staves, the two notes it has just reached lit in brass under it, one on each staff, and the player bar underneath, its play button, its progress and its open headphones lit in that same brass](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
+![A duet playing with its ABC source open above the engraving: the player bar across the top of the toolbar, under the row of buttons, with its pause button, its lit headphones and the played half of its progress in brass; below, the brass cursor standing across both staves, the two notes it has just reached lit in brass under it, one on each staff, and the lit headphones of the block that is sounding](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
 
     ```{.abc .play}
     X:1

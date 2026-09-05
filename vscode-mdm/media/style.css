@@ -474,8 +474,8 @@ body {
 
 /* ---------- Tooltips ----------
 
-   Drawn from aria-label on anything carrying .mdm-tip: the toolbar (south),
-   the block chrome (west) and the player bar (north). A native title never
+   Drawn from aria-label on anything carrying .mdm-tip: the toolbar and the
+   player row in it (south), the block chrome (west). A native title never
    shows inside the VS Code webview. */
 #app .mdm-tip {
   position: relative;
@@ -506,6 +506,15 @@ body {
    and covered its first entry. */
 #app .mdm-tip--off::after,
 #app .mdm-toolbar__item--open .mdm-tip::after {
+  display: none;
+}
+/* The same for the player row, which is a child of the toolbar and not of the
+   item whose panel is open, so the rule above cannot reach it. A panel hangs
+   over the row (z-index 5 against the row's own painting, which is what a
+   drop-down is for), and a tooltip from a control under it would be drawn on
+   top of the panel at z-index 10: the very artefact the rule above exists to
+   stop, one row lower. */
+#app .mdm-toolbar:has(.mdm-toolbar__item--open) .mdm-audio .mdm-tip::after {
   display: none;
 }
 #app .mdm-tip--s::after {
@@ -885,7 +894,9 @@ body {
 
 /* ---------- Scores ---------- */
 
-/* The widget: the engraving, its chrome and, under it, the player bar. */
+/* The widget: the engraving and its chrome. The player bar is not here any
+   more; it opens as a row of the toolbar (see .mdm-audio below), and what
+   this block keeps of it is the lit disc under the headphones. */
 #app .mdm-score {
   position: relative;
   margin: 0;
@@ -1116,44 +1127,85 @@ body {
   opacity: 0.7;
 }
 
-/* The player bar under a score. It lives inside the preview <pre>, so the
-   pre's own text manners (monospace, white-space: pre, the pointer of
-   click-to-edit) are all undone here. Centred at the score's width like the
-   score itself; the max-width is set at mount from the engraved SVG.
+/* The player bar, which is a row of the toolbar: main.js appends it there
+   while a player is open and takes it away when it closes, so the row exists
+   only while there is something to play. It used to sit under the score it
+   plays, at the score's width; a score can be a page long, and the controls
+   were then off the bottom of the pane while the music was on screen. Up
+   there it is always in view and always as wide as the pane. Which score is
+   sounding is said where it is worth saying, on the block itself: the lit
+   disc under its headphones (above, data-mdm-audio).
+
+   The row is drawn flush, not as the card-coloured pill it was: nothing else
+   in the toolbar carries a ground of its own (a button is `background: none`
+   until it is pointed at), and card material means SOURCE in this editor, the
+   floor code and inline code sit on. What says "player" here is what says it
+   everywhere else: the round targets, the brass ladder, and the hairline that
+   separates the row from the buttons, the same weight as the toolbar's own
+   bottom edge.
 
    abcjs ships the widget in one fixed palette from another decade: light
    icons on a #424242 slab, chunky square buttons, a 10px progress trough
    with a 2px outline and a 20px lozenge riding it. Everything below redraws
-   it in the terms of this editor. Two colours carry the whole thing, both
-   from the theme in use: the text colour, mixed down for the quiet parts,
-   and one accent, the same blue the notes light up in while they sound.
-   Nothing takes a syntax colour: those change hue from theme to theme, and
-   under a dark one the buttons came out red on hover. */
+   it in the terms of this editor. Two colours carry the whole thing: the ink
+   of the editor's chrome, mixed down for the quiet parts, and one accent, the
+   same brass the notes light up in while they sound. Nothing takes a syntax
+   colour: those change hue from theme to theme, and under a dark one the
+   buttons came out red on hover. */
 #app .mdm-audio {
   /* The quiet bar is drawn in the ink of the editor: the hairline of a
-     track, the glyphs, the clock. The brass is the language of use, on a
-     ladder of two weights: a light wash (12%) under whatever is being
-     pointed at, and the state weight (22%) for what is held or sounding,
-     with the glyph gone to the deep brass on that disc alone: repeat while
-     it loops, play while the tune sounds, a button under the press. What
-     is set rather than held, the played half of the progress and the
-     volume, wears -hot, the deep form of the brass, one colour for fill
-     and head alike on both sliders. The old bar had no hue at all ("brass
-     belongs to the score"); what it marked with a heavier ink disc it now
-     marks with the brass of the note, the same statement in the editor's
-     own colour. */
-  --mdm-audio-track: color-mix(in srgb, var(--mdm-syn-base) 18%, transparent);
+     track, the glyphs, the clock. --mdm-ink and not --mdm-syn-base, which is
+     what it used to be: the ink of the code palette was right for a bar
+     among code, and it is wrong for one sitting a pixel under the toolbar's
+     own buttons, which are --mdm-ink. The two are close on the light side
+     and not on the dark, where a Monokai foreground (#f8f8f2) put the
+     player's glyphs brighter than the buttons above them, and where a theme
+     of the user's own would drift in hue as well.
+
+     The brass is the language of use, on a ladder of two weights: a light
+     wash (12%) under whatever is being pointed at, and the state weight
+     (22%) for what is held or sounding, with the glyph gone to the deep
+     brass on that disc alone: repeat while it loops, play while the tune
+     sounds, a button under the press. What is set rather than held, the
+     played half of the progress and the volume, wears -hot, the deep form of
+     the brass, one colour for fill and head alike on both sliders. */
+  --mdm-audio-track: color-mix(in srgb, var(--mdm-ink) 18%, transparent);
   --mdm-audio-disc: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
   --mdm-audio-disc-on: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
   --mdm-audio-hot: var(--mdm-play-accent-ink);
-  white-space: normal;
-  line-height: normal;
+  /* A line of its own, whatever the buttons above it are doing: the toolbar
+     wraps, and a row as wide as the whole line always opens a new one, so
+     the bar sits under one line of buttons or under two without being told
+     which. Full-bleed out of the toolbar's 8px of padding and back in again
+     by its own, so the hairline spans the strip the way the toolbar's bottom
+     edge does; the width is 100% of the toolbar's content box plus that
+     padding back, which makes the outer box exactly the line, never wider.
+     Shrink is left on, since this sheet has no global border-box and a
+     rounding of a pixel must not overflow. */
+  flex: 0 1 auto;
+  width: calc(100% + 16px);
+  box-sizing: border-box;
+  margin: 0 -8px;
+  padding: 3px 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
+  /* The height is stated here and not left to what abcjs builds inside it,
+     because the row is inserted before the synth has mounted: without it the
+     toolbar would grow twice, once for an empty row and again when the
+     widget arrives, and the text under it would jump both times (main.js,
+     holdText, which measures the toolbar in the same task it changes it).
+     34 = 1 of border + 3 of padding + the 30 the widget stands at. */
+  height: 34px;
+  /* The row lays its own content out. The widget abcjs builds takes the whole
+     width of it; a line of text (the three states mountSynth can fail into)
+     is an anonymous item beside nothing, and lands on the row's middle line
+     instead of at the top of a box measured for a 30px widget. */
+  display: flex;
+  align-items: center;
+  /* 13px, the size of the whole chrome. Not inherited: outside the editor's
+     scroller the bar takes the body size, which is 13px inside VS Code and
+     16px in the test harness, and the two would measure differently. */
   font-size: 13px;
   cursor: default;
-  margin: 8px auto 0;
-}
-#app.mdm-score--left .mdm-audio {
-  margin-left: 0;
 }
 /* The bar holds the focus while the player is the thing being used: that is
    what puts Space on play/pause (main.js, watchPlayerKeys). It is a box and
@@ -1162,13 +1214,19 @@ body {
 #app .mdm-audio:focus {
   outline: none;
 }
+/* Flush on the toolbar's own ground: no slab, no edge, no radius. It stands
+   at 30px, which is what the row's height is written from, and takes the
+   whole width of the row (abcjs makes it a flex box; the track inside is the
+   flex child that absorbs whatever is left, which is what makes the bar
+   answer a pane dragged narrower with no JS at all). */
 #app .mdm-audio .abcjs-inline-audio {
   height: 30px;
-  padding: 0 8px 0 4px;
+  width: 100%;
+  padding: 0 4px;
   gap: 2px;
-  background: var(--mdm-syn-card);
-  border: 1px solid color-mix(in srgb, var(--mdm-syn-base) 12%, transparent);
-  border-radius: 15px;
+  background: none;
+  border: none;
+  border-radius: 0;
 }
 /* Square 28x34 slabs become round targets that only show themselves under
    the pointer, the way the chrome of an editor does. */
@@ -1183,9 +1241,11 @@ body {
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
+/* 72%, the weight the toolbar's own buttons are drawn at (.mdm-btn), so a
+   glyph of the player and a glyph of the bar above it are the same ink. */
 #app .mdm-audio .abcjs-btn g {
-  fill: color-mix(in srgb, var(--mdm-syn-base) 78%, transparent);
-  stroke: color-mix(in srgb, var(--mdm-syn-base) 78%, transparent);
+  fill: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
+  stroke: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
 }
 /* Hover brightens the ink and lays the light brass wash under it, the first
    step of the ladder; the glyph stays ink, so only a held state writes its
@@ -1216,11 +1276,11 @@ body {
 }
 #app .mdm-audio .abcjs-inline-audio .abcjs-btn:focus-visible {
   background-color: var(--mdm-audio-disc) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-syn-base) 30%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-ink) 30%, transparent);
 }
 #app .mdm-audio .abcjs-inline-audio .abcjs-btn:hover g {
-  fill: var(--mdm-syn-base);
-  stroke: var(--mdm-syn-base);
+  fill: var(--mdm-ink);
+  stroke: var(--mdm-ink);
 }
 /* The two buttons that hold a state take the accent: repeat while it loops,
    and play while the tune sounds (abcjs marks both with abcjs-pushed, the
@@ -1238,6 +1298,34 @@ body {
   fill: var(--mdm-play-accent-ink);
   stroke: var(--mdm-play-accent-ink);
 }
+/* The headphones that put the player away, the bar's copy of the toggle in
+   the corner of the score. It is the only button here that is lit at rest,
+   and it has to be: the lit disc is what says the player is open, which is
+   the same thing this drawing says on the block. So it wears the state
+   weight of the ladder from the start, glyph in the deep brass, exactly as a
+   pushed play or a running repeat does.
+
+   That costs it the step the other buttons answer a pointer with, since it
+   is already standing on it, and a button that cannot answer being pointed
+   at reads as a label. Hence the third and deepest step of the ladder,
+   written for this one button: 32% under the pointer, 40% under the press.
+   Nothing else in the editor uses either, and nothing else should: they mean
+   "the lit thing you are about to switch off". */
+#app .mdm-audio .abcjs-inline-audio .mdm-audio-close {
+  background-color: var(--mdm-audio-disc-on) !important;
+}
+#app .mdm-audio .abcjs-inline-audio .mdm-audio-close:hover {
+  background-color: color-mix(in srgb, var(--mdm-play-accent) 32%, transparent) !important;
+}
+#app .mdm-audio .abcjs-inline-audio .mdm-audio-close:active {
+  background-color: color-mix(in srgb, var(--mdm-play-accent) 40%, transparent) !important;
+}
+#app .mdm-audio .abcjs-inline-audio .mdm-audio-close g,
+#app .mdm-audio .abcjs-inline-audio .mdm-audio-close:hover g {
+  fill: var(--mdm-play-accent-ink);
+  stroke: var(--mdm-play-accent-ink);
+}
+
 /* A hairline track with a round head, in place of the outlined trough. */
 /* The part already played is filled in, which is how a progress bar says
    where you are without being read: --mdm-progress is written by the same
@@ -1248,6 +1336,19 @@ body {
   margin: 0 10px;
   border: none;
   border-radius: 2px;
+  /* The three declarations the vendored abcjs sheet already makes, restated
+     here because they are now load-bearing rather than incidental: the track
+     is the flex child that absorbs whatever the row has left, which is the
+     whole of the bar's answer to a pane dragged narrower, and the head rides
+     it absolutely. Left to the vendor alone, a version of abcjs that dropped
+     them, or a sheet that failed to load, would leave a full-width row with
+     a zero-width track and no visible cause. The floor keeps the head
+     grabbable: what collapses at the narrow end is named below, and the
+     track is never it. */
+  flex: 1 1 0;
+  min-width: 44px;
+  position: relative;
+  box-sizing: border-box;
   background: linear-gradient(
     to right,
     var(--mdm-audio-hot) var(--mdm-progress, 0%),
@@ -1265,8 +1366,13 @@ body {
 }
 /* Room to grab, without drawing any more than the hairline: the volume next
    to it is an 11px control around a 3px track, and 4px is a height you have
-   to aim at. The zone spans the track and nothing else, since the bar holds
-   nothing above or below it. */
+   to aim at. The zone is 20px tall on a 4px track centred in a 30px widget,
+   so it leaves 5px of that widget clear at either end, and the widget starts
+   4px down the row (its border and its padding): 9px of air between the top
+   of the zone and the button line above. It must keep that air, or it would
+   take the hover and the clicks off the toolbar button standing over it. The
+   arithmetic holds while the widget stands at 30px; shorten the row and this
+   inset has to come in with it. */
 #app .mdm-audio .abcjs-midi-progress-background::before {
   content: "";
   position: absolute;
@@ -1284,7 +1390,7 @@ body {
   .mdm-audio
   .abcjs-midi-progress-background:focus-visible
   .abcjs-midi-progress-indicator {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-syn-base) 30%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-ink) 30%, transparent);
 }
 /* Kept centred on its value: abcjs positions this by its left edge and
    offsets it by half the width it ships with, so the margin has to follow
@@ -1308,11 +1414,14 @@ body {
 #app .mdm-audio .abcjs-midi-progress-background:active .abcjs-midi-progress-indicator {
   transform: scale(1.25);
 }
-/* The clock ships in the widget's own light gray, invisible on a light card.
-   Tabular figures so the bar does not twitch as the seconds run. */
+/* The clock ships in the widget's own light gray, invisible on a light page.
+   Tabular figures so the bar does not twitch as the seconds run. `flex: none`
+   because the row is now as narrow as the pane can be dragged, and a clock
+   allowed to shrink would drop a digit rather than the whole reading. */
 #app .mdm-audio .abcjs-midi-clock {
+  flex: none;
   margin: 0 2px 0 0;
-  color: color-mix(in srgb, var(--mdm-syn-base) 62%, transparent);
+  color: color-mix(in srgb, var(--mdm-ink) 62%, transparent);
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -1327,7 +1436,7 @@ body {
   margin-left: 6px;
   padding-left: 8px;
   border-left: 1px solid
-    color-mix(in srgb, var(--mdm-syn-base) 12%, transparent);
+    color-mix(in srgb, var(--mdm-ink) 12%, transparent);
   flex: none;
 }
 /* The speaker is the mute button, so it gets the round target the buttons of
@@ -1351,11 +1460,11 @@ body {
 #app .mdm-audio .mdm-audio-vol svg {
   width: 14px;
   height: 14px;
-  fill: color-mix(in srgb, var(--mdm-syn-base) 62%, transparent);
+  fill: color-mix(in srgb, var(--mdm-ink) 62%, transparent);
   flex: none;
 }
 #app .mdm-audio .mdm-audio-mute:hover svg {
-  fill: var(--mdm-syn-base);
+  fill: var(--mdm-ink);
 }
 /* Muted: the speaker itself is struck through, so no disc is lit under it.
    A disc is how a button shows a state its drawing cannot (repeat, whose
@@ -1413,21 +1522,63 @@ body {
 }
 #app .mdm-audio .mdm-audio-vol input[type="range"]:focus-visible::-webkit-slider-thumb {
   background: var(--mdm-play-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-syn-base) 30%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-ink) 30%, transparent);
 }
 #app .mdm-audio .abcjs-loading-svg circle {
-  stroke: var(--mdm-syn-base);
+  stroke: var(--mdm-ink);
 }
-/* The tooltips of the bar's buttons, drawn north: the bar sits at the foot of
-   the block and a tooltip below it would hang under the score. They are the
-   .mdm-tip tooltips of the rest of the editor, a size smaller. */
-#app .mdm-audio .mdm-tip::after {
-  font-size: 11px;
-}
+/* The tooltips of the bar's buttons are drawn south (mdm-tip--s, set in
+   main.js), the way the toolbar's own buttons draw theirs: the buttons are
+   directly above this row and a tooltip drawn north would be laid over them.
+   They take no size of their own either. They used to be set a point smaller
+   than the toolbar's, which was right for a bar down in the text and reads as
+   an oversight in a strip where the two sit a row apart. */
 /* The fallback notes the player can show (audio unsupported, synth failed to
-   load): quiet text, not an alarm. */
+   load): quiet text, not an alarm. Mixed down the way the empty menu note is
+   (.mdm-menu__empty). */
 #app .mdm-audio {
-  color: var(--mdm-syn-comment);
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+}
+
+/* What goes when the pane is dragged narrow, in the order it goes.
+   Everything else in the row answers a change of width by itself: the track
+   is the flex child that takes what is left, and the fill on it is a per
+   cent of that. But the rest of the row is rigid, so past a point the track
+   is all that shrinks and it shrinks to nothing. Measured on the row as it
+   is drawn here (three 24px buttons, five 2px gaps, the track's 20px of
+   margins, a 29px clock, a 97px volume group, the widget's 8px and the row's
+   16px), the track is the pane less 252px, so it is under 120px, which is
+   about the least worth scrubbing, at a pane of 372.
+
+   So: the volume slider goes first, at 380, and the mute stays, since the
+   level is a session setting that survives the collapse while silence is a
+   thing you want to undo where you are. Then the clock, at 320: the filled
+   half of the track says where you are without it. Then the volume group
+   whole, at 260, which is narrower than an editor group is usually dragged
+   and where the alternative is the row painting past the pane. Play, stop,
+   repeat and the track never go.
+
+   The query reads the viewport, which in a VS Code webview IS the editor
+   pane: the toolbar spans it, and the outline panel takes its width from the
+   text below rather than from here. */
+@media (max-width: 380px) {
+  #app .mdm-audio .mdm-audio-vol input[type="range"] {
+    display: none;
+  }
+  #app .mdm-audio .mdm-audio-vol {
+    padding-left: 6px;
+    margin-left: 4px;
+  }
+}
+@media (max-width: 320px) {
+  #app .mdm-audio .abcjs-midi-clock {
+    display: none;
+  }
+}
+@media (max-width: 260px) {
+  #app .mdm-audio .mdm-audio-vol {
+    display: none;
+  }
 }
 
 /* ---------- Syntax colours ----------

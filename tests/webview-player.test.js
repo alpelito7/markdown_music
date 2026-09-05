@@ -41,7 +41,11 @@ async function playerState(page) {
     return {
       bars: document.querySelectorAll(".mdm-audio").length,
       widgets: document.querySelectorAll(".mdm-audio .abcjs-inline-audio").length,
-      onIndex: scores.findIndex((b) => b.querySelector(".mdm-audio")),
+      // Which score is playing. Not the block that holds the bar any more:
+      // the bar is a row of the toolbar and belongs to no score. What says it
+      // is the mark the block carries while its player is open, which is also
+      // what lights the disc under its headphones.
+      onIndex: scores.findIndex((b) => b.hasAttribute("data-mdm-audio")),
       attrs: document.querySelectorAll("[data-mdm-audio]").length,
       labels: scores.map((b) =>
         b.querySelector(".mdm-audio-toggle").getAttribute("aria-label")
@@ -352,8 +356,11 @@ test("the toggle opens the player without expanding the block, and closes it", {
     { timeout: 15000 }
   );
   const openState = await h.page.evaluate(() => {
-    const block = document.querySelector("#app [data-mdm-audio]");
-    const bar = block.querySelector(".mdm-audio");
+    const bar = document.querySelector(".mdm-audio");
+    const toolbar = document.querySelector("#app .mdm-toolbar");
+    const items = toolbar.querySelectorAll(".mdm-toolbar__item");
+    const last = items[items.length - 1].getBoundingClientRect();
+    const box = bar.getBoundingClientRect();
     return {
       // "Expanded" used to be Vditor's open block; now it is the source
       // lines showing, which the toggle must not bring up.
@@ -361,17 +368,37 @@ test("the toggle opens the player without expanding the block, and closes it", {
       play: !!bar.querySelector(".abcjs-midi-start"),
       loop: !!bar.querySelector(".abcjs-midi-loop"),
       progress: !!bar.querySelector(".abcjs-midi-progress-background"),
-      // The bar lives in the widget, right under the engraving.
-      insidePreview:
-        !!bar.closest(".mdm-score") &&
-        bar.previousElementSibling.matches("code.language-abc"),
-      maxWidth: parseInt(bar.style.maxWidth, 10),
+      // The bar lives in the toolbar, and nothing of it is left in the text.
+      inToolbar: !!bar.closest("#app .mdm-toolbar"),
+      underScore: document.querySelectorAll("#app .mdm-score .mdm-audio").length,
+      inContent: document.querySelectorAll(".cm-content .mdm-audio").length,
+      // A row of its own, below every button, spanning the whole strip: the
+      // toolbar's padding is the only thing either side of it.
+      ownRow: box.top >= last.bottom - 1,
+      barWidth: box.width,
+      toolbarWidth: toolbar.getBoundingClientRect().width,
+      // Nothing is left of the cap the old bar took from its score.
+      maxWidth: bar.style.maxWidth,
+      // Five controls among the document's formatting buttons: what ties
+      // them together for a keyboard walking the toolbar, where the lit disc
+      // says nothing.
+      role: bar.getAttribute("role"),
+      named: bar.getAttribute("aria-label"),
     };
   });
   assert.equal(openState.expanded, false, "opening the player expanded the block");
   assert.equal(openState.play && openState.loop && openState.progress, true);
-  assert.equal(openState.insidePreview, true);
-  assert.ok(openState.maxWidth >= 280, "bar sized to the score");
+  assert.equal(openState.inToolbar, true, "the bar did not open in the toolbar");
+  assert.equal(openState.underScore, 0, "a bar was left under the score");
+  assert.equal(openState.inContent, 0, "the bar is still inside the text");
+  assert.equal(openState.ownRow, true, "the bar shares its line with the buttons");
+  assert.equal(openState.maxWidth, "", "the bar kept a width taken from a score");
+  assert.ok(
+    Math.abs(openState.barWidth - openState.toolbarWidth) <= 1,
+    "the bar is " + openState.barWidth + " in a toolbar of " + openState.toolbarWidth
+  );
+  assert.equal(openState.role, "group", "the row is not a group of its own");
+  assert.equal(openState.named, "Player", "the row has no name");
   assert.deepEqual((await playerState(h.page)).labels, [
     "Hide player",
     "Show player",
@@ -387,6 +414,685 @@ test("the toggle opens the player without expanding the block, and closes it", {
   await h.close();
 });
 
+// A score with a page of prose under it, so the block can be scrolled clean
+// out of CodeMirror's viewport (where its widget is destroyed) while the tune
+// goes on sounding. Four 4/4 bars of even eighths at a quarter of 100, the
+// same grid the timing fixture uses: about 9.6 seconds.
+const FAR_SCORE_FIXTURE = [
+  "---",
+  'title: "A long page"',
+  "---",
+  "",
+  "```{.abc .play}",
+  "X:1",
+  "M:4/4",
+  "L:1/8",
+  "Q:1/4=100",
+  "K:C",
+  "CDEF GABc | cBAG FEDC | CDEF GABc | cBAG FEDC |",
+  "```",
+  "",
+]
+  .join("\n")
+  .concat(
+    Array.from(
+      { length: 200 },
+      (_, i) => "Paragraph " + i + " of the page that runs under the score.\n"
+    ).join("\n")
+  );
+
+// A score of many staff systems, taller than any pane the harness opens: what
+// a seek has to move the page for. Sixty 4/4 bars at a quarter of 240, so the
+// whole tune is about a minute and the engraving runs to a dozen systems.
+const TALL_SCORE_FIXTURE = [
+  "---",
+  'title: "A tall score"',
+  "---",
+  "",
+  "```{.abc .play}",
+  "X:1",
+  "M:4/4",
+  "L:1/8",
+  "Q:1/4=240",
+  "K:C",
+]
+  .concat(
+    Array.from({ length: 15 }, (_, i) =>
+      (i % 2 ? "cBAG FEDC | GABc defg | cBAG FEDC | GABc defg |"
+             : "CDEF GABc | cBAG FEDC | CDEF GABc | cBAG FEDC |")
+    )
+  )
+  .concat(["```", ""])
+  .join("\n");
+
+// The bar carries the same headphones the corner of the score does, lit the
+// same way, and they do the same thing: shut the player. Without them the
+// only way out was the block's own toggle, and a block can be a page long or
+// scrolled off the screen entirely, so closing what you were listening to
+// meant going to look for it.
+test("the bar's headphones sit by repeat, lit, and shut the player", { skip }, async () => {
+  const h = await open({});
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  const button = await h.page.evaluate(() => {
+    const b = document.querySelector(".mdm-audio .mdm-audio-close");
+    if (!b) return null;
+    const disc = getComputedStyle(b).backgroundColor;
+    const lit = getComputedStyle(
+      document.querySelector("#app .mdm-score[data-mdm-audio] .mdm-audio-toggle")
+    ).backgroundColor;
+    return {
+      label: b.getAttribute("aria-label"),
+      // The transport first, then the button that puts the player away.
+      after: b.previousElementSibling.className.match(/abcjs-midi-\w+/)[0],
+      // Drawn like the rest of the bar's buttons: a round target of the same
+      // size, its glyph in a <g> so the bar's own colour rules reach it.
+      size: Math.round(b.getBoundingClientRect().width),
+      glyph: getComputedStyle(b.querySelector("g")).fill,
+      // Lit at rest, and lit with the same brass as the toggle on the block.
+      disc: disc,
+      sameAsBlock: disc === lit,
+      tip: b.classList.contains("mdm-tip") && b.classList.contains("mdm-tip--s"),
+    };
+  });
+  assert.ok(button, "the bar has no headphones of its own");
+  assert.equal(button.label, "Hide player");
+  assert.equal(button.after, "abcjs-midi-loop", "the headphones are not beside repeat");
+  assert.equal(button.size, 24, "not the size of the bar's other buttons");
+  assert.equal(button.tip, true, "no tooltip, or one drawn north");
+  assert.notEqual(button.disc, "rgba(0, 0, 0, 0)", "the headphones are not lit");
+  assert.equal(button.sameAsBlock, true, "lit in a different brass from the block's toggle");
+  // The glyph goes to the deep brass on that disc, the way a pushed play does.
+  assert.match(button.glyph, /^(rgb|color)/);
+  assert.notEqual(button.glyph, "rgb(0, 0, 0)");
+
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .mdm-audio-close").click()
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  const shut = await playerState(h.page);
+  assert.equal(shut.bars, 0, "the headphones in the bar did not shut the player");
+  assert.equal(shut.attrs, 0, "the block was left lit with no player on it");
+  assert.deepEqual(shut.labels, ["Show player", "Show player", "Show player"]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Scrubbing the progress bar is a way of moving through the score, so the
+// page follows the head: dropping it halfway through a page-long score puts
+// the music on a system that may be nowhere near the pane, and a reader left
+// listening to something they cannot see is the same complaint the bar was
+// moved for. A tune left to play is followed too, at the crossing from one
+// staff system to the next, which is the test under this one.
+test("a seek brings the pane to the part that is sounding", { skip }, async () => {
+  const h = await open({ text: TALL_SCORE_FIXTURE, scores: 1 });
+  await h.page.setViewport({ width: 900, height: 520 });
+  await new Promise((r) => setTimeout(r, 500));
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 20000 }
+  );
+  const geom = await h.page.evaluate(() => {
+    const sc = window.__mdm.view.scrollDOM;
+    sc.scrollTop = 0;
+    return {
+      score: Math.round(
+        document.querySelector("#app code.language-abc svg").getBoundingClientRect().height
+      ),
+      pane: Math.round(sc.getBoundingClientRect().height),
+    };
+  });
+  assert.ok(
+    geom.score > geom.pane * 1.5,
+    "the fixture is not tall enough to have to scroll: " + geom.score + " in " + geom.pane
+  );
+  // A drag of the head to a fraction of the tune, released there.
+  const seekTo = async (percent) => {
+    const at = await h.page.evaluate((p) => {
+      const b = document
+        .querySelector(".mdm-audio .abcjs-midi-progress-background")
+        .getBoundingClientRect();
+      return { x: b.left + b.width * p, y: b.top + b.height / 2 };
+    }, percent);
+    await h.page.mouse.move(at.x, at.y);
+    await h.page.mouse.down();
+    await h.page.mouse.move(at.x + 1, at.y);
+    await h.page.mouse.up();
+    await new Promise((r) => setTimeout(r, 900));
+    return h.page.evaluate(() => {
+      const pane = window.__mdm.view.scrollDOM.getBoundingClientRect();
+      const line = document.querySelector("#app .mdm-play-cursor");
+      const b = line && line.getBoundingClientRect();
+      return {
+        scroll: Math.round(window.__mdm.view.scrollDOM.scrollTop),
+        drawn: !!line,
+        // Wholly inside the pane, which is what "brought on screen" means.
+        onScreen: !!b && b.top >= pane.top - 1 && b.bottom <= pane.bottom + 1,
+      };
+    });
+  };
+  const far = await seekTo(0.9);
+  assert.equal(far.drawn, true, "the seek drew no cursor to follow");
+  assert.ok(far.scroll > geom.pane, "the page did not follow the head: " + far.scroll);
+  assert.equal(far.onScreen, true, "the head was left off the pane");
+  const back = await seekTo(0.1);
+  assert.ok(
+    back.scroll < far.scroll - 100,
+    "the page did not come back with the head: " + far.scroll + " -> " + back.scroll
+  );
+  assert.equal(back.onScreen, true, "the head was left off the pane on the way back");
+  // A head already on the pane leaves the page alone. Read by nudging the
+  // page off the middle first, so that a rule which centred every seek would
+  // have something to snap back to: without the guard the score would slide
+  // under the reader on every move of a scrub inside one system.
+  await h.page.evaluate(() => {
+    window.__mdm.view.scrollDOM.scrollTop += 40;
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  const nudged = await h.page.evaluate(() =>
+    Math.round(window.__mdm.view.scrollDOM.scrollTop)
+  );
+  const again = await seekTo(0.1);
+  assert.equal(
+    again.onScreen,
+    true,
+    "the nudge alone took the head off the pane: the case is not being read"
+  );
+  assert.ok(
+    Math.abs(again.scroll - nudged) <= 2,
+    "a seek to where the head already was pulled the page back: " +
+      nudged +
+      " -> " +
+      again.scroll
+  );
+  // A seek made with the keyboard sends no pointermove, so here it is the
+  // landing of the seek and not the drag that has to bring the page. Six
+  // PageUps, a tenth of the tune each, walk the head from a tenth to about
+  // seven tenths, which on this fixture is several systems down. Not End: it
+  // parks the clock on the total, where the cursor is deliberately not drawn
+  // (a finished tune is not standing anywhere), so there would be nothing to
+  // bring on screen.
+  await h.page.evaluate(() => {
+    const track = document.querySelector(".mdm-audio .abcjs-midi-progress-background");
+    track.focus();
+    for (let i = 0; i < 6; i++) {
+      track.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
+    }
+  });
+  await new Promise((r) => setTimeout(r, 1200));
+  const ended = await h.page.evaluate(() => {
+    const pane = window.__mdm.view.scrollDOM.getBoundingClientRect();
+    const b = document.querySelector("#app .mdm-play-cursor");
+    return {
+      scroll: Math.round(window.__mdm.view.scrollDOM.scrollTop),
+      onScreen: !!b && b.getBoundingClientRect().top >= pane.top - 1 &&
+        b.getBoundingClientRect().bottom <= pane.bottom + 1,
+    };
+  });
+  assert.ok(
+    ended.scroll > again.scroll + 100,
+    "the keyboard seek did not bring the page down: " +
+      again.scroll +
+      " -> " +
+      ended.scroll
+  );
+  assert.equal(ended.onScreen, true, "the keyboard seek left the head off the pane");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The same complaint the seek answers, arrived at by waiting instead of by
+// dragging: a tune left to play walks the cursor down the engraving, and on a
+// page-long score it walks clean off the pane, so what is sounding cannot be
+// seen. The page turns with the music now, and turns the way a page turner
+// does: at the crossing from one staff system to the next, never between, so
+// the page is still while a line of music is played and a reader who pauses
+// gets it back.
+test("a tune left to play turns the page at the crossing, and only there", { skip }, async () => {
+  const h = await open({ text: TALL_SCORE_FIXTURE, scores: 1 });
+  await h.page.setViewport({ width: 900, height: 520 });
+  await new Promise((r) => setTimeout(r, 500));
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 20000 }
+  );
+  await h.page.evaluate(() => {
+    window.__mdm.view.scrollDOM.scrollTop = 0;
+  });
+  const onScreen = () =>
+    h.page.evaluate(() => {
+      const pane = window.__mdm.view.scrollDOM.getBoundingClientRect();
+      const line = document.querySelector("#app .mdm-play-cursor");
+      const b = line && line.getBoundingClientRect();
+      return {
+        scroll: Math.round(window.__mdm.view.scrollDOM.scrollTop),
+        drawn: !!line,
+        onScreen: !!b && b.top >= pane.top - 1 && b.bottom <= pane.bottom + 1,
+      };
+    });
+  await pressPlay(h.page);
+  // Waited for rather than timed: the fixture is a minute of music over a
+  // dozen systems, and how long the first crossing takes is the tempo's
+  // business, not the test's.
+  await h.page.waitForFunction(
+    () => window.__mdm.view.scrollDOM.scrollTop > 20,
+    { timeout: 30000 }
+  );
+  const moved = await onScreen();
+  assert.equal(moved.drawn, true, "the tune is playing with no cursor to follow");
+  assert.equal(moved.onScreen, true, "the page moved and left the head off the pane");
+  // The next turn, waited for so that what follows begins where a system
+  // does: the music has a whole line to walk before it crosses again, which
+  // is the window the two parks below are read in.
+  await h.page.waitForFunction(
+    (from) => Math.round(window.__mdm.view.scrollDOM.scrollTop) !== from,
+    { timeout: 30000 },
+    moved.scroll
+  );
+  // A reader who takes the page mid-line keeps it. Parked a whole pane past
+  // the music, so the head is off the pane and a follow held to the head
+  // rather than to the crossing would have it back within a frame.
+  const park = () =>
+    h.page.evaluate(() => {
+      const sc = window.__mdm.view.scrollDOM;
+      sc.scrollTop += sc.getBoundingClientRect().height;
+      return Math.round(sc.scrollTop);
+    });
+  const parked = await park();
+  await new Promise((r) => setTimeout(r, 700));
+  const kept = await onScreen();
+  assert.equal(
+    kept.onScreen,
+    false,
+    "the park left the head on the pane: the case is not being read"
+  );
+  assert.ok(
+    Math.abs(kept.scroll - parked) <= 2,
+    "the page was pulled back to a sounding head mid-system rather than left " +
+      "to the crossing: " +
+      parked +
+      " -> " +
+      kept.scroll
+  );
+  // And the crossing brings it back.
+  await h.page.waitForFunction(
+    (from) => Math.round(window.__mdm.view.scrollDOM.scrollTop) !== from,
+    { timeout: 30000 },
+    parked
+  );
+  const back = await onScreen();
+  assert.equal(back.onScreen, true, "the crossing left the head off the pane");
+  // Paused, the reader has the page for good: a stopped clock crosses
+  // nothing, and nothing else may move the page either.
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .abcjs-midi-start").click()
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  const stopped = await park();
+  await new Promise((r) => setTimeout(r, 1500));
+  const held = await onScreen();
+  assert.equal(held.drawn, true, "the pause took the cursor away");
+  assert.ok(
+    Math.abs(held.scroll - stopped) <= 2,
+    "the page moved under a paused tune: " + stopped + " -> " + held.scroll
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The whole reason the bar moved. A score can be a page long (duet.mdm is),
+// and the bar used to sit at its foot: playing meant scrolling to the bottom,
+// pressing play and scrolling back up to read what was sounding. In the
+// toolbar it is there whatever the reader is looking at, the block gone from
+// the viewport included, which is where CodeMirror has thrown the widget away
+// and there is no score on screen at all.
+test("the bar stays in reach with its score scrolled out of the viewport", { skip }, async () => {
+  const h = await open({ text: FAR_SCORE_FIXTURE, scores: 1 });
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  await pressPlay(h.page);
+  // Down to the foot of the page, far past the margin CodeMirror renders
+  // beyond the viewport: the score's widget goes, and with it the lit disc.
+  await h.page.evaluate(() => {
+    const s = window.__mdm.view.scrollDOM;
+    s.scrollTop = s.scrollHeight;
+  });
+  await h.page.waitForFunction(
+    () => document.querySelectorAll("#app [data-mdm-audio]").length === 0,
+    { timeout: 15000 }
+  );
+  const away = await h.page.evaluate(() => {
+    const bar = document.querySelector("#app .mdm-toolbar .mdm-audio");
+    const play = bar && bar.querySelector(".abcjs-midi-start");
+    const box = play.getBoundingClientRect();
+    return {
+      bars: document.querySelectorAll(".mdm-audio").length,
+      inToolbar: !!bar,
+      scores: document.querySelectorAll("#app .mdm-score").length,
+      pushed: play.classList.contains("abcjs-pushed"),
+      // Reachable with nothing scrolled to: the point on the play button
+      // really is the play button.
+      onButton: play.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      ),
+      // Where the tune has got to. Not the clock, which is whole seconds and
+      // would read 0:00 through the whole of a short wait: this is the
+      // property the editor writes on every move of the head (paint, in
+      // makeProgressDraggable), which the synth's timer drives whether or not
+      // the score is on screen.
+      progress: getComputedStyle(
+        bar.querySelector(".abcjs-midi-progress-background")
+      ).getPropertyValue("--mdm-progress"),
+    };
+  });
+  assert.equal(away.scores, 0, "the score's widget is still rendered");
+  assert.equal(away.bars, 1, "the bar went with the widget");
+  assert.equal(away.inToolbar, true);
+  assert.equal(away.pushed, true, "the tune stopped when its score left the view");
+  assert.equal(away.onButton, true, "the play button cannot be pointed at");
+  await new Promise((r) => setTimeout(r, 700));
+  const later = await h.page.evaluate(() =>
+    getComputedStyle(
+      document.querySelector(".mdm-audio .abcjs-midi-progress-background")
+    ).getPropertyValue("--mdm-progress")
+  );
+  assert.notEqual(later, away.progress, "the tune stood still off screen");
+  assert.ok(parseFloat(later) > 0, "the head never left the top: " + later);
+  // And stop still reaches it from up there.
+  await h.page.evaluate(() =>
+    document.querySelector(".mdm-audio .mdm-audio-stop").click()
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(
+    await h.page.evaluate(() =>
+      document
+        .querySelector(".mdm-audio .abcjs-midi-start")
+        .classList.contains("abcjs-pushed")
+    ),
+    false,
+    "stop did not reach the tune from the toolbar"
+  );
+  // Back up, and the block takes its mark again.
+  await h.page.evaluate(() => {
+    window.__mdm.view.scrollDOM.scrollTop = 0;
+  });
+  await h.page.waitForFunction(
+    () => document.querySelectorAll("#app [data-mdm-audio]").length === 1,
+    { timeout: 15000 }
+  );
+  assert.deepEqual((await playerState(h.page)).labels, ["Hide player"]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The row is as wide as the pane, and it stays that way while the pane is
+// dragged: the track is a flex child that absorbs what is left, and the parts
+// that cannot shrink are given up in a stated order rather than pushing the
+// row past the edge. The pane widths below are read as the webview's own,
+// which is what a VS Code editor group is.
+test("the player row follows the width of the pane, and sheds its parts in order", { skip }, async () => {
+  const h = await open({});
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  for (const width of [1400, 1000, 800, 620, 480, 400, 360, 300, 260]) {
+    await h.page.setViewport({ width, height: 1000 });
+    await new Promise((r) => setTimeout(r, 250));
+    const seen = await h.page.evaluate(() => {
+      const bar = document.querySelector(".mdm-audio");
+      const toolbar = document.querySelector("#app .mdm-toolbar");
+      const track = bar.querySelector(".abcjs-midi-progress-background");
+      const hit = (el) => {
+        const r = el.getBoundingClientRect();
+        return el.contains(
+          document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+        );
+      };
+      const shown = (sel) => {
+        const el = bar.querySelector(sel);
+        return !!el && getComputedStyle(el).display !== "none";
+      };
+      return {
+        bar: bar.getBoundingClientRect().width,
+        toolbar: toolbar.getBoundingClientRect().width,
+        track: track.offsetWidth,
+        left: Math.round(bar.getBoundingClientRect().left),
+        right: Math.round(bar.getBoundingClientRect().right),
+        overflow: bar.scrollWidth - bar.clientWidth,
+        play: hit(bar.querySelector(".abcjs-midi-start")),
+        stop: hit(bar.querySelector(".mdm-audio-stop")),
+        loop: hit(bar.querySelector(".abcjs-midi-loop")),
+        slider: shown('.mdm-audio-vol input[type="range"]'),
+        clock: shown(".abcjs-midi-clock"),
+        volume: shown(".mdm-audio-vol"),
+      };
+    });
+    const at = " at a pane of " + width + "px";
+    assert.ok(
+      Math.abs(seen.bar - seen.toolbar) <= 1,
+      "the bar is " + seen.bar + " in a toolbar of " + seen.toolbar + at
+    );
+    // The row's own box, and not the page's scrollWidth: CodeMirror's content
+    // overhangs its scroller by a few pixels at narrow widths, which has
+    // nothing to do with the toolbar and would fail this on its behalf.
+    assert.equal(seen.left, 0, "the row does not start at the edge of the pane" + at);
+    assert.ok(seen.right <= width + 1, "the row runs past the pane, to " + seen.right + at);
+    assert.ok(seen.overflow <= 1, "the row overflows itself" + at);
+    assert.ok(seen.track >= 44, "the track is only " + seen.track + "px" + at);
+    assert.equal(seen.play && seen.stop && seen.loop, true, "a transport button cannot be pointed at" + at);
+    // What goes, and in what order: the volume slider first (the mute stays,
+    // since the level is a setting of the session and silence is not), then
+    // the clock, then the volume group whole. Play, stop, repeat and the
+    // track never go.
+    assert.equal(seen.slider, width > 380, "the volume slider is on the wrong side of its threshold" + at);
+    assert.equal(seen.clock, width > 320, "the clock is on the wrong side of its threshold" + at);
+    assert.equal(seen.volume, width > 260, "the volume group is on the wrong side of its threshold" + at);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The outline panel is a column inside the body, below the toolbar, so it
+// takes its width from the text and never from the row. Worth pinning: the
+// obvious wrong build of this feature puts the row in the body, where the
+// panel would push it about.
+test("the outline panel narrows the text, not the player row", { skip }, async () => {
+  const h = await open({
+    seed: { settings: { outline: "shown", outlineWidth: 260 } },
+  });
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  const seen = await h.page.evaluate(() => {
+    const bar = document.querySelector(".mdm-audio").getBoundingClientRect();
+    return {
+      open: document.getElementById("app").classList.contains("mdm-outline--open"),
+      panel: document.querySelector("#app .mdm-outline").getBoundingClientRect().width,
+      bar: bar.width,
+      toolbar: document.querySelector("#app .mdm-toolbar").getBoundingClientRect().width,
+      editor: document.querySelector("#app .mdm-editor").getBoundingClientRect().width,
+      // Nothing of the panel is under the left end of the row.
+      clear: !document
+        .elementFromPoint(bar.x + 4, bar.y + bar.height / 2)
+        .closest(".mdm-outline"),
+    };
+  });
+  assert.equal(seen.open, true, "the fixture did not open the outline");
+  assert.ok(seen.panel > 200, "the panel is only " + seen.panel + "px");
+  assert.ok(
+    Math.abs(seen.bar - seen.toolbar) <= 1,
+    "the outline took width from the bar: " + seen.bar + " of " + seen.toolbar
+  );
+  assert.ok(
+    seen.editor < seen.toolbar - 200,
+    "the panel did not narrow the text: " + seen.editor + " of " + seen.toolbar
+  );
+  assert.equal(seen.clear, true, "the panel sits over the player row");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The row is chrome, and chrome takes its room from the pane: the toolbar
+// grows by the height of the row and the text moves down with it, then comes
+// back up when the player closes. What must NOT move is the reader's place in
+// the document. The scroller was nudged by the row's height once, so that the
+// page did not move at all; that held the pixels still by spending the text
+// under them, and the row came down over the line and a half that had been at
+// the top of the pane. So the two readings here are opposite on purpose: the
+// scroll position is pinned to the pixel, and the score is required to have
+// moved down by exactly what the toolbar gained. Read on a document long
+// enough to have room to scroll.
+test("the row takes its room from the pane, and hides no text taking it", { skip }, async () => {
+  const h = await open({ text: FAR_SCORE_FIXTURE, scores: 1 });
+  await h.page.evaluate(() => {
+    window.__mdm.view.scrollDOM.scrollTop = 120;
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  const read = () =>
+    h.page.evaluate(() => {
+      const score = document.querySelector("#app .mdm-score");
+      return {
+        toolbar: document.querySelector("#app .mdm-toolbar").getBoundingClientRect().height,
+        top: score ? Math.round(score.getBoundingClientRect().top) : null,
+        scroll: Math.round(window.__mdm.view.scrollDOM.scrollTop),
+        rows: document.querySelectorAll("#app .mdm-toolbar .mdm-audio").length,
+      };
+    });
+  const idle = await read();
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  const open1 = await read();
+  assert.equal(open1.rows, 1);
+  const grew = open1.toolbar - idle.toolbar;
+  assert.ok(grew > 20, "the toolbar did not grow a row: " + idle.toolbar + " -> " + open1.toolbar);
+  // The reader's place in the document, which is the thing the row must not
+  // spend. A scroller nudged to hold the page still shows here as a jump of
+  // exactly `grew`.
+  assert.equal(
+    open1.scroll,
+    idle.scroll,
+    "opening the player scrolled the document: " + idle.scroll + " -> " + open1.scroll
+  );
+  // And the text really did move down, by the room the row took and no more:
+  // that is what says the row is above the text rather than over it.
+  assert.ok(
+    Math.abs(open1.top - idle.top - grew) <= 1,
+    "the text did not follow the toolbar: " +
+      idle.top +
+      " -> " +
+      open1.top +
+      " for a row of " +
+      grew
+  );
+  await clickToggle(h.page, 0);
+  await new Promise((r) => setTimeout(r, 300));
+  const shut = await read();
+  assert.equal(shut.rows, 0, "the row outlived the player");
+  assert.equal(
+    await h.page.evaluate(() => document.querySelectorAll(".mdm-audio").length),
+    0,
+    "the bar was hidden rather than taken away"
+  );
+  assert.equal(shut.toolbar, idle.toolbar, "the toolbar kept the room the row had");
+  assert.equal(
+    shut.scroll,
+    idle.scroll,
+    "closing the player scrolled the document: " + idle.scroll + " -> " + shut.scroll
+  );
+  assert.ok(
+    Math.abs(shut.top - idle.top) <= 1,
+    "the text did not come back up: " + idle.top + " -> " + shut.top
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Using the player must not put the document away, and must not stop it from
+// being put away either. The bar left the editor's own DOM when it moved into
+// the toolbar, so both halves of that are held up by rules written for it by
+// name: the .mdm-audio exemption in dismissFromOutside, the bar's clause in
+// somebodyInside, and a pair of focus listeners on the bar, without which the
+// focus LEAVING it is seen by nobody and the document stays somebody's for
+// good (measured before they were added: with a player open, a click on the
+// bare strip of the toolbar left the heading marks showing).
+test("the player keeps the document somebody's, and lets it be put away", { skip }, async () => {
+  const h = await open({});
+  // A caret in a heading, whose marks are shown while somebody is in the
+  // document and hidden when nobody is.
+  const at = await posOf(h.page, "## ", 3, 0);
+  await setSelection(h.page, at);
+  await new Promise((r) => setTimeout(r, 250));
+  const heading = () =>
+    h.page.evaluate(() => {
+      const line = Array.from(
+        document.querySelectorAll("#app .cm-content .cm-line")
+      ).find((l) => /^##\s|^From /.test(l.textContent));
+      return {
+        marks: line ? line.textContent.slice(0, 2) === "##" : null,
+        focused: window.__mdm.view.hasFocus,
+        onBar: !!(document.activeElement.closest &&
+          document.activeElement.closest(".mdm-audio")),
+      };
+    });
+  const before = await heading();
+  assert.equal(before.marks, true, "the fixture must open its heading marks");
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  const held = await heading();
+  assert.equal(held.onBar, true, "the headphones did not hand the bar the focus");
+  assert.equal(held.focused, false, "the text kept the focus");
+  assert.equal(
+    held.marks,
+    true,
+    "opening the player put the document away: its marks went with it"
+  );
+  // The bare strip of the toolbar, past the last button: a press out there is
+  // somebody leaving, player or no player.
+  const bare = await h.page.evaluate(() => {
+    const items = document.querySelectorAll("#app .mdm-toolbar__item");
+    const last = items[items.length - 1].getBoundingClientRect();
+    return { x: last.right + 40, y: last.top + last.height / 2 };
+  });
+  await h.page.mouse.click(bare.x, bare.y);
+  await new Promise((r) => setTimeout(r, 400));
+  const away = await heading();
+  assert.equal(away.onBar, false, "the bar kept the focus a click took away");
+  assert.equal(
+    away.marks,
+    false,
+    "the document could not be put away while a player was open"
+  );
+  // The player is still there, and still the player: putting the document
+  // away is not closing it.
+  assert.equal(
+    await h.page.evaluate(
+      () => document.querySelectorAll("#app .mdm-toolbar .mdm-audio").length
+    ),
+    1,
+    "the click closed the player"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // The headphones name what the click leads to, "Show player" and "Hide
 // player", so the label flips under a pointer that has not moved. The tooltip
 // is put away by the click and comes back when the pointer leaves and
@@ -395,29 +1101,46 @@ test("the toggle opens the player without expanding the block, and closes it", {
 // says nothing the lit disc of the block does not say already. Only a pointer
 // click has anything to put away, which is why the rest of this file, which
 // clicks the toggle from script, never meets this.
+//
+// Read on the SECOND score with a player already open on the first, and that
+// is the whole reason the setup is not the obvious one: the row the player
+// takes in the toolbar comes out of the pane, so the FIRST player opened
+// moves every block down by the height of the row and the toggle leaves the
+// pointer, which fires the mouseleave that brings the tooltip back and makes
+// the case unreadable. Switching an open player from one score to another
+// swaps one row for another in the same task, so the toolbar keeps its height
+// and nothing moves: a pointer resting on the toggle is still resting on it
+// after the click, which is the state this test is about.
 test("a click on the headphones puts its tooltip away until the pointer leaves", { skip }, async () => {
   const h = await open({});
-  const SEL = "#app .mdm-score .mdm-audio-toggle";
+  await clickToggle(h.page, 0); // from script: no pointer, nothing to put away
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 15000 }
+  );
+  await new Promise((r) => setTimeout(r, 200));
   // The chrome of a score is drawn at opacity 0 and shown on hover.
-  const spot = await h.page.evaluate((sel) => {
-    const score = document.querySelector("#app .mdm-score");
+  const spot = await h.page.evaluate(() => {
+    const score = document.querySelectorAll("#app .mdm-score")[1];
     score.scrollIntoView({ block: "center" });
     const s = score.getBoundingClientRect();
-    const r = document.querySelector(sel).getBoundingClientRect();
+    const r = score.querySelector(".mdm-audio-toggle").getBoundingClientRect();
     return {
       block: { x: s.x + s.width / 2, y: s.y + Math.min(30, s.height / 2) },
       button: { x: r.x + r.width / 2, y: r.y + r.height / 2 },
     };
-  }, SEL);
+  });
   const read = () =>
-    h.page.evaluate((sel) => {
-      const btn = document.querySelector(sel);
+    h.page.evaluate(() => {
+      const btn = document
+        .querySelectorAll("#app .mdm-score")[1]
+        .querySelector(".mdm-audio-toggle");
       return {
         label: btn.getAttribute("aria-label"),
         drawn: getComputedStyle(btn, "::after").display !== "none",
         hovered: btn.matches(":hover"),
       };
-    }, SEL);
+    });
   await h.page.mouse.move(spot.block.x, spot.block.y);
   await new Promise((r) => setTimeout(r, 300));
   await h.page.mouse.move(spot.button.x, spot.button.y);
@@ -451,12 +1174,14 @@ test("a click on the headphones puts its tooltip away until the pointer leaves",
   // quiet for good.
   await h.page.mouse.move(5, 5);
   await new Promise((r) => setTimeout(r, 200));
-  await h.page.evaluate((sel) => document.querySelector(sel).click(), SEL);
+  await clickToggle(h.page, 1);
   await new Promise((r) => setTimeout(r, 200));
   assert.equal(
-    await h.page.evaluate(
-      (sel) => document.querySelector(sel).classList.contains("mdm-tip--off"),
-      SEL
+    await h.page.evaluate(() =>
+      document
+        .querySelectorAll("#app .mdm-score")[1]
+        .querySelector(".mdm-audio-toggle")
+        .classList.contains("mdm-tip--off")
     ),
     false,
     "a click from script left the tooltip put away with no pointer to bring it back"
@@ -702,10 +1427,8 @@ test("one player at a time: opening a second score closes the first", { skip }, 
   await h.page.waitForFunction(
     () =>
       document.querySelectorAll(".mdm-audio").length === 1 &&
-      document.querySelector(".mdm-audio .abcjs-inline-audio") &&
-      document
-        .querySelectorAll("#app [data-mdm-audio]")[0]
-        .querySelector(".mdm-audio"),
+      document.querySelector("#app .mdm-toolbar .mdm-audio .abcjs-inline-audio") &&
+      document.querySelectorAll("#app [data-mdm-audio]").length === 1,
     { timeout: 15000 }
   );
   const state = await playerState(h.page);
@@ -733,17 +1456,28 @@ test("the player rides out edits in its block and full external updates", { skip
   assert.ok(fence > 0 && end > fence, "the second score was not found");
   await setSelection(h.page, end);
   await h.page.keyboard.type(" A");
+  // Walked down from the lit block rather than up from the bar: the bar is in
+  // the toolbar and belongs to no score, so the mark on the block is what
+  // says which one the re-armed player came back on.
   await h.page.waitForFunction(
     () => {
-      const bar = document.querySelector(".mdm-audio");
-      const block = bar && bar.closest(".mdm-score");
+      const block = document.querySelector("#app [data-mdm-audio]");
+      const bar = document.querySelector("#app .mdm-toolbar .mdm-audio");
       return (
         block &&
+        bar &&
         bar.querySelector(".abcjs-inline-audio") &&
         /A\n?$/.test(block.getAttribute("data-mdm-source"))
       );
     },
     { timeout: 15000 }
+  );
+  assert.equal(
+    await h.page.evaluate(
+      () => document.querySelectorAll("#app .mdm-toolbar .mdm-audio").length
+    ),
+    1,
+    "the re-armed player grew a second row"
   );
   const pushed = await h.page.evaluate(() =>
     document
@@ -1161,10 +1895,13 @@ test("a rest is lit while the cursor crosses it, after a seek too", { skip }, as
 });
 
 // Opens the player on a score whose block is OPEN for editing (a click on the
-// drawing puts the caret in the ABC source, which shows above the engraving),
-// and leaves the bar in view: with the source showing above it, the bar can
-// sit below the fold, and a click aimed there lands outside the editor
-// instead (which blurs it, and looks exactly like the bug this fixes).
+// drawing puts the caret in the ABC source, which shows above the engraving).
+// The bar itself needs no scrolling to any more, wherever the block is: it
+// opens in the toolbar, which does not scroll. What the tests below are for
+// is the other half, that a press on the bar is not a press "outside the
+// text": the source has to stay open under it (main.js, the .mdm-audio
+// exemption in dismissFromOutside and the bar's own clause in
+// somebodyInside).
 async function openPlayerOnExpandedScore(page, index) {
   await page.evaluate((i) => {
     document
@@ -1188,7 +1925,6 @@ async function openPlayerOnExpandedScore(page, index) {
   );
   // Aim at the play button, and make sure the point really is on it.
   return page.evaluate(() => {
-    document.querySelector(".mdm-audio").scrollIntoView({ block: "center" });
     const r = document
       .querySelector(".mdm-audio .abcjs-midi-start")
       .getBoundingClientRect();
@@ -1248,8 +1984,12 @@ test("the player's buttons carry tooltips that name the destination", { skip }, 
     const loop = document.querySelector(".mdm-audio .abcjs-midi-loop");
     const widget = document.querySelector(".mdm-audio .abcjs-inline-audio");
     const buttons = Array.from(widget.querySelectorAll(".abcjs-btn"));
+    // South, the way the toolbar's own buttons are tipped: the bar is a row
+    // of that toolbar and north would draw over the buttons above it.
     const tipped = (el) =>
-      el.classList.contains("mdm-tip") && el.classList.contains("mdm-tip--n");
+      el.classList.contains("mdm-tip") &&
+      el.classList.contains("mdm-tip--s") &&
+      !el.classList.contains("mdm-tip--n");
     return {
       startLabel: start.getAttribute("aria-label"),
       loopLabel: loop.getAttribute("aria-label"),
@@ -1257,8 +1997,15 @@ test("the player's buttons carry tooltips that name the destination", { skip }, 
       // this editor is what labels them; carrying both would show two.
       startTitle: start.getAttribute("title"),
       loopTitle: loop.getAttribute("title"),
-      // The editor's own tooltip (.mdm-tip, drawn from aria-label), north.
-      tooltipped: tipped(start) && tipped(loop),
+      // The editor's own tooltip (.mdm-tip, drawn from aria-label), south.
+      // Every labelled control of the bar, the two abcjs ships and the two
+      // this editor adds: the stop button and the mute carry the class
+      // written by hand, and were the two a flip could miss.
+      tooltipped:
+        tipped(start) &&
+        tipped(loop) &&
+        tipped(document.querySelector(".mdm-audio .mdm-audio-stop")) &&
+        tipped(document.querySelector(".mdm-audio .mdm-audio-mute")),
       playFirst: buttons.indexOf(start) < buttons.indexOf(loop),
     };
   });
@@ -1268,6 +2015,27 @@ test("the player's buttons carry tooltips that name the destination", { skip }, 
   assert.equal(idle.loopTitle, null);
   assert.equal(idle.tooltipped, true);
   assert.equal(idle.playFirst, true, "play should lead the bar");
+  // And they give way to an open drop-down, as the toolbar's own do: a panel
+  // hangs over the row, and a tooltip from a control under it would be drawn
+  // on top of the panel (the tip is z-index 10 against the menu's 5).
+  await h.page.click('#app button[data-type="mdm-theme"]');
+  await new Promise((r) => setTimeout(r, 200));
+  const withMenu = await h.page.evaluate(() => ({
+    menus: document.querySelectorAll("#app .mdm-toolbar__item--open").length,
+    play: getComputedStyle(
+      document.querySelector(".mdm-audio .abcjs-midi-start"),
+      "::after"
+    ).display,
+    volume: getComputedStyle(
+      document.querySelector(".mdm-audio .mdm-audio-mute"),
+      "::after"
+    ).display,
+  }));
+  assert.equal(withMenu.menus, 1, "the theme menu did not open");
+  assert.equal(withMenu.play, "none", "the play tooltip is drawn over the open panel");
+  assert.equal(withMenu.volume, "none", "the mute tooltip is drawn over the open panel");
+  await h.page.evaluate(() => document.body.click());
+  await new Promise((r) => setTimeout(r, 200));
 
   // Pressing repeat lights it: abcjs declares `background: none !important` on
   // its buttons, so the state used to be drawn by a rule that never painted
@@ -1304,7 +2072,6 @@ test("the player chrome takes no syntax colour, so no theme can turn it red", { 
     { timeout: 15000 }
   );
   const spot = await h.page.evaluate(() => {
-    document.querySelector(".mdm-audio").scrollIntoView({ block: "center" });
     const r = document
       .querySelector(".mdm-audio .abcjs-midi-start")
       .getBoundingClientRect();
@@ -1948,10 +2715,14 @@ test("stop halts the tune and takes it back to the top", { skip }, async () => {
         ? "stop"
         : b.classList.contains("abcjs-midi-loop")
         ? "repeat"
+        : b.classList.contains("mdm-audio-close")
+        ? "close"
         : "?"
     );
   });
-  assert.deepEqual(order, ["play", "stop", "repeat"]);
+  // The transport in the order a player is read in, and then the headphones
+  // that put the player away, which are not part of it.
+  assert.deepEqual(order, ["play", "stop", "repeat", "close"]);
 
   await pressPlay(h.page);
   await h.page.waitForFunction(
@@ -2030,7 +2801,6 @@ test("setting the volume draws no focus box", { skip }, async () => {
     { timeout: 15000 }
   );
   const spot = await h.page.evaluate(() => {
-    document.querySelector(".mdm-audio").scrollIntoView({ block: "center" });
     const r = document
       .querySelector(".mdm-audio .mdm-audio-vol input")
       .getBoundingClientRect();
@@ -2057,7 +2827,6 @@ test("the volume can be set without closing the score that is open", { skip }, a
   const h = await open({});
   await openPlayerOnExpandedScore(h.page, 2);
   const aim = await h.page.evaluate(() => {
-    document.querySelector(".mdm-audio").scrollIntoView({ block: "center" });
     const el = document.querySelector(".mdm-audio .mdm-audio-vol input");
     const r = el.getBoundingClientRect();
     const x = r.x + r.width * 0.4;
@@ -2233,7 +3002,6 @@ test("a button of the bar answers the pointer, and deeper while it is held", { s
     { timeout: 15000 }
   );
   const aim = await h.page.evaluate(() => {
-    document.querySelector(".mdm-audio").scrollIntoView({ block: "center" });
     const el = document.querySelector(".mdm-audio .abcjs-midi-start");
     const r = el.getBoundingClientRect();
     const p = { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
@@ -2449,12 +3217,18 @@ test("the two little buttons of a score are sized to be read", { skip }, async (
 async function progressAim(page, fraction) {
   return page.evaluate((f) => {
     const bar = document.querySelector(".mdm-audio");
-    bar.scrollIntoView({ block: "center" });
     const track = bar.querySelector(".abcjs-midi-progress-background");
     const box = track.getBoundingClientRect();
     const x = box.x + track.offsetWidth * f;
     const y = box.y + box.height / 2;
-    return { x: x, y: y, onTrack: track.contains(document.elementFromPoint(x, y)) };
+    return {
+      x: x,
+      y: y,
+      onTrack: track.contains(document.elementFromPoint(x, y)),
+      // The bar is in the toolbar, so it is on screen with nothing scrolled
+      // to: this is what the scrollIntoView that used to stand here was for.
+      inView: box.top >= 0 && box.bottom <= window.innerHeight,
+    };
   }, fraction);
 }
 
@@ -2482,6 +3256,7 @@ test("the progress head follows the pointer, and the tune lands where it is drop
   const grab = await progressAim(h.page, 0.05);
   const drop = await progressAim(h.page, 0.75);
   assert.equal(grab.onTrack, true, "the grab point is not on the track");
+  assert.equal(grab.inView, true, "the track is off screen without a scroll");
   // The track draws a 4px hairline and answers to a band around it, the way
   // the volume slider is an 11px control over a 3px track.
   const reach = await h.page.evaluate(() => {
@@ -2665,7 +3440,6 @@ test("the tune can be scrubbed without closing the score that is open", { skip }
   const h = await open({});
   await openPlayerOnExpandedScore(h.page, 2);
   const aim = await h.page.evaluate(() => {
-    document.querySelector(".mdm-audio").scrollIntoView({ block: "center" });
     const track = document.querySelector(
       ".mdm-audio .abcjs-midi-progress-background"
     );

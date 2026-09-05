@@ -361,7 +361,13 @@ body .code-copy-button:hover {
    Everything below redraws it in the terms of the editor. Two colours carry
    the whole thing, both from the theme in use: the text colour, mixed down
    for the quiet parts, and one accent, the same brass the notes light up in
-   while they sound. */
+   while they sound.
+
+   The port is of the CONTROLS, not of where they sit. A page has no toolbar,
+   so the bar stays under the score it plays, as a card-coloured pill at the
+   score's width, with its tooltips drawn north; the editor moved its own bar
+   into the toolbar and drew it flush, and that half of media/style.css is
+   deliberately not mirrored here. */
 body .mdm-audio {
   /* The quiet bar is drawn in the ink of the document: the hairline of a
      track, the glyphs, the clock. The brass is the language of use, on a
@@ -370,7 +376,9 @@ body .mdm-audio {
      glyph gone to the deep brass on that disc alone. What is set rather than
      held, the played half of the progress and the volume, wears -hot, the
      deep form of the brass, one colour for fill and head alike. The editor's
-     bar, rule for rule (media/style.css). */
+     bar control for control (media/style.css); the editor keys its own to
+     --mdm-ink now that the bar lives in its toolbar, while a page has only
+     the one ink and keeps the code palette's. */
   --mdm-audio-track: color-mix(in srgb, var(--mdm-syn-base) 18%, transparent);
   --mdm-audio-disc: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
   --mdm-audio-disc-on: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);

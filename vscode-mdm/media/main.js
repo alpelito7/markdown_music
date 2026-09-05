@@ -617,7 +617,8 @@
   // ---------- Audio ----------
 
   // Each score gets a small button beside the copy button that opens a player
-  // bar under the score; play sounds the tune. The synthesizer is the abcjs
+  // bar in the toolbar, as a row of its own (see openPlayer for why it is not
+  // under the score); play sounds the tune. The synthesizer is the abcjs
   // 6.7.0 vendored in media/vendor/abcjs (the same engine the Quarto HTML
   // uses, and the one that engraves the scores on screen). The soundfont is a
   // piano vendored in media/vendor/soundfont, so playback needs no network at
@@ -632,11 +633,15 @@
       : Promise.reject(new Error("abcjs unreachable"));
   }
 
-  // The one open player: { index, bar, controller, source }. One at a time on
-  // purpose, two tunes sounding over each other serve nobody; opening a second
-  // score closes the first. `index` is the block's position among the score
-  // blocks, the identity that survives CodeMirror rebuilding the widget when
-  // the source is edited.
+  // The one open player: { pos, block, bar, controller, source, repaint }. One
+  // at a time on purpose, two tunes sounding over each other serve nobody;
+  // opening a second score closes the first. `pos` is the position in the
+  // document its block ends at, the identity that survives CodeMirror
+  // rebuilding the widget when the source is edited and the only one there is
+  // now that the bar has left the block (playerBlock); `block` is the widget
+  // last found at that position, kept so the frame loop need not look it up
+  // again; `repaint` puts the progress head back where the width it was drawn
+  // at has moved (makeProgressDraggable).
   let player = null;
 
   // The on-screen engraving of each score, keyed by its <code>. The player
@@ -879,7 +884,7 @@
     // the session, like the level, so it holds across the players opened
     // after it.
     const mute = document.createElement("span");
-    mute.className = "mdm-audio-mute mdm-tip mdm-tip--n";
+    mute.className = "mdm-audio-mute mdm-tip mdm-tip--s";
     mute.setAttribute("role", "button");
     const slider = document.createElement("input");
     slider.type = "range";
@@ -1023,6 +1028,21 @@
       return buffer && buffer.duration ? buffer.duration * 1000 : 0;
     }
 
+    // The head is placed by abcjs in pixels, off the track's clientWidth at
+    // the moment it is drawn (checked in the bundle: `left = clientWidth *
+    // percent`), while the fill beside it is a percentage of the same track.
+    // A row as wide as the pane is dragged narrower and wider all the time,
+    // and the two would come apart: the fill follows, the head stands where
+    // the old width put it. While the tune runs the timer redraws it on the
+    // next reading; paused, stopped or never played, nothing does, so the
+    // width watcher (watchPlayerWidth) asks for it here, off the number the
+    // head was last drawn from.
+    if (player && player.bar === bar) {
+      player.repaint = function () {
+        if (!dragging) paint(head, totalMs());
+      };
+    }
+
     // offsetWidth, not the width of the box: the head is placed at
     // clientWidth * percent, and on a track with neither border nor padding
     // that is the same integer, so the head lands under the pointer to the
@@ -1085,6 +1105,13 @@
           // the point that was asked for rather than on the nearest one the
           // timer happens to report.
           controller.setProgress(percent, totalMs());
+          // Where the music now is, brought on screen. Here rather than in
+          // seek(), because until this call the clock still stands where the
+          // gesture started and the cursor would be measured at the old
+          // position. This is what covers the gestures that never send a
+          // pointermove: the arrow keys, Home and End, and a plain click on
+          // the track.
+          revealPlayhead();
           return Promise.resolve();
         }, null)
         .then(done, done);
@@ -1137,6 +1164,7 @@
       if (!dragging) return;
       cursorDrag = pointerPercent(e.clientX);
       paint(cursorDrag, totalMs());
+      revealPlayhead(); // the score follows the head as it is dragged
     });
     track.addEventListener("pointerup", function (e) {
       if (!dragging) return;
@@ -1188,8 +1216,11 @@
   //    editor uses (the copy button included), drawn from aria-label
   //    (.mdm-tip in style.css); the title is dropped so that nothing shows
   //    it twice.
-  //    Drawn north: the bar sits at the bottom of the block, and a tooltip
-  //    below it would fall outside the score.
+  //    Drawn south, the way the toolbar's own buttons draw theirs: the bar is
+  //    a row of that toolbar now, with the buttons directly above it, so a
+  //    tooltip drawn north would be laid over them. Below there is nothing
+  //    but the text, which a tooltip is allowed to cover (the toolbar is a
+  //    stacking context of its own above the editor).
   //  - Labels that follow the state. As everywhere in this editor, they name
   //    what the click leads to, not the state in force.
   //
@@ -1211,7 +1242,7 @@
   function stopButton(bar) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "abcjs-btn mdm-audio-stop mdm-tip mdm-tip--n";
+    button.className = "abcjs-btn mdm-audio-stop mdm-tip mdm-tip--s";
     button.setAttribute("aria-label", "Stop");
     button.innerHTML = STOP_ICON;
     button.addEventListener("click", function () {
@@ -1239,6 +1270,33 @@
     return button;
   }
 
+  // The player is shut from the bar as well as from the score. The headphones
+  // in the corner of a block are the only other way, and a block can be a
+  // page long or scrolled clean off the screen, so closing what you are
+  // listening to meant going to find the score again. This is the same
+  // drawing, lit the way that one is lit while its player is open, and it
+  // does the same thing.
+  //
+  // It is the one button of the bar that is lit at rest, and it has to be:
+  // the lit disc is what says "this is on", and a player with a bar on
+  // screen always is. That costs it the two steps of the brass ladder the
+  // other buttons use (a wash under the pointer, the state weight for what
+  // is held), since it already stands on the second, so the stylesheet gives
+  // it a third and deeper step for the hover alone.
+  //
+  // No state to keep and no label to flip: there is one thing it can do.
+  function closeButton() {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "abcjs-btn mdm-audio-close mdm-tip mdm-tip--s";
+    button.setAttribute("aria-label", "Hide player");
+    button.innerHTML = HEADPHONES_BAR_ICON;
+    button.addEventListener("click", function () {
+      closePlayer();
+    });
+    return button;
+  }
+
   function decorateWidget(bar, controller) {
     const widget = bar.querySelector(".abcjs-inline-audio");
     if (!widget) return;
@@ -1246,9 +1304,14 @@
     const loop = widget.querySelector(".abcjs-midi-loop");
     if (start && loop) widget.insertBefore(start, loop);
     if (start) start.insertAdjacentElement("afterend", stopButton(bar));
+    // After repeat, which is the end of the transport: the buttons that work
+    // the tune first, then the one that puts the player away.
+    const close = closeButton();
+    if (loop) loop.insertAdjacentElement("afterend", close);
+    else widget.insertBefore(close, widget.firstChild);
     [start, loop].forEach(function (button) {
       if (!button) return;
-      button.classList.add("mdm-tip", "mdm-tip--n");
+      button.classList.add("mdm-tip", "mdm-tip--s");
       button.removeAttribute("title");
     });
     widget.appendChild(volumeControl());
@@ -1483,6 +1546,137 @@
     return !!(engraver && engraver.selected && engraver.selected.length);
   }
 
+  // ---- Bringing the pane to the playhead ----
+  //
+  // A score can be a page long, and the music is only worth watching if it is
+  // on screen. Two things take the pane to it, and both end in showPlayhead.
+  //
+  // A seek is one. Scrubbing the progress bar is a way of moving through the
+  // SCORE: dropping the head halfway through duet.mdm puts the music on a
+  // staff system that may be nowhere near the pane, and the reader is left
+  // listening to something they cannot see. So a seek scrolls the pane to the
+  // system the head has landed on, and follows the head live while it is
+  // dragged.
+  //
+  // Following a drag live is safe here in a way it would not have been under
+  // the score: the bar is a row of the toolbar, outside the scroller, so the
+  // page can move as much as it likes without the track sliding out from
+  // under the pointer holding it.
+  //
+  // A tune sounding is the other (followMusic, called from the frame loop).
+  // The page turns the way a page turner does, at the crossing and not
+  // before: while the music walks along one staff system nothing moves, so a
+  // score that fits the pane is never scrolled at all and the reader has the
+  // page to themselves for the length of a line. Only the crossing turns it:
+  // the tune's own first system is taken as read, so a play press moves
+  // nothing and a reader who scrolls away while the sound primes keeps the
+  // page they went to. And a score scrolled clean out of CodeMirror's
+  // viewport leaves no engraving to read a system off, which is a reader who
+  // has left the score behind rather than one who has it under the fold: the
+  // music goes on sounding, and the page is picked up again when the score
+  // comes back within the pane's reach.
+  const REVEAL_MARGIN = 24; // how close to an edge counts as "not on screen"
+  let revealPending = false;
+
+  function revealPlayhead() {
+    if (revealPending) return; // one move per frame, however fast the drag
+    revealPending = true;
+    requestAnimationFrame(function () {
+      revealPending = false;
+      showPlayhead(0);
+    });
+  }
+
+  // `tries` bounds the wait for something to measure: the cursor is drawn by
+  // the frame loop, and a widget CodeMirror has thrown away comes back a
+  // frame after it is asked for.
+  function showPlayhead(tries) {
+    if (!player || !view) return;
+    const block = playerBlock();
+    if (!block) {
+      // Scrolled far enough out that CodeMirror keeps no widget: ask it for
+      // the block's position, and come back for the system on the next frame,
+      // when the engraving exists again.
+      if (tries > 1) return;
+      try {
+        view.dispatch({
+          effects: CM.EditorView.scrollIntoView(player.pos, { y: "center" }),
+        });
+      } catch (e) {
+        return; // a position the document no longer has
+      }
+      requestAnimationFrame(function () {
+        showPlayhead(tries + 1);
+      });
+      return;
+    }
+    const line = block.querySelector("code.language-abc svg .mdm-play-cursor");
+    if (!line) {
+      // The cursor is drawn from the frame loop, which may not have run since
+      // the seek landed. One frame is enough; after that there is nothing
+      // being played to show (a stopped tune draws no cursor) and the pane is
+      // left where the reader put it.
+      if (tries > 1) return;
+      requestAnimationFrame(function () {
+        showPlayhead(tries + 1);
+      });
+      return;
+    }
+    const box = line.getBoundingClientRect();
+    const pane = view.scrollDOM.getBoundingClientRect();
+    // Already on screen with room to spare: the page is left alone. This is
+    // what keeps a score that fits the pane from being scrolled at all, and a
+    // scrub within one system from sliding the page under every move.
+    if (box.top >= pane.top + REVEAL_MARGIN && box.bottom <= pane.bottom - REVEAL_MARGIN) {
+      return;
+    }
+    view.scrollDOM.scrollTop +=
+      (box.top + box.bottom) / 2 - (pane.top + pane.bottom) / 2;
+  }
+
+  // ---- Following a sounding tune ----
+  //
+  // The staff system the music was last seen on, as the top of its staff
+  // group in the units of the engraving the cursor is drawn on (cursorPlace
+  // reads it off the event, and every event of a system carries the same
+  // pair), so the two staves of a duet are one system and one crossing. Null
+  // for a tune that is not standing anywhere the pane can see.
+  let followedSystem = null;
+
+  // Called every frame with where the cursor stands, or with null when there
+  // is no engraving on screen to read a place off.
+  function followMusic(place) {
+    // A hand on the progress bar is a seek, and a seek reveals itself from
+    // the drag handlers; what is left to do here is remember the system the
+    // hand is over, so that letting go does not read as a crossing.
+    if (cursorDrag !== null || !isSounding(player.bar)) {
+      // Paused, stopped, or held: the reader has the page.
+      followedSystem = place ? place.top : null;
+      return;
+    }
+    // No engraving to read a system off: the tune is still priming, or the
+    // reader has taken the page far enough away that CodeMirror keeps no
+    // widget for the block. Neither is followed. The first is a wait of a
+    // frame or two; the second is a reader who has left the score behind, and
+    // hauling the page back to a block they have scrolled a page past is the
+    // one thing this must not do. The tune goes on sounding either way,
+    // reachable from the row in the toolbar, and the music is picked up again
+    // when the score comes back within the pane's reach.
+    if (!place) return;
+    if (followedSystem === null) {
+      // The system the music is first seen standing on. Taken as read and
+      // never revealed: a press of play is a gesture, and a gesture is
+      // answered where it is made, not a second later when the tune has
+      // finished priming, by which time the reader may have taken the page
+      // somewhere else. What this follows is the music moving.
+      followedSystem = place.top;
+      return;
+    }
+    if (place.top === followedSystem) return;
+    followedSystem = place.top;
+    revealPlayhead();
+  }
+
   let cursorLoop = 0; // the rAF handle while a player is open
 
   function cursorFrame() {
@@ -1491,7 +1685,13 @@
     const block = playerBlock();
     const code = block && block.querySelector("code.language-abc");
     const svg = code && code.querySelector("svg");
-    if (!svg) return; // scrolled out: nothing to draw on
+    if (!svg) {
+      // Scrolled out: nothing to draw the line on, and no system to read a
+      // place from. The follow still hears about it, so that a stop made from
+      // up here is not carried over into the next tune as a crossing.
+      followMusic(null);
+      return;
+    }
     const line = svg.querySelector(".mdm-play-cursor");
     const timer = player.controller && player.controller.timer;
     const total = (timer && timer.lastMoment) || 0;
@@ -1515,6 +1715,9 @@
     const timing = visual && cursorTimings(visual);
     if (!timing) {
       if (line && line.parentNode) line.parentNode.removeChild(line);
+      // No cursor to show: a stopped tune, or one still priming, which is
+      // where a press of play lands before the first note has a place.
+      followMusic(null);
       return;
     }
     const at =
@@ -1522,6 +1725,7 @@
         ? cursorDrag * timing.total
         : (ms * timing.total) / total;
     const place = cursorPlace(timing, at);
+    followMusic(place);
     const el = line || cursorEl(svg);
     el.setAttribute("x1", place.x);
     el.setAttribute("x2", place.x);
@@ -1548,6 +1752,7 @@
     if (cursorLoop) cancelAnimationFrame(cursorLoop);
     cursorLoop = 0;
     cursorDrag = null; // a drag cannot outlive the player it was made in
+    followedSystem = null; // nor can the system the music was last seen on
     document.querySelectorAll("#app .mdm-play-cursor").forEach(function (el) {
       if (el.parentNode) el.parentNode.removeChild(el);
     });
@@ -1573,22 +1778,58 @@
     return view ? view.posAtDOM(block) : -1;
   }
 
-  // The block the player is open on. While its bar is in the document the bar
-  // itself says which block; otherwise the block is the widget at the
+  // The block the player is open on. The bar sits in the toolbar and says
+  // nothing about which score is sounding, so the block is the widget at the
   // position the player remembers, kept mapped through every edit (see the
-  // update listener), for the moment just after CodeMirror replaced the
-  // widget or brought it back into the viewport.
+  // update listener). Null while the block is out of CodeMirror's viewport,
+  // where there is no widget at all: the tune plays on and nothing is drawn
+  // on a score that is not on screen.
+  //
+  // The block found is kept, because this is asked on the hot path: the
+  // cursor loop asks once a frame and the ink asks on every note, and each
+  // miss is a query over every score in the document plus a position
+  // resolution per score. What is kept is trusted only while the element is
+  // still in the document at the position it was found at, which is what
+  // CodeMirror rebuilding the widget breaks. A miss is not cached: with the
+  // score out of the viewport there is nothing to keep, so the scan is done
+  // again every frame. That is a query over the scores CodeMirror has
+  // rendered, which is at most the handful on screen, and caching the
+  // absence would mean deciding when it stops being true.
   function playerBlock() {
     if (!player) return null;
-    if (player.bar && document.contains(player.bar)) {
-      return player.bar.closest(".mdm-score");
+    const held = player.block;
+    if (held && document.contains(held) && blockPos(held) === player.pos) {
+      return held;
     }
     const blocks = scoreBlocks();
     for (let i = 0; i < blocks.length; i++) {
-      if (blockPos(blocks[i]) === player.pos) return blocks[i];
+      if (blockPos(blocks[i]) === player.pos) {
+        player.block = blocks[i];
+        return blocks[i];
+      }
     }
+    player.block = null;
     return null;
   }
+
+  // ---- The room the bar takes in the toolbar ----
+  //
+  // The bar is a row of the toolbar, and the toolbar is a flex item above the
+  // editor: growing a row takes its height off the top of the pane, and the
+  // text moves down with it. That is what chrome does, and it is left to
+  // happen. It was held still once, by nudging the scroller by whatever the
+  // toolbar had gained, so that the score whose headphones were just pressed
+  // did not slide out from under the pointer. What that bought in stillness
+  // it paid for in text: the row does not conjure its 34 pixels, and holding
+  // the page put them on the reader's account, so the row came down over the
+  // line and a half that had been at the top of the pane and the paragraph
+  // there was left cut in half under it. Measured on example.mdm at a pane
+  // 640 tall, scrolled to 120: opening the player moved the scroller to 155
+  // and the top line went from `lang: en` to `  html:`, two lines the reader
+  // had been looking at gone behind the bar. Letting the text move keeps
+  // every one of them: the pane shows the same document from the same
+  // character on, 34 pixels lower and 34 pixels shorter, and closing the
+  // player hands them back.
 
   function closePlayer() {
     if (!player) return;
@@ -1625,6 +1866,17 @@
     restAudioWhenIdle();
   }
 
+  // The bar opens in the toolbar, as a row of its own under the buttons, and
+  // not under the score it plays. A score can be a page long (the duet is),
+  // and a bar at the foot of it meant scrolling to the bottom to press play
+  // and back up to read what was sounding. Up there it is in view whatever
+  // the reader is looking at, it is as wide as the pane, so the progress is
+  // worth scrubbing, and it takes the width it is given rather than the width
+  // of whichever score happens to be playing.
+  //
+  // What is left behind on the block is the only thing that says which score
+  // is sounding: data-mdm-audio, which lights the disc under its headphones
+  // (style.css) and keeps the chrome showing without a hover.
   function openPlayer(block) {
     closePlayer();
     const code = block.querySelector("code.language-abc");
@@ -1634,51 +1886,76 @@
     ensureAudioGraph();
     const bar = document.createElement("div");
     bar.className = "mdm-audio";
-    bar.setAttribute("contenteditable", "false");
     // Focusable, though never in the tab order: the headphones hand it the
     // focus as they open it (handleChromeClick), and holding the focus is
     // what puts Space on play/pause (playerTakesSpace) without ever taking
     // the key from the document, where a space is a space.
     bar.setAttribute("tabindex", "-1");
-    // The player's events are its own: the widget tells CodeMirror to ignore
-    // what happens in the bar (ScoreWidget.ignoreEvent), and stopping them
-    // here keeps the document's own listeners (the chrome click handler, the
-    // toolbar's menu closer) out of it as well. Bubble phase, so the widget's
-    // own listeners, which sit on the buttons and on the progress bar
-    // themselves, have all run by then.
+    // Five controls that used to say what they belonged to by sitting under a
+    // score, and now sit among the document's formatting buttons: tabbed
+    // through, they came as a bare "Play / Stop / Repeat / Position / Volume"
+    // in the middle of the toolbar. The group and its name are what the lit
+    // disc says to everybody else.
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "Player");
+    // The focus watchers of the editor are on view.dom, and the bar is no
+    // longer inside it: without a pair of its own, the focus LEAVING the bar
+    // is seen by nobody, and the document stays somebody's for good. Measured
+    // before this was added: with a player open, a click on the bare strip of
+    // the toolbar left the heading marks showing and the caret drawn with
+    // nothing in the page focused, where the same click with no player open
+    // puts the document into visual mode. It is also what makes
+    // leaveDocument's blur of the bar mean anything. They go with the
+    // element, so closing the player takes them off.
+    bar.addEventListener("focusin", syncFocus);
+    bar.addEventListener("focusout", function () {
+      // On the way out the focus has not landed yet, the same as on view.dom.
+      setTimeout(syncFocus, 0);
+    });
+    // The focus watchers of the editor are on view.dom, and the bar is no
+    // longer inside it: without a pair of its own, the focus LEAVING the bar
+    // is seen by nobody, and the document stays somebody's for good. Measured
+    // before this was added: with a player open, a click on the bare strip of
+    // the toolbar left the heading marks showing and the caret drawn with
+    // nothing in the page focused, where the same click with no player open
+    // puts the document into visual mode. It is also what makes
+    // leaveDocument's blur of the bar mean anything. They go with the
+    // element, so closing the player takes them off.
+    // Nothing of the bar's is stopped on its way up any more. It used to stop
+    // click, mousedown, mouseup, input and change, to keep the document's own
+    // listeners out of a bar that sat inside the text; in the toolbar the
+    // only listener any of them could still reach is the menu closer
+    // (buildToolbar), which now SHOULD hear them: a drop-down left open hangs
+    // directly over this row, and a press on the player has to put it away
+    // like a press anywhere else. Everything else that listens for those
+    // types does so in the capture phase, where a bubble-phase stop never had
+    // any say (dismissFromOutside, dismissTip, pressedAt, watchAltPresses).
     //
-    // The keys are NOT on this list, and must not be. A key pressed with the
-    // bar focused has to go on rising to the window, because that is where
-    // the webview preload picks it up and hands it to the workbench
+    // The keys were never on that list and still must not be. A key pressed
+    // with the bar focused has to go on rising to the window, because that is
+    // where the webview preload picks it up and hands it to the workbench
     // (handleInnerKeydown, in workbench/contrib/webview/browser/pre/
     // index.html): stopped here, Ctrl+S never reached VS Code and the file
     // would not save while the bar held the focus, and no other shortcut of
-    // the workbench worked either. Nothing in the page needs them stopped.
-    // CodeMirror already leaves them alone on its own: it walks up from the
-    // target to its content and drops the event at the first view that says
-    // to ignore it (eventBelongsToEditor), and this bar sits inside a
-    // ScoreWidget, whose ignoreEvent says exactly that. Measured with the bar
+    // the workbench worked either. What keeps those keys off the text is no
+    // longer CodeMirror's own eventBelongsToEditor (the bar used to sit in a
+    // ScoreWidget, whose ignoreEvent said to drop them) but the plainer fact
+    // that the bar is not in the editor at all. Measured with the bar
     // focused: Backspace, Delete, Enter, a letter, ArrowDown and Ctrl+B all
     // leave the document byte for byte as it was.
-    [
-      "click",
-      "mousedown",
-      "mouseup",
-      "input",
-      "change",
-    ].forEach(function (type) {
-      bar.addEventListener(type, function (e) {
-        e.stopPropagation();
-      });
-    });
+    //
     // The caret stays where it is while the player is used. A <button> is
-    // focusable, so its mousedown would pull the focus out of the editor;
-    // preventing the default of mousedown keeps the focus (and the click,
-    // which fires regardless). Two controls keep theirs: the volume slider, a
-    // form control that needs the browser's own drag, and the progress bar,
+    // focusable, so its mousedown would pull the focus out of the editor, and
+    // unlike the toolbar's own buttons the bar has no view.focus() to put it
+    // back with: the bar is where the keyboard is meant to stay. Preventing
+    // the default of mousedown keeps the focus where it is (and the click,
+    // which fires regardless), so the document stays somebody's and whatever
+    // block was open stays open. Two controls keep theirs: the volume slider,
+    // a form control that needs the browser's own drag, and the progress bar,
     // which answers the arrow keys once it has been clicked just as the
     // volume does. Neither takes a text selection with it (the two carry
-    // user-select: none).
+    // user-select: none), and somebodyInside reads a focus resting on either
+    // as the document's own.
     //
     // The gesture is also one more place the output is woken (the click that
     // opened the bar was the first): abcjs resumes a suspended context on
@@ -1691,17 +1968,18 @@
       }
     });
     bar.addEventListener("click", watchPlayPresses, true);
-    // The bar sits under the score at the score's width (with a floor so the
-    // controls fit), which keeps it reading as part of the block.
-    const svg = code.querySelector("svg");
-    if (svg) {
-      const width = svg.getBoundingClientRect().width;
-      if (width) bar.style.maxWidth = Math.max(280, Math.ceil(width)) + "px";
-    }
-    code.insertAdjacentElement("afterend", bar);
+    // Last child of the toolbar, so it takes a line below every line of
+    // buttons (the toolbar wraps, and the row asks for the whole of one), and
+    // so the buttons keep the document order the toolbar tests read them in.
+    // No width is set here: the row is as wide as the toolbar, and follows it
+    // when the pane is dragged (style.css, and watchPlayerWidth for the head
+    // abcjs places in pixels).
+    const toolbar = document.querySelector("#app .mdm-toolbar");
+    if (toolbar) toolbar.appendChild(bar);
     block.setAttribute("data-mdm-audio", "1"); // keeps the toggle shown
     player = {
       pos: blockPos(block),
+      block: block,
       bar: bar,
       controller: null,
       source: scoreSource(block),
@@ -1735,7 +2013,7 @@
           document.body.removeChild(scratch);
         }
         if (!visual) {
-          bar.textContent = "Nothing to play in this block.";
+          bar.textContent = "The score has nothing to play.";
           return;
         }
         const controller = new A.synth.SynthController();
@@ -1869,14 +2147,11 @@
         if (!scoreAt(player.pos)) closePlayer();
       } else if (scoreSource(block) !== player.source) {
         openPlayer(block);
-      } else if (!document.contains(player.bar)) {
-        // The widget was built again (back into view, or a caret went in
-        // and out): the same bar, with its controller and whatever is
-        // sounding, goes back under the new engraving.
-        const code = block.querySelector("code.language-abc");
-        if (code) code.insertAdjacentElement("afterend", player.bar);
-        block.setAttribute("data-mdm-audio", "1");
       } else {
+        // The widget may have been built again (back into view, or a caret
+        // went in and out). The bar stays where it is, in the toolbar, with
+        // its controller and whatever is sounding; what the new widget needs
+        // is the mark that lights its headphones.
         block.setAttribute("data-mdm-audio", "1");
       }
     }
@@ -1908,11 +2183,17 @@
   // lit disc (the block carries data-mdm-audio while its player is open, and
   // the stylesheet paints from that). The tooltip keeps naming the
   // destination, "Show player" and "Hide player".
-  const HEADPHONES_ICON =
-    '<svg viewBox="0 0 16 16">' +
+  const HEADPHONES_SHAPES =
     '<path d="M1.6 10.6a6.4 6.4 0 0 1 12.8 0h-1.3a5.1 5.1 0 0 0-10.2 0Z"/>' +
     '<rect x="1.1" y="9.9" width="3" height="4.6" rx="1.3"/>' +
-    '<rect x="11.9" y="9.9" width="3" height="4.6" rx="1.3"/></svg>';
+    '<rect x="11.9" y="9.9" width="3" height="4.6" rx="1.3"/>';
+  const HEADPHONES_ICON =
+    '<svg viewBox="0 0 16 16">' + HEADPHONES_SHAPES + "</svg>";
+  // The same drawing for the bar's own copy of the toggle, inside a <g>: the
+  // rules that colour the bar's buttons reach for one, the way abcjs draws
+  // its own (see STOP_ICON).
+  const HEADPHONES_BAR_ICON =
+    '<svg viewBox="0 0 16 16"><g>' + HEADPHONES_SHAPES + "</g></svg>";
 
   // Tooltips name the destination of the click, as everywhere in this editor.
   // The drawing does not: there is only one of it (see HEADPHONES_ICON), and
@@ -1952,13 +2233,16 @@
     if (!player || !player.bar) return false;
     if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
     if (e.repeat) return false; // held down is one press, not a stutter
-    // What the focus is on, never what it hangs from: the bar is a widget of
-    // the editor, so it sits inside the very element a caret focuses, and an
-    // ancestor test would read every press as the document's. The two are
-    // told apart on the element itself, the content editable and the bar
-    // (contenteditable=false) not.
+    // The bar is asked first and by name, so the answer does not turn on
+    // where in the page the bar happens to sit: a focus resting on it is the
+    // player's, whatever else is true.
     const at = document.activeElement;
     if (!at || !at.matches) return false;
+    if (player.bar.contains(at)) return !at.matches(SELF_KEYED);
+    // Elsewhere the rule is the one it has always been, read off the element
+    // that holds the focus and never off what it hangs from: a caret in the
+    // text keeps Space for the text, and a control that answers a press of
+    // its own keeps it too (the toolbar's buttons and menu rows).
     if (at.isContentEditable) return false; // a caret in the text
     return !at.matches(SELF_KEYED); // a control answers its own press
   }
@@ -1975,9 +2259,11 @@
     start.click();
   }
 
-  // Capture at the document: the bar stops the keys it hears (openPlayer),
-  // so a listener waiting for the bubble would never see a press made with
-  // the bar focused.
+  // Capture at the document, so this is heard before anything the page does
+  // with the key: the toolbar closes its menus on Escape from the bubble
+  // (buildToolbar), and Escape from the bar has to hand the keyboard back
+  // first. Neither press can want both, since opening a menu takes the focus
+  // off the bar.
   function watchPlayerKeys() {
     document.addEventListener(
       "keydown",
@@ -2351,10 +2637,15 @@
   // away on every Alt+Tab.
   function somebodyInside() {
     const active = document.activeElement;
-    if (!view || !active || !view.dom.contains(active)) return false;
-    if (active.closest && active.closest(".mdm-audio")) {
+    if (!view || !active) return false;
+    // The bar is asked first, and by identity rather than by where it sits:
+    // it lives in the toolbar, outside the view, so the containment test
+    // below would answer "nobody" for a focus resting on the player and put
+    // the document away the moment the headphones were pressed.
+    if (player && player.bar && player.bar.contains(active)) {
       return !!view.state.field(focusField, false);
     }
+    if (!view.dom.contains(active)) return false;
     return true;
   }
 
@@ -2389,7 +2680,12 @@
   // player bar alike.
   function leaveDocument() {
     const active = document.activeElement;
-    if (active && active.blur && view && view.dom.contains(active)) active.blur();
+    if (!active || !active.blur || !view) return;
+    // The bar is named on its own: it is the one control of the editor that
+    // holds the focus from outside the view, and a focus resting there is
+    // what keeps the document somebody's (somebodyInside).
+    const onBar = player && player.bar && player.bar.contains(active);
+    if (onBar || view.dom.contains(active)) active.blur();
   }
 
   // ---- KaTeX ----
@@ -2518,10 +2814,10 @@
     ignoreEvent() {
       return true;
     }
-    destroy(dom) {
-      // A player open on this block goes with it; syncPlayer reopens it on
-      // the block that takes its place, if one does.
-      releaseScore(dom);
+    destroy() {
+      // A player open on this block follows it; syncPlayer finds the block
+      // that takes its place, if one does, and closes the player if none has.
+      releaseScore();
     }
   }
 
@@ -3930,9 +4226,12 @@
 
   // A score widget leaving the document (its source changed, or the block
   // went): the player that may be open on it follows the block by position,
-  // from the observer below.
-  function releaseScore(dom) {
-    if (player && player.bar && dom.contains(player.bar)) scheduleAfterRender();
+  // from the observer below. Which widget it was is not asked, because it
+  // cannot be answered here: the bar is in the toolbar and says nothing about
+  // the score, and a node CodeMirror is throwing away has no position left to
+  // read. A pass while a player is open costs a coalesced frame.
+  function releaseScore() {
+    if (player) scheduleAfterRender();
   }
 
   // Engraves one score into its <code>. abcjs is loaded by the page before
@@ -4019,7 +4318,13 @@
   // nothing to say anyway.
   function dismissFromOutside(e) {
     if (e.button !== 0 || !e.target || !e.target.closest || !view) return;
-    if (e.target.closest(".cm-content")) return;
+    // The player is not "anywhere but the text": listening to a score while
+    // its ABC is open beside it is one gesture, and a press on play, on the
+    // progress or on the volume must not shut the source under the reader.
+    // Named here because the bar left the text and stopped being covered by
+    // the .cm-content test; this listener is in the capture phase, so the bar
+    // cannot answer for itself either.
+    if (e.target.closest(".cm-content, .mdm-audio")) return;
     dismissOpenBlock();
   }
 
@@ -4118,7 +4423,6 @@
       }
       return;
     }
-    if (e.target.closest(".mdm-audio")) return; // the player bar's own
     const drawing = e.target.closest(".mdm-score, .mdm-math, .mdm-table");
     if (drawing) {
       e.preventDefault();
@@ -4600,6 +4904,22 @@
     window.addEventListener("resize", applyOutlineWidth);
   }
 
+  // The player row spans the toolbar, so the pane getting narrower or wider
+  // is the one thing that changes its width. Everything in the row answers
+  // that by itself, in CSS: the track is a flex child that absorbs what is
+  // left (abcjs's own sheet), the fill is a percentage of it, and what has to
+  // go at the narrow end goes by media query (style.css). The single piece
+  // that cannot is the progress head, placed in pixels; see the note in
+  // makeProgressDraggable. The window's own resize is what the editor already
+  // listens to for the outline, so this is the same event, not a second
+  // mechanism: nothing else in the page resizes the toolbar (the outline
+  // panel sits below it and takes width from the text alone).
+  function watchPlayerWidth() {
+    window.addEventListener("resize", function () {
+      if (player && player.repaint) player.repaint();
+    });
+  }
+
   function makeOutlineGrip(grip, body) {
     grip.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
@@ -4890,6 +5210,7 @@
     applyScoreAlign();
     watchScoreSelection();
     watchPlayerKeys();
+    watchPlayerWidth();
     watchAltPresses();
     afterRender();
   }

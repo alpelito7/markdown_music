@@ -153,8 +153,9 @@ editor, gets Pandoc's own dialect and its blank lines.
 The page a render produces is dressed as the VS Code editor rather than as a
 stock Quarto document: the same ground under the document and the same ink on
 it, prose at the editor's measure, code on the same cards in the same
-colours, scores drawn and filled the same way, and the same player bar under
-a `.play` block. `_extensions/mdm/resources/mdm-look.css` is that look, a
+colours, scores drawn and filled the same way, and the same player controls
+on a `.play` block (a page has no toolbar, so there the bar stays under the
+score). `_extensions/mdm/resources/mdm-look.css` is that look, a
 port of the editor's own stylesheet (`vscode-mdm/media/style.css`) onto the
 HTML Quarto produces; it spends a handful of custom properties, and the
 filter writes them into the page from what it is told.
@@ -331,13 +332,21 @@ What it does:
   output) in the MDM output channel, one "Show log" away. A PDF asks for an
   engraver only when the document actually holds a score.
 - **Playback**: beside the copy button of every score (both appear on hover)
-  a pair of headphones unfolds a player bar under it, with play/pause, stop,
-  repeat, a draggable progress bar, volume and mute. A real piano sounds
+  a pair of headphones opens a player in the toolbar, as a row of its own
+  under the buttons, with play/pause, stop, repeat, a draggable progress bar,
+  volume and mute. It sits there rather than under the score because a score
+  can be a page long: the controls stay in view whatever part of the music
+  the reader is looking at, and the progress runs the width of the pane. The
+  headphones of the score being played stay lit while it does, which is what
+  says which one it is. A real piano sounds
   without touching the network: the 88 notes of the Musyng Kite soundfont
   (CC BY-SA 3.0) are vendored, and the synthesis is the vendored abcjs. One
   player at a time. While a tune plays the notes light up on the engraving,
   every voice of a duet on its own staff, with a cursor that walks the score
-  and can be dragged to seek. Resuming after a pause lands on the beat. What
+  and can be dragged to seek. The page follows the music the way a page turner
+  does, turning at the crossing from one staff system to the next and only
+  there, so a score that fits the pane is never scrolled and a pause hands the
+  page back. Resuming after a pause lands on the beat. What
   is written is what sounds and nothing else: chord symbols in quotes
   (`"Dm7"`) are drawn but not synthesized. Only the piano is vendored, so a
   different `%%MIDI program` will not find its notes.
@@ -420,8 +429,9 @@ still open for review, are in `vscode-mdm/docs/cm6-migration.md`.
 
 Editor limitations: no editing notes by dragging them with the mouse (the
 dragging API of abcjs is the identified route; untested); CodeMirror draws
-only the part of the document in view, so a player whose score scrolls far
-off screen keeps sounding and its bar comes back with the score; if the
+only the part of the document in view, so a score that scrolls far off screen
+keeps sounding with nothing lit, no cursor and no page turning until it comes
+back (the player itself stays in the toolbar and answers throughout); if the
 file changes from outside (git, a search and replace) while you are typing
 in the visual editor, what was typed wins (last writer), and an outside
 change that arrives between keystrokes is merged at the stretch that
