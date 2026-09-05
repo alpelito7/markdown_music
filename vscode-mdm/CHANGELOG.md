@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.2
+
+- The formulas of an exported page are set by the vendored KaTeX, the same
+  engine the editor draws them with. Quarto's default for the HTML is
+  MathJax, fetched from a CDN: the page needed the network to show a formula
+  at all, and the formulas it did show were not the editor's, since MathJax
+  sets them to other widths and the same paragraph broke at a different word
+  on the page than on screen, which is the one thing the export is supposed
+  not to do. The filter leaves each formula as its own LaTeX inside a
+  `span.math` and sends KaTeX, the faces its stylesheet names and a script
+  that reads the formulas back and sets them, along with the page as an HTML
+  dependency, which is what `embed-resources` takes into the file.
+- An SVG figure is printed to the PDF by the headless Chrome that engraves
+  the scores. LaTeX cannot read an SVG, and Quarto converts one with
+  rsvg-convert, a program it does not ship and does not look for until the
+  render is under way: without it the render died there, so a document with a
+  drawn figure in it had no PDF at all on a machine carrying everything the
+  editor itself needs. The page Chrome prints is the size of the drawing, so
+  what comes out is the drawing and nothing around it, and it is not trimmed
+  to its ink the way a score is: the white an author left around a figure is
+  part of the figure. Without a Chrome the image is left as it was and Quarto
+  tries its own converter, as it did before.
+- A heading on paper gets the air the page leaves over its rule. The rule sat
+  0.19 em under the ink of a 2 em heading in the PDF against the 0.625 em of
+  the HTML, measured on the pixels of both, and read as stuck to the text.
+  The page spends the padding of the heading plus the half of its leading
+  that falls under the text; paper has no leading under a last line, so the
+  whole gap is skipped now. Only under KOMA, the class a document that names
+  none is given: a standard class rules its headings through titlesec, whose
+  own spacing already leaves as much.
+
 ## 0.4.1
 
 - The export is named after the document, whatever its extension. The copy
