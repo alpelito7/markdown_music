@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.5.0
+
+- The player opens in the toolbar, as a row of its own under the buttons,
+  instead of under the score it plays. A score can be a page long, and on one
+  of those the bar was off the bottom of the pane while the music was on
+  screen: playing meant scrolling to the foot of the engraving, pressing play
+  and scrolling back up to read what was sounding. The row is there whatever
+  the reader is looking at, the score scrolled clean out of the viewport
+  included, and it is as wide as the pane, so the progress is worth scrubbing
+  on a long tune. Which score is playing is still said where it can be seen:
+  the headphones of that block stay lit. The row is drawn flush on the
+  toolbar's own ground rather than as the card-coloured pill it was, since
+  card material means source in this editor and the player is chrome; its
+  tooltips point south with the toolbar's; and its quiet ink comes off the
+  chrome's --mdm-ink rather than the code palette, which on a dark theme had
+  been drawing the player's glyphs brighter than the buttons a row above
+  them. The row follows the pane as it is dragged, and past the widths where
+  everything no longer fits it gives up the volume slider first (the mute
+  stays), then the clock, then the volume altogether; play, stop, repeat and
+  the progress never go. The row is chrome, so it takes its height off the
+  top of the pane and the text moves down with it and back up when the player
+  closes; what does not move is the reader's place in the document, since a
+  row that held the page still would be paying for its own height out of the
+  line and a half at the top of the pane. Beside repeat sit the same
+  headphones the corner of the score carries, lit the way that one is lit
+  while its player is open, and they do the same thing: the player can be shut
+  from the bar without going to look for the block again. Dragging the
+  progress head brings the pane to the part that is sounding, so a scrub
+  through a page-long score is something you can watch, and a tune left to
+  play is followed the same way: the page turns at the crossing from one staff
+  system to the next, and only there, so a score that fits the pane is never
+  scrolled, the page is still while a line of music is played, and a pause
+  hands it straight back. What the music never does is take a page the reader
+  has gone to: the system a tune starts on is taken as read rather than
+  revealed, and a score scrolled clean out of the viewport is one the reader
+  has left, so it plays on unfollowed until it comes back within the pane's
+  reach. The exported page is unchanged: it has no toolbar, and its bar stays
+  under the score.
+- The lines of the source are numbered in the margin. The number rides on the
+  line itself, in an attribute the stylesheet prints, and not in a gutter: a
+  gutter of CodeMirror's is a column at the head of the scroller, and the text
+  of this editor is a centred column, so the two would stand as far apart as
+  the pane is wide. A paragraph that wraps carries one number for all its
+  rows, the way a line of a text editor does, and a block that is drawn
+  instead of its source is numbered by the line it starts at, on the cover
+  over that source, until a caret opens the block and every line of it comes
+  back numbered. What the numbers count is the file's lines and not the
+  editor's: with the YAML header hidden the editor's first line is not the
+  file's first, so the host says how many lines it kept back and the numbering
+  starts from there, which is what makes a line read the same here as in the
+  text editor beside it on the same file. The number stands in the middle of
+  the row it counts, its box taking the line's own line height: handed the
+  line's ratio to inherit instead, the number's 11px multiplied it into an
+  18.7px box in a row of 27.2 and 14.3 in a heading's row of 41.6, and every
+  number rode at the top of its row.
+- A file with CRLF line endings is edited like any other. That is what a .mdm
+  written on Windows has, and the editor is CodeMirror, which splits an
+  incoming text on any of the three line breaks and holds no CR at all, so a
+  CRLF file handed over as it was came back LF, while the host's own view of
+  the document came back CRLF (VS Code gives an extension the lines joined
+  with the document's ending, whatever was written into it). The two texts
+  never agreed again: every keystroke was read as a change and echoed back,
+  and the echo rewrote the document from the first CR on, which threw the
+  caret to the end of line 1 and left one blank line more behind each time.
+  The text that travels between the host and the editor is LF now, and the
+  ending of the file, which only the host knows, is put back on whatever is
+  written to it.
+
 ## 0.4.2
 
 - The formulas of an exported page are set by the vendored KaTeX, the same
