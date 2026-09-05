@@ -140,7 +140,9 @@ editor, gets Pandoc's own dialect and its blank lines.
   equations go the same way, set by the vendored KaTeX. A figure the document
   names is carried across too: one at an absolute path is copied into the
   cache, since Quarto rewrites such a path into a relative one that points at
-  nothing. Results are cached by a hash of the
+  nothing, and an SVG is printed to PDF by the same Chrome, since LaTeX
+  cannot read one and Quarto's own converter (`rsvg-convert`) is a program
+  neither it nor this extension ships. Results are cached by a hash of the
   content in `mdm_cache/`. Without a Chrome (or without
   `pdfcrop`) the filter names in the render log the tool it missed and falls
   back: the scores to `abcm2ps`, which draws with glyphs of its own and

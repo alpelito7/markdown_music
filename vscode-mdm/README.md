@@ -134,7 +134,8 @@ away.
 - Images render for `https:` addresses and for local paths, relative to the
   document or absolute. A click on a figure opens its source, as it does on a
   score or an equation. An export carries the figure with it: one named by an
-  absolute path is copied beside the output.
+  absolute path is copied beside the output, and an SVG is printed to PDF for
+  the paper by the same headless Chrome that engraves the scores.
 - The formulas of an exported page are set by the KaTeX this extension
   carries, the one the editor draws with, sent along with the page: it asks
   nothing of the network, breaks its lines where the editor does, and a

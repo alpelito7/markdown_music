@@ -1623,6 +1623,77 @@ function Meta(meta)
   return nil
 end
 
+-- ---------- An SVG figure on paper ----------
+
+-- LaTeX cannot read an SVG. Quarto converts one with rsvg-convert, a program
+-- it does not ship and does not look for until it is too late to do without:
+-- the render dies there ("Could not convert a SVG to a PDF for output",
+-- measured on Quarto 1.9.37), so a document with a drawn figure in it had no
+-- PDF at all on a machine carrying everything the editor itself needs. The
+-- headless Chrome that engraves the scores prints the figure instead, and the
+-- PDF goes in the cache beside them.
+--
+-- The page is the size of the drawing, so what comes out is the drawing and
+-- nothing around it, and it is not trimmed to its ink: the white an author
+-- left around a figure is part of the figure, unlike the sheet a score is
+-- engraved on. `<base>` points at the folder the SVG came from, so anything
+-- it names relatively (another image, a font) is found where it would be.
+local function svg_size(text)
+  local w = tonumber((text:match('%swidth%s*=%s*"([%d%.]+)') or ""))
+  local h = tonumber((text:match('%sheight%s*=%s*"([%d%.]+)') or ""))
+  if w and h and w > 0 and h > 0 then return w, h end
+  local vb = text:match('viewBox%s*=%s*"([^"]+)"')
+  if vb then
+    local nums = {}
+    for n in vb:gmatch("[-%d%.]+") do nums[#nums + 1] = tonumber(n) end
+    if #nums >= 4 and nums[3] > 0 and nums[4] > 0 then return nums[3], nums[4] end
+  end
+  return nil
+end
+
+local function svg_page(svg, dir, w, h)
+  return table.concat({
+    '<!doctype html><meta charset="utf-8">',
+    '<base href="file://' .. dir .. '/">',
+    "<style>",
+    "  html, body { margin: 0; padding: 0; background: transparent; }",
+    "  @page { margin: 0; size: " .. w .. "px " .. h .. "px; }",
+    "  svg { display: block; width: " .. w .. "px; height: " .. h .. "px; }",
+    "</style>",
+    svg,
+  }, "\n")
+end
+
+-- The printed figure, or nil when there is nothing to print with, when the
+-- file is not an SVG, or when it does not say how big it is. The caller then
+-- leaves the image as it was and Quarto tries its own converter.
+local function svg_as_pdf(src)
+  if not src:lower():match("%.svg$") then return nil end
+  if not chrome_path then return nil end
+  local f = io.open(src, "rb")
+  if not f then return nil end
+  local svg = f:read("a")
+  f:close()
+  local w, h = svg_size(svg)
+  if not w then return nil end
+  local digest = sha1(svg)
+  local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
+  if file_exists(pdf) then return pdf end
+  run("mkdir -p " .. CACHE_DIR)
+  local html = CACHE_DIR .. "/" .. digest .. ".svg.html"
+  local page = io.open(html, "w")
+  if not page then return nil end
+  page:write(svg_page(svg, abs_path(src):match("^(.*)/[^/]*$") or ".", w, h))
+  page:close()
+  run(string.format(
+    '"%s" --headless=new --disable-gpu --no-pdf-header-footer%s' ..
+    " --virtual-time-budget=4000 --print-to-pdf=%s %s >/dev/null 2>&1",
+    chrome_path, chrome_sandbox_flag(), pdf, html))
+  os.remove(html)
+  if file_exists(pdf) then return pdf end
+  return nil
+end
+
 -- ---------- Figures named by an absolute path ----------
 
 -- Quarto rewrites the src of an image that sits outside the render directory
@@ -1659,10 +1730,19 @@ local function copy_figure(el)
 end
 
 function Image(el)
-  if quarto.doc.is_format("html") or quarto.doc.is_format("latex") then
-    return copy_figure(el)
+  if not quarto.doc.is_format("html") and not quarto.doc.is_format("latex") then
+    return nil
   end
-  return nil
+  -- The figure first, since what is printed on paper is the file itself and
+  -- the cache is where the print lands anyway.
+  if quarto.doc.is_format("latex") then
+    local pdf = svg_as_pdf(el.src)
+    if pdf then
+      el.src = pdf
+      return el
+    end
+  end
+  return copy_figure(el)
 end
 
 -- The formula as the page carries it: its own LaTeX inside a `span.math`,

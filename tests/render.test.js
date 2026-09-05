@@ -327,6 +327,49 @@ test("a figure named by an absolute path is copied into the cache", () => {
   assert.match(tex, /mdm_cache\/[0-9a-f]{40}\.png/, "the TeX does not name the copy");
 });
 
+// An SVG figure has to be a PDF before LaTeX can take it. Quarto converts one
+// with rsvg-convert, which it does not ship: without that program the render
+// dies where the conversion is asked for, so a document with a drawn figure
+// had no PDF at all on a machine carrying everything the editor needs. The
+// filter prints it with the Chrome it engraves the scores with.
+const SVG_FIGURE = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160">',
+  '<rect width="240" height="160" fill="#f6f4f1"/>',
+  '<circle cx="120" cy="80" r="60" fill="#a0740f"/>',
+  "</svg>",
+  "",
+].join("\n");
+
+test("an SVG figure is printed to PDF by the filter's own Chrome", () => {
+  const dir = freshDir("svg-figure");
+  fs.writeFileSync(path.join(dir, "fig.svg"), SVG_FIGURE);
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    '---\ntitle: "Drawn"\nfilters:\n  - mdm\n---\n\n![A drawing.](fig.svg)\n'
+  );
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(fs.existsSync(path.join(dir, "doc.pdf")), "no PDF came out");
+  const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
+  const named = /mdm_cache\/([0-9a-f]{40})\.pdf/.exec(tex);
+  assert.ok(named, "the TeX does not name a printed figure");
+  assert.equal(
+    named[1],
+    sha1(SVG_FIGURE),
+    "the print is not named after the drawing it was made from"
+  );
+  // The drawing and nothing around it: 240 x 160 px is 180 x 120 pt.
+  const box = execFileSync("pdfinfo", [path.join(dir, "mdm_cache", named[1] + ".pdf")], {
+    encoding: "utf8",
+  });
+  const size = /Page size:\s+([\d.]+) x ([\d.]+)/.exec(box);
+  assert.ok(size, "no page size in the printed figure");
+  assert.ok(Math.abs(Number(size[1]) - 180) < 2, "printed " + size[1] + " pt wide, not 180");
+  assert.ok(Math.abs(Number(size[2]) - 120) < 2, "printed " + size[2] + " pt tall, not 120");
+  assert.ok(!/includesvg/.test(tex), "the SVG was left for LaTeX to read");
+});
+
 // ---------- The rules the copy draws ----------
 
 // A `---` written straight above a score. The editor draws a rule there and
