@@ -133,7 +133,8 @@ away.
   monospace grid, with the drawing below as the preview.
 - Images render for `https:` addresses and for local paths, relative to the
   document or absolute. A click on a figure opens its source, as it does on a
-  score or an equation.
+  score or an equation. An export carries the figure with it: one named by an
+  absolute path is copied beside the output.
 - Only the piano is vendored: a different `%%MIDI program` will not find its
   notes.
 

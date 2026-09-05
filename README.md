@@ -129,8 +129,11 @@ editor, gets Pandoc's own dialect and its blank lines.
   than one staff system goes down as one clipped image per system, stacked
   into the drawing it was cut from, so a page break can fall between two
   systems instead of throwing the whole engraving onto the next page. The
-  equations go the same way, set by the vendored KaTeX. Results are cached
-  by a hash of the content in `mdm_cache/`. Without a Chrome (or without
+  equations go the same way, set by the vendored KaTeX. A figure the document
+  names is carried across too: one at an absolute path is copied into the
+  cache, since Quarto rewrites such a path into a relative one that points at
+  nothing. Results are cached by a hash of the
+  content in `mdm_cache/`. Without a Chrome (or without
   `pdfcrop`) the filter names in the render log the tool it missed and falls
   back: the scores to `abcm2ps`, which draws with glyphs of its own and
   reads differently, and the equations to LaTeX's own setting.

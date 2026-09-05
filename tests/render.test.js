@@ -13,6 +13,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const zlib = require("node:zlib");
 const { execFileSync, spawnSync } = require("node:child_process");
 
 const ROOT = path.join(__dirname, "..");
@@ -26,6 +27,10 @@ function freshDir(name) {
   fs.symlinkSync(path.join(ROOT, "_extensions"), path.join(dir, "_extensions"));
   fs.symlinkSync(path.join(ROOT, "tools"), path.join(dir, "tools"));
   return dir;
+}
+
+function sha1Bytes(buf) {
+  return crypto.createHash("sha1").update(buf).digest("hex");
 }
 
 function sha1(s) {
@@ -152,6 +157,98 @@ test("HTML render: figures, playback, escaping, deps, and no music alias", () =>
   ]) {
     assert.ok(html.includes(dep), dep + " missing from HTML");
   }
+});
+
+// ---------- Figures named by an absolute path ----------
+
+// A figure drawn by another project is named by its absolute path, and Quarto
+// rewrites the src of an image outside the render directory into a relative
+// one by dropping the leading slash: `/tmp/x/fig.png` came out of the HTML as
+// `./tmp/x/fig.png`, which points at nothing, and the PDF died in LaTeX
+// looking for a file of that name beside the document. The filter copies the
+// file into its own cache and points the image there.
+const FIGURE_DOC = (src) => `---
+title: "Absolute figure"
+filters:
+  - mdm
+---
+
+A figure from somewhere else.
+
+![Elsewhere.](${src})
+`;
+
+// A 100 x 70 PNG of one flat colour, written by hand so the test carries no
+// binary of its own: header, one IDAT of the raw rows, and the end marker.
+function png() {
+  const [w, h] = [100, 70];
+  const raw = Buffer.concat(
+    Array.from({ length: h }, () =>
+      Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0xc8)])
+    )
+  );
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; // bits per channel
+  ihdr[9] = 2; // truecolour
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+// The checksum every PNG chunk ends with, computed rather than tabulated.
+function crc32(buf) {
+  let c = ~0;
+  for (const b of buf) {
+    c ^= b;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
+
+test("a figure named by an absolute path is copied into the cache", () => {
+  const dir = freshDir("abs-figure");
+  // Outside the render directory on purpose: that is the case Quarto mangles.
+  const elsewhere = path.join(TMP, "abs-figure-source");
+  fs.rmSync(elsewhere, { recursive: true, force: true });
+  fs.mkdirSync(elsewhere, { recursive: true });
+  const figure = path.join(elsewhere, "fig.png");
+  const bytes = png();
+  fs.writeFileSync(figure, bytes);
+  fs.writeFileSync(path.join(dir, "doc.mdm"), FIGURE_DOC(figure));
+
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  const src = /<img src="([^"]*)"/.exec(html);
+  assert.ok(src, "no figure in the HTML at all");
+  assert.equal(
+    src[1],
+    "mdm_cache/" + sha1Bytes(bytes) + ".png",
+    "the figure was not pointed at the cache"
+  );
+  const copy = path.join(dir, src[1]);
+  assert.ok(fs.existsSync(copy), "the figure was not copied into the cache");
+  assert.ok(fs.readFileSync(copy).equals(bytes), "the copy is not the figure");
+
+  // And on paper: the same path, and a PDF that comes out at all.
+  const p = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(p.status, 0, p.stderr);
+  assert.ok(fs.existsSync(path.join(dir, "doc.pdf")), "no PDF came out");
+  const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
+  assert.match(tex, /mdm_cache\/[0-9a-f]{40}\.png/, "the TeX does not name the copy");
 });
 
 // ---------- The rules the copy draws ----------

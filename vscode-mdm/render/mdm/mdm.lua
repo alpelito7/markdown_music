@@ -1581,6 +1581,48 @@ function Meta(meta)
   return nil
 end
 
+-- ---------- Figures named by an absolute path ----------
+
+-- Quarto rewrites the src of an image that sits outside the render directory
+-- into a relative one by dropping its leading slash: `/home/me/fig.svg` comes
+-- out of the HTML as `./home/me/fig.svg`, which points at nothing (measured on
+-- Quarto 1.9.37 through Pandoc 3.8.3, with no filter of ours in the way). The
+-- figure was missing from the page, and the PDF died in LaTeX looking for a
+-- file of that name in the render directory.
+--
+-- The file is copied into the cache the filter keeps its own drawings in, and
+-- the image is pointed at the copy: a path inside the render directory, which
+-- both formats carry the way they carry a figure written beside the document.
+-- The copy is named after the digest of its contents, so a figure that has
+-- been redrawn is copied again and one that has not is not.
+local function copy_figure(el)
+  local src = el.src
+  if src:match("^%a[%w+.-]*:") then return nil end -- a URL, or a data: image
+  if not src:match("^/") and not src:match("^%a:[/\\]") then return nil end
+  local from = io.open(src, "rb")
+  if not from then return nil end -- named but not there: left as it was
+  local bytes = from:read("a")
+  from:close()
+  local ext = src:match("(%.[%w]+)$") or ""
+  local copy = CACHE_DIR .. "/" .. sha1(bytes) .. ext
+  if not file_exists(copy) then
+    run("mkdir -p " .. CACHE_DIR)
+    local to = io.open(copy, "wb")
+    if not to then return nil end
+    to:write(bytes)
+    to:close()
+  end
+  el.src = copy
+  return el
+end
+
+function Image(el)
+  if quarto.doc.is_format("html") or quarto.doc.is_format("latex") then
+    return copy_figure(el)
+  end
+  return nil
+end
+
 function CodeBlock(el)
   if not is_abc_block(el) then return nil end
   if quarto.doc.is_format("html") then
@@ -1606,5 +1648,5 @@ end
 -- Within the second table the Pandoc function runs after the element ones.
 return {
   { Meta = Meta },
-  { CodeBlock = CodeBlock, HorizontalRule = horizontal_rule, Pandoc = document },
+  { CodeBlock = CodeBlock, HorizontalRule = horizontal_rule, Image = Image, Pandoc = document },
 }
