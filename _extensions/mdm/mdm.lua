@@ -587,6 +587,48 @@ local function ensure_html_deps()
   })
 end
 
+-- The engine the formulas are set with, riding with the page: KaTeX, the one
+-- the editor draws with and the one the PDF is set in, the script that reads
+-- the formulas back out of the page (resources/mdm-math.js) and the faces the
+-- stylesheet names. A dependency and not a folder beside the output, because
+-- that is what a self-contained export knows how to take inside the file:
+-- `embed-resources: true` inlines a dependency and rewrites the faces into it,
+-- while a folder of our own it only leaves where it is, and a page moved away
+-- from it showed its formulas as LaTeX source.
+local katex_added = false
+local function ensure_katex_dep()
+  if katex_added then return end
+  katex_added = true
+  quarto.doc.add_html_dependency({
+    name = "mdm-katex",
+    version = "0.18.4",
+    scripts = { "resources/katex/katex.min.js", "resources/mdm-math.js" },
+    stylesheets = { "resources/katex/katex.min.css" },
+    resources = {
+      { name = "fonts/KaTeX_AMS-Regular.woff2", path = "resources/katex/fonts/KaTeX_AMS-Regular.woff2" },
+      { name = "fonts/KaTeX_Caligraphic-Bold.woff2", path = "resources/katex/fonts/KaTeX_Caligraphic-Bold.woff2" },
+      { name = "fonts/KaTeX_Caligraphic-Regular.woff2", path = "resources/katex/fonts/KaTeX_Caligraphic-Regular.woff2" },
+      { name = "fonts/KaTeX_Fraktur-Bold.woff2", path = "resources/katex/fonts/KaTeX_Fraktur-Bold.woff2" },
+      { name = "fonts/KaTeX_Fraktur-Regular.woff2", path = "resources/katex/fonts/KaTeX_Fraktur-Regular.woff2" },
+      { name = "fonts/KaTeX_Main-Bold.woff2", path = "resources/katex/fonts/KaTeX_Main-Bold.woff2" },
+      { name = "fonts/KaTeX_Main-BoldItalic.woff2", path = "resources/katex/fonts/KaTeX_Main-BoldItalic.woff2" },
+      { name = "fonts/KaTeX_Main-Italic.woff2", path = "resources/katex/fonts/KaTeX_Main-Italic.woff2" },
+      { name = "fonts/KaTeX_Main-Regular.woff2", path = "resources/katex/fonts/KaTeX_Main-Regular.woff2" },
+      { name = "fonts/KaTeX_Math-BoldItalic.woff2", path = "resources/katex/fonts/KaTeX_Math-BoldItalic.woff2" },
+      { name = "fonts/KaTeX_Math-Italic.woff2", path = "resources/katex/fonts/KaTeX_Math-Italic.woff2" },
+      { name = "fonts/KaTeX_SansSerif-Bold.woff2", path = "resources/katex/fonts/KaTeX_SansSerif-Bold.woff2" },
+      { name = "fonts/KaTeX_SansSerif-Italic.woff2", path = "resources/katex/fonts/KaTeX_SansSerif-Italic.woff2" },
+      { name = "fonts/KaTeX_SansSerif-Regular.woff2", path = "resources/katex/fonts/KaTeX_SansSerif-Regular.woff2" },
+      { name = "fonts/KaTeX_Script-Regular.woff2", path = "resources/katex/fonts/KaTeX_Script-Regular.woff2" },
+      { name = "fonts/KaTeX_Size1-Regular.woff2", path = "resources/katex/fonts/KaTeX_Size1-Regular.woff2" },
+      { name = "fonts/KaTeX_Size2-Regular.woff2", path = "resources/katex/fonts/KaTeX_Size2-Regular.woff2" },
+      { name = "fonts/KaTeX_Size3-Regular.woff2", path = "resources/katex/fonts/KaTeX_Size3-Regular.woff2" },
+      { name = "fonts/KaTeX_Size4-Regular.woff2", path = "resources/katex/fonts/KaTeX_Size4-Regular.woff2" },
+      { name = "fonts/KaTeX_Typewriter-Regular.woff2", path = "resources/katex/fonts/KaTeX_Typewriter-Regular.woff2" }
+    },
+  })
+end
+
 local function render_html(el)
   ensure_html_deps()
   local playable = el.classes:includes("play")
@@ -1623,6 +1665,22 @@ function Image(el)
   return nil
 end
 
+-- The formula as the page carries it: its own LaTeX inside a `span.math`,
+-- which is what mdm-math.js reads and KaTeX sets. Written out here rather
+-- than left to Quarto, whose engines are MathJax from a CDN (the default) and
+-- a KaTeX loaded by a path beside the output, which a page moved away from
+-- that folder could not follow. With no Math left in the document Pandoc
+-- writes no engine of its own into the page.
+function Math(m)
+  if not quarto.doc.is_format("html") then return nil end
+  ensure_katex_dep()
+  local kind = m.mathtype == "DisplayMath" and "display" or "inline"
+  return pandoc.RawInline(
+    "html",
+    '<span class="math ' .. kind .. '">' .. html_escape(m.text) .. "</span>"
+  )
+end
+
 function CodeBlock(el)
   if not is_abc_block(el) then return nil end
   if quarto.doc.is_format("html") then
@@ -1648,5 +1706,5 @@ end
 -- Within the second table the Pandoc function runs after the element ones.
 return {
   { Meta = Meta },
-  { CodeBlock = CodeBlock, HorizontalRule = horizontal_rule, Image = Image, Pandoc = document },
+  { CodeBlock = CodeBlock, HorizontalRule = horizontal_rule, Image = Image, Math = Math, Pandoc = document },
 }

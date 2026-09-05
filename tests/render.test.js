@@ -159,6 +159,82 @@ test("HTML render: figures, playback, escaping, deps, and no music alias", () =>
   }
 });
 
+// ---------- The engine the page sets its formulas with ----------
+
+const PAGE_MATH = (opts) => `---
+title: "Math"
+${opts}filters:
+  - mdm
+---
+
+Inline $f:x\\to y$ and a display:
+
+$$E=mc^2$$
+`;
+
+test("the page carries the vendored KaTeX and asks nothing of the network", () => {
+  const dir = freshDir("katex");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), PAGE_MATH(""));
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  // Quarto's own default is MathJax from a CDN, which is what the page used
+  // to carry: a formula needed the network, and MathJax's widths are not the
+  // editor's, so the same paragraph broke at a different word.
+  assert.ok(!/cdn\.jsdelivr/.test(html), "the page still asks a CDN for something");
+  assert.ok(
+    !/<script[^>]+src="[^"]*mathjax[^"]*"/i.test(html),
+    "the page still loads MathJax"
+  );
+  // KaTeX and the script that reads the formulas back out ride with the page.
+  assert.match(html, /src="[^"]*mdm-katex-[^"]*\/katex\.min\.js"/);
+  assert.match(html, /src="[^"]*mdm-katex-[^"]*\/mdm-math\.js"/);
+  assert.match(html, /href="[^"]*mdm-katex-[^"]*\/katex\.min\.css"/);
+  const faces = fs
+    .readdirSync(path.join(dir, "doc_files", "libs", "quarto-contrib"))
+    .filter((n) => n.startsWith("mdm-katex-"));
+  assert.equal(faces.length, 1, "the KaTeX dependency is not beside the page");
+  assert.equal(
+    fs.readdirSync(path.join(dir, "doc_files", "libs", "quarto-contrib", faces[0], "fonts"))
+      .length,
+    20,
+    "the faces the stylesheet names did not come along"
+  );
+  // The formula is left as its own LaTeX for KaTeX to set, not written out
+  // as Pandoc's own approximation of it in HTML.
+  assert.match(html, /<span class="math inline">f:x\\to y<\/span>/);
+  assert.match(html, /<span class="math display">E=mc\^2<\/span>/);
+  // And nothing was left beside the output for the page to reach for.
+  assert.ok(!fs.existsSync(path.join(dir, "mdm_cache", "katex")));
+});
+
+test("a self-contained page carries KaTeX inside the file", () => {
+  // `embed-resources: true` is one file and no folder beside it, which is
+  // what example.mdm asks for. The engine used to be fetched at view time by
+  // a path relative to the page (Quarto rewrites the tags into a loader), so
+  // a page moved away from that folder showed its formulas as LaTeX source.
+  const dir = freshDir("katex-embedded");
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    PAGE_MATH("format:\n  html:\n    embed-resources: true\n")
+  );
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  assert.ok(
+    !/<script[^>]+src="(?!data:)[^"]*"/.test(html),
+    "the page fetches a script from outside itself"
+  );
+  assert.ok(!/href="[^"]*katex[^"]*"/.test(html), "the stylesheet was left outside");
+  assert.match(html, /katex\.render/, "KaTeX itself is not in the page");
+  // The faces too, or every formula would come out in a fallback face.
+  assert.equal(
+    (html.match(/url\(data:font\/woff2;base64,/g) || []).length,
+    20,
+    "the faces were not taken into the page"
+  );
+});
+
 // ---------- Figures named by an absolute path ----------
 
 // A figure drawn by another project is named by its absolute path, and Quarto

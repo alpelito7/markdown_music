@@ -120,7 +120,15 @@ editor, gets Pandoc's own dialect and its blank lines.
 - **HTML**: the Lua filter (`_extensions/mdm/mdm.lua`) emits the ABC source
   and `_extensions/mdm/resources/mdm.js` renders it to SVG with
   [abcjs](https://github.com/paulrosen/abcjs) (vendored, v6.7.0) once the
-  page has loaded, on a page dressed as the visual editor (below).
+  page has loaded, on a page dressed as the visual editor (below). The
+  formulas are set by the vendored KaTeX, the one the editor draws with: the
+  filter leaves each one as its own LaTeX in a span and sends KaTeX, its
+  faces and `resources/mdm-math.js` along with the page as an HTML
+  dependency, so a self-contained export carries the engine inside the file.
+  Quarto's own default is MathJax from a CDN, which needed the network to
+  show a formula at all and set them to widths the editor does not use, so
+  the same paragraph broke at a different word on the page than in the
+  editor.
 - **PDF**: the filter engraves each block with the same vendored abcjs,
   loaded into a headless Chrome and printed to a vector PDF, then trimmed to
   the ink with `pdfcrop`, so the engraving on paper is the drawing the

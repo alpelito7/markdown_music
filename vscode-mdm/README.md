@@ -135,6 +135,10 @@ away.
   document or absolute. A click on a figure opens its source, as it does on a
   score or an equation. An export carries the figure with it: one named by an
   absolute path is copied beside the output.
+- The formulas of an exported page are set by the KaTeX this extension
+  carries, the one the editor draws with, sent along with the page: it asks
+  nothing of the network, breaks its lines where the editor does, and a
+  self-contained export carries the engine inside the file.
 - Only the piano is vendored: a different `%%MIDI program` will not find its
   notes.
 
