@@ -2034,6 +2034,127 @@ test("the numbers stand in one column beside the text, out of its flow", { skip 
   await h.close();
 });
 
+// A number stands in the middle of the row it counts. Its box takes the
+// line's own line height (`1lh` in style.css), so a heading's number sits
+// halfway down the heading's row and a blank line's halfway down its em. It
+// used to say `inherit`, which handed down the line's ratio (1.7, 1.3) for
+// the number's 11px to multiply, and every number rode at the top of its row.
+// What this holds is the number's place in the row, which is the same in both
+// faces. The words sit where their face puts them, so how far the digits are
+// from the words' baseline is the face's to decide (the comment over the rule
+// gives the measurement) and is not held here.
+// Read in the pixels, at two to the CSS pixel: the middle of the digits' ink
+// against the middle of the line's first row, for prose, a paragraph that
+// wraps, three levels of heading, a blank line, a quote, a line of code and
+// the cover over a drawn equation.
+test("a number stands in the middle of the row it counts, in either face", { skip }, async () => {
+  const text = [
+    "# A heading",
+    "",
+    "A line of prose.",
+    "",
+    "A paragraph long enough to wrap onto a second row, so that its number has a first row to stand in and a second one to keep out of. ".repeat(4).trim(),
+    "",
+    "## A section",
+    "",
+    "#### A smaller one",
+    "",
+    "> A quoted line.",
+    "",
+    "```",
+    "let a = 1",
+    "```",
+    "",
+    "$$",
+    "a^2 + b^2 = c^2",
+    "$$",
+    "",
+  ].join("\n");
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { frontMatter: "hidden", textFont: face } } });
+    await h.page.setViewport({ width: 900, height: 2400, deviceScaleFactor: 2 });
+    await h.page.evaluate(async () => {
+      await document.fonts.ready;
+      const view = window.__mdm.view;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+    await sleep(400);
+    const rows = await h.page.evaluate(() => {
+      const content = document.querySelector("#app .cm-content").getBoundingClientRect();
+      return [...document.querySelectorAll("#app .cm-content [data-mdm-line]")].map((l) => {
+        const r = l.getBoundingClientRect();
+        const cs = getComputedStyle(l);
+        const top = r.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop);
+        const lh = parseFloat(cs.lineHeight);
+        return {
+          n: l.getAttribute("data-mdm-line"),
+          cls: l.className,
+          top,
+          lh,
+          box: parseFloat(getComputedStyle(l, "::before").lineHeight),
+          // The margin beside the first row and a little over it, which holds
+          // the ink of this number and of nothing else: the row above ends
+          // with its own number well clear of its bottom edge.
+          clip: { x: content.left - 48, y: top - 2, width: 44, height: lh + 4 },
+        };
+      });
+    });
+    const kinds = rows.map((r) => r.cls).join(" ");
+    for (const k of ["mdm-h1", "mdm-h2", "mdm-h4", "mdm-blank", "mdm-quote", "mdm-code-line", "mdm-blockline"]) {
+      assert.ok(kinds.includes(k), `no ${k} to measure (${face})`);
+    }
+    for (const row of rows) {
+      const where = `line ${row.n} (${row.cls}, ${face})`;
+      assert.ok(Math.abs(row.box - row.lh) < 0.1, `the number of ${where} is ${row.box}px tall in a row of ${row.lh}`);
+      const png = await h.page.screenshot({ clip: row.clip, encoding: "base64" });
+      const ink = await h.page.evaluate(async (b64) => {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+        const cv = new OffscreenCanvas(bmp.width, bmp.height);
+        const g = cv.getContext("2d");
+        g.drawImage(bmp, 0, 0);
+        const d = g.getImageData(0, 0, bmp.width, bmp.height).data;
+        // The ground is the commonest colour in the box, and ink is whatever
+        // stands at least half as far from it as the farthest pixel does.
+        const counts = new Map();
+        for (let i = 0; i < d.length; i += 4) {
+          const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+          counts.set(k, (counts.get(k) || 0) + 1);
+        }
+        const ground = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        const far = (i) =>
+          Math.abs(d[i] - (ground >> 16)) +
+          Math.abs(d[i + 1] - ((ground >> 8) & 255)) +
+          Math.abs(d[i + 2] - (ground & 255));
+        let max = 0;
+        for (let i = 0; i < d.length; i += 4) max = Math.max(max, far(i));
+        if (max < 60) return null;
+        let first = -1;
+        let last = -1;
+        for (let y = 0; y < bmp.height; y++) {
+          for (let x = 0; x < bmp.width; x++) {
+            if (far((y * bmp.width + x) * 4) >= max / 2) {
+              if (first < 0) first = y;
+              last = y;
+              break;
+            }
+          }
+        }
+        return { first, last, height: bmp.height };
+      }, png);
+      assert.ok(ink, `no number drawn beside ${where}`);
+      const scale = ink.height / row.clip.height;
+      const middle = row.clip.y + (ink.first + ink.last + 1) / 2 / scale;
+      const off = middle - (row.top + row.lh / 2);
+      assert.ok(
+        Math.abs(off) <= 1.5,
+        `the number of ${where} stands ${off.toFixed(2)}px from the middle of its ${row.lh}px row`
+      );
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
 
 test("with the header hidden the numbers are the file's lines, not the editor's", { skip }, async () => {
   const disk = ["---", "title: x", "author: y", "---", "", "First body line.", ""].join("\n");
