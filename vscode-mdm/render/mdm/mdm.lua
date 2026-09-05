@@ -251,6 +251,18 @@ end
 -- The colours of an engraving are not written here but into the EPS itself,
 -- since what the page says has no bearing on a graphic that carries its own
 -- (paint_eps, further down).
+-- The skip a heading takes before its rule under KOMA, in ems of the body
+-- text. What the page leaves between the ink and the rule is 0.625 em under a
+-- 2 em heading and 0.375 em under a 1.5 em one (10 px and 6 px on a 16 px
+-- text, measured on the pixels of the rendered page); the depth of the last
+-- line adds about 0.05 em to whatever is skipped here, so these are those two
+-- less that much, and they come out at 0.624 and 0.360 em on paper.
+--
+-- Only KOMA: a standard class rules its headings through titlesec, whose own
+-- spacing already leaves 0.648 em under a section and 0.504 under a
+-- subsection (measured the same way), which is the page's within a rounding.
+local HEAD_RULE_AIR = { section = "0.57", subsection = "0.32" }
+
 local function look_tex(l)
   local side = SIDES[l.side] or SIDES.light
   local out = {}
@@ -374,7 +386,14 @@ local function look_tex(l)
   -- example.mdm: `source code` where the editor breaks after `source`).
   put("\\@ifpackageloaded{microtype}{\\microtypesetup{expansion=false}}{}")
   put("\\AtBeginDocument{\\raggedright}")
-  put("\\newcommand*{\\mdmheadrule}{\\par\\nobreak\\vskip 0.18\\mdmem" ..
+  -- The air between a heading and the rule under it, in ems of the body text.
+  -- The page leaves the padding of the heading (0.2 of its own size) plus the
+  -- half of its leading that falls under the text; on paper there is no
+  -- leading under the last line, so the whole gap is asked for here. Measured
+  -- off the pixels of both: the page leaves 10 px under a 2 em heading and
+  -- 6 px under a 1.5 em one, on a 16 px text, and the 0.18 em this used to
+  -- skip came out as 0.19 em of white, a third of the page's.
+  put("\\newcommand*{\\mdmheadrule}[1]{\\par\\nobreak\\vskip #1\\mdmem" ..
       "{\\color{mdmrule}\\hrule height 0.8pt}}")
   -- Two ways in, since the class is the document's to choose: KOMA, which is
   -- what Quarto gives a document that names none, restyles through its own
@@ -430,7 +449,9 @@ local function look_tex(l)
   komafont("paragraph", "1.1", "1.43")
   put("  \\renewcommand*{\\sectionlinesformat}[4]{%")
   put("    \\@hangfrom{\\hskip #2#3}{#4}%")
-  put("    \\Ifstr{#1}{section}{\\mdmheadrule}{\\Ifstr{#1}{subsection}{\\mdmheadrule}{}}%")
+  put("    \\Ifstr{#1}{section}{\\mdmheadrule{" .. HEAD_RULE_AIR.section ..
+      "}}{\\Ifstr{#1}{subsection}{\\mdmheadrule{" .. HEAD_RULE_AIR.subsection ..
+      "}}{}}%")
   put("  }%")
   put("}")
   put("\\makeatother")

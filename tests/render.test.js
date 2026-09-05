@@ -587,6 +587,37 @@ function texOf(dir) {
   return fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
 }
 
+test("a heading leaves the page's air over its rule", () => {
+  // The rule under a heading sat 0.19 em under its ink on paper against the
+  // 0.625 em the page leaves under a 2 em heading (measured on the pixels of
+  // both), which read as the line being stuck to the text. KOMA is what a
+  // document that names no class gets, and the skip goes in through its hook;
+  // a standard class rules its headings through titlesec, whose own spacing
+  // already leaves what the page does, so it is left alone.
+  const dir = freshDir("head-rule");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), TEX_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const tex = texOf(dir);
+  assert.match(
+    tex,
+    /\\newcommand\*\{\\mdmheadrule\}\[1\]\{\\par\\nobreak\\vskip #1\\mdmem/,
+    "the rule takes no air to skip"
+  );
+  assert.match(
+    tex,
+    /\\Ifstr\{#1\}\{section\}\{\\mdmheadrule\{0\.57\}\}/,
+    "a section's rule is not given the page's air"
+  );
+  assert.match(
+    tex,
+    /\\Ifstr\{#1\}\{subsection\}\{\\mdmheadrule\{0\.32\}\}/,
+    "a subsection's rule is not given the page's air"
+  );
+  // titlesec draws its own, with the spacing it computes.
+  assert.match(tex, /\[\{\\color\{mdmrule\}\\titlerule\[0\.8pt\]\}\]/);
+});
+
 test("the look rides on every PDF render, and reads the same metadata", () => {
   const dir = freshDir("look-tex");
   fs.writeFileSync(path.join(dir, "doc.mdm"), TEX_DOC);
