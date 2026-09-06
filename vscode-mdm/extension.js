@@ -52,6 +52,7 @@ const SETTINGS = {
   frontMatter: ["hidden", "shown"],
   outline: ["hidden", "shown"],
   multicursorMatch: ["word", "substring"],
+  followMusic: ["follow", "still"],
 };
 
 // A setting whose value is a number and not one of a handful of words. The

@@ -53,9 +53,14 @@ again, a draggable progress bar, volume and mute. It sits up there rather than
 under the score because a score can be a page long, and the controls should
 not have to be scrolled to. Dragging the progress head brings the pane to the
 part that is sounding, so scrubbing through a long score is something you can
-watch, and a tune left to play is followed the same way: the page turns at the
-crossing from one staff system to the next, and only there, so it is still
-while a line of music is played and a pause hands it straight back. The piano is the Musyng Kite soundfont, all 88 notes vendored with the
+watch, and a tune left to play is followed the same way: the page keeps the
+staff system that is sounding whole on screen and asks nothing more of it, so
+it is still while a line of music is played, a play made with the score under
+the fold brings the page to the head and one made with it already in front of
+you moves nothing, a page you take away from the music comes straight back,
+and a pause hands it to you for good. A toolbar toggle turns the whole of that
+off, and then a long score can sound while you read past it, since the music
+never moves the page. The piano is the Musyng Kite soundfont, all 88 notes vendored with the
 extension, so playback touches no network. A caret in the block opens its ABC
 above the engraving, and while a tune plays a brass cursor glides across the
 score and the notes light up under it as they sound, every voice of them:
@@ -132,6 +137,7 @@ away.
 | `mdm.outline`          | whether the outline panel is open                                          |
 | `mdm.outlineWidth`     | the outline panel's width in pixels                                        |
 | `mdm.multicursorMatch` | whether `Ctrl+D` matches whole words or inside them                        |
+| `mdm.followMusic`      | `follow` or `still`: whether the page keeps up with a sounding tune        |
 
 ## Notes
 

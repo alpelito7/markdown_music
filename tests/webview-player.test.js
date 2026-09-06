@@ -31,6 +31,9 @@ const {
   docText,
   posOf,
   setSelection,
+  settingsMessage,
+  postSettings,
+  setSettingPosts,
 } = require("./webview/helpers.js");
 
 // Shared helpers: the score widgets in document order, and the state the
@@ -648,11 +651,15 @@ test("a seek brings the pane to the part that is sounding", { skip }, async () =
 // The same complaint the seek answers, arrived at by waiting instead of by
 // dragging: a tune left to play walks the cursor down the engraving, and on a
 // page-long score it walks clean off the pane, so what is sounding cannot be
-// seen. The page turns with the music now, and turns the way a page turner
-// does: at the crossing from one staff system to the next, never between, so
-// the page is still while a line of music is played and a reader who pauses
-// gets it back.
-test("a tune left to play turns the page at the crossing, and only there", { skip }, async () => {
+// seen. The page keeps the head on the pane now, and keeps it there whenever
+// it leaves: while the music walks along one staff system the head does not
+// move down the page and nothing is scrolled, so a score that fits the pane
+// is never touched, and a page taken away from the music comes back at once
+// rather than at the end of the line. It was the crossing alone until the
+// toolbar toggle arrived, and waiting a line of music to see what is sounding
+// is what the toggle made unnecessary: a reader who wants the page turns
+// following off.
+test("a tune left to play keeps the head on the pane, and a pause hands it back", { skip }, async () => {
   const h = await open({ text: TALL_SCORE_FIXTURE, scores: 1 });
   await h.page.setViewport({ width: 900, height: 520 });
   await new Promise((r) => setTimeout(r, 500));
@@ -694,9 +701,10 @@ test("a tune left to play turns the page at the crossing, and only there", { ski
     { timeout: 30000 },
     moved.scroll
   );
-  // A reader who takes the page mid-line keeps it. Parked a whole pane past
-  // the music, so the head is off the pane and a follow held to the head
-  // rather than to the crossing would have it back within a frame.
+  // The page taken away mid-line comes straight back. Parked a whole pane past
+  // the music, so the head is off the pane, and read within the window the
+  // wait above opened: the music has a line to walk before it crosses again,
+  // so a follow held to the crossing would leave the page parked for seconds.
   const park = () =>
     h.page.evaluate(() => {
       const sc = window.__mdm.view.scrollDOM;
@@ -704,31 +712,24 @@ test("a tune left to play turns the page at the crossing, and only there", { ski
       return Math.round(sc.scrollTop);
     });
   const parked = await park();
-  await new Promise((r) => setTimeout(r, 700));
-  const kept = await onScreen();
+  const off = await onScreen();
   assert.equal(
-    kept.onScreen,
+    off.onScreen,
     false,
     "the park left the head on the pane: the case is not being read"
   );
+  await new Promise((r) => setTimeout(r, 700));
+  const back = await onScreen();
+  assert.equal(back.onScreen, true, "the head was left off the pane");
   assert.ok(
-    Math.abs(kept.scroll - parked) <= 2,
-    "the page was pulled back to a sounding head mid-system rather than left " +
-      "to the crossing: " +
+    Math.abs(back.scroll - parked) > 2,
+    "the page was left where it was parked, a line of music from the head: " +
       parked +
       " -> " +
-      kept.scroll
+      back.scroll
   );
-  // And the crossing brings it back.
-  await h.page.waitForFunction(
-    (from) => Math.round(window.__mdm.view.scrollDOM.scrollTop) !== from,
-    { timeout: 30000 },
-    parked
-  );
-  const back = await onScreen();
-  assert.equal(back.onScreen, true, "the crossing left the head off the pane");
-  // Paused, the reader has the page for good: a stopped clock crosses
-  // nothing, and nothing else may move the page either.
+  // Paused, the reader has the page for good: a stopped clock walks nowhere,
+  // and nothing else may move the page either.
   await h.page.evaluate(() =>
     document.querySelector(".mdm-audio .abcjs-midi-start").click()
   );
@@ -745,6 +746,309 @@ test("a tune left to play turns the page at the crossing, and only there", { ski
   await h.close();
 });
 
+// A short score, one staff system and no crossing anywhere in it, with prose
+// on both sides of it: whatever moves the page around this one was the press
+// of play and not a page turn. The run-out matters as much as the run-up. With
+// the score at the end of the document there is nowhere to scroll to (the
+// bottom padding gives about 50px, measured), so a reader who walks away from
+// it cannot be drawn, and a test of that would pass whatever the rule was.
+const ONE_SYSTEM_FIXTURE = ["---", 'title: "One system"', "---", ""]
+  .concat(
+    Array.from({ length: 25 }, (_, i) => "Paragraph " + (i + 1) + " of the run-up.\n")
+  )
+  .concat([
+    "```{.abc .play}",
+    "X:1",
+    "M:4/4",
+    "L:1/8",
+    "Q:1/4=100",
+    "K:C",
+    "CDEF GABc | cBAG FEDC |",
+    "```",
+    "",
+  ])
+  .concat(
+    Array.from({ length: 25 }, (_, i) => "Paragraph " + (i + 1) + " of the run-out.\n")
+  )
+  .join("\n");
+
+// Where the head stands against the pane, and where the page is.
+function headPlace(page) {
+  return page.evaluate(() => {
+    const sc = window.__mdm.view.scrollDOM;
+    const pane = sc.getBoundingClientRect();
+    const line = document.querySelector("#app .mdm-play-cursor");
+    const box = line && line.getBoundingClientRect();
+    return {
+      scroll: Math.round(sc.scrollTop),
+      drawn: !!line,
+      onScreen: !!box && box.top >= pane.top - 1 && box.bottom <= pane.bottom + 1,
+    };
+  });
+}
+
+// The system a tune starts on was taken as read: a press of play moved
+// nothing, and the page came to the music only at the crossing to the second
+// system. Which is right while the score is in front of the reader and wrong
+// when it is not: a tune started with its engraving under the fold sounded
+// with nothing to see, for as long as a line of music lasts, and on a score
+// of one system for the whole of it. The rule is the same one the follow
+// keeps everywhere now, and needs no case of its own: the head belongs on the
+// pane, so a play that leaves it off the pane brings the page to it. Read on
+// a score of one staff system, where no crossing can be the thing that moved
+// the page.
+test("a play made with the score under the fold brings the page to the head", { skip }, async () => {
+  const h = await open({ text: ONE_SYSTEM_FIXTURE, scores: 1 });
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 20000 }
+  );
+  await h.page.setViewport({ width: 900, height: 520 });
+  await new Promise((r) => setTimeout(r, 500));
+  // The top of the engraving 30px above the bottom edge: the block is on the
+  // pane and the staff it draws is not, which is the case a reader meets by
+  // scrolling down to a score and pressing play as it comes into sight.
+  const parked = await h.page.evaluate(() => {
+    const sc = window.__mdm.view.scrollDOM;
+    const block = document.querySelector("#app .mdm-score");
+    sc.scrollTop +=
+      block.getBoundingClientRect().top - (sc.getBoundingClientRect().bottom - 30);
+    return Math.round(sc.scrollTop);
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  await pressPlay(h.page);
+  await h.page.waitForFunction(
+    (from) => Math.round(window.__mdm.view.scrollDOM.scrollTop) !== from,
+    { timeout: 15000 },
+    parked
+  );
+  const seen = await headPlace(h.page);
+  assert.equal(seen.drawn, true, "the tune is sounding with no head to show");
+  assert.equal(seen.onScreen, true, "the page moved and left the head off the pane");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The tall score with prose either side of it. TALL_SCORE_FIXTURE opens on its
+// engraving, so there is nothing above it to scroll and it cannot be put under
+// the fold at all: a park written against it moves the page by nothing and the
+// test that follows would pass whatever the rule was (measured: scrollTop 0
+// before and after).
+const TALL_RUNUP_FIXTURE = ["---", 'title: "A tall score, read down to"', "---", ""]
+  .concat(
+    Array.from({ length: 25 }, (_, i) => "Paragraph " + (i + 1) + " of the run-up.\n")
+  )
+  .concat(TALL_SCORE_FIXTURE.split("\n").slice(4))
+  .concat(
+    Array.from({ length: 10 }, (_, i) => "Paragraph " + (i + 1) + " of the run-out.\n")
+  )
+  .join("\n");
+
+// The same tall score at a crawl: a quarter every second and a half, so a
+// staff system lasts tens of seconds and a reading taken within a second of a
+// scroll cannot be a crossing in disguise. Prose either side, so the score can
+// be put wherever on the pane the test wants it.
+const SLOW_TALL_FIXTURE = ["---", 'title: "A tall score, slowly"', "---", ""]
+  .concat(
+    Array.from({ length: 25 }, (_, i) => "Paragraph " + (i + 1) + " of the run-up.\n")
+  )
+  .concat(["```{.abc .play}", "X:1", "M:4/4", "L:1/8", "Q:1/4=40", "K:C"])
+  .concat(
+    Array.from({ length: 12 }, (_, i) =>
+      i % 2
+        ? "cBAG FEDC | GABc defg | cBAG FEDC | GABc defg |"
+        : "CDEF GABc | cBAG FEDC | CDEF GABc | cBAG FEDC |"
+    )
+  )
+  .concat(["```", ""])
+  .concat(
+    Array.from({ length: 10 }, (_, i) => "Paragraph " + (i + 1) + " of the run-out.\n")
+  )
+  .join("\n");
+
+// What counts as the head being in the reader's sight, which is the one thing
+// the follow reads before it decides to move anything: the staff system that
+// is sounding, showing whole. Not "with room to spare at both edges", which is
+// what it used to ask for and which took a system resting a dozen pixels off
+// an edge, perfectly readable, and threw the page half a pane to centre it.
+// The band read here is the cursor's own box, the reach of the whole staff
+// group, so on this duet-less score it is the one staff and on a duet it would
+// be both.
+test("a system showing whole is left where it is, however near an edge", { skip }, async () => {
+  const h = await open({ text: SLOW_TALL_FIXTURE, scores: 1 });
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 20000 }
+  );
+  await h.page.setViewport({ width: 900, height: 520 });
+  await new Promise((r) => setTimeout(r, 500));
+  await h.page.evaluate(() => {
+    const sc = window.__mdm.view.scrollDOM;
+    sc.scrollTop = sc.scrollHeight;
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await pressPlay(h.page);
+  await h.page.waitForFunction(
+    () => document.querySelector("#app .mdm-play-cursor"),
+    { timeout: 20000 }
+  );
+  await new Promise((r) => setTimeout(r, 800));
+
+  // Places the sounding band `gap` pixels clear of the pane's bottom edge: a
+  // positive gap leaves it whole on the pane, a negative one hangs it over.
+  const place = (gap) =>
+    h.page.evaluate((g) => {
+      const sc = window.__mdm.view.scrollDOM;
+      const pane = sc.getBoundingClientRect();
+      const box = document.querySelector("#app .mdm-play-cursor").getBoundingClientRect();
+      sc.scrollTop += box.bottom - (pane.bottom - g);
+      return Math.round(sc.scrollTop);
+    }, gap);
+  const read = () =>
+    h.page.evaluate(() => {
+      const sc = window.__mdm.view.scrollDOM;
+      const pane = sc.getBoundingClientRect();
+      const line = document.querySelector("#app .mdm-play-cursor");
+      const box = line && line.getBoundingClientRect();
+      return {
+        scroll: Math.round(sc.scrollTop),
+        whole: !!box && box.top >= pane.top - 1 && box.bottom <= pane.bottom + 1,
+        clearOfBottom: box ? Math.round(pane.bottom - box.bottom) : null,
+      };
+    });
+
+  // Six pixels off the bottom edge: inside the 24 the old rule wanted, and
+  // whole on the pane, so nothing may move.
+  const near = await place(6);
+  await new Promise((r) => setTimeout(r, 700));
+  const held = await read();
+  assert.equal(held.whole, true, "the band is not whole on the pane: the case is not being read");
+  assert.ok(
+    held.clearOfBottom < 24,
+    "the band is not near enough the edge to read the case: " + held.clearOfBottom
+  );
+  assert.ok(
+    Math.abs(held.scroll - near) <= 2,
+    "the page moved under a system that was showing whole: " + near + " -> " + held.scroll
+  );
+
+  // And hung over the edge, it is brought back.
+  const over = await place(-14);
+  await h.page.waitForFunction(
+    (from) => Math.round(window.__mdm.view.scrollDOM.scrollTop) !== from,
+    { timeout: 15000 },
+    over
+  );
+  const brought = await read();
+  assert.equal(brought.whole, true, "the band was left hanging over the edge");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The page keeping up with the music is right until it is not: a score can be
+// longer than the pane and worth listening to while the document around it is
+// read, and there was no way to ask for that. The toolbar toggle is the whole
+// of the choice, on by default, and off it means the music never moves the
+// page: not at a crossing, not at a play made with the score under the fold,
+// and not at a scrub of the progress bar either, which is one rule with no
+// exceptions to remember. In the toolbar and not in the player row, since it
+// says what the editor does with a tune rather than what this tune is doing,
+// and it can be set before a player is open at all.
+test("the follow button says what the page does, and a press asks for the other", { skip }, async () => {
+  const h = await open({ text: ONE_SYSTEM_FIXTURE, scores: 1 });
+  const state = () =>
+    h.page.evaluate(() => {
+      const b = document.querySelector('#app button[data-type="mdm-follow"]');
+      return b && { lit: b.classList.contains("mdm-btn--on"), label: b.getAttribute("aria-label") };
+    });
+  const on = await state();
+  assert.ok(on, "the transport carries no follow button");
+  assert.equal(on.lit, true, "the page follows by default and the button does not say so");
+  await h.page.evaluate(() =>
+    document.querySelector('#app button[data-type="mdm-follow"]').click()
+  );
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(await setSettingPosts(h.page), [
+    { type: "setSetting", key: "followMusic", value: "still" },
+  ]);
+  // The button paints itself from what the host sends back, the way every
+  // other toggle of this editor does.
+  assert.equal((await state()).lit, true, "the button lit itself before the host answered");
+  await postSettings(h.page, { followMusic: "still" });
+  await new Promise((r) => setTimeout(r, 300));
+  const off = await state();
+  assert.equal(off.lit, false, "the setting came back and the button kept its disc");
+  assert.notEqual(off.label, on.label, "the button says the same thing either way");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("with the follow off a tune plays on and the page is the reader's", { skip }, async () => {
+  // The tall score with a run-up, so it can be put under the fold, and where
+  // the music crosses from one staff system to the next every couple of
+  // seconds: with the follow on, the press alone would bring the page to the
+  // head, and each crossing after it would turn the page again.
+  const h = await open({
+    text: TALL_RUNUP_FIXTURE,
+    scores: 1,
+    seed: { settings: { followMusic: "still" } },
+  });
+  // The player is opened on the tall window the harness makes, before the pane
+  // is shrunk: at 520 the score is past the end of what CodeMirror renders and
+  // there is no toggle in the document to click.
+  await clickToggle(h.page, 0);
+  await h.page.waitForFunction(
+    () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+    { timeout: 20000 }
+  );
+  await h.page.setViewport({ width: 900, height: 520 });
+  await new Promise((r) => setTimeout(r, 500));
+  // Down to the run-out first: at 520 with the page at the top, the score is
+  // past what CodeMirror renders and there is no widget to measure. From the
+  // foot of the document it is one screen up, well inside the margin.
+  await h.page.evaluate(() => {
+    const sc = window.__mdm.view.scrollDOM;
+    sc.scrollTop = sc.scrollHeight;
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  // Parked with the engraving under the fold, which with the follow on is the
+  // press that brings the page to the head.
+  const parked = await h.page.evaluate(() => {
+    const sc = window.__mdm.view.scrollDOM;
+    const block = document.querySelector("#app .mdm-score");
+    sc.scrollTop +=
+      block.getBoundingClientRect().top - (sc.getBoundingClientRect().bottom - 30);
+    return Math.round(sc.scrollTop);
+  });
+  const under = await h.page.evaluate(() => {
+    const sc = window.__mdm.view.scrollDOM;
+    const pane = sc.getBoundingClientRect();
+    return document.querySelector("#app .mdm-score").getBoundingClientRect().top >
+      pane.bottom - 60;
+  });
+  assert.equal(under, true, "the score was not put under the fold: the park did nothing");
+  await new Promise((r) => setTimeout(r, 300));
+  await pressPlay(h.page);
+  // Long enough for several crossings at this tempo, and long past the press
+  // itself, which with the follow on is the first thing that would move it.
+  await new Promise((r) => setTimeout(r, 6000));
+  const after = await h.page.evaluate(() => ({
+    scroll: Math.round(window.__mdm.view.scrollDOM.scrollTop),
+    sounding: document
+      .querySelector(".mdm-audio .abcjs-midi-start")
+      .classList.contains("abcjs-pushed"),
+  }));
+  assert.equal(after.sounding, true, "the tune stopped before the reading");
+  assert.ok(
+    Math.abs(after.scroll - parked) <= 2,
+    "the music moved the page with the follow off: " + parked + " -> " + after.scroll
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // The whole reason the bar moved. A score can be a page long (duet.mdm is),
 // and the bar used to sit at its foot: playing meant scrolling to the bottom,
 // pressing play and scrolling back up to read what was sounding. In the
@@ -752,7 +1056,16 @@ test("a tune left to play turns the page at the crossing, and only there", { ski
 // the viewport included, which is where CodeMirror has thrown the widget away
 // and there is no score on screen at all.
 test("the bar stays in reach with its score scrolled out of the viewport", { skip }, async () => {
-  const h = await open({ text: FAR_SCORE_FIXTURE, scores: 1 });
+  // The follow seeded off, because with it on the reader cannot leave a
+  // sounding score behind at all: the page comes back to the head the frame
+  // after it is scrolled, so the widget is never thrown away and the case
+  // this reads does not arise. Reading past a playing score is what the
+  // toggle is for, and this is that reader.
+  const h = await open({
+    text: FAR_SCORE_FIXTURE,
+    scores: 1,
+    seed: { settings: { followMusic: "still" } },
+  });
   await clickToggle(h.page, 0);
   await h.page.waitForFunction(
     () => document.querySelector(".mdm-audio .abcjs-inline-audio"),

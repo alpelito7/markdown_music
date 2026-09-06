@@ -317,6 +317,56 @@
     btn.classList.toggle("mdm-btn--on", staffLines === "ink");
   }
 
+  // ---------- Following the music ----------
+
+  // Whether the page keeps up with a sounding tune: on, it keeps the staff
+  // system that is sounding whole on the pane (showPlayhead); off, the music
+  // never moves the page at all, so a score longer than the pane can sound
+  // while the document around it is read, which there was no way to ask for.
+  // On by default, which is what the page has always done.
+  //
+  // In the toolbar with the other things that are set once and left, and not
+  // in the player row: it says what this editor does with a tune rather than
+  // what this tune is doing, and it is worth setting before a player is open
+  // at all. Lit while the page is following, the convention of the staff-line
+  // and multicursor toggles rather than the theme button's (whose glyph names
+  // what the click leads to): this one has a state to show.
+  //
+  // The page and the head that walks it: three rules of text with the
+  // playhead standing across them, which is the one mark of this editor that
+  // means "here is the music". Rects and no strokes, since the toolbar
+  // stylesheet sets stroke-width 0; three rules and not four, so it is not
+  // the staff icon two buttons along.
+  const FOLLOW_ICON =
+    '<svg viewBox="0 0 16 16">' +
+    '<rect x="1.5" y="3" width="13" height="1.3" rx=".65"/>' +
+    '<rect x="1.5" y="7.35" width="13" height="1.3" rx=".65"/>' +
+    '<rect x="1.5" y="11.7" width="13" height="1.3" rx=".65"/>' +
+    '<rect x="9.9" y="1.3" width="1.5" height="13.4" rx=".75"/>' +
+    "</svg>";
+
+  let following = SETTINGS.followMusic !== "still";
+
+  function followTip() {
+    return following ? "Let the page be" : "Follow the music";
+  }
+
+  function updateFollowButton() {
+    const btn = document.querySelector('#app button[data-type="mdm-follow"]');
+    if (!btn) return;
+    btn.setAttribute("aria-label", followTip());
+    btn.classList.toggle("mdm-btn--on", following);
+  }
+
+  // The setting has come back from the host: the button follows it, and a tune
+  // already sounding is brought under the pane at once. Turning it on is a
+  // gesture asking to see the music, and a gesture is answered where it is
+  // made rather than at whatever the tune does next.
+  function applyFollowMusic() {
+    updateFollowButton();
+    if (following) revealPlayhead();
+  }
+
   // ---------- Score alignment button ----------
 
   // Where a score sits across the page. Centred by default, like display maths;
@@ -1585,22 +1635,46 @@
   // page can move as much as it likes without the track sliding out from
   // under the pointer holding it.
   //
-  // A tune sounding is the other (followMusic, called from the frame loop).
-  // The page turns the way a page turner does, at the crossing and not
-  // before: while the music walks along one staff system nothing moves, so a
-  // score that fits the pane is never scrolled at all and the reader has the
-  // page to themselves for the length of a line. Only the crossing turns it:
-  // the tune's own first system is taken as read, so a play press moves
-  // nothing and a reader who scrolls away while the sound primes keeps the
-  // page they went to. And a score scrolled clean out of CodeMirror's
-  // viewport leaves no engraving to read a system off, which is a reader who
-  // has left the score behind rather than one who has it under the fold: the
-  // music goes on sounding, and the page is picked up again when the score
-  // comes back within the pane's reach.
-  const REVEAL_MARGIN = 24; // how close to an edge counts as "not on screen"
+  // A tune sounding is the other (followMusic, called from the frame loop),
+  // and what it keeps true is one sentence: the staff system being played
+  // stays whole on the pane. Asked every frame and answered only when part of
+  // that band would leave it, so a score that fits the pane is never scrolled
+  // at all, and the page is still while a line of music is played, since the
+  // head does not go down the page inside a system.
+  //
+  // The band is the cursor's own box, top to bottom of the staff group
+  // (cursorPlace reads that reach off the event, so a duet's two staves are
+  // one band). A system showing whole is one the reader can follow, wherever
+  // on the pane it happens to sit, and asking for nothing beyond that is the
+  // point: the guard used to want 24px of room to spare at each edge as well,
+  // which took a system resting a dozen pixels off an edge, perfectly
+  // readable, and threw the page half a pane to centre it. The slack below is
+  // rounding on a fractional rect and nothing more.
+  //
+  // The other thing that changed with the toolbar toggle: the page used to
+  // move at the crossing from one system to the next and nowhere else, which
+  // left a reader who could not see the head a line of music to wait through.
+  // Reading past a playing score is what the toggle is for now, so with it on
+  // the follow can simply follow.
+  //
+  // A score scrolled clean out of CodeMirror's viewport leaves no engraving to
+  // read a place off, and is not followed: the music goes on sounding,
+  // reachable from the row in the toolbar, and is picked up again when the
+  // score comes back within the pane's reach. That branch is all but out of
+  // reach while following is on, since the page comes back the frame after it
+  // is scrolled and the reader never gets far enough for CodeMirror to throw
+  // the widget away. It is the shape of the code that is left; the case
+  // belongs to the toggle.
+  const REVEAL_SLACK = 1;
   let revealPending = false;
 
   function revealPlayhead() {
+    // The one gate, so the rule has no exceptions to remember: with the
+    // follow off the music never moves the page, a scrub of the progress bar
+    // included. A reader who turned it off asked for the document to stand
+    // still, and a head dragged across a tune they are not watching is no
+    // reason to take it from them.
+    if (!following) return;
     if (revealPending) return; // one move per frame, however fast the drag
     revealPending = true;
     requestAnimationFrame(function () {
@@ -1646,10 +1720,10 @@
     }
     const box = line.getBoundingClientRect();
     const pane = view.scrollDOM.getBoundingClientRect();
-    // Already on screen with room to spare: the page is left alone. This is
+    // The sounding system whole on the pane: the page is left alone. This is
     // what keeps a score that fits the pane from being scrolled at all, and a
     // scrub within one system from sliding the page under every move.
-    if (box.top >= pane.top + REVEAL_MARGIN && box.bottom <= pane.bottom - REVEAL_MARGIN) {
+    if (box.top >= pane.top - REVEAL_SLACK && box.bottom <= pane.bottom + REVEAL_SLACK) {
       return;
     }
     view.scrollDOM.scrollTop +=
@@ -1657,26 +1731,19 @@
   }
 
   // ---- Following a sounding tune ----
-  //
-  // The staff system the music was last seen on, as the top of its staff
-  // group in the units of the engraving the cursor is drawn on (cursorPlace
-  // reads it off the event, and every event of a system carries the same
-  // pair), so the two staves of a duet are one system and one crossing. Null
-  // for a tune that is not standing anywhere the pane can see.
-  let followedSystem = null;
 
-  // Called every frame with where the cursor stands, or with null when there
-  // is no engraving on screen to read a place off.
+  // Called every frame from the cursor loop with where the head stands, or
+  // with null when there is no engraving on screen to read a place off. What
+  // the place says no longer decides anything: showPlayhead measures the band
+  // for itself and does nothing while it shows whole, so all this has to do
+  // is ask, every frame the music is sounding and there is a score to ask
+  // about. The system the music was last seen on used to be kept here, since
+  // the page moved at the crossing and nowhere else; nothing reads it now.
   function followMusic(place) {
     // A hand on the progress bar is a seek, and a seek reveals itself from
-    // the drag handlers; what is left to do here is remember the system the
-    // hand is over, so that letting go does not read as a crossing.
-    if (cursorDrag !== null || !isSounding(player.bar)) {
-      // Paused, stopped, or held: the reader has the page.
-      followedSystem = place ? place.top : null;
-      return;
-    }
-    // No engraving to read a system off: the tune is still priming, or the
+    // the drag handlers. Paused or stopped, the reader has the page.
+    if (cursorDrag !== null || !isSounding(player.bar)) return;
+    // No engraving to read a place off: the tune is still priming, or the
     // reader has taken the page far enough away that CodeMirror keeps no
     // widget for the block. Neither is followed. The first is a wait of a
     // frame or two; the second is a reader who has left the score behind, and
@@ -1685,17 +1752,6 @@
     // reachable from the row in the toolbar, and the music is picked up again
     // when the score comes back within the pane's reach.
     if (!place) return;
-    if (followedSystem === null) {
-      // The system the music is first seen standing on. Taken as read and
-      // never revealed: a press of play is a gesture, and a gesture is
-      // answered where it is made, not a second later when the tune has
-      // finished priming, by which time the reader may have taken the page
-      // somewhere else. What this follows is the music moving.
-      followedSystem = place.top;
-      return;
-    }
-    if (place.top === followedSystem) return;
-    followedSystem = place.top;
     revealPlayhead();
   }
 
@@ -1774,7 +1830,6 @@
     if (cursorLoop) cancelAnimationFrame(cursorLoop);
     cursorLoop = 0;
     cursorDrag = null; // a drag cannot outlive the player it was made in
-    followedSystem = null; // nor can the system the music was last seen on
     document.querySelectorAll("#app .mdm-play-cursor").forEach(function (el) {
       if (el.parentNode) el.parentNode.removeChild(el);
     });
@@ -5187,6 +5242,14 @@
         },
       },
       {
+        name: "mdm-follow",
+        icon: FOLLOW_ICON,
+        tip: followTip(),
+        click: function () {
+          askSetting("followMusic", following ? "still" : "follow");
+        },
+      },
+      {
         name: "mdm-front-matter",
         icon: FM_ICON,
         tip: fmTip(),
@@ -5255,6 +5318,7 @@
     applyOutlineWidth();
     applyOutline();
     updateMatchButton();
+    updateFollowButton();
     watchOutlineRoom();
     watchTheme();
     applyTheme();
@@ -5296,6 +5360,7 @@
       outlineOpen = next.outline === "shown";
       outlineWidth = next.outlineWidth || 250;
       matchSubstring = next.multicursorMatch === "substring";
+      following = next.followMusic !== "still";
       // applyTheme repaints the toolbar and the score styling, whose colours
       // are picked from the effective theme. A theme chosen from the menu
       // also brings a palette message right behind this one, which repaints
@@ -5309,6 +5374,7 @@
       applyOutlineWidth();
       applyOutline();
       updateMatchButton();
+      applyFollowMusic();
       return;
     }
     if (msg.type === "palette") {

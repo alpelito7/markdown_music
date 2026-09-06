@@ -343,10 +343,18 @@ What it does:
   (CC BY-SA 3.0) are vendored, and the synthesis is the vendored abcjs. One
   player at a time. While a tune plays the notes light up on the engraving,
   every voice of a duet on its own staff, with a cursor that walks the score
-  and can be dragged to seek. The page follows the music the way a page turner
-  does, turning at the crossing from one staff system to the next and only
-  there, so a score that fits the pane is never scrolled and a pause hands the
-  page back. Resuming after a pause lands on the beat. What
+  and can be dragged to seek. The page keeps the staff system that is sounding
+  whole on the pane, and asks nothing more of it: a system showing top to
+  bottom is one the reader can follow, wherever on the pane it sits, so a
+  score that fits the pane is never scrolled, a play made with the score
+  already in front of the reader moves nothing, one made with it under the
+  fold brings the page to the head, the page is still while a line of music is
+  played (the head does not go down the page inside a system), a page taken
+  away from the music comes back at once, and a pause hands it back for good.
+  A toolbar toggle (`mdm.followMusic`) turns all of that off, and then the
+  music never moves the page at all, which is what it takes to leave a long
+  score sounding while the document around it is read.
+  Resuming after a pause lands on the beat. What
   is written is what sounds and nothing else: chord symbols in quotes
   (`"Dm7"`) are drawn but not synthesized. Only the piano is vendored, so a
   different `%%MIDI program` will not find its notes.

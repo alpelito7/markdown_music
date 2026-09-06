@@ -119,6 +119,16 @@
           ],
           "default": "word",
           "description": "What Ctrl+D (select next occurrence) matches. The toolbar toggle writes it."
+        },
+        "mdm.followMusic": {
+          "type": "string",
+          "enum": ["follow", "still"],
+          "enumDescriptions": [
+            "The page keeps up with the tune: it keeps the staff system that is sounding whole on screen, moving only when part of that band would leave it.",
+            "The page is the reader's: a tune plays on wherever it is and nothing scrolls, so a long score can sound while the document is read."
+          ],
+          "default": "follow",
+          "description": "Whether the page follows a sounding tune. The toolbar toggle writes it."
         }
       }
     },
