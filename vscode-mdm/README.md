@@ -16,7 +16,7 @@ equations, code, scores and player. Download it from the [raw file](https://raw.
 anywhere with the `.mdm` extension and open it in VS Code: it comes up
 in this editor.
 
-![An equation and a score rendered in the editor, dark side](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-dark.png)
+![An equation and a score rendered in the editor on the dark side, with the numbers of the source lines drawn in brass down the margin beside them](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-dark.png)
 
 ## How it edits
 
@@ -65,7 +65,7 @@ extension, so playback touches no network. A caret in the block opens its ABC
 above the engraving, and while a tune plays a brass cursor glides across the
 score and the notes light up under it as they sound, every voice of them:
 
-![A duet playing with its ABC source open above the engraving: the player bar across the top of the toolbar, under the row of buttons, with its pause button, its lit headphones and the played half of its progress in brass; below, the brass cursor standing across both staves, the two notes it has just reached lit in brass under it, one on each staff, and the lit headphones of the block that is sounding](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
+![A duet playing with its ABC source open above the engraving: the player bar across the top of the toolbar, under the row of buttons, with its pause button, its lit headphones and the played half of its progress in brass, and the lit follow toggle at the right of the button row; below, the brass cursor standing across both staves, the two notes it has just reached lit in brass under it, one on each staff, and the lit headphones of the block that is sounding](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
 
     ```{.abc .play}
     X:1
