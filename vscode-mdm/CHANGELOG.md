@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.5.1
+
+- Every glyph of the chrome is drawn in brass: a button of the toolbar, the
+  copy and the headphones in the corner of a block, the whole transport of the
+  player row. One colour for everything that can be pressed, at rest and under
+  the pointer alike, so a control reads as a control before it is read at all,
+  and what a control is doing is said by the ground under it: the light wash
+  under whatever is pointed at, the state weight under what is held or
+  sounding. Hover no longer brightens a glyph and a held state no longer
+  repaints one, since the ground has already said both. It is not the accent
+  itself, which reads loud on a near-white page and yellow on a dark one, but
+  that accent with two fifths of its chroma taken out at the same lightness,
+  which leaves the accent to mean what it means. The numbers in the margin are
+  the part of the chrome nobody presses, so they take an ink of their own, the
+  same idea carried to the 4.5:1 that governs text at 11px with a third of its
+  chroma out again: grey enough to read as furniture, and still the amber the
+  rest of the chrome is written in. Neither colour is written by the theme, so
+  a palette cannot take the chrome with it. The copy in the corner of a block
+  is drawn a little larger, since two thin rectangles carry less ink than the
+  solid band of the headphones beside it at the same box, and the headphones
+  in the player row are drawn at the size of the pair on the block they echo.
+  The player's glyphs are filled and no longer stroked: every shape abcjs
+  draws there is a filled one, so the stroke added half its width all the way
+  round the outline and made the transport read heavier than the row above it.
+  The exported page is drawn the same way.
+- The first three entries of the theme menu are MDM Light, MDM Dark and MDM
+  White, and they are the editor's own looks. What sits under them is the list
+  of colour themes installed in VS Code, by their own names, so "Dark" read as
+  one of those rather than as this editor's dark. They are painted as their
+  names say now: a palette read off the VS Code theme was still spent on them
+  whenever that theme happened to sit on the same side, which made MDM Dark
+  under Monokai a different editor from MDM Dark under Tomorrow Night, and
+  picking one of the three takes the palettes the extension bakes in, whatever
+  VS Code is wearing. Follow VS Code and the named themes under it are the
+  entries that bring colours from outside. The ground of the dark one is no
+  longer Monokai's either: its syntax colours are Monokai's own, taken from
+  the theme VS Code ships, but its #272822 is a warm olive, and MDM Dark
+  stands on the editor.background of Dark 2026, #121314, which is what the
+  text editor beside it stands on. The setting is unchanged, so a
+  `"mdm.theme": "dark"` already written down still means what it meant. They
+  select in a colour of their own as well, the brass of the accent at a
+  quarter strength on the light side and a third on the dark one, half that
+  out of focus: a theme's selection belongs to that theme's side, and MDM
+  Light inside Dark Modern selected in Dark Modern's blue on paper.
+- A selected letter keeps its contrast, whatever colour it is taken in. The
+  selection layer is drawn above the text, since a card is opaque and a
+  selection behind one is hidden under it, and laid over the words it counted
+  on the theme's selection colour being translucent, which VS Code's own
+  themes do not give it (#add6ff in Light Modern, #264f78 in Dark Modern).
+  Every letter a selection took came out as a solid box, the four notes
+  Ctrl+D picks in a tune among them. The layer is blended into what is under
+  it instead, multiply on a light page and screen on a dark one, which tints
+  the ground and leaves each letter readable whatever the alpha.
+- A dark block of code sits on the material the outline panel is drawn in
+  instead of in a hole. The card took `editor.background` itself on that side,
+  the colour VS Code paints behind the same code, which put it a step darker
+  than the page the way a notebook draws its cells; under a theme that draws
+  its editor near black there is nothing under that to be darker than, and the
+  block read as a hole at the bottom of the page. It is the ink carried 4%
+  over the page now, the mix the outline panel is already drawn with, so the
+  code sits a step lighter than the prose on the dark side and a step darker
+  on the light one: the step is made of ink, and the ink changes ends.
+- The word that names the language of a fence is drawn in the brass of the
+  notes, on every fence and not only on the score fences. It is the one thing
+  on that line that says what the block is, and it took the theme's name
+  colour, which said as much about it as the grey of the backticks around it
+  did.
+
 ## 0.5.0
 
 - The player opens in the toolbar, as a row of its own under the buttons,

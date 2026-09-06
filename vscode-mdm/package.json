@@ -2,7 +2,7 @@
   "name": "mdm-editor",
   "displayName": "Markdown Music",
   "description": "Editor for .mdm files: Markdown, equations and music scores in one rendered, editable document.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "alpelito7",
   "license": "MIT",
   "icon": "media/icon.png",
