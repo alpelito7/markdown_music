@@ -279,7 +279,20 @@ body {
      inset for every kind of line with padding and a digit count from main.js. */
   line-height: 1lh;
   font-variant-numeric: tabular-nums;
-  color: color-mix(in srgb, var(--mdm-ink) 65%, transparent);
+  /* Brass, so a number says it belongs to the chrome and not to the
+     document, since the margin is the one place where the two meet. Its own
+     brass, though, and not the one the buttons are drawn in: the numbers are
+     the part of the chrome nobody presses, and they sit a step behind the
+     glyphs a row above them, 4.51:1 against 5.01:1 on the light page and
+     6.04:1 against 7.54:1 on the dark, greyer than those glyphs as well. On
+     the light side that is as far back as they go, since they are text at
+     11px and 4.5:1 is a floor rather than a preference; the dark pair was
+     derived against the same floor on the ground the fallback used to have
+     (#34342e, Monokai's) and stands clear of it on the one it has now. Fixed
+     values either way: what a live theme brings as a ground is anybody's
+     guess, so neither is tuned to one. The 65% ink they used to be drawn in
+     stood at 4.50 and 5.42, the same weight in a colder colour. */
+  color: var(--mdm-line-ink);
   /* An absolute box placed by its right edge against the left edge of the
      line has no room to its right to be laid out in, so a two-digit number
      was broken over two rows. Held on one line it takes the width it needs
@@ -364,6 +377,13 @@ body {
   margin: 0 4px;
   background: color-mix(in srgb, var(--mdm-ink) 18%, transparent);
 }
+/* Every glyph of the chrome is brass, at rest and under the pointer alike:
+   the buttons of this bar, the round pair on a block, the transport of the
+   player row. One colour says "this is a control", and the ground under it
+   says what the control is doing. The chrome ink and not the accent, which
+   is left to what is held or sounding: measured against the grounds these
+   are drawn on, 5.01:1 on the bare toolbar of the light side and 3.89:1 on
+   the 22% disc a held state puts under it, 7.54:1 and 4.84:1 on the dark. */
 #app .mdm-btn {
   display: flex;
   align-items: center;
@@ -374,15 +394,15 @@ body {
   border: none;
   border-radius: 4px;
   background: none;
-  color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
+  color: var(--mdm-chrome-ink);
   cursor: pointer;
 }
 /* Hover is the light brass wash everywhere a button is pointed at, the same
-   first step of the ladder the player bar climbs; the glyph brightens to
-   full ink, and only a held state writes its glyph in brass. */
+   first step of the ladder the player bar climbs. The wash alone: the glyph
+   is already brass, and a colour that moved under the pointer would say
+   something the ground has said. */
 #app .mdm-btn:hover {
   background: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
-  color: var(--mdm-ink);
 }
 #app .mdm-btn:focus {
   outline: none;
@@ -392,12 +412,11 @@ body {
 }
 /* A button that holds a state (ink staff lines, header shown) sits on a
    disc, the way the repeat button of the player does, and the disc is
-   brass: held state is what the accent means in this editor (hover stays
-   ink, since pointing is not state). The glyph goes to the ink form of the
-   accent, measured at 3.9:1 on its disc over the light page. */
+   brass at the state weight, one step past the hover wash. That disc is the
+   whole of the mark: the glyph does not change, since it never left the
+   brass. */
 #app .mdm-btn--on {
   background: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
-  color: var(--mdm-play-accent-ink);
 }
 /* Nothing to do: undo with no history, the header button of a file without
    one. */
@@ -842,6 +861,10 @@ body {
   opacity: 0;
   transition: opacity 0.12s ease;
 }
+/* The chrome ink, the colour every button of the editor is drawn in
+   (.mdm-btn above), and one declaration for both sides: the token carries a
+   light and a dark form, which is what the pair of slate greys written here
+   used to do by hand. */
 #app .mdm-chrome .mdm-copy,
 #app .mdm-chrome .mdm-audio-toggle {
   position: absolute;
@@ -852,7 +875,7 @@ body {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  color: #586069;
+  color: var(--mdm-chrome-ink);
   cursor: pointer;
 }
 #app .mdm-chrome .mdm-copy {
@@ -861,9 +884,12 @@ body {
 #app .mdm-chrome .mdm-audio-toggle {
   right: 34px;
 }
+/* 17px against the headphones' 18: the two shapes carry different amounts of
+   ink at the same box, the headphones a solid band and the copy two thin
+   rectangles, so a copy drawn at the toolbar's 15 read small beside it. */
 #app .mdm-chrome svg {
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
   display: block;
   fill: currentColor;
 }
@@ -872,24 +898,17 @@ body {
   height: 18px;
 }
 /* The same light brass wash every hovered button wears, toolbar and player
-   bar alike. */
+   bar alike, and nothing else: the glyph is brass at rest. */
 #app .mdm-chrome .mdm-copy:hover,
 #app .mdm-chrome .mdm-audio-toggle:hover {
-  color: var(--mdm-ink);
   background-color: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
-}
-#app.mdm--dark .mdm-chrome .mdm-copy,
-#app.mdm--dark .mdm-chrome .mdm-audio-toggle {
-  color: #9aa2aa;
 }
 /* The lit disc under the headphones while this block's player is open: an
    open player is a held state, so the disc is the brass of the repeat and
-   the active toolbar toggle, and the glyph goes with it. Stated after the
-   hover rules above and at the same specificity, so the open colours hold
-   under the pointer too. */
+   the active toolbar toggle. Stated after the hover rule above and at the
+   same specificity, so the open ground holds under the pointer too. */
 #app .mdm-score[data-mdm-audio] .mdm-audio-toggle {
   background-color: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
-  color: var(--mdm-play-accent-ink);
 }
 
 /* ---------- Scores ---------- */
@@ -951,14 +970,40 @@ body {
    chrome marks as held or sounding is drawn from this pair: the active
    toolbar toggle, the repeat state, the played half of the progress and its
    head, the open-player disc, the current outline section, the caret.
-   applyPalette() never writes either, so they hold under any theme. */
+   applyPalette() never writes either, so they hold under any theme.
+
+   The chrome and the margin draw from inks of their own, both of them brass
+   and neither of them the accent. A glyph written in the accent itself reads
+   loud on a near-white page and yellow on a dark one, so the chrome ink is
+   that accent with two fifths of its chroma taken out at the same lightness:
+   the controls stop shouting without going dark, and the accent is left to
+   mean what it means, held or sounding. The margin ink is the same idea
+   carried further, since the numbers are the one part of the chrome nobody
+   presses: back to the 4.5:1 that governs text at 11px, and a third of its
+   chroma out again on top of that, which is what leaves it grey enough to
+   read as furniture while it keeps the amber the chrome is written in.
+
+   Measured against the page each is drawn on (the fallback palettes, #f2f2f2
+   light and #202121 dark): the glyph 5.01:1 and 7.54:1, and 3.89:1 and
+   4.84:1 on the 22% disc a held state puts under it; the number 4.51:1 and
+   6.04:1, at a chroma of 0.076 and 0.045 against the glyph's 0.065 and 0.072
+   and the accent's 0.108 and 0.121 (OKLCH). On the light side that last
+   third costs 0.002 of lightness to stay over the floor, which is why the
+   value is not simply the glyph lightened. The four were chosen against a
+   dark ground of #34342e, which is what the fallback carried before it took
+   Dark 2026's; on the darker one they read stronger, the numbers most of all.
+   applyPalette() writes neither of these two either. */
 #app {
   --mdm-play-accent: #a0740f;
   --mdm-play-accent-ink: #8a5f00;
+  --mdm-chrome-ink: #7d643c;
+  --mdm-line-ink: #866b39;
 }
 #app.mdm--dark {
   --mdm-play-accent: #d9a94f;
   --mdm-play-accent-ink: #d9a94f;
+  --mdm-chrome-ink: #caad7d;
+  --mdm-line-ink: #ad9c7f;
 }
 #app code.language-abc svg .abcjs-note_selected,
 #app code.language-abc svg .abcjs-note_selected *,
@@ -1148,25 +1193,27 @@ body {
    icons on a #424242 slab, chunky square buttons, a 10px progress trough
    with a 2px outline and a 20px lozenge riding it. Everything below redraws
    it in the terms of this editor. Two colours carry the whole thing: the ink
-   of the editor's chrome, mixed down for the quiet parts, and one accent, the
-   same brass the notes light up in while they sound. Nothing takes a syntax
-   colour: those change hue from theme to theme, and under a dark one the
-   buttons came out red on hover. */
+   of the editor's chrome, mixed down for the quiet parts it draws (the
+   hairline of a track, the clock), and one accent, the same brass the notes
+   light up in while they sound, which draws everything that can be pressed.
+   Nothing takes a syntax colour: those change hue from theme to theme, and
+   under a dark one the buttons came out red on hover. */
 #app .mdm-audio {
-  /* The quiet bar is drawn in the ink of the editor: the hairline of a
-     track, the glyphs, the clock. --mdm-ink and not --mdm-syn-base, which is
-     what it used to be: the ink of the code palette was right for a bar
-     among code, and it is wrong for one sitting a pixel under the toolbar's
-     own buttons, which are --mdm-ink. The two are close on the light side
-     and not on the dark, where a Monokai foreground (#f8f8f2) put the
-     player's glyphs brighter than the buttons above them, and where a theme
-     of the user's own would drift in hue as well.
+  /* What is not a control is drawn in the ink of the editor: the hairline of
+     a track, the clock. --mdm-ink and not --mdm-syn-base, which is what it
+     used to be: the ink of the code palette was right for a bar among code,
+     and it is wrong for one sitting a pixel under the toolbar's own buttons.
+     The two are close on the light side and not on the dark, where a Monokai
+     foreground (#f8f8f2) put the player's quiet parts brighter than the
+     chrome above them, and where a theme of the user's own would drift in
+     hue as well.
 
-     The brass is the language of use, on a ladder of two weights: a light
-     wash (12%) under whatever is being pointed at, and the state weight
-     (22%) for what is held or sounding, with the glyph gone to the deep
-     brass on that disc alone: repeat while it loops, play while the tune
-     sounds, a button under the press. What is set rather than held, the
+     The brass is the language of use. Every glyph is drawn in it, so a
+     control is a control before it is read; what the control is doing is
+     said by the ground under it, on a ladder of two weights: a light wash
+     (12%) under whatever is being pointed at, and the state weight (22%) for
+     what is held or sounding, which is repeat while it loops, play while the
+     tune sounds, a button under the press. What is set rather than held, the
      played half of the progress and the volume, wears -hot, the deep form of
      the brass, one colour for fill and head alike on both sliders. */
   --mdm-audio-track: color-mix(in srgb, var(--mdm-ink) 18%, transparent);
@@ -1241,17 +1288,29 @@ body {
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
-/* 72%, the weight the toolbar's own buttons are drawn at (.mdm-btn), so a
-   glyph of the player and a glyph of the bar above it are the same ink. */
+/* The chrome ink, the colour the toolbar's own buttons are drawn in
+   (.mdm-btn), so a glyph of the player and a glyph of the bar above it are
+   the same mark.
+   The ID in the selector is what carries this past the vendored abcjs sheet,
+   which paints these glyphs #f4f4f4 for the dark slab it ships with and
+   #cccccc under the pointer.
+
+   Fill and no stroke, where that sheet sets both. Every shape abcjs draws
+   here is a filled one (rect, polygon, path), so the stroke added nothing but
+   half its width all the way round the outline, and at these sizes that is
+   what made the transport read heavier than the buttons a row above it: the
+   toolbar's own icons are filled and nothing else. The spinner abcjs shows
+   while a tune loads is the one stroked shape it has, and it is not inside a
+   <g>, so it keeps the stroke its own sheet gives it. */
 #app .mdm-audio .abcjs-btn g {
-  fill: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
-  stroke: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
+  fill: var(--mdm-chrome-ink);
+  stroke: none;
 }
-/* Hover brightens the ink and lays the light brass wash under it, the first
-   step of the ladder; the glyph stays ink, so only a held state writes its
-   glyph in brass. Never a syntax colour: this used to take the keyword
-   colour of the theme, which is Monokai's pink on the dark side, and the
-   buttons read as an error state. */
+/* Hover lays the light brass wash under the glyph, the first step of the
+   ladder, and does nothing to the glyph itself: the ground is what answers
+   the pointer, here and everywhere else in this editor. Never a syntax
+   colour: this used to take the keyword colour of the theme, which is
+   Monokai's pink on the dark side, and the buttons read as an error state. */
 /* !important, and not for the usual bad reason: abcjs declares
    `background: none !important` on every one of its buttons, so a plain
    declaration here never painted. That is what made the repeat button look
@@ -1278,32 +1337,21 @@ body {
   background-color: var(--mdm-audio-disc) !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-ink) 30%, transparent);
 }
-#app .mdm-audio .abcjs-inline-audio .abcjs-btn:hover g {
-  fill: var(--mdm-ink);
-  stroke: var(--mdm-ink);
-}
-/* The two buttons that hold a state take the accent: repeat while it loops,
-   and play while the tune sounds (abcjs marks both with abcjs-pushed, the
-   play through its pushPlay). Each sits lit on the brass disc with its
-   glyph gone to the deep brass. */
+/* The two buttons that hold a state take the lit disc: repeat while it
+   loops, and play while the tune sounds (abcjs marks both with
+   abcjs-pushed, the play through its pushPlay). The disc is the whole of
+   the state; the glyph was already brass and stays where it was. */
 #app .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed,
 #app .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed {
   border: none;
   background-color: var(--mdm-audio-disc-on) !important;
 }
-#app .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed g,
-#app .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed:hover g,
-#app .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed g,
-#app .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed:hover g {
-  fill: var(--mdm-play-accent-ink);
-  stroke: var(--mdm-play-accent-ink);
-}
 /* The headphones that put the player away, the bar's copy of the toggle in
    the corner of the score. It is the only button here that is lit at rest,
    and it has to be: the lit disc is what says the player is open, which is
    the same thing this drawing says on the block. So it wears the state
-   weight of the ladder from the start, glyph in the deep brass, exactly as a
-   pushed play or a running repeat does.
+   weight of the ladder from the start, exactly as a pushed play or a running
+   repeat does.
 
    That costs it the step the other buttons answer a pointer with, since it
    is already standing on it, and a button that cannot answer being pointed
@@ -1320,10 +1368,17 @@ body {
 #app .mdm-audio .abcjs-inline-audio .mdm-audio-close:active {
   background-color: color-mix(in srgb, var(--mdm-play-accent) 40%, transparent) !important;
 }
-#app .mdm-audio .abcjs-inline-audio .mdm-audio-close g,
-#app .mdm-audio .abcjs-inline-audio .mdm-audio-close:hover g {
-  fill: var(--mdm-play-accent-ink);
-  stroke: var(--mdm-play-accent-ink);
+/* Drawn at exactly the size the pair in the corner of a score is drawn at,
+   which is what it is a copy of: the same shapes (HEADPHONES_SHAPES in
+   main.js), the same 18px, on the same 24px disc. abcjs pads its own buttons
+   by 5px, which would leave this one at 14 and reading thinner than the
+   headphones it echoes; 3px is what 18 needs inside 24. */
+#app .mdm-audio .abcjs-inline-audio .mdm-audio-close {
+  padding: 3px;
+}
+#app .mdm-audio .abcjs-inline-audio .mdm-audio-close svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* A hairline track with a round head, in place of the outlined trough. */

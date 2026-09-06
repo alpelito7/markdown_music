@@ -2926,7 +2926,7 @@ test("the speaker silences the score, and the level it was set to survives", { s
   await h.close();
 });
 
-test("the repeat state is drawn in the brass of the accent, disc and glyph together", { skip }, async () => {
+test("the repeat state is drawn as the disc alone, in the brass of the accent", { skip }, async () => {
   const h = await open({});
   await clickToggle(h.page, 2);
   await h.page.waitForFunction(
@@ -2949,12 +2949,13 @@ test("the repeat state is drawn in the brass of the accent, disc and glyph toget
       const out = {
         ink: resolve("--mdm-syn-base"),
         // The brass the score marks the sounding note with, and its deep
-        // form. Held state is the one thing of the bar drawn in it: the
-        // repeat sits on the accent disc with its glyph in the accent ink,
-        // while everything idle or merely pointed at stays in the ink of
-        // the editor.
+        // form. Held state is the one thing of the bar drawn in it, and it
+        // is drawn as the GROUND: the repeat sits on the accent disc while
+        // its glyph stays where it was, in the chrome ink every control of
+        // the editor is written in.
         accent: resolve("--mdm-play-accent"),
         accentInk: resolve("--mdm-play-accent-ink"),
+        chromeInk: resolve("--mdm-chrome-ink"),
         glyph: getComputedStyle(loop.querySelector("g")).fill,
         disc: getComputedStyle(loop).backgroundColor,
       };
@@ -2970,7 +2971,12 @@ test("the repeat state is drawn in the brass of the accent, disc and glyph toget
   const on = await read();
   assert.notEqual(on.disc, "rgba(0, 0, 0, 0)", "the repeat state is not drawn");
   assert.notEqual(on.disc, off.disc);
-  assert.equal(on.glyph, on.accentInk, "the held glyph is not the accent ink");
+  assert.equal(
+    on.glyph,
+    off.glyph,
+    "the held glyph changed colour: the state is meant to be the disc alone"
+  );
+  assert.equal(on.glyph, on.chromeInk, "the glyph is not the chrome ink: " + on.glyph);
   assert.notEqual(on.glyph, on.ink);
   // The disc is the accent at some weight, never the ink or a syntax colour:
   // it is a mix of the accent with transparency, so its channels are the

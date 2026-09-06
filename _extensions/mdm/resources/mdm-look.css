@@ -298,15 +298,17 @@ body code span.al,
 body code span.wa {
   color: var(--mdm-error);
 }
-/* Quarto's copy button, in the terms of the editor's own block chrome:
-   quiet, and lit under the pointer. */
+/* Quarto's copy button, in the terms of the editor's own block chrome: drawn
+   in brass, like everything that can be pressed, with the light brass wash
+   under the pointer and no change of colour, since the ground is what answers
+   being pointed at. */
 body .code-copy-button {
-  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  color: var(--mdm-play-accent-ink);
   background: none;
   border: none;
 }
 body .code-copy-button:hover {
-  color: var(--mdm-ink);
+  background: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
 }
 
 /* ---------- Scores ---------- */
@@ -369,16 +371,17 @@ body .code-copy-button:hover {
    into the toolbar and drew it flush, and that half of media/style.css is
    deliberately not mirrored here. */
 body .mdm-audio {
-  /* The quiet bar is drawn in the ink of the document: the hairline of a
-     track, the glyphs, the clock. The brass is the language of use, on a
-     ladder of two weights: a light wash (12%) under whatever is being pointed
-     at, and the state weight (22%) for what is held or sounding, with the
-     glyph gone to the deep brass on that disc alone. What is set rather than
-     held, the played half of the progress and the volume, wears -hot, the
-     deep form of the brass, one colour for fill and head alike. The editor's
-     bar control for control (media/style.css); the editor keys its own to
-     --mdm-ink now that the bar lives in its toolbar, while a page has only
-     the one ink and keeps the code palette's. */
+  /* What is not a control is drawn in the ink of the document: the hairline
+     of a track, the clock. The brass is the language of use: every glyph is
+     drawn in it, and the ground under it says what the control is doing, on
+     a ladder of two weights, a light wash (12%) under whatever is being
+     pointed at and the state weight (22%) for what is held or sounding. What
+     is set rather than held, the played half of the progress and the volume,
+     wears -hot, the deep form of the brass, one colour for fill and head
+     alike. The editor's bar control for control (media/style.css); the
+     editor keys its own ink to --mdm-ink now that the bar lives in its
+     toolbar, while a page has only the one ink and keeps the code
+     palette's. */
   --mdm-audio-track: color-mix(in srgb, var(--mdm-syn-base) 18%, transparent);
   --mdm-audio-disc: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
   --mdm-audio-disc-on: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
@@ -416,9 +419,18 @@ body .mdm-audio .abcjs-inline-audio .abcjs-btn {
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
-body .mdm-audio .abcjs-btn g {
-  fill: color-mix(in srgb, var(--mdm-syn-base) 78%, transparent);
-  stroke: color-mix(in srgb, var(--mdm-syn-base) 78%, transparent);
+/* Every glyph of the transport is brass, at rest and under the pointer
+   alike, the way the editor draws the same bar (media/style.css): one colour
+   says "this is a control", and the ground under it says what the control is
+   doing. The hover selector is carried here rather than left to the base
+   rule because the vendored abcjs sheet claims it at a higher specificity
+   (.abcjs-inline-audio .abcjs-btn:hover g, which paints #cccccc for the dark
+   slab it ships with); the editor's copy needs no such twin, since its
+   selectors are under #app and outrank the vendor on the ID alone. */
+body .mdm-audio .abcjs-btn g,
+body .mdm-audio .abcjs-inline-audio .abcjs-btn:hover g {
+  fill: var(--mdm-play-accent-ink);
+  stroke: var(--mdm-play-accent-ink);
 }
 /* !important, and not for the usual bad reason: abcjs declares
    `background: none !important` on every one of its buttons, so a plain
@@ -437,26 +449,14 @@ body .mdm-audio .abcjs-inline-audio .abcjs-btn:focus-visible {
   background-color: var(--mdm-audio-disc) !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-syn-base) 30%, transparent);
 }
-body .mdm-audio .abcjs-inline-audio .abcjs-btn:hover g {
-  fill: var(--mdm-syn-base);
-  stroke: var(--mdm-syn-base);
-}
 /* The two buttons that hold a state take the lit disc: repeat while it loops,
    and play while the tune sounds (abcjs marks both with abcjs-pushed, the
-   play through its pushPlay). Each sits on the brass disc with its glyph gone
-   to the deep brass; a hovered button keeps its glyph in ink, so only a held
-   state writes its glyph in brass. */
+   play through its pushPlay). The disc is the whole of the state; the glyph
+   was already brass and stays where it was. */
 body .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed,
 body .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed {
   border: none;
   background-color: var(--mdm-audio-disc-on) !important;
-}
-body .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed g,
-body .mdm-audio .abcjs-inline-audio .abcjs-midi-loop.abcjs-pushed:hover g,
-body .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed g,
-body .mdm-audio .abcjs-inline-audio .abcjs-midi-start.abcjs-pushed:hover g {
-  fill: var(--mdm-play-accent-ink);
-  stroke: var(--mdm-play-accent-ink);
 }
 /* A hairline track with a round head, in place of the outlined trough. The
    part already played is filled in: --mdm-progress is written by the same

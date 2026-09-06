@@ -2186,3 +2186,137 @@ test("with the header hidden the numbers are the file's lines, not the editor's"
   assert.deepEqual(shown.errors, []);
   await shown.close();
 });
+
+// One colour for everything that can be pressed. Every glyph of the chrome is
+// drawn in --mdm-chrome-ink, at rest and under the pointer alike, so a control
+// reads as a control before it is read at all, and what a control is doing is
+// said by the ground under it: the light wash under a pointer, the state
+// weight under a held toggle. The numbers in the margin are chrome too, but
+// they are the part of it nobody presses, so they take an ink of their own
+// (--mdm-line-ink) that stands a step behind the glyphs. Neither of the two is
+// --mdm-play-accent-ink, which is left to what is held or sounding: the disc,
+// the played half of the progress, the caret, the outline rail and the cursor
+// that walks a score. What this pins is that no part of the chrome is left in
+// ink, that the margin is not drawn in the glyph colour, and that no rule
+// paints a glyph a second colour on the way: the vendored abcjs sheet claims
+// the player's glyphs (#f4f4f4, #cccccc under the pointer) at a specificity
+// the editor's own rules have to outrank, and the two round buttons on a block
+// used to carry a pair of hard-coded slate greys, one per side.
+async function chromeColours(page) {
+  return page.evaluate(() => {
+    const root = document.getElementById("app");
+    // The custom properties turned into the rgb() computed styles are read in.
+    const token = (name) => {
+      const probe = document.createElement("span");
+      root.appendChild(probe);
+      probe.style.color = getComputedStyle(root).getPropertyValue(name);
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    };
+    const fill = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? getComputedStyle(el).fill : null;
+    };
+    const colour = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? getComputedStyle(el).color : null;
+    };
+    const line = document.querySelector("#app .cm-content [data-mdm-line]");
+    return {
+      chrome: token("--mdm-chrome-ink"),
+      margin: token("--mdm-line-ink"),
+      accent: token("--mdm-play-accent-ink"),
+      ink: getComputedStyle(root).getPropertyValue("--mdm-ink").trim(),
+      glyphs: {
+        toolbar: colour("#app .mdm-toolbar .mdm-btn"),
+        copy: colour("#app .mdm-chrome .mdm-copy"),
+        headphones: colour("#app .mdm-chrome .mdm-audio-toggle"),
+        play: fill(".mdm-audio .abcjs-midi-start g"),
+        hoveredPlay: fill(".mdm-audio .abcjs-midi-start:hover g"),
+        repeat: fill(".mdm-audio .abcjs-midi-loop g"),
+        close: fill(".mdm-audio .mdm-audio-close g"),
+      },
+      number: line ? getComputedStyle(line, "::before").color : null,
+      // What the two held states are standing on, to tell a ground that
+      // changes from a glyph that does not.
+      grounds: {
+        repeat: getComputedStyle(
+          document.querySelector(".mdm-audio .abcjs-midi-loop")
+        ).backgroundColor,
+        headphones: getComputedStyle(
+          document.querySelector("#app .mdm-chrome .mdm-audio-toggle")
+        ).backgroundColor,
+      },
+    };
+  });
+}
+
+for (const side of ["light", "dark"]) {
+  test("every button of the chrome is the chrome ink on the " + side + " side, and the margin its own", { skip }, async () => {
+    const h = await open({ seed: { settings: { theme: side } } });
+    // A player open, so the transport is there to read, and the pointer on
+    // its play button, which is where the vendored sheet would come in.
+    await h.page.evaluate(() => {
+      document
+        .querySelectorAll("#app .mdm-score")[0]
+        .querySelector(".mdm-audio-toggle")
+        .click();
+    });
+    await h.page.waitForFunction(
+      () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
+      { timeout: 20000 }
+    );
+    const aim = await h.page.evaluate(() => {
+      const r = document
+        .querySelector(".mdm-audio .abcjs-midi-start")
+        .getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    });
+    await h.page.mouse.move(aim.x, aim.y);
+    await sleep(250);
+    const seen = await chromeColours(h.page);
+    assert.notEqual(seen.chrome, "", "the chrome ink resolves to nothing");
+    for (const [name, colour] of Object.entries(seen.glyphs)) {
+      assert.ok(colour, "there is no " + name + " to read");
+      assert.equal(
+        colour,
+        seen.chrome,
+        "the " + name + " glyph is not the chrome ink: " + colour
+      );
+    }
+    // The margin stands a step behind the glyphs, in an ink of its own, and
+    // neither of the two is the accent that marks what is held or sounding.
+    assert.ok(seen.number, "there is no number in the margin to read");
+    assert.equal(seen.number, seen.margin, "the number is not the margin ink: " + seen.number);
+    assert.notEqual(seen.number, seen.chrome, "the number is drawn in the glyph colour");
+    assert.notEqual(seen.chrome, seen.accent, "the glyphs are drawn in the accent itself");
+    // The block's headphones are lit while its player is open, and the repeat
+    // is not running: two different grounds under two identical glyphs, which
+    // is the whole of the rule.
+    assert.notEqual(
+      seen.grounds.headphones,
+      seen.grounds.repeat,
+      "the held state is not drawn as a ground at all"
+    );
+    assert.equal(seen.grounds.repeat, "rgba(0, 0, 0, 0)", "an idle button carries a disc");
+    // Repeat turned on: the ground takes the state, the glyph does not move.
+    await h.page.evaluate(() =>
+      document.querySelector(".mdm-audio .abcjs-midi-loop").click()
+    );
+    await sleep(250);
+    const looping = await chromeColours(h.page);
+    assert.notEqual(
+      looping.grounds.repeat,
+      seen.grounds.repeat,
+      "repeat turned on and its ground did not change"
+    );
+    assert.equal(
+      looping.glyphs.repeat,
+      seen.glyphs.repeat,
+      "the held glyph changed colour: the state is meant to be the ground alone"
+    );
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  });
+}
