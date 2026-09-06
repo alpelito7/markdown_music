@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.5.2
+
+- The caret keeps its place in its line while the outline panel opens and
+  shuts. The panel is a flex sibling of the text, so opening it, closing it or
+  dragging its sash moves the whole column sideways without touching a line of
+  the document, and CodeMirror draws the caret as a box of its own placed from
+  coordinates it measured against the geometry that was there before. For four
+  painted frames after the panel moved, the caret stood where the column used
+  to be, which coming back from an open panel is 93px left of its line, out in
+  the dead margin past the number. The measure is asked for where the width is
+  written now, and spent in the same frame, so the wrong position is never
+  painted at all.
+- A toolbar toggle says whether the page follows a sounding tune. A score can
+  be longer than the pane and worth listening to while the document around it
+  is read, and there was no way to ask for that: the page went with the music
+  and that was the whole of it. On by default, so nothing changes for a reader
+  who never touches it; off, the music never moves the page, not when the
+  sounding system leaves it, not at a play made with the score under the fold,
+  and not at a scrub of the progress bar. It sits with the other things that
+  are set once and left, after the alignment toggle, since it says what the
+  editor does with a tune rather than what this tune is doing, and it is worth
+  setting before a player is open at all. Turning it back on brings a sounding
+  tune under the pane at once. The setting is `mdm.followMusic`.
+- The page moves only when the staff system that is sounding would leave it.
+  Two things used to keep a reader waiting for a page they could not read. The
+  first was that the page turned at the crossing from one system to the next
+  and nowhere else, so a reader who could not see the head had a line of music
+  to wait through; that rule was paying for the one case it protected, and the
+  toggle pays for it now, so the follow is asked every frame instead. The
+  second was the guard that decides whether the page is already where it
+  should be, which wanted the head clear of both edges by 24px and so took a
+  system resting a dozen pixels off an edge, whole on the pane and perfectly
+  readable, and threw the page half a pane to centre it. What it asks now is
+  that the band the cursor stands in, the reach of the whole staff group,
+  shows top to bottom: a system showing whole is one the reader can follow,
+  wherever on the pane it happens to sit. A score that fits the pane is still
+  never scrolled, the page is still while a line of music is played, since the
+  head does not go down the page inside a system, and a pause hands the page
+  back for good.
+
 ## 0.5.1
 
 - Every glyph of the chrome is drawn in brass: a button of the toolbar, the
