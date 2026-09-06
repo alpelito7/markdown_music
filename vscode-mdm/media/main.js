@@ -4891,6 +4891,20 @@
     });
   }
 
+  // The panel is a flex sibling of the text, so opening it, closing it or
+  // dragging its sash moves the whole column sideways without touching a line
+  // of the document. CodeMirror draws the caret and the selection as boxes of
+  // its own, placed from coordinates measured against the geometry that was
+  // there before, and it does not measure again until its resize observer
+  // notices: five frames, measured on a caret held at the head of a heading.
+  // For those five the caret stands where the column used to be, which coming
+  // back from an open panel is out in the dead margin, 93px left of the line
+  // and well left of its number. Asking for the measure here spends it in the
+  // frame the width is written in.
+  function remeasureText() {
+    if (view) view.requestMeasure();
+  }
+
   // The panel drawn from the setting in force: the class that shows it, the
   // lit button, and the list, which is only filled while it is open.
   function applyOutline() {
@@ -4899,6 +4913,7 @@
     const btn = document.querySelector('#app button[data-type="outline"]');
     if (btn) btn.classList.toggle("mdm-btn--on", outlineOpen);
     if (outlineOpen) refreshOutline();
+    remeasureText();
   }
 
   // ---------- The width of the outline ----------
@@ -4925,6 +4940,7 @@
     const room = body ? body.getBoundingClientRect().width - EDITOR_MIN : Infinity;
     const width = Math.max(OUTLINE_MIN, Math.min(outlineWidth, room));
     root.style.setProperty("--mdm-outline-width", Math.round(width) + "px");
+    remeasureText();
   }
 
   // The pane can be resized under an open panel (the editor group dragged
@@ -4962,6 +4978,10 @@
       const drag = function (ev) {
         width = Math.min(most, Math.max(OUTLINE_MIN, ev.clientX - box.left));
         root.style.setProperty("--mdm-outline-width", Math.round(width) + "px");
+        // Every frame of the drag moves the column, so every frame of it has
+        // to be measured; a sash dragged slowly otherwise drags a caret that
+        // trails a hand's width behind the text.
+        remeasureText();
       };
       const drop = function () {
         root.classList.remove("mdm-resizing");

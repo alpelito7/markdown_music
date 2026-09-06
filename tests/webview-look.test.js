@@ -143,6 +143,91 @@ test("an outline wider than the pane is narrowed to fit, and grows back", { skip
   await h.close();
 });
 
+// The panel is a flex sibling of the text, so opening or closing it moves the
+// whole column sideways without touching a line of the document. CodeMirror
+// draws the caret as a box of its own, placed from coordinates measured
+// against the geometry that was there before, and left to itself it does not
+// measure again until its resize observer notices, four painted frames later:
+// for those four the caret stands where the column used to be, which coming
+// back from an open panel is out in the dead margin, well left of the number
+// of its line.
+//
+// What is read is the gap between the caret and the left edge of its own
+// line, which is the one thing the panel must not move, sampled at the end of
+// every frame: a timeout queued from inside a requestAnimationFrame runs after
+// every animation callback of that frame, so what it reads is what the frame
+// is painted with rather than the state halfway through its callbacks.
+async function caretGapPerFrame(page, message) {
+  await page.evaluate((msg) => {
+    window.__gaps = [];
+    const heading = () =>
+      [...document.querySelectorAll("#app .cm-line")].find((l) =>
+        l.textContent.includes("From equations to score")
+      );
+    let n = 0;
+    const tick = () => {
+      setTimeout(() => {
+        const caret =
+          document.querySelector("#app .cm-cursor-primary") ||
+          document.querySelector("#app .cm-cursor");
+        const line = heading();
+        window.__gaps.push(
+          caret && line
+            ? Math.round(
+                caret.getBoundingClientRect().left - line.getBoundingClientRect().left
+              )
+            : null
+        );
+      }, 0);
+      if (++n < 20) requestAnimationFrame(tick);
+    };
+    window.postMessage(msg, "*");
+    requestAnimationFrame(tick);
+  }, message);
+  await sleep(900);
+  return page.evaluate(() => window.__gaps);
+}
+
+test("the caret keeps its place in the line while the outline opens and shuts", { skip }, async () => {
+  // Wide enough that the text column is at its full 820px with the panel open
+  // and shut alike: what the panel changes is then the position of the column
+  // and nothing else, which is the case CodeMirror is slowest to notice.
+  const h = await open({ seed: { settings: { outline: "hidden", theme: "light" } } });
+  await h.page.setViewport({ width: 1400, height: 1200 });
+  await sleep(600);
+  await setSelection(h.page, await posOf(h.page, "From equations to score"));
+  await sleep(300);
+
+  const gap = () =>
+    h.page.evaluate(() => {
+      const caret = document.querySelector("#app .cm-cursor-primary");
+      const line = [...document.querySelectorAll("#app .cm-line")].find((l) =>
+        l.textContent.includes("From equations to score")
+      );
+      return Math.round(
+        caret.getBoundingClientRect().left - line.getBoundingClientRect().left
+      );
+    });
+  const rest = await gap();
+  assert.ok(rest > 0, "the caret is not drawn inside its line to begin with");
+
+  for (const [what, outline] of [["opens", "shown"], ["shuts", "hidden"]]) {
+    const frames = await caretGapPerFrame(h.page, settingsMessage({ outline }));
+    const strayed = frames.filter((g) => g !== rest);
+    assert.deepEqual(
+      strayed,
+      [],
+      "the caret left its place in the line while the panel " +
+        what +
+        ": " +
+        JSON.stringify(frames.slice(0, 8))
+    );
+    assert.equal(await gap(), rest, "the caret did not come back to its place");
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- The YAML header ----------
 
 test("typing inside the header keeps the caret and the text", { skip }, async () => {
