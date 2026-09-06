@@ -3398,7 +3398,7 @@
             // the ABC mode never sees it and it took the grey of the marks.
             if (info) {
               decos.push(
-                Decoration.mark({ class: "mdm-abc-info" }).range(info.from, info.to)
+                Decoration.mark({ class: "mdm-fence-info" }).range(info.from, info.to)
               );
             }
             return false;
@@ -3416,6 +3416,15 @@
           if (open) {
             lines.add(openLine.from, openLine.from, "mdm-code-first mdm-fence-line");
             if (closeLine) lines.add(closeLine.from, closeLine.from, "mdm-code-last mdm-fence-line");
+            // The word that names the language, in the same brass the `abc` of
+            // a score fence takes: it is the one thing on that line that says
+            // what the block is, and the grey of the marks around it said as
+            // much about it as about the backticks.
+            if (info) {
+              decos.push(
+                Decoration.mark({ class: "mdm-fence-info" }).range(info.from, info.to)
+              );
+            }
           } else {
             hideLines(openLine.from, openLine.to);
             if (closeLine) hideLines(closeLine.from, closeLine.to);

@@ -1836,14 +1836,16 @@ body {
 #app .mdm-abc-lyric { color: var(--mdm-abc-text); font-style: italic; }
 #app .mdm-abc-rest { color: var(--mdm-abc-quiet); }
 #app .mdm-abc-comment { color: var(--mdm-abc-quiet); }
-/* The `abc` of the fence, which is Markdown and not ABC: the mode never
-   sees it, so the info string took the theme's name colour like any other
-   fence label, and the one word that says "this block is a score" was the
-   only thing in it wearing a colour of the theme. The mark decoration
-   (main.js) wraps whatever the Markdown highlighting already put there, so
-   the rule has to reach the span inside it as well: an inner span carries
-   its own colour rule and would otherwise win on the text. */
-#app .cm-line.mdm-fence-line .mdm-abc-info,
-#app .cm-line.mdm-fence-line .mdm-abc-info span {
+/* The word on a fence, `abc` or `python` or any other: the one thing on that
+   line that says what the block is, drawn in the brass of the notes while the
+   backticks around it stay in the grey of the marks. It used to take the
+   theme's name colour, which said nothing that the mark grey did not.
+
+   The mark decoration (main.js) wraps whatever the Markdown highlighting
+   already put there, so the rule has to reach the span inside it as well: an
+   inner span carries its own colour rule and would otherwise win on the
+   text. */
+#app .cm-line.mdm-fence-line .mdm-fence-info,
+#app .cm-line.mdm-fence-line .mdm-fence-info span {
   color: var(--mdm-abc-note);
 }

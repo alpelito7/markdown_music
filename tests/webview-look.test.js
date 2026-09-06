@@ -1102,7 +1102,7 @@ function abcPaint(page) {
     // The word the mark decoration wraps, measured where the paint lands:
     // the Markdown highlighting already put a span of its own inside it,
     // and an inner span with a colour rule wins on the text.
-    const marked = document.querySelector("#app .cm-line.mdm-fence-line .mdm-abc-info");
+    const marked = document.querySelector("#app .cm-line.mdm-fence-line .mdm-fence-info");
     const info = marked ? marked.querySelector("span") || marked : null;
     const line = document.querySelector("#app .cm-line.mdm-abc-line");
     return {
