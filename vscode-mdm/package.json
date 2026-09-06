@@ -49,7 +49,7 @@
         "mdm.theme": {
           "type": "string",
           "default": "auto",
-          "description": "MDM editor theme. 'auto' follows the VS Code theme; 'light' and 'dark' force the side and read the syntax colours from the VS Code theme when it is on that side; 'white' is the light side on a sheet of white paper, with the code keeping its slate. The name of any installed colour theme ('Monokai', 'Solarized Light', ...) picks that theme's syntax colours and its side. A name nobody contributes falls back to 'auto'. The toolbar lists them all."
+          "description": "MDM editor theme. 'auto' follows the VS Code theme; 'light', 'dark' and 'white' are the editor's own looks, painted by the palettes the extension bakes in whatever VS Code is wearing, 'white' being the light one on a sheet of white paper with the code keeping its slate. The name of any installed colour theme ('Monokai', 'Solarized Light', ...) picks that theme's syntax colours and its side. A name nobody contributes falls back to 'auto'. The toolbar lists them all."
         },
         "mdm.staffLines": {
           "type": "string",

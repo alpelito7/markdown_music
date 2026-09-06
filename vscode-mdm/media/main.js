@@ -100,6 +100,13 @@
   // A palette is used only while the editor is on the same side as the theme
   // it was read from: mdm.theme can hold this editor to light with VS Code on
   // a dark theme, and dark syntax colours on a light ground are unreadable.
+  //
+  // And only while the look asked for is somebody else's. MDM Light, MDM Dark
+  // and MDM White are this editor's own, which is what their names say and
+  // what they are picked for: the palettes baked into style.css paint them,
+  // whatever VS Code is wearing, so that picking one gets the same editor on
+  // every machine. "Follow VS Code" and the named themes under it are the
+  // entries that bring colours from outside.
   const SYNTAX_SLOTS = [
     "base",
     "bg",
@@ -119,11 +126,16 @@
   let palette = (window.MDM_PALETTE || {}).palette || null;
   let themeSide = (window.MDM_PALETTE || {}).side || null;
 
+  const OWN_LOOKS = { light: true, dark: true, white: true };
+
   function applyPalette() {
     const root = document.getElementById("app");
     if (!root) return;
     const usable =
-      palette && palette.colors && palette.kind === (isDark() ? "dark" : "light");
+      !OWN_LOOKS[themeSetting] &&
+      palette &&
+      palette.colors &&
+      palette.kind === (isDark() ? "dark" : "light");
     SYNTAX_SLOTS.forEach(function (slot) {
       const value = usable ? palette.colors[slot] : null;
       if (value) root.style.setProperty("--mdm-syn-" + slot, value);
@@ -150,17 +162,23 @@
   const THEME_ICON =
     '<svg viewBox="0 0 16 16"><path d="M8 .8A7.2 7.2 0 1 0 8 15.2 7.2 7.2 0 1 0 8 .8zm0 1.5v11.4a5.7 5.7 0 0 1 0-11.4z"/></svg>';
 
-  // White is the light look on a sheet of paper: the page goes to white
+  // MDM White is the light look on a sheet of paper: the page goes to white
   // instead of the wash the theme gives it, and the code keeps its slate (see
   // --mdm-syn-page in style.css). It sits with the sides rather than in a
   // switch of its own: what it changes is how the editor looks, which is what
   // this menu is for, and every other entry rules it out anyway, since a sheet
   // of paper under a dark theme would leave dark syntax colours on white.
+  //
+  // The three carry the extension's name because the entries under them are
+  // the colour themes installed in VS Code, by their own names: "MDM Dark" is
+  // this editor's dark, one of the list rather than a switch over it. The
+  // values behind the labels are the old ones, so a settings file that says
+  // `"mdm.theme": "dark"` still means what it meant.
   const THEME_SIDES = [
     { value: "auto", label: "Follow VS Code" },
-    { value: "light", label: "Light" },
-    { value: "dark", label: "Dark" },
-    { value: "white", label: "White" },
+    { value: "light", label: "MDM Light" },
+    { value: "dark", label: "MDM Dark" },
+    { value: "white", label: "MDM White" },
   ];
 
   const THEMES = (window.MDM_THEMES || []).filter(function (theme) {

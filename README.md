@@ -351,9 +351,13 @@ What it does:
   (`"Dm7"`) are drawn but not synthesized. Only the piano is vendored, so a
   different `%%MIDI program` will not find its notes.
 - **Theme menu**: a toolbar button opens, in this order, *Follow VS Code*
-  (the default), *Light*, *Dark*, *White* and every colour theme installed in
-  VS Code. A named theme brings a syntax palette of its own and a side of its
-  own: Monokai leaves the editor dark, Solarized Light leaves it light. The
+  (the default), *MDM Light*, *MDM Dark*, *MDM White* and every colour theme
+  installed in VS Code. The first three are the editor's own looks, which is
+  what the name says: no theme paints them, so one of them is the same editor
+  on any machine, and the palettes baked into `style.css` are what they wear.
+  The entries under them are themes by their own names, and a named one brings
+  a syntax palette of its own and a side of its own: Monokai leaves the editor
+  dark, Solarized Light leaves it light. The
   setting is `mdm.theme`, shared by every open `.mdm` editor. The list is
   read when the editor opens.
 - **Two backgrounds**, both derived from the chosen theme, and on both sides
@@ -367,9 +371,12 @@ What it does:
   `editor.tokenColorCustomizations` on top) and sends the webview a palette
   of ten colours, spent over the tokens of each fenced language (Python,
   JavaScript, JSON, YAML, HTML, CSS and C++ with full parsers; a couple of
-  dozen more with the lighter stream modes). With no usable palette the
-  fallbacks of `style.css` come in: Monokai on the dark side and
-  stackoverflow-light on the light one.
+  dozen more with the lighter stream modes). With no usable palette, and on
+  the three MDM looks whatever the palette is, the fallbacks of `style.css`
+  come in: Monokai's colours on the dark side and
+  stackoverflow-light on the light one. The ground under the dark one is not
+  Monokai's own olive but the `editor.background` of Dark 2026, `#121314`, so
+  MDM Dark stands where the text editor beside it stands.
 - **Scores**: no background by default, so a score reads as part of the
   document the way an equation does (`mdm.scoreFill`: `none`, `paper`,
   `slate`, `brass`); centred like a display equation or lined up left

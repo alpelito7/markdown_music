@@ -1648,10 +1648,14 @@ body {
    What follows are the fallbacks, in use whenever there is no palette to set
    (a theme that cannot be read, or an editor held to the side opposite the VS
    Code theme by mdm.theme): Monokai in dark, stackoverflow-light in light,
-   the two the user asked for. The dark values are Monokai's own, taken from
-   the theme VS Code ships. The colours reach the code through the
-   CodeMirror highlight style in main.js, which spends these same
-   properties. */
+   the two the user asked for. The dark syntax values are Monokai's own, taken
+   from the theme VS Code ships; the ground under them is not. Monokai's own
+   #272822 is a warm olive, and this is MDM Dark, the editor's own dark rather
+   than Monokai's, so it stands on what the text editor beside it stands on:
+   the editor.background of Dark 2026, #121314, read out of the theme VS Code
+   ships in resources/app/extensions/theme-defaults. The colours reach the
+   code through the CodeMirror highlight style in main.js, which spends these
+   same properties. */
 #app {
   --mdm-syn-base: #2f3337;
   --mdm-syn-bg: #f6f6f6;
@@ -1666,7 +1670,7 @@ body {
 }
 #app.mdm--dark {
   --mdm-syn-base: #f8f8f2;
-  --mdm-syn-bg: #272822;
+  --mdm-syn-bg: #121314;
   --mdm-syn-comment: #88846f;
   --mdm-syn-string: #e6db74;
   --mdm-syn-number: #ae81ff;

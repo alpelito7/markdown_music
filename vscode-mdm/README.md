@@ -88,9 +88,11 @@ paints the code around them.
 ## Themes
 
 The editor follows the VS Code theme by default, and the toolbar's theme
-menu offers light, dark, white paper, or any colour theme installed in VS
-Code: the syntax colours of the code blocks are read from the theme itself,
-Monokai's from Monokai. Staff lines can be drawn grey (Guitar Pro style) or
+menu offers MDM Light, MDM Dark, MDM White (the light look on a sheet of
+paper), or any colour theme installed in VS Code. The three MDM looks are the
+editor's own and no theme paints them; pick a theme by name instead and the
+syntax colours of the code blocks are read from the theme itself, Monokai's
+from Monokai. Staff lines can be drawn grey (Guitar Pro style) or
 in ink, scores can take a paper, slate or brass fill, and every toolbar
 state persists as an `mdm.*` setting, so a document reopens the way it was
 left.

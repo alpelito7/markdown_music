@@ -632,9 +632,9 @@ test("the theme menu lists what the host sent, and a click asks for it", { skip 
   // The entry in use carries a tick; the harness opens on "light".
   assert.deepEqual(
     menu.entries.map((e) => e.replace("✓", "")),
-    ["Follow VS Code", "Light", "Dark", "White", "Monokai", "Solarized Light"]
+    ["Follow VS Code", "MDM Light", "MDM Dark", "MDM White", "Monokai", "Solarized Light"]
   );
-  assert.deepEqual(menu.entries.filter((e) => e.includes("✓")), ["Light✓"]);
+  assert.deepEqual(menu.entries.filter((e) => e.includes("✓")), ["MDM Light✓"]);
   await h.page.click('#app button[data-type="mdm-theme-4"]');
   await sleep(200);
   assert.deepEqual(await setSettingPosts(h.page), [
@@ -937,8 +937,15 @@ function paintedCode(page) {
 }
 
 test("the palette of the theme in use paints the code", { skip }, async () => {
+  // A named theme and not one of the three MDM looks: those are the editor's
+  // own and no palette is spent on them (the test under this one pins that).
   const h = await open({
-    seed: { settings: { theme: "light" }, palette: palette("light") },
+    seed: {
+      settings: { theme: "Solarized Light" },
+      themes: [{ name: "Solarized Light", kind: "light" }],
+      palette: palette("light"),
+      side: "light",
+    },
   });
   const vars = await synVars(h.page);
   assert.deepEqual(vars, palette("light").colors);
@@ -952,11 +959,50 @@ test("the palette of the theme in use paints the code", { skip }, async () => {
   await h.close();
 });
 
-test("a palette from the other side is dropped, fallbacks stay", { skip }, async () => {
-  // mdm.theme can hold this editor to light while VS Code is on a dark theme,
-  // and dark syntax colours on a light ground are unreadable.
+test("the editor's own looks take no palette at all", { skip }, async () => {
+  // MDM Light, MDM Dark and MDM White are looks of this editor rather than of
+  // a theme, which is what their names say: a palette from a dark VS Code
+  // theme, with the editor on the dark side where it would otherwise be
+  // usable, is still not spent on MDM Dark.
   const h = await open({
-    seed: { settings: { theme: "light" }, palette: palette("dark") },
+    seed: { settings: { theme: "dark" }, palette: palette("dark") },
+  });
+  assert.deepEqual(
+    await synVars(h.page),
+    Object.fromEntries(Object.keys(palette("dark").colors).map((k) => [k, ""])),
+    "a theme painted one of the editor's own looks"
+  );
+  // What paints it instead: Monokai's keyword colour, baked into style.css as
+  // the dark fallback, over the ground MDM Dark carries, which is the
+  // editor.background of Dark 2026 and not Monokai's own #272822. The grounds
+  // the reader sees are mixes of it (the page is that background carried 6%
+  // towards the ink, the card the panel material over the page), so what is
+  // read here is the value they are all derived from.
+  assert.equal((await paintedCode(h.page)).keyword, "rgb(249, 38, 114)");
+  assert.equal(
+    await h.page.evaluate(() =>
+      getComputedStyle(document.getElementById("app"))
+        .getPropertyValue("--mdm-syn-bg")
+        .trim()
+    ),
+    "#121314",
+    "MDM Dark is not standing on Dark 2026's ground"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a palette from the other side is dropped, fallbacks stay", { skip }, async () => {
+  // The editor held to the light side by a named light theme, with a palette
+  // read off a dark one: dark syntax colours on a light ground are
+  // unreadable, so it is dropped.
+  const h = await open({
+    seed: {
+      settings: { theme: "Solarized Light" },
+      themes: [{ name: "Solarized Light", kind: "light" }],
+      palette: palette("dark"),
+      side: "light",
+    },
   });
   const vars = await synVars(h.page);
   assert.deepEqual(
@@ -972,18 +1018,24 @@ test("a palette from the other side is dropped, fallbacks stay", { skip }, async
 });
 
 test("a palette message repaints the code with no document update", { skip }, async () => {
-  const h = await open({ seed: { settings: { theme: "light" } } });
+  const h = await open({
+    seed: {
+      settings: { theme: "Solarized Light" },
+      themes: [{ name: "Solarized Light", kind: "light" }],
+      side: "light",
+    },
+  });
   // Nothing seeded: the editor opens on the fallbacks.
   assert.equal((await synVars(h.page)).string, "");
   await h.page.evaluate((p) => {
-    window.postMessage({ type: "palette", palette: p, side: null }, "*");
+    window.postMessage({ type: "palette", palette: p, side: "light" }, "*");
   }, palette("light"));
   await sleep(300);
   assert.deepEqual(await synVars(h.page), palette("light").colors);
   assert.equal((await paintedCode(h.page)).keyword, "rgb(10, 11, 12)");
   // And a palette that no longer matches the side is taken back off.
   await h.page.evaluate((p) => {
-    window.postMessage({ type: "palette", palette: p, side: null }, "*");
+    window.postMessage({ type: "palette", palette: p, side: "light" }, "*");
   }, palette("dark"));
   await sleep(300);
   assert.equal((await synVars(h.page)).string, "");
@@ -1063,7 +1115,12 @@ test("the score source is painted in the extension's own brass, palette or none"
   // Light, with a palette seeded: the code around takes the palette, the
   // score does not.
   let h = await open({
-    seed: { settings: { theme: "light" }, palette: palette("light") },
+    seed: {
+      settings: { theme: "Solarized Light" },
+      themes: [{ name: "Solarized Light", kind: "light" }],
+      palette: palette("light"),
+      side: "light",
+    },
   });
   await setSelection(h.page, await posOf(h.page, "vibrating string"));
   await sleep(400);
