@@ -57,6 +57,10 @@
     const root = app();
     if (!root) return;
     root.classList.toggle("mdm--dark", isDark());
+    // MDM Light, Dark and White (OWN_LOOKS, under Syntax colours) select in a
+    // colour of their own, --mdm-selection in style.css, and not in the VS
+    // Code theme's.
+    root.classList.toggle("mdm-look--own", !!OWN_LOOKS[themeSetting]);
     // The toolbar renders in terms of the effective theme, so it follows every
     // path that can change it: the mdm.theme setting, the VS Code theme while
     // on "auto", and the OS preference.

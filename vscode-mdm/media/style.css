@@ -315,8 +315,12 @@ body {
 #app .cm-line.mdm-co-line[data-mdm-line]::before {
   margin-right: 17px;
 }
-/* The selection in the colours of the VS Code theme, so several carets and
-   their ranges read as they do in the text editor beside this one. */
+/* The caret and the selection. Under "Follow VS Code" and the themes
+   installed in it the selection is in the colours of the VS Code theme, so
+   several carets and their ranges read as they do in the text editor beside
+   this one. MDM Light, Dark and White select in a colour of their own
+   (--mdm-selection, below): the theme's belongs to the theme's side, and
+   MDM Light inside Dark Modern selected in Dark Modern's blue on paper. */
 #app .cm-cursor,
 #app .cm-dropCursor {
   /* drawSelection paints its own caret, so the colour is stated twice: here
@@ -325,10 +329,27 @@ body {
 }
 #app .cm-selectionBackground,
 #app .cm-content ::selection {
-  background: var(--vscode-editor-inactiveSelectionBackground, rgba(100, 100, 100, 0.25));
+  background: var(
+    --mdm-selection-idle,
+    var(--vscode-editor-inactiveSelectionBackground, rgba(100, 100, 100, 0.25))
+  );
 }
 #app .cm-focused .cm-selectionBackground {
-  background: var(--vscode-editor-selectionBackground, rgba(0, 120, 215, 0.3));
+  background: var(--mdm-selection, var(--vscode-editor-selectionBackground, rgba(0, 120, 215, 0.3)));
+}
+/* The own looks' selection is the brass of the accent (--mdm-play-accent-ink):
+   #8a5f00 at 25% on white on the light side, #d9a94f at 30% on black on the
+   dark one, and half that strength out of focus, where VS Code greys its
+   own. Opaque like VS Code's, which the blended layer below allows. The class
+   is set by applyTheme() in main.js while mdm.theme is one of the three;
+   white is a light look and never meets the dark rule. */
+#app.mdm-look--own {
+  --mdm-selection: #e2d7bf;
+  --mdm-selection-idle: #f0ebdf;
+}
+#app.mdm-look--own.mdm--dark {
+  --mdm-selection: #413318;
+  --mdm-selection-idle: #21190c;
 }
 #app .cm-selectionMatch {
   background: color-mix(in srgb, var(--mdm-ink) 12%, transparent);
@@ -337,11 +358,21 @@ body {
    opaque card (--mdm-syn-card below); CodeMirror draws the selection on a
    layer behind the content, so a selection inside a card was hidden under it
    and a match found by Ctrl+D in a code comment showed nothing. The layer is
-   lifted above the text instead (the selection colours are translucent, so
-   the text reads through), and the caret layer is lifted above that so a
-   caret is never covered by its own selection. */
+   lifted above the text instead, and the caret layer above that so a caret
+   is never covered by its own selection.
+   Lifted, the layer is blended into what is under it rather than laid over
+   it. Laid over, it counted on the theme's selection colour being
+   translucent, and VS Code's own themes give it opaque (#add6ff in Light
+   Modern, #264f78 in Dark Modern, read off the webview): every letter a
+   selection took came out as a solid box, the four notes Ctrl+D picked in a
+   tune among them. Multiply on a light page and screen on a dark one tint
+   the ground and keep each letter at its own contrast, whatever the alpha. */
 #app .cm-selectionLayer {
   z-index: 1 !important;
+  mix-blend-mode: multiply;
+}
+#app.mdm--dark .cm-selectionLayer {
+  mix-blend-mode: screen;
 }
 #app .cm-cursorLayer {
   z-index: 2 !important;

@@ -1679,6 +1679,135 @@ test("a selection inside a code block shows above its card", { skip }, async () 
   await h.close();
 });
 
+// A colour theme installed in VS Code, as the host describes it: named in
+// mdm.theme, listed in the menu, and carrying its own side.
+function namedTheme(name, side) {
+  return { settings: { theme: name }, themes: [{ name, kind: side }], side };
+}
+
+// The selection's colour comes from VS Code under "Follow VS Code" and the
+// themes installed in it, and VS Code's own themes give it opaque: #add6ff in
+// Light Modern, #264f78 in Dark Modern. Lifted above the text by the rule the
+// test before this one guards, an opaque colour hid every letter it selected;
+// the four notes Ctrl+D took in a tune came out as four solid boxes. The layer
+// is blended into the text instead. The editor's own looks select in a brass
+// that is just as opaque (the test after this one pins its value). This
+// selects a word in a code block under each look and checks that the ground
+// under the word changed (the selection shows) and that its letters still
+// stand out of that ground.
+test("a word under an opaque selection colour keeps its letters", { skip }, async () => {
+  for (const [look, seed, colour] of [
+    ["Light Modern", namedTheme("Default Light Modern", "light"), "#add6ff"],
+    ["Dark Modern", namedTheme("Default Dark Modern", "dark"), "#264f78"],
+    ["MDM Light", { settings: { theme: "light" } }, "#add6ff"],
+    ["MDM Dark", { settings: { theme: "dark" } }, "#264f78"],
+  ]) {
+    seed.settings.frontMatter = "hidden";
+    const h = await open({ seed });
+    await h.page.evaluate((c) => {
+      document.documentElement.style.setProperty("--vscode-editor-selectionBackground", c);
+      window.__mdm.view.focus();
+    }, colour);
+    const card = await h.page.evaluate(() => {
+      const { view, CM } = window.__mdm;
+      const doc = view.state.doc.toString();
+      const from = doc.indexOf("render the score") + "render the ".length;
+      view.dispatch({ selection: CM.EditorSelection.range(from, from + 5) });
+      const line = view.domAtPos(from).node;
+      const el = line.nodeType === 1 ? line : line.parentElement;
+      return getComputedStyle(el.closest(".cm-line")).backgroundColor;
+    });
+    await sleep(300);
+    const box = await h.page.evaluate(() => {
+      const sel = document.querySelector("#app .cm-focused .cm-selectionBackground");
+      if (!sel) return null;
+      const b = sel.getBoundingClientRect();
+      return {
+        clip: { x: b.left + 1, y: b.top + 1, width: b.width - 2, height: b.height - 2 },
+        paint: getComputedStyle(sel).backgroundColor,
+      };
+    });
+    assert.ok(box, `no selection drawn (${look})`);
+    const png = await h.page.screenshot({ clip: box.clip, encoding: "base64" });
+    // The ground is the commonest colour in the box; a letter is a pixel whose
+    // lightness is far from it.
+    const seen = await h.page.evaluate(async (b64) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+      const cv = new OffscreenCanvas(bmp.width, bmp.height);
+      const g = cv.getContext("2d");
+      g.drawImage(bmp, 0, 0);
+      const d = g.getImageData(0, 0, bmp.width, bmp.height).data;
+      const lum = (r, gr, b) => 0.2126 * r + 0.7152 * gr + 0.0722 * b;
+      const counts = new Map();
+      for (let i = 0; i < d.length; i += 4) {
+        const k = `${d[i] >> 2},${d[i + 1] >> 2},${d[i + 2] >> 2}`;
+        counts.set(k, (counts.get(k) || 0) + 1);
+      }
+      const ground = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0].split(",").map((v) => v * 4 + 2);
+      const at = lum(...ground);
+      let letters = 0;
+      for (let i = 0; i < d.length; i += 4) if (Math.abs(lum(d[i], d[i + 1], d[i + 2]) - at) > 60) letters++;
+      return { ground, letters: letters / (d.length / 4) };
+    }, png);
+    const unselected = card.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
+    const moved = Math.max(...seen.ground.map((v, i) => Math.abs(v - unselected[i])));
+    assert.ok(moved > 12, `the selection does not show on the card (${look}): ground ${seen.ground} against ${card}`);
+    assert.ok(
+      seen.letters > 0.04,
+      `the selected letters are hidden under ${box.paint} (${look}): ${(seen.letters * 100).toFixed(1)}% of the box stands out`
+    );
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// MDM Light, MDM Dark and MDM White select in the editor's own colour, the
+// brass of the accent (--mdm-play-accent-ink, #8a5f00 at 25% on white and
+// #d9a94f at 30% on black), and not in the VS Code theme's. An own look is
+// the same editor whatever VS Code wears, and the theme's colour belongs to
+// the theme's side: MDM Light inside Dark Modern selected in Dark Modern's
+// blue on paper. Out of focus the brass is at half strength, where VS Code
+// greys its own. The colours VS Code hands over here are the other side's,
+// the case that went wrong; a named theme goes on taking them.
+test("the editor's own looks select in brass", { skip }, async () => {
+  const DARK_MODERN = ["#264f78", "#3a3d41"];
+  const LIGHT_MODERN = ["#add6ff", "#e5ebf1"];
+  for (const [look, seed, vscode, focused, idle] of [
+    ["MDM Light", { settings: { theme: "light" } }, DARK_MODERN, "rgb(226, 215, 191)", "rgb(240, 235, 223)"],
+    ["MDM White", { settings: { theme: "white" } }, DARK_MODERN, "rgb(226, 215, 191)", "rgb(240, 235, 223)"],
+    ["MDM Dark", { settings: { theme: "dark" } }, LIGHT_MODERN, "rgb(65, 51, 24)", "rgb(33, 25, 12)"],
+    ["Light Modern", namedTheme("Default Light Modern", "light"), LIGHT_MODERN, "rgb(173, 214, 255)", "rgb(229, 235, 241)"],
+  ]) {
+    const h = await open({ seed });
+    const painted = await h.page.evaluate(async ([active, inactive]) => {
+      const root = document.documentElement.style;
+      root.setProperty("--vscode-editor-selectionBackground", active);
+      root.setProperty("--vscode-editor-inactiveSelectionBackground", inactive);
+      const { view, CM } = window.__mdm;
+      const until = async (ok) => {
+        for (let i = 0; i < 50 && !ok(); i++) await new Promise((r) => setTimeout(r, 20));
+      };
+      const colour = () => {
+        const sel = document.querySelector("#app .cm-selectionBackground");
+        return sel && getComputedStyle(sel).backgroundColor;
+      };
+      view.focus();
+      const from = view.state.doc.toString().indexOf("render the score");
+      view.dispatch({ selection: CM.EditorSelection.range(from, from + 6) });
+      await until(() => document.querySelector("#app .cm-focused .cm-selectionBackground"));
+      const focused = colour();
+      view.contentDOM.blur();
+      await until(() => !document.querySelector("#app .cm-focused"));
+      return { focused, idle: colour(), blurred: !document.querySelector("#app .cm-focused") };
+    }, vscode);
+    assert.ok(painted.blurred, `the editor kept its focus (${look})`);
+    assert.deepEqual([painted.focused, painted.idle], [focused, idle], look);
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
 // The LaTeX inside inline and block maths is syntax-highlighted while its
 // source shows (a stex overlay on the math content, mounted in the Lezer tree
 // and coloured by the same palette as code). Regression guard: the content
