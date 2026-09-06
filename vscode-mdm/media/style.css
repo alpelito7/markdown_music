@@ -1713,11 +1713,12 @@ body {
 }
 
 /* The two grounds of the editor, both derived from the theme in use so that
-   picking one in the menu moves them together. Whichever side is in force, the
-   code sits on the darker of the two and the page on the lighter, the way a
-   notebook draws its cells.
+   picking one in the menu moves them together: the page the prose is written
+   on, and the card the code sits on. The card is the material the outline
+   panel is drawn in as well, the same one on both sides, which is what says
+   that a block of code and a panel of chrome are the same kind of surface.
 
-   Two mixes of the theme's own colours do all of it: the tint, which is
+   Two mixes of the theme's own colours do most of it: the tint, which is
    `editor.background` carried 6% towards the foreground, and the wash, the same
    at 2%. The wash is deliberately shallow: it has to take the page off pure
    white without closing the gap to the slate the code sits on, and the two are
@@ -1726,8 +1727,16 @@ body {
 
    - Light: the code keeps the slate it has always had (the tint) and the page
      takes the wash, so it comes out a shade off the white the theme gives it.
-   - Dark: the code drops to `editor.background` itself, the colour VS Code
-     paints behind that same code, and the page rises to the tint.
+     The card lands within a level of the outline's own mix, which is where the
+     dark side takes its card from.
+   - Dark: the page rises to the tint and the card is the ink carried 4% over
+     that page, the mix the outline panel is drawn with (see .mdm-outline).
+     Which puts the code a step LIGHTER than the prose on this side, where on
+     the light one it is a step darker: the ink is what the step is made of,
+     and the ink changes ends. `editor.background` itself, which is what the
+     card used to take here, is a hole at the bottom of the page under a theme
+     that draws its editor near black (Dark 2026 is #121314), and a hole is
+     not what a block of code is.
    - White: the light arrangement on a sheet of paper. The page is white
      whatever the theme says and the code keeps its slate. A score with no fill
      of its own draws straight on the page, so there it comes out on white. */
@@ -1738,8 +1747,8 @@ body {
   --mdm-syn-page: var(--mdm-syn-wash);
 }
 #app.mdm--dark {
-  --mdm-syn-card: var(--mdm-syn-bg);
   --mdm-syn-page: var(--mdm-syn-tint);
+  --mdm-syn-card: color-mix(in srgb, var(--mdm-ink) 4%, var(--mdm-syn-page));
 }
 /* Last of the three: white is a light look, so it never meets the dark rule
    above, and reading it last is what says it wins if it ever did. */

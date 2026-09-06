@@ -664,28 +664,42 @@ function grounds(page) {
     return {
       page: bg(document.querySelector("#app .cm-editor")),
       code: bg(document.querySelector("#app .cm-line.mdm-code-line")),
+      outline: bg(document.querySelector("#app .mdm-outline")),
       header: bg(document.querySelector("#app .cm-line.mdm-fm-line")),
       score: bg(document.querySelector("#app code.language-abc")),
     };
   });
 }
 
-test("the code sits on a darker ground than the page, on either side", { skip }, async () => {
+test("the code sits on the panel material, a step off the page either side", { skip }, async () => {
   for (const theme of ["dark", "light"]) {
-    const h = await open({ seed: { settings: { theme: theme, scoreFill: "none" } } });
+    const h = await open({
+      seed: { settings: { theme: theme, scoreFill: "none", outline: "shown" } },
+    });
     const g = await grounds(h.page);
     assert.ok(g.code, theme + ": no code line to measure");
-    // Both greys are mixes of the theme's own colours, and whichever side is in
-    // force the code is the darker of the two, the way a notebook draws its
-    // cells: in light the code keeps its slate and the page is a shade off
-    // white, in dark the code drops to editor.background and the page rises.
-    assert.ok(
-      luminance(g.code) < luminance(g.page),
-      theme + ": code " + g.code + " against page " + g.page
-    );
+    // Both greys are mixes of the theme's own colours, and the step between
+    // them is made of ink, which changes ends with the side: on the light one
+    // the code keeps the slate it has always had and the page is a shade off
+    // white, on the dark one the page rises to the tint and the code sits a
+    // step above it, where editor.background would be a hole (a theme like
+    // Dark 2026 paints that near black).
     assert.ok(
       Math.abs(luminance(g.code) - luminance(g.page)) > 4,
       theme + ": the two grounds are the same grey"
+    );
+    assert.equal(
+      luminance(g.code) < luminance(g.page),
+      theme === "light",
+      theme + ": code " + g.code + " against page " + g.page
+    );
+    // And it is the material the outline panel is drawn in: a block of code
+    // and a panel of chrome are the same kind of surface. The dark side takes
+    // the panel's own mix, so the two are the same string; the light one
+    // reaches it from the other direction (the tint) and lands within a level.
+    assert.ok(
+      Math.abs(luminance(g.code) - luminance(g.outline)) < 1,
+      theme + ": code " + g.code + " against the outline " + g.outline
     );
     // The YAML header reads as a block of code, so it takes the same ground.
     assert.equal(g.header, g.code);
