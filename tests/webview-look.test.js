@@ -451,6 +451,107 @@ test("the header button takes the editor to the top, on and off", { skip }, asyn
   await h.close();
 });
 
+// The link between that button and the export, which is the whole of what it
+// is for: the header the editor is showing decides whether the page opens with
+// the block Quarto draws from the YAML (TITLE_BLOCK in mdm.lua), and the only
+// thing that carries the decision across is mdm.frontMatter. The host end is
+// pinned in extension-host.test.js, where exportLook is read; the filter end in
+// render.test.js and html.test.js, where the block is rendered and measured.
+// This is the end nothing held: that pressing the button asks for the setting
+// at all, in the right direction, and that a document with no header of its
+// own asks for nothing.
+test("the header button asks the host to store the choice", { skip }, async () => {
+  const h = await open({
+    seed: { settings: { frontMatter: "hidden" } },
+    withFrontMatter: false,
+  });
+  const fm = () =>
+    h.page.evaluate(() => {
+      const btn = document.querySelector('#app button[data-type="mdm-front-matter"]');
+      return {
+        lit: btn.classList.contains("mdm-btn--on"),
+        greyed: btn.classList.contains("mdm-btn--off"),
+        tip: btn.getAttribute("aria-label"),
+      };
+    });
+
+  // Hidden is the default, and a lamp lit from the first opening would say
+  // nothing: the lamp means the reader has moved off it. The tooltip names
+  // where the click goes and not where the editor is.
+  assert.deepEqual(await fm(), {
+    lit: false,
+    greyed: false,
+    tip: "Show YAML header",
+  });
+  await h.page.click('#app button[data-type="mdm-front-matter"]');
+  await sleep(200);
+  assert.deepEqual(await setSettingPosts(h.page), [
+    { type: "setSetting", key: "frontMatter", value: "shown" },
+  ]);
+  // The webview does not move itself: the value comes back from the host, and
+  // until it does the button is where it was.
+  assert.equal((await fm()).lit, false, "the button moved before the host answered");
+
+  await postSettings(h.page, { frontMatter: "shown" });
+  await sleep(300);
+  assert.deepEqual(await fm(), {
+    lit: true,
+    greyed: false,
+    tip: "Hide YAML header",
+  });
+  // And back the other way, so the click is a toggle and not a one-way switch.
+  await h.page.click('#app button[data-type="mdm-front-matter"]');
+  await sleep(200);
+  assert.deepEqual(await setSettingPosts(h.page), [
+    { type: "setSetting", key: "frontMatter", value: "shown" },
+    { type: "setSetting", key: "frontMatter", value: "hidden" },
+  ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A file with no header has nothing to show or hide, so the button greys out
+// and a click on it asks for nothing. Storing "shown" here would leave the
+// setting saying the editor is showing a header it has not got, and the next
+// document opened would come up in a mode nobody chose.
+test("a file with no YAML header greys the button out", { skip }, async () => {
+  const h = await open({
+    text: "Just prose, and no header at all.\n",
+    scores: 0,
+    seed: { settings: { frontMatter: "hidden" } },
+    withFrontMatter: false,
+    frontMatter: "",
+  });
+  const btn = '#app button[data-type="mdm-front-matter"]';
+  assert.deepEqual(
+    await h.page.evaluate((sel) => {
+      const b = document.querySelector(sel);
+      return {
+        lit: b.classList.contains("mdm-btn--on"),
+        greyed: b.classList.contains("mdm-btn--off"),
+        tip: b.getAttribute("aria-label"),
+        reachable: getComputedStyle(b).pointerEvents !== "none",
+      };
+    }, btn),
+    {
+      lit: false,
+      greyed: true,
+      tip: "No YAML header in this file",
+      reachable: false,
+    }
+  );
+  // Both locks, because there are two and each can be undone on its own: the
+  // pointer cannot reach the button (the rule above), and the handler refuses
+  // anyway. The click is dispatched on the element rather than aimed at the
+  // screen, which is what gets past `pointer-events: none` and leaves the
+  // handler itself as the thing under test.
+  await h.page.evaluate((sel) => document.querySelector(sel).click(), btn);
+  await sleep(200);
+  assert.deepEqual(await setSettingPosts(h.page), []);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- Copy ----------
 
 // The body of the python block of the example, which is what its copy button

@@ -307,7 +307,7 @@ async function open(options) {
     { timeout: 20000 }
   );
   const withFrontMatter = opts.withFrontMatter !== false;
-  await update(page, opts.text || EXAMPLE, withFrontMatter, opts.scores);
+  await update(page, opts.text || EXAMPLE, withFrontMatter, opts.scores, opts.frontMatter);
   return {
     page,
     browser,
@@ -335,14 +335,18 @@ test.after(async () => {
 // The host's update message, with the text mapped the way the host maps it,
 // and with the count of the lines that mapping kept back, which is what the
 // numbers in the margin count from.
-async function update(page, disk, withFrontMatter, scores) {
+// `header` is the header itself, which the webview only uses to know whether
+// there is one: the button greys out on a file without one. Any non-empty
+// string will do for a test that is not about that, which is why it defaults
+// to the "x" every caller but that one has always sent.
+async function update(page, disk, withFrontMatter, scores, header) {
   await page.evaluate(
-    (text, fm, hidden) =>
+    (text, fm, hidden, head) =>
       window.postMessage(
         {
           type: "update",
           text: text,
-          frontMatter: "x",
+          frontMatter: head,
           withFrontMatter: fm,
           hiddenLines: hidden,
         },
@@ -350,7 +354,8 @@ async function update(page, disk, withFrontMatter, scores) {
       ),
     toEditor(disk, withFrontMatter),
     withFrontMatter,
-    hiddenLines(disk, withFrontMatter)
+    hiddenLines(disk, withFrontMatter),
+    header === undefined ? "x" : header
   );
   // The scores are engraved as their widgets are built, and fitted on an
   // animation frame after; settle before measuring. A document with no score
