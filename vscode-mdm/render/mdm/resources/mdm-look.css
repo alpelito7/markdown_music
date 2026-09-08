@@ -87,17 +87,36 @@ body {
   scrollbar-color: color-mix(in srgb, var(--mdm-ink) 26%, transparent) transparent;
   scrollbar-width: thin;
 }
-/* The text column at the measure the editor holds it to, inside Quarto's grid
-   cell, so the margin sidebar and the table of contents keep their columns.
-   The width is stated and not left to the auto margins alone: a grid item with
-   an auto margin is sized to fit its content instead of to its cell, which
-   here squeezed the whole column down to the widest word on the page
-   (measured: 238 px of a 752 px cell). With the width definite, the auto
-   margins have something left over to share and go back to centring it. */
+/* The text column at the measure the editor holds it to, which is a width and
+   not a maximum.
+   `width: 100%; max-width: 820px` was the rule here and it never reached 820:
+   the column is a grid item of Quarto's page-columns layout, and that grid
+   gives the body track a width of its own, 802 px on a wide window and 752 px
+   at a 900 px one. 100% is 100% of the track, so the maximum was never the
+   binding constraint and the measure was Quarto's rather than the editor's.
+   Eighteen pixels sounds like nothing and is a word: example.mdm's first
+   paragraph breaks after "LaTeX" in the editor and after "emphasis" on the
+   page, which is the line-break test the export rule is stated in terms of.
+   So the width is the editor's own formula instead. There the pane carries
+   `padding: 0 50px` and the column is `max-width: 820px` inside it, which is
+   min(820, pane - 100); here the viewport plays the pane. At 1400 that is 820
+   on both sides, at 900 it is 800 on both, and below 920 the two shrink
+   together.
+   The column then overflows its grid track, which is what `justify-self`
+   answers: an auto margin has no free space to share once the item is wider
+   than its track and resolves to zero, leaving the column hanging off the
+   right edge of the track, while justify-self centres it in the track either
+   way. The track sits in the middle of the page with margin columns to spare
+   either side, so the overflow lands in the margin and nothing is cut.
+   One approximation, stated because it is measured: 100vw counts the
+   scrollbar and the editor's pane does not, so on a window narrow enough for
+   the column to shrink the page reads about 15 px wider than the editor.
+   Above 920 px, where both sit at a flat 820, the two are exact. */
 body main.content {
-  width: 100%;
-  max-width: 820px;
+  width: min(820px, calc(100vw - 100px));
+  max-width: none;
   margin-inline: auto;
+  justify-self: center;
 }
 /* The title block reads as part of the document, not as a card of its own. */
 body #title-block-header .quarto-title-banner,
@@ -165,7 +184,14 @@ body a:visited {
 body a:hover {
   text-decoration: underline;
 }
-body blockquote {
+/* The class as well as the element: Quarto puts `.blockquote` on a quotation
+   and Bootstrap gives that class a padding of its own, which outranks a
+   selector of two elements however it is ordered. Its 1rem is 17px here and
+   not 16, since Quarto sets the root font size to 17 while the body stays at
+   the editor's 16, so the quotation was indented three pixels further from
+   its bar on the page than in the editor. */
+body blockquote,
+body blockquote.blockquote {
   border-left: 3px solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
   padding-left: 14px;
   color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);

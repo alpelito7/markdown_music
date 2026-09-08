@@ -117,6 +117,7 @@ const DARK_LOOK = [
 // fallbacks) and with the look of a dark editor.
 let PAGE = null;
 let DARK_PAGE = null;
+let EXAMPLE_PAGE = null;
 
 test.before(() => {
   if (!available) return;
@@ -139,6 +140,21 @@ test.before(() => {
   );
   assert.equal(d.status, 0, d.stderr);
   DARK_PAGE = "file://" + path.join(DIR, "dark.html");
+
+  // And the real example, which is the document the export rule is stated in
+  // terms of: the editor opens this same file, so the two surfaces can be put
+  // side by side. Rendered in the roman, because that is the face the editor
+  // opens in and the filter's own default is the sans (the first trap named in
+  // CLAUDE.md); the toolbar's export passes the same -M.
+  fs.copyFileSync(path.join(ROOT, "example.mdm"), path.join(DIR, "example.mdm"));
+  const e = spawnSync(
+    MDM,
+    ["render", "example.mdm", "--to", "html",
+      "-M", "mdm-text-font:roman", "-M", "mdm-front-matter:shown"],
+    { cwd: DIR, encoding: "utf8" }
+  );
+  assert.equal(e.status, 0, e.stderr);
+  EXAMPLE_PAGE = "file://" + path.join(DIR, "example.html");
 });
 
 const OPEN_BROWSERS = new Set();
@@ -530,4 +546,142 @@ test("the look the editor exports with reaches the page", { skip }, async () => 
   assert.equal(l.scoreMargin, "0px", "the scores are not lined up left");
   assert.deepEqual(h.errors, []);
   await h.close();
+});
+
+// ---------- The export is the editor, measured ----------
+
+// The rule the whole format rests on (CLAUDE.md): what the reader sees in the
+// editor is what the export has to show, and the test of it is a line break.
+// Both surfaces are opened on the same example.mdm at the same width and asked
+// where the first paragraph runs out of room.
+//
+// Two faults this caught, both of which had been on the page for as long as
+// there was a page:
+//
+//   - The measure. The column is a grid item of Quarto's page-columns layout,
+//     and the grid gave the body track 802px where the editor holds its text
+//     to 820. `max-width: 820px` therefore never bound, the eighteen pixels
+//     were a word, and the paragraph broke after "emphasis" on the page and
+//     after "LaTeX" in the editor.
+//   - The size of a score. mdm.js asked abcjs for a staff the width of the
+//     column so a tune would fill it; the editor asks for nothing and abcjs
+//     draws 740. A responsive SVG scales its whole drawing, so every note,
+//     staff line and word came out 11% larger on the page.
+//
+// The width is 1200 because that is where the two are flat: both hold the
+// column at its full 820 and neither is shrinking to the window.
+const SIDE_BY_SIDE_WIDTH = 1200;
+
+// The first visual line of an element, as a string: walk its text and stop at
+// the character that starts a new row. The one measurement that says a line
+// broke in the same place without knowing anything about fonts or widths.
+const FIRST_VISUAL_LINE = function (el) {
+  let top = null;
+  let first = "";
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let n;
+  outer: while ((n = walk.nextNode())) {
+    for (let i = 0; i < n.data.length; i++) {
+      const rg = document.createRange();
+      rg.setStart(n, i);
+      rg.setEnd(n, i + 1);
+      const t = Math.round(rg.getBoundingClientRect().top);
+      if (top === null) top = t;
+      if (t > top + 2) break outer;
+      first += n.data[i];
+    }
+  }
+  return first.trim();
+}.toString();
+
+// What both surfaces are asked for, in the same words: the column, where the
+// first paragraph breaks, and the score as it is actually drawn. On screen and
+// not in user units, since an SVG scaled to its container reports the same
+// getBBox whatever size it is painted at, which is how the 11% went unseen.
+const MEASURE = function (columnEl, paraEl, scoreEl, firstLine) {
+  const svg = scoreEl.querySelector("svg");
+  const staff = svg.querySelector(".abcjs-staff");
+  const title = Array.from(svg.querySelectorAll(".abcjs-title")).find((e) =>
+    e.getAttribute("font-size")
+  );
+  return {
+    column: Math.round(columnEl.getBoundingClientRect().width),
+    first: eval("(" + firstLine + ")")(paraEl),
+    svg: Math.round(svg.getBoundingClientRect().width),
+    staff: +staff.getBoundingClientRect().height.toFixed(2),
+    titleSize: title ? title.getAttribute("font-size") : null,
+    titleInk: Math.round(title.getBoundingClientRect().width),
+    adjust: getComputedStyle(svg).fontSizeAdjust,
+  };
+};
+
+let SIDES = null;
+async function sides() {
+  if (SIDES) return SIDES;
+  const { open: openEditor } = require("./webview/helpers.js");
+  const m = MEASURE.toString();
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto(EXAMPLE_PAGE, { waitUntil: "networkidle0" });
+  await page.evaluate(() => document.fonts.ready);
+  const paper = await page.waitForSelector(".mdm-paper svg");
+  assert.ok(paper, "the page engraved no score to measure");
+  const exported = await page.evaluate((f, fl) => {
+    const para = Array.from(document.querySelectorAll("p")).find((e) =>
+      e.textContent.startsWith("This document is ordinary Markdown")
+    );
+    return eval("(" + f + ")")(
+      document.querySelector("main.content"),
+      para,
+      document.querySelector(".mdm-paper"),
+      fl
+    );
+  }, m, FIRST_VISUAL_LINE);
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+
+  const h = await openEditor({ seed: { settings: { textFont: "roman" } }, scores: 1 });
+  await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+  await h.page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  );
+  const editor = await h.page.evaluate((f, fl) => {
+    const line = Array.from(document.querySelectorAll("#app .cm-line")).find((e) =>
+      e.textContent.startsWith("This document is ordinary Markdown")
+    );
+    return eval("(" + f + ")")(
+      document.querySelector("#app .cm-content"),
+      line,
+      document.querySelector("#app code.language-abc"),
+      fl
+    );
+  }, m, FIRST_VISUAL_LINE);
+  await h.close();
+
+  SIDES = { exported: exported, editor: editor };
+  return SIDES;
+}
+
+test("the page breaks the first paragraph where the editor breaks it", { skip }, async () => {
+  const s = await sides();
+  assert.equal(
+    s.exported.column,
+    s.editor.column,
+    "the page holds its text to " + s.exported.column + "px and the editor to " + s.editor.column
+  );
+  assert.ok(s.editor.first.length > 40, "the paragraph did not wrap; nothing was tested");
+  assert.equal(
+    s.exported.first,
+    s.editor.first,
+    "the first paragraph breaks in a different place:\n  editor: ..." +
+      s.editor.first.slice(-40) +
+      "\n  page:   ..." +
+      s.exported.first.slice(-40)
+  );
 });
