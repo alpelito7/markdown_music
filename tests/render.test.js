@@ -502,7 +502,16 @@ test("the look metadata is read, and only what is on the list gets through", () 
   assert.equal(look["--mdm-look"], undefined, "the raw metadata was echoed");
   assert.equal(look["--mdm-ink"], "#d4d4d4");
   assert.equal(look["--mdm-scheme"], "dark");
-  assert.equal(look["--mdm-syn-card"], "var(--mdm-syn-bg)");
+  // The card of the dark side is lifted off the page and not sunk into it,
+  // which is the mix the editor's own dark rule carries (style.css,
+  // `#app.mdm--dark`): under a theme that draws its editor near black,
+  // `--mdm-syn-bg` reads as a hole at the bottom of the page, and a block of
+  // code is not a hole. The light side keeps the opposite step and is read a
+  // few tests above.
+  assert.equal(
+    look["--mdm-syn-card"],
+    "color-mix(in srgb, var(--mdm-ink) 4%, var(--mdm-syn-page))"
+  );
   assert.equal(look["--mdm-syn-string"], "#e6db74");
   assert.equal(look["--mdm-score-fill"], "#332c1c", "brass, on its dark value");
   assert.equal(look["--mdm-score-margin"], "0");
@@ -511,11 +520,27 @@ test("the look metadata is read, and only what is on the list gets through", () 
   // are one value.
   assert.equal(look["--mdm-play-accent"], "#d9a94f");
   assert.equal(look["--mdm-play-accent-ink"], "#d9a94f");
-  // A colour that is not six hex digits is dropped whole, and the fallback of
-  // the stylesheet paints that slot instead.
-  assert.ok(!("--mdm-syn-base" in look), "a colour name reached the page");
-  assert.ok(!("--mdm-syn-keyword" in look), "a value with CSS in it got through");
-  assert.ok(!("--mdm-syn-number" in look), "a value with markup in it got through");
+  // A colour that is not six hex digits is dropped whole. What paints the slot
+  // instead is the side's business: on the light side nothing is written and
+  // the stylesheet's own `:root` block has it, and on the dark side the filter
+  // writes its fallback out, because that `:root` block holds the light
+  // palette alone and a dark page has nothing under it to fall through to.
+  // (Leaving the slot out is what used to put the dark side's ink over a
+  // ground mixed from the light side's #f6f6f6.) The three values below are
+  // Monokai's, the editor's own dark fallback, and not one of them is what the
+  // command line carried.
+  assert.equal(look["--mdm-syn-base"], "#f8f8f2", "a colour name reached the page");
+  assert.equal(
+    look["--mdm-syn-keyword"],
+    "#f92672",
+    "a value with CSS in it got through"
+  );
+  assert.equal(
+    look["--mdm-syn-number"],
+    "#ae81ff",
+    "a value with markup in it got through"
+  );
+  assert.ok(!html.includes("display: none"), "the CSS in a value reached the page");
   assert.ok(!html.includes("alert(1)"), "the payload reached the page anyway");
 });
 
@@ -915,8 +940,46 @@ test("a PDF takes the side and the palette it is given", () => {
   assert.ok(tex.includes("\\definecolor{mdmink}{HTML}{D4D4D4}"), "the dark ink is missing");
   assert.ok(tex.includes("\\colorlet{mdmpage}{mdmtint}"), "the dark page is missing");
   assert.ok(tex.includes("\\definecolor{mdmsynkeyword}{HTML}{569CD6}"), "the palette did not travel");
-  // A slot that was not passed still falls back, one by one.
-  assert.ok(tex.includes("\\definecolor{mdmsynstring}{HTML}{54790D}"), "an unset slot went missing");
+  // A slot that was not passed still falls back, one by one, and it falls back
+  // to the palette of the side it is on rather than to one flat set: this is
+  // the dark side, so the string is Monokai's. The two sides were one table
+  // before, and a dark page that carried no palette came out with the dark
+  // side's ink, #d4d4d4, over a ground mixed from the LIGHT side's #f6f6f6.
+  assert.ok(
+    tex.includes("\\definecolor{mdmsynstring}{HTML}{E6DB74}"),
+    "an unset slot went missing"
+  );
+  assert.ok(
+    !tex.includes("{HTML}{54790D}"),
+    "the light side's fallback was written onto a dark page"
+  );
+});
+
+test("a PDF with no palette at all takes the fallback of its own side", () => {
+  const dir = freshDir("look-tex-fallback");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), TEX_DOC);
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true", "-M", "mdm-look:light"],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const tex = texOf(dir);
+  // The other half of the pair the test above reads: stackoverflow-light,
+  // which is what the editor shows on this side when it has no theme to read.
+  // LaTeX has no cascade to leave a slot to, so every one of them is written
+  // out whether it arrived or not.
+  assert.ok(
+    tex.includes("\\definecolor{mdmsynstring}{HTML}{54790D}"),
+    "the light fallback string went missing"
+  );
+  assert.ok(
+    tex.includes("\\definecolor{mdmsynbg}{HTML}{F6F6F6}"),
+    "the light fallback ground went missing"
+  );
+  assert.ok(
+    !tex.includes("{HTML}{E6DB74}"),
+    "the dark side's fallback was written onto a light page"
+  );
 });
 
 test("a PDF with no code block at all still compiles", () => {

@@ -1261,6 +1261,32 @@ test("the export carries the look the editor is showing", async () => {
   assert.equal(look["mdm-syn-bg"], "272822");
 });
 
+test("the editor's own looks export with their own colours, not VS Code's", async () => {
+  // MDM Light, MDM Dark and MDM White carry palettes of their own and the
+  // webview refuses VS Code's outright while one of them is chosen
+  // (applyPalette and OWN_LOOKS in media/main.js). The export used to send it
+  // anyway whenever the sides happened to agree, so an editor showing MDM Dark
+  // exported a page dressed in whatever theme VS Code was wearing: another
+  // ground, another code card and ten other syntax colours.
+  //
+  // The side must still travel, or the page comes out light.
+  for (const own of ["light", "dark", "white"]) {
+    const args = await exportWith(
+      "html",
+      { "mdm.theme": own, "workbench.colorTheme": "Test Theme" },
+      seedTheme("#e6db74"),
+      own === "dark" ? 2 : 1
+    );
+    const look = lookOf(args);
+    assert.equal(look["mdm-look"], own, "the side of " + own + " did not travel");
+    assert.deepEqual(
+      Object.keys(look).filter((k) => k.startsWith("mdm-syn-")),
+      [],
+      "VS Code's colours were sent for MDM " + own
+    );
+  }
+});
+
 test("a palette from the other side is left out of the export", async () => {
   // The editor held to light while VS Code is on a dark theme: the side
   // travels, its colours do not, and the render falls back to the palette the

@@ -55,6 +55,12 @@ const SETTINGS = {
   followMusic: ["follow", "still"],
 };
 
+// The three values of mdm.theme that are looks of this editor rather than
+// names of VS Code themes. They carry their own palettes, so nothing of VS
+// Code's colours travels while one of them is on. The webview keeps the same
+// list (OWN_LOOKS in media/main.js).
+const OWN_LOOKS = ["light", "dark", "white"];
+
 // A setting whose value is a number and not one of a handful of words. The
 // allowlist above does two jobs at once, and here a clamp does both: a
 // settings.json carries whatever it carries, and these values are written into
@@ -273,7 +279,17 @@ function exportLook() {
       "mdm-front-matter:" + settings.frontMatter,
     ];
     const palette = readPalette(installed).palette;
+    // MDM Light, MDM Dark and MDM White are the editor's own looks and take no
+    // colours from VS Code: the webview refuses the palette outright while one
+    // of them is chosen (applyPalette and OWN_LOOKS in media/main.js), and
+    // paints with the fallbacks its stylesheet carries. Without the same
+    // refusal here the export was dressed in the colours of whatever theme VS
+    // Code happened to be wearing while the editor was showing its own, which
+    // is the ground, the code card and the ten syntax colours all differing
+    // between the screen and the page.
+    const own = OWN_LOOKS.indexOf(settings.theme) !== -1;
     const usable =
+      !own &&
       palette &&
       palette.colors &&
       palette.kind === (side === "dark" ? "dark" : "light");

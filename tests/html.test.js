@@ -406,8 +406,12 @@ test("the page is the editor's: its ground, its ink, its measure", { skip }, asy
   assert.equal(l.fontSize, "16px");
   assert.equal(l.lineHeight, "27.2px", "the editor's 1.7 of a line");
   assert.ok(l.column <= 820, "the text column is wider than the editor's 820");
-  // The two grounds of the editor: whichever side is in force, the code sits
-  // on the darker of the two and the page on the lighter.
+  // The two grounds of the editor, on the light side, which is the side a
+  // render with no look at all comes out on: the code keeps the slate it has
+  // always had and the page takes the shallower wash above it, so the card is
+  // the darker of the two. The step is made of the ink, and on the dark side
+  // the ink changes ends and the step with it; that arrangement is read in
+  // "the look the editor exports with reaches the page" below.
   assert.ok(
     luma(l.card) < luma(l.page),
     "the code card is not darker than the page: " + l.card + " on " + l.page
@@ -502,13 +506,18 @@ test("the player bar is the editor's", { skip }, async () => {
 test("the look the editor exports with reaches the page", { skip }, async () => {
   const h = await open(DARK_PAGE);
   const l = await looks(h.page);
-  // The dark side: the editor's ink, and the page above the code rather than
-  // under it (dark is the one arrangement where the card is the theme's own
-  // background and the page the tint over it).
+  // The dark side: the editor's ink, and the code a step LIGHTER than the
+  // prose, where on the light side it is a step darker. The step is made of
+  // the ink and the ink changes ends: the page rises to the tint here, and the
+  // card is that page carried 4% towards the ink, which is the mix the editor
+  // paints its own dark card and its outline panel with (style.css,
+  // `#app.mdm--dark`). The card used to be the theme's own background, and
+  // under a theme that draws its editor near black (Dark 2026 is #121314)
+  // that is a hole at the bottom of the page; a block of code is not a hole.
   assert.equal(l.ink, "rgb(212, 212, 212)");
   assert.ok(
-    luma(l.card) < luma(l.page),
-    "the code card is not darker than the page: " + l.card + " on " + l.page
+    luma(l.card) > luma(l.page),
+    "the code card is not lighter than the page: " + l.card + " on " + l.page
   );
   // The palette that travelled, Monokai's.
   assert.equal(l.keyword, "rgb(249, 38, 114)");

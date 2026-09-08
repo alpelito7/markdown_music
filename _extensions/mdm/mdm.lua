@@ -57,9 +57,15 @@ local SIDES = {
     accent_ink = "#d9a94f",
     svg_ink = "#d4d4d4",
     staff = "#6f6f6f",
-    card = "var(--mdm-syn-bg)",
+    -- The card is lifted off the page and not sunk into it: a theme that
+    -- draws its editor near black (Dark 2026 is #121314) leaves a block of
+    -- code looking like a hole in the sheet, which is not what it is. The
+    -- editor changed to this and the filter was left behind (style.css,
+    -- `#app.mdm--dark`). In TeX the mix is written against mdmtint rather
+    -- than mdmpage because mdmcard is defined first.
+    card = "color-mix(in srgb, var(--mdm-ink) 4%, var(--mdm-syn-page))",
     page = "var(--mdm-syn-tint)",
-    card_tex = "mdmsynbg",
+    card_tex = "mdmink!4!mdmtint",
     page_tex = "mdmtint",
   },
   white = {
@@ -83,6 +89,51 @@ local SCORE_FILLS = {
   slate = { light = "#eceef1", dark = "#2c3138" },
   brass = { light = "#f7edd8", dark = "#332c1c" },
 }
+
+-- What the stylesheet leaves to its own `:root` block, the fallback palette a
+-- render with no editor behind it gets (stackoverflow-light, the editor's own
+-- when it cannot read a theme). LaTeX has no cascade to fall back through, so
+-- the ten slots and the error colour are written out whether they arrived or
+-- not.
+-- One set per side, which is what the editor's stylesheet carries (style.css,
+-- `#app` and `#app.mdm--dark`): stackoverflow-light on the light side and
+-- Monokai on the dark one, over the ground of VS Code's Dark 2026. The dark
+-- set used to be missing here, and a dark render that carried no palette came
+-- out with the dark side's ink, #d4d4d4, over a ground mixed from the LIGHT
+-- side's #f6f6f6: light grey on near-white, a page with nothing readable on
+-- it. That is not a rare corner, it is every export made from an editor held
+-- to dark while VS Code is on a light theme, and every `bin/mdm render -M
+-- mdm-look:dark` from a terminal.
+local FALLBACK_COLORS = {
+  light = {
+    base = "#2f3337",
+    bg = "#f6f6f6",
+    comment = "#656e77",
+    string = "#54790d",
+    number = "#b75501",
+    keyword = "#015692",
+    attr = "#015692",
+    name = "#b75501",
+    type = "#b75501",
+    variable = "#54790d",
+  },
+  dark = {
+    base = "#f8f8f2",
+    bg = "#121314",
+    comment = "#88846f",
+    string = "#e6db74",
+    number = "#ae81ff",
+    keyword = "#f92672",
+    attr = "#f92672",
+    name = "#a6e22e",
+    type = "#66d9ef",
+    variable = "#f8f8f2",
+  },
+}
+
+-- Which of the two a side reads. White is a light look on a sheet of paper,
+-- so it takes the light palette and only the ground changes.
+local PALETTE_SIDES = { light = "light", white = "light", dark = "dark" }
 
 -- The ten slots the editor paints code with (theme.js), in the order they are
 -- written out.
@@ -150,8 +201,16 @@ local function look_css(l)
   local function put(name, value)
     lines[#lines + 1] = "  --mdm-" .. name .. ": " .. value .. ";"
   end
+  -- A slot the palette carried, and on the dark side every slot it did not.
+  -- The stylesheet's own `:root` block holds the light set alone, so on the
+  -- light side there is a cascade to leave the rest to and nothing is written
+  -- (a render with no editor behind it says nothing about colours, which is
+  -- what the tests read); on the dark side there is nothing under it to fall
+  -- to, and leaving a slot out is what put the dark ink on the light ground.
+  local fallback = FALLBACK_COLORS[PALETTE_SIDES[l.side] or "light"]
   for _, slot in ipairs(SYNTAX_SLOTS) do
-    if l.colors[slot] then put("syn-" .. slot, l.colors[slot]) end
+    local value = l.colors[slot] or (dark and fallback[slot] or nil)
+    if value then put("syn-" .. slot, value) end
   end
   put("ink", side.ink)
   put("link", side.link)
@@ -272,8 +331,9 @@ local function look_tex(l)
   end
 
   put("%% ---------- MDM: the page dressed as the editor ----------")
+  local fallback = FALLBACK_COLORS[PALETTE_SIDES[l.side] or "light"]
   for _, slot in ipairs(SYNTAX_SLOTS) do
-    color("mdmsyn" .. slot, l.colors[slot] or FALLBACK_COLORS[slot])
+    color("mdmsyn" .. slot, l.colors[slot] or fallback[slot])
   end
   color("mdmerror", ERROR_COLOR)
   color("mdmink", side.ink)
