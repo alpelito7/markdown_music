@@ -1277,8 +1277,245 @@ test("the roman travels to the paper, and takes the sans preamble with it", () =
         tex.split("{" + pair[0] + "\\mdmem}{" + pair[1] + "\\mdmem}").length - 1,
         2,
         "the roman heading at " + pair[0] + " ems is not on both branches"
+  // The two bold files at a Scale of their own: the editor's font-size-adjust
+  // weighs each face by its own sxHeight, 0.444 for the bold against the
+  // regular's 0.431, and under the family's one Scale the bold stood 3% taller
+  // on paper than on screen (ROMAN_BOLD_SCALE in mdm.lua; what the paper draws
+  // is measured further down).
+  for (const shape of ["BoldFeatures", "BoldItalicFeatures"]) {
+    assert.ok(
+      tex.includes(shape + "={Scale=1.1892}"),
+      "the " + shape + " do not hold the bold to the editor's x-height"
+    );
+  }
+  // And the words at the size the editor draws them. fontspec's Scale is
+  // font-size-adjust on paper: the x-height the editor holds the roman to
+  // (0.528) over Latin Modern's own (0.431), with \f@size left alone so every
+  // length in \mdmem stays where it was. The files are the four the editor
+  // carries, named one by one: asked for by family name, luaotfload would
+  // hand the scaled body to Latin Modern 12, a narrower drawing than the one
+  // the editor breaks its lines with. What is measured on the page is in the
+  // tests below; this pins the lever.
+  assert.match(
+    tex,
+    /\\setmainfont\{lmroman10-regular\.otf\}\[Scale=1\.2251,/,
+    "the roman is not drawn at the editor's size"
+  );
+  for (const file of ["lmroman10-italic.otf", "lmroman10-bold.otf", "lmroman10-bolditalic.otf"]) {
+    assert.ok(tex.includes(file), file + " is not the face of its shape");
+  }
+  assert.ok(
+    tex.includes("\\setmathfont{Latin Modern Math}[Scale=1.2251]"),
+    "the maths LaTeX sets itself does not grow with the words"
+  );
+});
+
+test("a document that names its own mainfont keeps it in the roman", () => {
+  const dir = freshDir("roman-own-mainfont");
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    TEX_DOC.replace("filters:", "mainfont: TeX Gyre Termes\nfilters:")
+  );
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true",
+     "-M", "mdm-text-font:roman"],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const tex = texOf(dir);
+  // Quarto writes the document's own face into the preamble before this
+  // block is read, and a \setmainfont after it would take it away.
+  assert.ok(tex.includes("TeX Gyre Termes"), "the document's face never reached the preamble");
+  assert.ok(!tex.includes("lmroman10-regular.otf"), "the roman was put over the document's face");
+});
+
+// ---------- The words and the equations on paper, measured ----------
+
+// The x-height of every face this project draws words or maths in on paper,
+// as a fraction of its em: OS/2 sxHeight, read off the files with fontTools
+// (the TeX Live 2025 faces, and KaTeX 0.18.4's, the build vendored here).
+// A face missing from the table fails the test that meets it rather than
+// being guessed at.
+const X_HEIGHT = {
+  "LMRoman10-Regular": 0.431,
+  // The roman's other three shapes. sxHeight is also what the editor's
+  // font-size-adjust weighs a face by, and not the ink of its x: Chrome's `ex`
+  // reads 0.431, 0.431, 0.444 and 0.444 for the four in the editor, where the
+  // ink of the italic's x reaches 0.442 and the bold italic's 0.452.
+  "LMRoman10-Italic": 0.431,
+  "LMRoman10-Bold": 0.444,
+  "LMRoman10-BoldItalic": 0.444,
+  "TeXGyreHeros-Regular": 0.524,
+  "TeXGyreHeros-Bold": 0.54,
+  "KaTeX_Math-Italic": 0.441,
+  "LatinModernMath-Regular": 0.431,
+  "NewCMMath-Book": 0.431,
+};
+
+// Every run of text on the first page of a PDF, with its face and the size
+// it is painted at after every transformation: ghostscript's txtwrite reports
+// the size the glyph is drawn at, a formula printed by Chrome and included as
+// a graphic among them.
+function pdfSpans(pdf) {
+  const r = spawnSync(
+    "gs",
+    ["-q", "-dNOPAUSE", "-dBATCH", "-sDEVICE=txtwrite", "-dTextFormat=0",
+     "-dFirstPage=1", "-dLastPage=1", "-sOutputFile=-", pdf],
+    { encoding: "utf8" }
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const spans = [];
+  const re = /<span bbox="[^"]*" font="([^"]+)" size="([\d.]+)">([\s\S]*?)<\/span>/g;
+  let m;
+  while ((m = re.exec(r.stdout))) {
+    spans.push({
+      font: m[1].replace(/^[A-Z]{6}\+/, "").replace(/-Identity-H$/, ""),
+      size: Number(m[2]),
+      letters: (m[3].match(/ c="[^"]*"/g) || []).length,
+    });
+  }
+  return spans;
+}
+
+// The height of a face's lowercase as painted, in bp: its size times its own
+// x-height. The size is the one that face carries the most letters at, which
+// is the body for the words and the line for the maths, not a script or a
+// heading of the same face.
+function paintedX(spans, face) {
+  const at = new Map();
+  for (const s of spans) {
+    if (s.font === face) at.set(s.size, (at.get(s.size) || 0) + s.letters);
+  }
+  assert.ok(at.size, face + " is not on the page: " + [...new Set(spans.map((s) => s.font))]);
+  assert.ok(face in X_HEIGHT, "no measured x-height for " + face);
+  const size = [...at].sort((a, b) => b[1] - a[1])[0][0];
+  return { size: size, x: size * X_HEIGHT[face] };
+}
+
+const WORDS_AND_MATHS_DOC = `---
+format:
+  pdf:
+    documentclass: article
+filters:
+  - mdm
+---
+
+A string of length $L$ under a tension $T$ sounds a note, and the words around
+the formula stand in the same line as it does, at the size it is.
+
+$$f_n = \\frac{n}{2L}\\sqrt{\\frac{T}{\\mu}}$$
+`;
+
+const WORD_FACE = { roman: "LMRoman10-Regular", sans: "TeXGyreHeros-Regular" };
+
+// Renders the fixture in one face and measures the words and the maths of
+// its first page. The maths face is whichever of the three set it: KaTeX's,
+// with a Chrome at hand, or LaTeX's own under the name the preamble gives it.
+function wordsAndMaths(face, extra) {
+  const dir = freshDir("pdf-words-maths-" + face + (extra.length ? "-latex" : ""));
+  fs.writeFileSync(path.join(dir, "doc.mdm"), WORDS_AND_MATHS_DOC);
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:" + face].concat(extra),
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const spans = pdfSpans(path.join(dir, "doc.pdf"));
+  const mathFace = ["KaTeX_Math-Italic", "LatinModernMath-Regular", "NewCMMath-Book"].find(
+    (f) => spans.some((s) => s.font === f)
+  );
+  assert.ok(mathFace, "no maths face on the page: " + [...new Set(spans.map((s) => s.font))]);
+  return { words: paintedX(spans, WORD_FACE[face]), maths: paintedX(spans, mathFace), mathFace };
+}
+
+// The one proportion this page was designed around: the editor draws the
+// prose at an x-height of 0.528 of its em, the sans's own and the roman's by
+// font-size-adjust, and sets the equations at 1.21 of the text in Computer
+// Modern shapes, which lands their lowercase within 2% of the words. On paper
+// the roman used to keep Latin Modern's own 0.431, and the formulas set into
+// a line of it stood a fifth taller than its words (9.96 pt of text against
+// 12.06 of maths, measured on example.pdf).
+function assertSameSize(m, what) {
+  const ratio = m.maths.x / m.words.x;
+  assert.ok(
+    Math.abs(ratio - 1) < 0.03,
+    what + ": the maths is " + ratio.toFixed(3) + " of the words (" +
+      m.mathFace + " at " + m.maths.size + " bp against the words at " + m.words.size + ")"
+  );
+}
+
+test("on paper the words are the size of the equations set among them, in either face", () => {
+  const roman = wordsAndMaths("roman", []);
+  const sans = wordsAndMaths("sans", []);
+  assertSameSize(roman, "roman");
+  assertSameSize(sans, "sans");
+  // And the two faces read at one size, as they do in the editor, where the
+  // roman is drawn at the sans's x-height. The two proportions are one fact
+  // seen twice: with the roman at its own x-height it would fail both.
+  const faces = roman.words.x / sans.words.x;
+  assert.ok(
+    Math.abs(faces - 1) < 0.02,
+    "the roman's words are " + faces.toFixed(3) + " of the sans's"
+  );
+});
+
+// The four shapes of the roman against each other, which is what a bold
+// heading is drawn in. The editor weighs each face of the family by its own
+// sxHeight, so under its adjust all four are drawn with that height at 0.528
+// of the em (measured off its pixels at a device scale of 16: the x of the
+// regular and of the bold at 0.5283, of the italic and the bold italic at
+// 0.5410 and 0.5371, whose ink stands over their sxHeight). One Scale for
+// the four files drew the bold and the bold italic at 1.0302 of the regular
+// on paper (measured on this fixture).
+const ROMAN_SHAPES_DOC = `---
+format:
+  pdf:
+    documentclass: article
+filters:
+  - mdm
+---
+
+Regular words, *italic words*, **bold words** and ***bold italic words***.
+`;
+
+test("on paper the four shapes of the roman are drawn at the editor's x-height", () => {
+  const dir = freshDir("pdf-roman-shapes");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), ROMAN_SHAPES_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:roman"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const spans = pdfSpans(path.join(dir, "doc.pdf"));
+  const regular = paintedX(spans, "LMRoman10-Regular");
+  for (const face of ["LMRoman10-Italic", "LMRoman10-Bold", "LMRoman10-BoldItalic"]) {
+    const ratio = paintedX(spans, face).x / regular.x;
+    assert.ok(
+      Math.abs(ratio - 1) < 0.001,
+      face + " is drawn at " + ratio.toFixed(4) + " of the regular's x-height"
+    );
+  }
+});
+
+// Six levels, each over a line of prose, which is the document the editor's
+// own test of the ladder opens (HEADINGS_DOC in webview-look.test.js). The
+// class is the document's to choose, and the preamble reaches its headings
+// through two doors, titlesec for a standard class and KOMA's hooks for the
+// class Quarto gives a document that names none; a class with chapters writes
+// `#` as \chapter and every level under it one command down. `extra` is YAML
+// put in as it stands.
       );
     }
+test("the maths LaTeX sets itself grows with the words", () => {
+  // The route with no KaTeX in it, which is every document without a Chrome
+  // at hand and every one that asks for abcm2ps: unicode-math sets the
+  // formulas, and its face has to be scaled with the words or the fix above
+  // turns round and leaves the maths a fifth small.
+  const roman = wordsAndMaths("roman", ["-M", "mdm-engraver:abcm2ps"]);
+  const sans = wordsAndMaths("sans", ["-M", "mdm-engraver:abcm2ps"]);
+  assert.notEqual(roman.mathFace, "KaTeX_Math-Italic", "KaTeX set the maths under abcm2ps");
+  assertSameSize(roman, "roman");
+  assertSameSize(sans, "sans");
+  const faces = roman.words.x / sans.words.x;
+  assert.ok(
+    Math.abs(faces - 1) < 0.02,
+    "the roman's words are " + faces.toFixed(3) + " of the sans's"
   );
   assert.ok(!tex.includes("{2\\mdmem}{2.6\\mdmem}"), "the sans ladder is still on the roman");
   assert.ok(!tex.includes("{1.5\\mdmem}"), "the sans ladder is still on the roman");

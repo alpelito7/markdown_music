@@ -187,6 +187,7 @@ local function read_look(meta)
     -- Not a look of the editor's: whether the document names a maths font of
     -- its own, which the scale below leaves alone.
     mathfont = meta_string(meta, "mathfont") ~= nil,
+    mainfont = meta_string(meta, "mainfont") ~= nil,
     colors = {},
   }
   for _, slot in ipairs(SYNTAX_SLOTS) do
@@ -313,6 +314,23 @@ end
 -- text, measured on the pixels of the rendered page); the depth of the last
 -- line adds about 0.05 em to whatever is skipped here, so these are those two
 -- less that much, and they come out at 0.624 and 0.360 em on paper.
+-- How much larger than its size the paper draws the roman: the x-height the
+-- editor holds the roman to (0.528 em, `font-size-adjust` in style.css and in
+-- mdm-roman.css) over the one Latin Modern has of its own (0.431 em, read off
+-- lmroman10-regular.otf with fontTools). 1.2251.
+local ROMAN_SCALE = string.format("%.4f", 0.528 / 0.431)
+-- And the bold's, which is not the same number: font-size-adjust holds each
+-- face of the family to 0.528 by that face's own OS/2 sxHeight, and the two
+-- bold files carry 0.444 where the regular and the italic carry 0.431 (read
+-- with fontTools off the four woff2 and the four lmroman10 .otf alike, and
+-- Chrome's `ex` reads the same four in the editor). Under the one Scale the
+-- four files used to share, the bold stood 3% taller on paper than on
+-- screen: its lowercase at 0.5439 of \mdmem against the regular's 0.528,
+-- measured with txtwrite and off the page's pixels, article and KOMA alike.
+-- The italic keeps the regular's Scale, its sxHeight being the regular's.
+-- 1.1892.
+local ROMAN_BOLD_SCALE = string.format("%.4f", 0.528 / 0.444)
+
 --
 -- Only KOMA: a standard class rules its headings through titlesec, whose own
 -- spacing already leaves 0.648 em under a section and 0.504 under a
@@ -349,13 +367,34 @@ local function look_tex(l)
   -- the Unicode engines look for a font by name and would otherwise fall back
   -- to the roman. A distribution without it keeps whatever it has.
   --
-  -- In the roman the right thing to do is nothing. LaTeX's own default family
-  -- is a Computer Modern already (Latin Modern under fontspec, and under
-  -- pdfTeX whichever of the two the template loaded), which is the very face
-  -- the editor carries as woff2 and sets its own page in, so the paper matches
-  -- the screen by being left alone. Naming it instead would cost the optical
-  -- sizes fontspec sets up for it. The sans is still declared, so a \\textsf
-  -- in the document has Helvetica to reach for.
+  -- In the roman the face is LaTeX's own already, Latin Modern, and what the
+  -- paper was missing is the size it is drawn at. The editor does not draw
+  -- the roman at its own proportions: it holds its lowercase to 0.528 of the
+  -- em (`font-size-adjust`, style.css and mdm-roman.css), the x-height of the
+  -- sans it replaced, because every other size on the page was designed
+  -- against that one, the equations first. KaTeX sets them at 1.21 of the
+  -- text in Computer Modern shapes, whose lowercase is 0.431 to 0.442 of an
+  -- em, so beside the adjusted words they land within 2%. Left at its own
+  -- 0.431, the paper's roman read a fifth smaller than the maths set into it:
+  -- measured on example.pdf, the words at 9.96 pt and the formulas at 12.06.
+  --
+  -- fontspec's Scale is the same lever as font-size-adjust. \\f@size, and so
+  -- \\mdmem and every length hung from it, stays where it was, and only the
+  -- glyphs grow, by ROMAN_SCALE, and the two bold files by ROMAN_BOLD_SCALE,
+  -- since the editor weighs each face by its own x-height (over look_tex).
+  -- The four files are the ones the editor
+  -- carries (lmroman10, the 10 pt optical size), named one by one so the
+  -- paper is set in the drawing the screen is: asked for by family name,
+  -- luaotfload picks the optical size by the scaled size, which is Latin
+  -- Modern 12 for the body and 17 for the title, narrower drawings than the
+  -- one the editor breaks its lines with. A document that names a `mainfont`
+  -- of its own keeps it as it asked.
+  --
+  -- Under pdfTeX there is no fontspec to scale with and the roman keeps its
+  -- own x-height, so the maths comes out about a fifth larger than the words
+  -- there. It is the one engine this does not reach, and not the one Quarto
+  -- renders with. The sans is still declared either way, so a \\textsf in
+  -- the document has Helvetica to reach for.
   local roman = l.text_font == "roman"
   put("\\ifPDFTeX")
   if not roman then
@@ -366,6 +405,16 @@ local function look_tex(l)
   put("\\else")
   put("  \\usepackage{fontspec}")
   if roman then
+    if not l.mainfont then
+      put("  \\IfFontExistsTF{lmroman10-regular.otf}{%")
+      put("    \\setmainfont{lmroman10-regular.otf}[Scale=" .. ROMAN_SCALE .. ",")
+      put("      ItalicFont=lmroman10-italic.otf, BoldFont=lmroman10-bold.otf,")
+      put("      BoldItalicFont=lmroman10-bolditalic.otf,")
+      put("      BoldFeatures={Scale=" .. ROMAN_BOLD_SCALE .. "},")
+      put("      BoldItalicFeatures={Scale=" .. ROMAN_BOLD_SCALE .. "},")
+      put("      SmallCapsFont=lmromancaps10-regular.otf,")
+      put("      SlantedFont=lmromanslant10-regular.otf]}{}")
+    end
     put("  \\IfFontExistsTF{TeX Gyre Heros}{\\setsansfont{TeX Gyre Heros}}{}")
   else
     put("  \\IfFontExistsTF{TeX Gyre Heros}{\\setmainfont{TeX Gyre Heros}\\setsansfont{TeX Gyre Heros}}{}")
@@ -393,11 +442,20 @@ local function look_tex(l)
   -- sets them in its upright serif; the roman of the same family puts them
   -- back.
   --
-  -- None of that holds once the words are the roman, and both halves of it
-  -- invert. The scale goes to 1: the compensation was for a sans, and beside
-  -- Latin Modern there is nothing to compensate, the two being the same
-  -- drawing (x-heights of 0.431 and 0.442 em, a cap height of 0.683 on both,
-  -- measured on the files this project carries). The face goes to Latin
+  -- In the roman the face changes and the reason for the scale does not. The
+  -- words are Latin Modern held to the sans's x-height (above), so the maths
+  -- standing in for KaTeX's grows by the same ROMAN_SCALE to stay the size of
+  -- the words: the same drawing scaled the same, Latin Modern Math's
+  -- lowercase being Latin Modern's, 0.431 em on both (read off the files).
+  -- Pandoc's template reaches the same size by another road, which is worth
+  -- knowing before this Scale is taken for dead weight: it sets
+  -- `\\defaultfontfeatures{Scale=MatchLowercase}` before this block is read,
+  -- and that scales a maths face asked for with no Scale of its own to the
+  -- lowercase of the main font, landing it at 12.21 pt beside words at 12.21
+  -- either way. The explicit Scale is what holds under a template without
+  -- that default: in a plain document an unscaled Latin Modern Math came out
+  -- at 9.96 pt beside the same words.
+  -- The face goes to Latin
   -- Modern Math rather than NewCM Book: Book is Computer Modern thickened, and
   -- it was picked to hold its own beside Helvetica's weight, which is not what
   -- stands beside it here. NewCM stays as the fallback for a distribution
@@ -406,9 +464,10 @@ local function look_tex(l)
   -- roman KaTeX sets them in.
   if not l.mathfont then
     if roman then
-      put("  \\IfFontExistsTF{Latin Modern Math}{\\setmathfont{Latin Modern Math}}{%")
+      put("  \\IfFontExistsTF{Latin Modern Math}" ..
+          "{\\setmathfont{Latin Modern Math}[Scale=" .. ROMAN_SCALE .. "]}{%")
       put("    \\IfFontExistsTF{NewCMMath-Book.otf}" ..
-          "{\\setmathfont{NewCMMath-Book.otf}}{}%")
+          "{\\setmathfont{NewCMMath-Book.otf}[Scale=" .. ROMAN_SCALE .. "]}{}%")
       put("  }")
     else
       put("  \\IfFontExistsTF{NewCMMath-Book.otf}{%")
