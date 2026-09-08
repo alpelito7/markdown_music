@@ -206,6 +206,19 @@ body {
      so it reads as a line on the light page. */
   caret-color: var(--mdm-play-accent-ink);
 }
+/* Lines end where the page ends them. CodeMirror wraps with
+   `white-space: break-spaces` (its .cm-lineWrapping), in which the space after
+   the last word of a line takes room and has to fit; a page lets that space
+   hang past the edge, as `normal` does. So a word ending within a space of the
+   margin stayed on the exported line and went down one in the editor, or was
+   divided there with hyphenation on: measured on example.mdm with the column
+   at 820 px, "The boundary" ended at 818.95 px and the editor set
+   "bound-|ary" where the page kept the word whole. pre-wrap keeps every space
+   the source has, as break-spaces does, and lets the last one of a line hang
+   (html.test.js, every paragraph line by line). */
+#app .cm-lineWrapping {
+  white-space: pre-wrap;
+}
 #app .cm-line {
   padding: 0;
   /* Every line is the frame its own furniture is placed against: the number

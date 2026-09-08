@@ -594,6 +594,39 @@ const FIRST_VISUAL_LINE = function (el) {
   return first.trim();
 }.toString();
 
+// Every paragraph as the words its lines end on, keyed by how it opens. The
+// text of a formula is left out on both surfaces, since a sub- or superscript
+// sits off the row it belongs to and would read as a line break, and a row
+// counts as new only half a line below the one before.
+const LINE_ENDS = function (els) {
+  const out = {};
+  Array.from(els).forEach((el) => {
+    const cs = getComputedStyle(el);
+    const half = (parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2) / 2;
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const ends = [];
+    let top = null;
+    let text = "";
+    let n;
+    while ((n = walk.nextNode())) {
+      if (n.parentElement.closest(".katex")) continue;
+      for (let i = 0; i < n.data.length; i++) {
+        const rg = document.createRange();
+        rg.setStart(n, i);
+        rg.setEnd(n, i + 1);
+        const rect = rg.getClientRects()[0];
+        if (rect && top !== null && rect.top > top + half) {
+          ends.push((text.match(/(\S+)\s*$/) || ["", ""])[1]);
+        }
+        if (rect) top = rect.top;
+        text += n.data[i];
+      }
+    }
+    out[text.slice(0, 30)] = { ends: ends, text: text.replace(/\s+/g, " ").trim() };
+  });
+  return out;
+}.toString();
+
 // What both surfaces are asked for, in the same words: the column, where the
 // first paragraph breaks, and the score as it is actually drawn. On screen and
 // not in user units, since an SVG scaled to its container reports the same
@@ -632,17 +665,19 @@ async function sides() {
   await page.evaluate(() => document.fonts.ready);
   const paper = await page.waitForSelector(".mdm-paper svg");
   assert.ok(paper, "the page engraved no score to measure");
-  const exported = await page.evaluate((f, fl) => {
+  const exported = await page.evaluate((f, fl, le) => {
     const para = Array.from(document.querySelectorAll("p")).find((e) =>
       e.textContent.startsWith("This document is ordinary Markdown")
     );
-    return eval("(" + f + ")")(
+    const out = eval("(" + f + ")")(
       document.querySelector("main.content"),
       para,
       document.querySelector(".mdm-paper"),
       fl
     );
-  }, m, FIRST_VISUAL_LINE);
+    out.ends = eval("(" + le + ")")(document.querySelectorAll("main.content p"));
+    return out;
+  }, m, FIRST_VISUAL_LINE, LINE_ENDS);
   await browser.close();
   OPEN_BROWSERS.delete(browser);
 
@@ -651,17 +686,19 @@ async function sides() {
   await h.page.evaluate(
     () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   );
-  const editor = await h.page.evaluate((f, fl) => {
+  const editor = await h.page.evaluate((f, fl, le) => {
     const line = Array.from(document.querySelectorAll("#app .cm-line")).find((e) =>
       e.textContent.startsWith("This document is ordinary Markdown")
     );
-    return eval("(" + f + ")")(
+    const out = eval("(" + f + ")")(
       document.querySelector("#app .cm-content"),
       line,
       document.querySelector("#app code.language-abc"),
       fl
     );
-  }, m, FIRST_VISUAL_LINE);
+    out.ends = eval("(" + le + ")")(document.querySelectorAll("#app .cm-line"));
+    return out;
+  }, m, FIRST_VISUAL_LINE, LINE_ENDS);
   await h.close();
 
   SIDES = { exported: exported, editor: editor };
@@ -684,4 +721,31 @@ test("the page breaks the first paragraph where the editor breaks it", { skip },
       "\n  page:   ..." +
       s.exported.first.slice(-40)
   );
+});
+
+// And every paragraph after it, line by line, where the first line of the
+// first one could not look: at a word ending within a space of the margin.
+// CodeMirror wraps with `break-spaces`, in which the space after the last word
+// of a line takes room and has to fit, while a page lets it hang past the
+// edge; "The boundary" of the string paragraph ended 1.05 px inside the 820 px
+// column, stayed on the page's first line and went down to the editor's
+// second (or was divided there, with hyphenation on). Compared only where the
+// two surfaces show the same characters, formulas aside: a paragraph holding
+// the caret shows its marks in the editor and not on the page.
+test("every paragraph of the page ends its lines where the editor ends them", { skip }, async () => {
+  const s = await sides();
+  const same = Object.keys(s.exported.ends).filter(
+    (k) =>
+      s.exported.ends[k].ends.length &&
+      s.editor.ends[k] &&
+      s.editor.ends[k].text === s.exported.ends[k].text
+  );
+  assert.ok(same.length >= 3, "too few paragraphs wrapped alike on both surfaces to test: " + JSON.stringify(same));
+  for (const k of same) {
+    assert.deepEqual(
+      s.editor.ends[k].ends,
+      s.exported.ends[k].ends,
+      "the lines of \"" + k + "...\" end on different words"
+    );
+  }
 });
