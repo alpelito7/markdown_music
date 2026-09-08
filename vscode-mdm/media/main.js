@@ -317,20 +317,27 @@
     btn.classList.toggle("mdm-btn--on", staffLines === "ink");
   }
 
-  // ---------- Following the music ----------
+  // ---------- Following the playhead ----------
 
-  // Whether the page keeps up with a sounding tune: on, it keeps the staff
+  // Whether the page keeps up with the playhead: on, it keeps the staff
   // system that is sounding whole on the pane (showPlayhead); off, the music
   // never moves the page at all, so a score longer than the pane can sound
   // while the document around it is read, which there was no way to ask for.
   // On by default, which is what the page has always done.
   //
+  // The playhead and not "the music" is what the button says, because the
+  // playhead is the thing that moves and the thing the page is chasing: a
+  // tune can sound with the page perfectly still, and it is the mark walking
+  // the staff that a reader is asking to keep in front of them.
+  //
   // In the toolbar with the other things that are set once and left, and not
   // in the player row: it says what this editor does with a tune rather than
   // what this tune is doing, and it is worth setting before a player is open
-  // at all. Lit while the page is following, the convention of the staff-line
-  // and multicursor toggles rather than the theme button's (whose glyph names
-  // what the click leads to): this one has a state to show.
+  // at all. Lit while the page is NOT following, which is the convention of
+  // the staff-line, multicursor and text-font toggles rather than the theme
+  // button's (whose glyph names what the click leads to): the lamp marks the
+  // setting that was asked for, and following is what the editor does before
+  // anyone asks for anything.
   //
   // The page and the head that walks it: three rules of text with the
   // playhead standing across them, which is the one mark of this editor that
@@ -345,24 +352,32 @@
     '<rect x="9.9" y="1.3" width="1.5" height="13.4" rx=".75"/>' +
     "</svg>";
 
-  let following = SETTINGS.followMusic !== "still";
+  let following = SETTINGS.followPlayhead !== "still";
 
+  // One verb and its negation, so the two states of the button read as one
+  // switch. "Let the page be" said the same thing in better English and named
+  // neither the playhead nor the following, so a reader meeting the off state
+  // first had no way to tell what the button was for.
   function followTip() {
-    return following ? "Let the page be" : "Follow the music";
+    return following ? "Unfollow the playhead" : "Follow the playhead";
   }
 
+  // Lit while the page is NOT following, which is the convention of the rest
+  // of the bar: the lamp marks the setting that was asked for, and following
+  // is what the editor does before anyone asks for anything. The staff-line,
+  // multicursor and text-font toggles all light this way round.
   function updateFollowButton() {
     const btn = document.querySelector('#app button[data-type="mdm-follow"]');
     if (!btn) return;
     btn.setAttribute("aria-label", followTip());
-    btn.classList.toggle("mdm-btn--on", following);
+    btn.classList.toggle("mdm-btn--on", !following);
   }
 
   // The setting has come back from the host: the button follows it, and a tune
   // already sounding is brought under the pane at once. Turning it on is a
   // gesture asking to see the music, and a gesture is answered where it is
   // made rather than at whatever the tune does next.
-  function applyFollowMusic() {
+  function applyFollowPlayhead() {
     updateFollowButton();
     if (following) revealPlayhead();
   }
@@ -1730,7 +1745,7 @@
   // page can move as much as it likes without the track sliding out from
   // under the pointer holding it.
   //
-  // A tune sounding is the other (followMusic, called from the frame loop),
+  // A tune sounding is the other (followPlayhead, called from the frame loop),
   // and what it keeps true is one sentence: the staff system being played
   // stays whole on the pane. Asked every frame and answered only when part of
   // that band would leave it, so a score that fits the pane is never scrolled
@@ -1834,7 +1849,7 @@
   // is ask, every frame the music is sounding and there is a score to ask
   // about. The system the music was last seen on used to be kept here, since
   // the page moved at the crossing and nowhere else; nothing reads it now.
-  function followMusic(place) {
+  function followPlayhead(place) {
     // A hand on the progress bar is a seek, and a seek reveals itself from
     // the drag handlers. Paused or stopped, the reader has the page.
     if (cursorDrag !== null || !isSounding(player.bar)) return;
@@ -1862,7 +1877,7 @@
       // Scrolled out: nothing to draw the line on, and no system to read a
       // place from. The follow still hears about it, so that a stop made from
       // up here is not carried over into the next tune as a crossing.
-      followMusic(null);
+      followPlayhead(null);
       return;
     }
     const line = svg.querySelector(".mdm-play-cursor");
@@ -1890,7 +1905,7 @@
       if (line && line.parentNode) line.parentNode.removeChild(line);
       // No cursor to show: a stopped tune, or one still priming, which is
       // where a press of play lands before the first note has a place.
-      followMusic(null);
+      followPlayhead(null);
       return;
     }
     const at =
@@ -1898,7 +1913,7 @@
         ? cursorDrag * timing.total
         : (ms * timing.total) / total;
     const place = cursorPlace(timing, at);
-    followMusic(place);
+    followPlayhead(place);
     const el = line || cursorEl(svg);
     el.setAttribute("x1", place.x);
     el.setAttribute("x2", place.x);
@@ -5370,7 +5385,7 @@
         icon: FOLLOW_ICON,
         tip: followTip(),
         click: function () {
-          askSetting("followMusic", following ? "still" : "follow");
+          askSetting("followPlayhead", following ? "still" : "follow");
         },
       },
     ];
@@ -5481,7 +5496,7 @@
       outlineOpen = next.outline === "shown";
       outlineWidth = next.outlineWidth || 250;
       matchSubstring = next.multicursorMatch === "substring";
-      following = next.followMusic !== "still";
+      following = next.followPlayhead !== "still";
       textFont = next.textFont || "roman";
       // applyTheme repaints the toolbar and the score styling, whose colours
       // are picked from the effective theme. A theme chosen from the menu
@@ -5496,7 +5511,7 @@
       applyOutlineWidth();
       applyOutline();
       updateMatchButton();
-      applyFollowMusic();
+      applyFollowPlayhead();
       applyTextFont();
       return;
     }

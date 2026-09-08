@@ -481,7 +481,7 @@ function settingsMessage(overrides) {
         outline: "hidden",
         outlineWidth: 250,
         multicursorMatch: "word",
-        followMusic: "follow",
+        followPlayhead: "follow",
         textFont: "roman",
       },
       overrides || {}

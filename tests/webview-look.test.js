@@ -2950,3 +2950,52 @@ test("the sans keeps the ladder Markdown is usually drawn with", { skip }, async
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// ---------- What a lit button means ----------
+
+// One rule for the whole bar: a lamp marks the setting that was asked for, and
+// stays dark on the one the editor does before anybody asks for anything. Two
+// buttons used to light on their own default, which said nothing at all, and
+// this is what keeps the next one from doing the same.
+const TOGGLES = [
+  { name: "mdm-staff-lines", key: "staffLines", asked: "ink" },
+  { name: "mdm-match-substring", key: "multicursorMatch", asked: "substring" },
+  { name: "mdm-text-font", key: "textFont", asked: "sans" },
+  { name: "mdm-follow", key: "followPlayhead", asked: "still" },
+  { name: "mdm-front-matter", key: "frontMatter", asked: "shown" },
+];
+
+const lampOf = (page, name) =>
+  page.evaluate(
+    (n) =>
+      document
+        .querySelector('#app button[data-type="' + n + '"]')
+        .classList.contains("mdm-btn--on"),
+    name
+  );
+
+test("no toggle is lit until it is asked for", { skip }, async () => {
+  // Every setting at the value the extension ships, front matter included:
+  // the helper seeds that one shown, and the default is hidden.
+  const h = await open({ seed: { settings: { frontMatter: "hidden" } } });
+  for (const t of TOGGLES) {
+    assert.equal(await lampOf(h.page, t.name), false, t.name + " is lit on its own default");
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("every toggle lights on the setting that was asked for", { skip }, async () => {
+  for (const t of TOGGLES) {
+    const seed = { frontMatter: "hidden" };
+    seed[t.key] = t.asked;
+    const h = await open({ seed: { settings: seed } });
+    assert.equal(
+      await lampOf(h.page, t.name),
+      true,
+      t.name + " stayed dark on " + t.key + ": " + t.asked
+    );
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});

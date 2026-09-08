@@ -530,7 +530,7 @@ test and no other:
   keeps the place the old column gave it for four painted frames after the
   panel opens or shuts, which coming back from an open panel is 93px left of
   its line, out past the number);
-- `main.js`: the `revealPlayhead()` at the end of `followMusic` dropped (a
+- `main.js`: the `revealPlayhead()` at the end of `followPlayhead` dropped (a
   play made with the score under the fold sounds with nothing to see, and a
   page taken away from the music is never brought back);
 - `main.js`: the `if (!following) return` dropped from `revealPlayhead()` (the
@@ -538,7 +538,7 @@ test and no other:
 - `main.js`: the `REVEAL_SLACK` of the guard in `showPlayhead` put back to the
   24px of room to spare it used to ask for at each edge (a system showing whole
   but resting near an edge throws the page half a pane to centre itself);
-- `main.js`: `followMusic` given back the guard it used to carry, which kept
+- `main.js`: `followPlayhead` given back the guard it used to carry, which kept
   the staff system the head was last seen on and revealed only when that
   changed (the follow waits for a crossing again, and a page taken away from
   the music mid-system is left parked for the length of a staff system before
@@ -569,7 +569,7 @@ The brass chrome (2026-09-05) added this one, caught the same way:
 The page turning with the music (2026-09-05) added these, all three caught,
 each restored from a copy and checked by hash:
 
-- `main.js`: the `revealPlayhead()` at the end of `followMusic` dropped (the
+- `main.js`: the `revealPlayhead()` at the end of `followPlayhead` dropped (the
   crossing turns no page: the follow test waits out its 30 seconds for a
   scroll that never comes);
 - `main.js`: the `place.top === followedSystem` guard dropped, so the page is

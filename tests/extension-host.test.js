@@ -96,7 +96,8 @@ test("hostile setting values never reach the webview HTML", () => {
     "mdm.outline": { shown: true },
     "mdm.outlineWidth": "</script>",
     "mdm.multicursorMatch": ["substring"],
-    "mdm.followMusic": 0,
+    "mdm.followPlayhead": 0,
+    "mdm.textFont": "roman; drop",
   });
   assert.ok(!h.html.includes("alert(1)"));
   const m = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html);
@@ -109,7 +110,8 @@ test("hostile setting values never reach the webview HTML", () => {
     frontMatter: "hidden",
     outline: "hidden",
     multicursorMatch: "word",
-    followMusic: "follow",
+    followPlayhead: "follow",
+    textFont: "roman",
     outlineWidth: 250,
     multiCursorModifier: "alt",
   });
@@ -125,7 +127,8 @@ test("valid setting values pass through to the webview HTML", () => {
     "mdm.outline": "shown",
     "mdm.outlineWidth": 480,
     "mdm.multicursorMatch": "substring",
-    "mdm.followMusic": "still",
+    "mdm.followPlayhead": "still",
+    "mdm.textFont": "sans",
   });
   const m = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html);
   assert.deepEqual(JSON.parse(m[1]), {
@@ -136,7 +139,8 @@ test("valid setting values pass through to the webview HTML", () => {
     frontMatter: "shown",
     outline: "shown",
     multicursorMatch: "substring",
-    followMusic: "still",
+    followPlayhead: "still",
+    textFont: "sans",
     outlineWidth: 480,
     multiCursorModifier: "alt",
   });

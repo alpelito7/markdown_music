@@ -352,7 +352,7 @@ What it does:
   fold brings the page to the head, the page is still while a line of music is
   played (the head does not go down the page inside a system), a page taken
   away from the music comes back at once, and a pause hands it back for good.
-  A toolbar toggle (`mdm.followMusic`) turns all of that off, and then the
+  A toolbar toggle (`mdm.followPlayhead`) turns all of that off, and then the
   music never moves the page at all, which is what it takes to leave a long
   score sounding while the document around it is read.
   Resuming after a pause lands on the beat. What

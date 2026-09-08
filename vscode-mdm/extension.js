@@ -52,7 +52,7 @@ const SETTINGS = {
   frontMatter: ["hidden", "shown"],
   outline: ["hidden", "shown"],
   multicursorMatch: ["word", "substring"],
-  followMusic: ["follow", "still"],
+  followPlayhead: ["follow", "still"],
   textFont: ["roman", "sans"],
 };
 

@@ -965,21 +965,23 @@ test("the follow button says what the page does, and a press asks for the other"
     });
   const on = await state();
   assert.ok(on, "the transport carries no follow button");
-  assert.equal(on.lit, true, "the page follows by default and the button does not say so");
+  // The lamp marks the setting that was asked for, and following is what the
+  // editor does before anyone asks: unlit is the default state.
+  assert.equal(on.lit, false, "the button is lit on the state the editor opens in");
   await h.page.evaluate(() =>
     document.querySelector('#app button[data-type="mdm-follow"]').click()
   );
   await new Promise((r) => setTimeout(r, 200));
   assert.deepEqual(await setSettingPosts(h.page), [
-    { type: "setSetting", key: "followMusic", value: "still" },
+    { type: "setSetting", key: "followPlayhead", value: "still" },
   ]);
   // The button paints itself from what the host sends back, the way every
   // other toggle of this editor does.
-  assert.equal((await state()).lit, true, "the button lit itself before the host answered");
-  await postSettings(h.page, { followMusic: "still" });
+  assert.equal((await state()).lit, false, "the button lit itself before the host answered");
+  await postSettings(h.page, { followPlayhead: "still" });
   await new Promise((r) => setTimeout(r, 300));
   const off = await state();
-  assert.equal(off.lit, false, "the setting came back and the button kept its disc");
+  assert.equal(off.lit, true, "the setting came back and the button did not take its disc");
   assert.notEqual(off.label, on.label, "the button says the same thing either way");
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -993,7 +995,7 @@ test("with the follow off a tune plays on and the page is the reader's", { skip 
   const h = await open({
     text: TALL_RUNUP_FIXTURE,
     scores: 1,
-    seed: { settings: { followMusic: "still" } },
+    seed: { settings: { followPlayhead: "still" } },
   });
   // The player is opened on the tall window the harness makes, before the pane
   // is shrunk: at 520 the score is past the end of what CodeMirror renders and
@@ -1064,7 +1066,7 @@ test("the bar stays in reach with its score scrolled out of the viewport", { ski
   const h = await open({
     text: FAR_SCORE_FIXTURE,
     scores: 1,
-    seed: { settings: { followMusic: "still" } },
+    seed: { settings: { followPlayhead: "still" } },
   });
   await clickToggle(h.page, 0);
   await h.page.waitForFunction(

@@ -158,7 +158,7 @@ away.
 | `mdm.outline`          | whether the outline panel is open                                          |
 | `mdm.outlineWidth`     | the outline panel's width in pixels                                        |
 | `mdm.multicursorMatch` | whether `Ctrl+D` matches whole words or inside them                        |
-| `mdm.followMusic`      | `follow` or `still`: whether the page keeps up with a sounding tune        |
+| `mdm.followPlayhead`   | `follow` or `still`: whether the page keeps up with a sounding tune        |
 | `mdm.textFont`         | `roman` or `sans`: the face the text of the document is set in             |
 
 ## Notes
