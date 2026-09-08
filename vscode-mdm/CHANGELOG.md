@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.5.3
+
+- A page exported on the dark side carries the dark side's own fallback
+  palette. The ten slots the editor paints code with had one fallback set for
+  both sides, stackoverflow-light's, so a dark page with no palette behind it
+  came out with the dark side's ink, #d4d4d4, over a ground mixed from the
+  light side's #f6f6f6: light grey on near-white, with nothing readable on it.
+  That was every export made from an editor held to dark while VS Code was on
+  a light theme, and every `bin/mdm render -M mdm-look:dark` from a terminal.
+- The code card on the dark side is lifted 4% of the ink off the page instead
+  of sunk into the theme's own background, which is the step the editor draws.
+  Under a theme whose editor is near black, and Dark 2026 is #121314, a block
+  of code read as a hole in the sheet.
+- An export made while the editor is showing MDM Light, MDM Dark or MDM White
+  is dressed in that look. The editor refuses VS Code's palette outright while
+  one of its own is on and the export did not, so a document read in MDM Dark
+  came out wearing whatever theme VS Code happened to have on: the ground, the
+  code card and all ten syntax colours differing between the screen and the
+  page.
+- The text column of the exported page is the editor's measure. `width: 100%`
+  inside Quarto's grid resolved against a track of 802 px and never reached
+  the 820 the maximum allowed, and eighteen pixels is a word: example.mdm's
+  first paragraph reached "LaTeX" in the editor and only "emphasis" on the
+  page. They break in the same place now, and a test walks the paragraph
+  character by character to say so.
+- A quotation on the page is indented from its bar by the editor's 14 px.
+  Quarto stamps `.blockquote` on it, Bootstrap gives that class a padding of
+  its own, and its 1rem is Quarto's 17 px rather than the body's 16.
+
+- A line of the page ends on the word the editor ends it on. CodeMirror
+  wraps with `break-spaces`, in which the space after the last word of a line
+  takes room and has to fit, while a page lets that space hang past the edge:
+  a word ending within a space of the margin stayed on the page's line and
+  went down one in the editor. Measured on example.mdm with the column at
+  820 px, "The boundary" ended 1.05 px inside it. The editor wraps with
+  `pre-wrap` now, which keeps every space the source has and lets the last
+  one of a line hang, and the test walks every paragraph of the two surfaces
+  line by line.
+
 ## 0.5.2
 
 - The caret keeps its place in its line while the outline panel opens and
