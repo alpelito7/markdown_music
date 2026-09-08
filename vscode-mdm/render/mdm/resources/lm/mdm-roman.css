@@ -1,0 +1,106 @@
+/* Latin Modern Roman for the exported page, the other end of the editor's own
+   roman (the @font-face block of vscode-mdm/media/style.css, which carries
+   the same four files).
+
+   This sheet rides with the page only when the document is set in the roman
+   (mdm-text-font: roman), so a page in the sans pays none of its 191 KB and a
+   self-contained one carries no face it does not draw with.
+
+   The faces are Latin Modern Roman at the 10 pt optical size, the one the
+   family means for running text, converted from the OpenType originals GUST
+   publishes with no other change: same outlines, same metrics, same 794
+   characters. See THIRD-PARTY-NOTICES.md and licenses/GUST-FONT-LICENSE.txt. */
+@font-face {
+  font-family: "Latin Modern Roman";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/LatinModernRoman-Regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/LatinModernRoman-Italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url(fonts/LatinModernRoman-Bold.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman";
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
+}
+
+/* The size the roman is drawn at, which is not the size it is asked for, and
+   the other end of the same rule in the editor's stylesheet.
+   What a reader sees as the size of a text is its x-height, and Latin
+   Modern's is 0.431 em against the 0.528 of the sans it replaces (measured
+   with fontTools on the files this repository carries). At the same
+   `font-size: 16px` the roman reads about a fifth smaller and takes the whole
+   page out of proportion with it: the headings are ems of that same 16px and
+   keep their size, and the text abcjs draws inside a score is its own pixels
+   and no em of ours, so both come out looking oversized beside the words.
+   `font-size-adjust` leaves the computed font-size at 16px, so every em in
+   mdm-look.css is where it was, and scales the glyphs until their x-height is
+   the ratio named. 0.528 is the sans's own, so the page is set at the reading
+   size it had and keeps the proportions it was designed with.
+   The maths is left out of it for free: the vendored KaTeX sheet opens with
+   the `font` shorthand (`.katex { font: normal 1.21em KaTeX_Main }`), and that
+   shorthand resets font-size-adjust to `none`. Its 1.21 is then right again
+   and is left alone, being the compensation a Computer Modern needs beside a
+   sans (0.528/0.442 is 1.19) and the words now being drawn at the sans's
+   x-height.
+   The engraving is not left out for free, and what takes it out is not here:
+   the reset lives in mdm-look.css beside the rest of the score's rules,
+   because it belongs to the score and not to the face. */
+body {
+  font-size-adjust: ex-height 0.528;
+}
+
+/* The headings of the roman, which are not the headings of the sans, and the
+   other end of the `#app.mdm-text--roman .cm-line.mdm-hN` rules in the
+   editor's stylesheet. Whoever asks for the roman is asking for the page
+   LaTeX would have set, so the levels take the sizes an `article` gives its
+   sections rather than Markdown's own ladder: \huge, \LARGE, \Large,
+   \large and \normalsize, whose ratios over the body are 2.074, 1.728,
+   1.44, 1.2 and 1 (read off article.cls and size10.clo of TeX Live 2025, not
+   from memory).
+   h6 is the anchor: `###### Title` and `**Title**` have to be drawn the same.
+   h5 is the one level LaTeX has no size for, since \subsubsection and
+   \paragraph share \normalsize while a Markdown ladder wants six distinct
+   steps; it is put between h6 at 1 and h4 at \large, whose geometric middle
+   is 1.095, and 1.1 is the round number a rounding away.
+   The rules the sans sets alongside these, the weight, the leading and the
+   hairline under the first two levels, are left where they are: only the
+   sizes change with the face.
+
+   This sheet is only in the page at all when the roman was asked for, so the
+   selectors need no class of their own and there is none to use: the face
+   travels as a custom property and not as a class. They match mdm-look.css's
+   own selectors exactly and win on order, this dependency being added after
+   that one (mdm.lua, ensure_look). h6 is already 1em there and is left alone.
+   The title Quarto draws from the YAML follows h1, as it does in the sans. */
+body h1,
+body .title {
+  font-size: 2.074em;
+}
+body h2 {
+  font-size: 1.728em;
+}
+body h3 {
+  font-size: 1.44em;
+}
+body h4 {
+  font-size: 1.2em;
+}
+body h5 {
+  font-size: 1.1em;
+}

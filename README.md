@@ -268,13 +268,14 @@ Installation: from the VS Code Marketplace (search "Markdown Music"), or
 build the package with `npx @vscode/vsce package` inside `vscode-mdm/` and
 install the `.vsix` it leaves there (Extensions panel > "..." > "Install from
 VSIX..."). For working on the extension itself, a symlink of the directory
-into `~/.vscode/extensions/alpelito7.mdm-editor-0.3.0` (the version has to
-match the manifest's) and a reload (`Developer: Reload Window`) does the
-same. The editor needs nothing else; an export needs Quarto, and a PDF of a
-document with scores in it needs TeX and a Chrome (or abcm2ps, the fallback
-engraver). To go back to the plain text editor: right click the file, `Open
-With...`. Both can be open at once on the same file (Reopen Editor With... in
-a second group): they share the document.
+into `~/.vscode/extensions/alpelito7.mdm-editor` and a reload (`Developer:
+Reload Window`) does the same. The folder name carries no version: VS Code
+reads the version out of the manifest, so a name without one is a name that
+does not go stale at the next release. The editor needs nothing else; an
+export needs Quarto, and a PDF of a document with scores in it needs TeX and
+a Chrome (or abcm2ps, the fallback engraver). To go back to the plain text
+editor: right click the file, `Open With...`. Both can be open at once on the
+same file (Reopen Editor With... in a second group): they share the document.
 
 What it does:
 
@@ -385,6 +386,30 @@ What it does:
   stackoverflow-light on the light one. The ground under the dark one is not
   Monokai's own olive but the `editor.background` of Dark 2026, `#121314`, so
   MDM Dark stands where the text editor beside it stands.
+- **The face of the text**: the document is set in Latin Modern Roman, the
+  face TeX sets a document in, which the extension carries as four woff2 files
+  (191 KB). Nothing is installed for it and no LaTeX is involved: the equations
+  beside it were already drawn in those shapes, KaTeX's own faces being
+  Computer Modern, so the words and the maths of a page are one design rather
+  than two. A toolbar toggle (`mdm.textFont`) hands the text back to the
+  interface sans of the system. Only the text moves: the toolbar, the menus and
+  the outline panel stay in the sans, and code, the numbers in the margin and
+  the source of an open block keep their monospace.
+
+  It is drawn at the reading size the sans had, not at the size it is asked
+  for. What a reader sees as the size of a text is its x-height, and Latin
+  Modern's is 0.431 em against the sans's 0.528, so at a bare 16 px it reads
+  about a fifth small and pulls the page out of proportion with it: the
+  headings are ems of that same 16 px and keep their size, and the text abcjs
+  draws inside a score is its own pixels and no em of ours. `font-size-adjust`
+  fixes all three at once, leaving the computed size at 16 px, so every em of
+  the stylesheet stays where it was, and scaling the glyphs until their
+  x-height is the sans's. The maths keeps KaTeX's own 1.21, which is the
+  compensation a Computer Modern needs beside a sans and is exactly right for
+  a page set at the sans's x-height; the engraving keeps its own pixels. An
+  export carries the face to the page and to the paper, where the roman is
+  what LaTeX is already set in.
+
 - **Scores**: no background by default, so a score reads as part of the
   document the way an equation does (`mdm.scoreFill`: `none`, `paper`,
   `slate`, `brass`); centred like a display equation or lined up left

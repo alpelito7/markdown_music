@@ -486,6 +486,43 @@ uncommitted, so `git diff --quiet` was no use):
 - `style.css`: the `.mdm-play-cursor` selector unwired (the line draws
   with no stroke, and the computed brass assertion fails).
 
+The face of the text (2026-09-07) added these nine, each caught by one test and
+no other:
+
+- `style.css`: the `--mdm-text` of `#app.mdm-text--roman` dropped (the class
+  lands, the button lights, and every word stays in the sans: the whole
+  feature is the one declaration);
+- `style.css`: `font-family: var(--mdm-text)` put back on `#app` as well as on
+  the scroller (the toolbar, the drop-down menus and the outline panel go
+  roman too, through the three `font: inherit` rules that hang off `#app`,
+  and the editor stops looking like an application);
+- `main.js`: the button repainting itself before asking (`textFont` flipped and
+  `applyTextFont()` called in the click handler), which is the one thing the
+  toolbar of this editor never does;
+- `main.js`: `applyTextFont()` dropped from the settings handler (the first
+  press is the last: the value comes back from the host and nothing reads it);
+- `main.js`: `SETTINGS.textFont` ignored at start-up, hard-coded to `roman` (a
+  document left in the sans reopens in the roman, which is the memory of the
+  toolbar gone);
+- `extension.js`: the `-M mdm-text-font` pair dropped from `exportLook()` (the
+  editor is in the roman and the export comes out in the sans, since the
+  filter's own fallback is the sans on purpose);
+- `mdm.lua`: the filter's fallback flipped from `sans` to `roman` (a plain
+  `bin/mdm render`, which passes no look at all, changes the page it has always
+  drawn, and carries 191 KB of faces into every self-contained export that
+  never asked for them);
+- `mdm.lua`: `[Scale=1.21]` left on `\setmathfont` in the roman branch (the
+  same fifth too tall as the second mutation, on paper);
+- `media/fonts/LatinModernRoman-Regular.woff2` deleted (the fallback serif
+  draws the page and nothing says so, which is the failure the arrival check
+  exists for).
+
+One trap, in the runner rather than in the harness: a mutation applied with
+`open(p, "w").write(mutate(open(p).read()))` truncates the file before the
+argument is evaluated, so the mutation is handed an empty string, every anchor
+misses and a whole round reports nothing. Read the file, then open it for
+writing.
+
 The outline and the follow (2026-09-06) added these five, each caught by one
 test and no other:
 

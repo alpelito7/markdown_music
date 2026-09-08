@@ -102,6 +102,27 @@ in ink, scores can take a paper, slate or brass fill, and every toolbar
 state persists as an `mdm.*` setting, so a document reopens the way it was
 left.
 
+## The face of the text
+
+The document is set in Latin Modern Roman, the face TeX sets a document in.
+The extension carries it: four woff2 files, 191 KB, nothing to install and no
+LaTeX anywhere near it. It is the face the equations were already drawn in,
+KaTeX's own being Computer Modern, so the words and the maths of a page read
+as one design instead of two.
+
+It is drawn at the reading size the sans had. What a reader sees as the size
+of a text is its x-height, and Latin Modern's is a fifth shorter than the
+sans's, so at the same nominal size it reads small and leaves the headings and
+the text inside a score looking oversized beside it. The page is set at the
+sans's x-height instead, which keeps the proportions it was designed with and
+keeps KaTeX's maths, sized for exactly that, the size of the words it sits in.
+
+A toolbar toggle hands the text back to the interface font of the system, and
+the choice persists as `mdm.textFont`. Only the text moves either way: the
+toolbar, the menus and the outline panel keep the interface sans, and code,
+the numbers in the margin and the source of an open block keep their
+monospace. An export carries the face to the page and to the paper.
+
 ## Export
 
 The export button renders the document to HTML, PDF or both through
@@ -138,6 +159,7 @@ away.
 | `mdm.outlineWidth`     | the outline panel's width in pixels                                        |
 | `mdm.multicursorMatch` | whether `Ctrl+D` matches whole words or inside them                        |
 | `mdm.followMusic`      | `follow` or `still`: whether the page keeps up with a sounding tune        |
+| `mdm.textFont`         | `roman` or `sans`: the face the text of the document is set in             |
 
 ## Notes
 

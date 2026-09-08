@@ -482,6 +482,7 @@ function settingsMessage(overrides) {
         outlineWidth: 250,
         multicursorMatch: "word",
         followMusic: "follow",
+        textFont: "roman",
       },
       overrides || {}
     ),

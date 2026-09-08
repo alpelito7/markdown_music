@@ -174,6 +174,13 @@ local function read_look(meta)
     staff_lines = meta_word(meta, "mdm-staff-lines", { gray = true, ink = true }, "gray"),
     score_fill = meta_word(meta, "mdm-score-fill", SCORE_FILLS, "none"),
     score_align = meta_word(meta, "mdm-score-align", { center = true, left = true }, "center"),
+    -- The face the words are set in: the roman is Latin Modern, carried by
+    -- this extension, and the sans is what the page and the paper have always
+    -- been set in, which is why it is the fallback here. The editor names it
+    -- on every render it makes (exportLook), so a document exported from the
+    -- toolbar comes out in the face it was being read in; a plain
+    -- `bin/mdm render`, which passes no look at all, keeps the sans.
+    text_font = meta_word(meta, "mdm-text-font", { roman = true, sans = true }, "sans"),
     -- Which engraver draws the PDF: the editor's own abcjs through Chrome,
     -- unless the document asks for abcm2ps (or no Chrome is found).
     engraver = meta_word(meta, "mdm-engraver", { abcjs = true, abcm2ps = true }, "abcjs"),
@@ -237,29 +244,19 @@ local function look_css(l)
   -- A score sits centred like a display equation, unless the editor was set
   -- to line them up with the text.
   if l.score_align == "left" then put("score-margin", "0") end
+  -- The roman, when the editor was in it. The faces themselves ride with the
+  -- page as their own dependency (ensure_look), and this is the line that
+  -- spends them: mdm-look.css sets --mdm-text to the sans and reads it on the
+  -- body and the headings, so the words move and the chrome does not.
+  if l.text_font == "roman" then
+    put("text", '"Latin Modern Roman", Georgia, "Times New Roman", serif')
+  end
   return "<style>\nhtml:root {\n" .. table.concat(lines, "\n") .. "\n}\n</style>"
 end
 
 
 -- ---------- The same look, on paper ----------
 
--- What the stylesheet leaves to its own `:root` block, the fallback palette a
--- render with no editor behind it gets (stackoverflow-light, the editor's own
--- when it cannot read a theme). LaTeX has no cascade to fall back through, so
--- the ten slots and the error colour are written out whether they arrived or
--- not.
-local FALLBACK_COLORS = {
-  base = "#2f3337",
-  bg = "#f6f6f6",
-  comment = "#656e77",
-  string = "#54790d",
-  number = "#b75501",
-  keyword = "#015692",
-  attr = "#015692",
-  name = "#b75501",
-  type = "#b75501",
-  variable = "#54790d",
-}
 local ERROR_COLOR = "#c94f4f"
 
 -- Every token class Pandoc paints code with, on the slot the stylesheet gives
@@ -345,18 +342,34 @@ local function look_tex(l)
   put("\\colorlet{mdmrule}{mdmink!14!mdmpage}")
   put("\\colorlet{mdmquiet}{mdmink!72!mdmpage}")
 
-  -- The editor asks the platform for its own interface font and falls back to
-  -- Helvetica, which is what TeX Gyre Heros is. Under pdfTeX it comes as an
-  -- NFSS family, under XeTeX and LuaTeX through fontspec, since the Unicode
-  -- engines look for a font by name and would otherwise fall back to the
-  -- roman. A distribution without it keeps whatever it has.
+  -- The face of the words, and the whole of what mdm-text-font decides on
+  -- paper. In the sans the editor asks the platform for its own interface font
+  -- and falls back to Helvetica, which is what TeX Gyre Heros is: under pdfTeX
+  -- it comes as an NFSS family, under XeTeX and LuaTeX through fontspec, since
+  -- the Unicode engines look for a font by name and would otherwise fall back
+  -- to the roman. A distribution without it keeps whatever it has.
+  --
+  -- In the roman the right thing to do is nothing. LaTeX's own default family
+  -- is a Computer Modern already (Latin Modern under fontspec, and under
+  -- pdfTeX whichever of the two the template loaded), which is the very face
+  -- the editor carries as woff2 and sets its own page in, so the paper matches
+  -- the screen by being left alone. Naming it instead would cost the optical
+  -- sizes fontspec sets up for it. The sans is still declared, so a \\textsf
+  -- in the document has Helvetica to reach for.
+  local roman = l.text_font == "roman"
   put("\\ifPDFTeX")
-  put("  \\IfFileExists{tgheros.sty}{\\usepackage{tgheros}}{\\usepackage{helvet}}")
-  put("  \\renewcommand{\\familydefault}{\\sfdefault}")
+  if not roman then
+    put("  \\IfFileExists{tgheros.sty}{\\usepackage{tgheros}}{\\usepackage{helvet}}")
+    put("  \\renewcommand{\\familydefault}{\\sfdefault}")
+  end
   put("  \\IfFileExists{DejaVuSansMono.sty}{\\usepackage[scaled=0.88]{DejaVuSansMono}}{}")
   put("\\else")
   put("  \\usepackage{fontspec}")
-  put("  \\IfFontExistsTF{TeX Gyre Heros}{\\setmainfont{TeX Gyre Heros}\\setsansfont{TeX Gyre Heros}}{}")
+  if roman then
+    put("  \\IfFontExistsTF{TeX Gyre Heros}{\\setsansfont{TeX Gyre Heros}}{}")
+  else
+    put("  \\IfFontExistsTF{TeX Gyre Heros}{\\setmainfont{TeX Gyre Heros}\\setsansfont{TeX Gyre Heros}}{}")
+  end
   -- Code at 0.88 of the text, which is the size the stylesheet gives it.
   put("  \\IfFontExistsTF{DejaVu Sans Mono}{\\setmonofont{DejaVu Sans Mono}[Scale=0.88]}{}")
   -- The maths at 1.21 of the text, which is what KaTeX sets its own at
@@ -379,16 +392,35 @@ local function look_tex(l)
   -- \\cos, \\mathrm) from the text font, which here is the sans, where KaTeX
   -- sets them in its upright serif; the roman of the same family puts them
   -- back.
+  --
+  -- None of that holds once the words are the roman, and both halves of it
+  -- invert. The scale goes to 1: the compensation was for a sans, and beside
+  -- Latin Modern there is nothing to compensate, the two being the same
+  -- drawing (x-heights of 0.431 and 0.442 em, a cap height of 0.683 on both,
+  -- measured on the files this project carries). The face goes to Latin
+  -- Modern Math rather than NewCM Book: Book is Computer Modern thickened, and
+  -- it was picked to hold its own beside Helvetica's weight, which is not what
+  -- stands beside it here. NewCM stays as the fallback for a distribution
+  -- without the Latin Modern maths. No \\setmathrm either: unicode-math takes
+  -- the words of an operator from the text font, and here that is already the
+  -- roman KaTeX sets them in.
   if not l.mathfont then
-    put("  \\IfFontExistsTF{NewCMMath-Book.otf}{%")
-    put("    \\setmathfont{NewCMMath-Book.otf}[Scale=1.21]%")
-    put("    \\IfFontExistsTF{NewCM10-Book.otf}" ..
-        "{\\setmathrm{NewCM10-Book.otf}[Scale=1.21]}{}%")
-    put("  }{%")
-    put("    \\IfFontExistsTF{Latin Modern Math}{%")
-    put("      \\setmathfont{Latin Modern Math}[Scale=1.21]%")
-    put("      \\setmathrm{Latin Modern Roman}[Scale=1.21]}{}%")
-    put("  }")
+    if roman then
+      put("  \\IfFontExistsTF{Latin Modern Math}{\\setmathfont{Latin Modern Math}}{%")
+      put("    \\IfFontExistsTF{NewCMMath-Book.otf}" ..
+          "{\\setmathfont{NewCMMath-Book.otf}}{}%")
+      put("  }")
+    else
+      put("  \\IfFontExistsTF{NewCMMath-Book.otf}{%")
+      put("    \\setmathfont{NewCMMath-Book.otf}[Scale=1.21]%")
+      put("    \\IfFontExistsTF{NewCM10-Book.otf}" ..
+          "{\\setmathrm{NewCM10-Book.otf}[Scale=1.21]}{}%")
+      put("  }{%")
+      put("    \\IfFontExistsTF{Latin Modern Math}{%")
+      put("      \\setmathfont{Latin Modern Math}[Scale=1.21]%")
+      put("      \\setmathrm{Latin Modern Roman}[Scale=1.21]}{}%")
+      put("  }")
+    end
   end
   -- Inline code sits on a chip of the card material, as in the editor. A
   -- \\colorbox would refuse to break at the end of a line, which is why the
@@ -476,6 +508,20 @@ local function look_tex(l)
   -- empty, and the patch is a no-op there rather than an error.
   put("\\RequirePackage{etoolbox}")
   put("\\patchcmd{\\@maketitle}{\\vskip 1.5em}{\\vskip 0.5em}{}{}")
+  -- The heading sizes of the two faces, in ems of the body text and by the
+  -- level of the Markdown heading, not by what LaTeX calls the command that
+  -- draws it: `##` is \subsection here because Pandoc writes it that way, and
+  -- it takes the size the editor gives an h2 in the face the document is set
+  -- in. The sans ladder is Markdown's own (2 / 1.5 / 1.25 / 1.1) and the
+  -- roman one is article.cls's (\huge / \LARGE / \Large / \large over a
+  -- 10 pt body: 2.074 / 1.728 / 1.44 / 1.2), which is where the editor's
+  -- roman ladder was read off too (style.css, `#app.mdm-text--roman
+  -- .cm-line.mdm-h1`, and mdm-roman.css for the exported page). Leading is
+  -- 1.3 of the size in both, as it has been since the sans ladder was
+  -- written.
+  local HEAD = roman
+    and { { "2.074", "2.7" }, { "1.728", "2.25" }, { "1.44", "1.87" }, { "1.2", "1.56" } }
+    or { { "2", "2.6" }, { "1.5", "1.95" }, { "1.25", "1.63" }, { "1.1", "1.43" } }
   put("\\@ifundefined{sectionlinesformat}{%")
   put("  \\def\\ps@plain{\\let\\@mkboth\\@gobbletwo")
   put("    \\let\\@oddhead\\@empty\\let\\@evenhead\\@empty")
@@ -488,10 +534,10 @@ local function look_tex(l)
         size .. "\\mdmem}{" .. leading .. "\\mdmem}\\selectfont}{\\" .. counter ..
         "}{1em}{}" .. (rule and "[{\\color{mdmrule}\\titlerule[0.8pt]}]" or "") .. "%")
   end
-  titled("section", "thesection", "2", "2.6", true)
-  titled("subsection", "thesubsection", "1.5", "1.95", true)
-  titled("subsubsection", "thesubsubsection", "1.25", "1.63", false)
-  titled("paragraph", "theparagraph", "1.1", "1.43", false)
+  titled("section", "thesection", HEAD[1][1], HEAD[1][2], true)
+  titled("subsection", "thesubsection", HEAD[2][1], HEAD[2][2], true)
+  titled("subsubsection", "thesubsubsection", HEAD[3][1], HEAD[3][2], false)
+  titled("paragraph", "theparagraph", HEAD[4][1], HEAD[4][2], false)
   put("}{%")
   put("  \\setkomafont{disposition}{\\bfseries\\color{mdmink}}%")
   -- pagenumber and not pageheadfoot alone: KOMA's pagenumber element opens
@@ -503,10 +549,10 @@ local function look_tex(l)
     put("  \\addtokomafont{" .. cmd .. "}{\\fontsize{" .. size ..
         "\\mdmem}{" .. leading .. "\\mdmem}\\selectfont}%")
   end
-  komafont("section", "2", "2.6")
-  komafont("subsection", "1.5", "1.95")
-  komafont("subsubsection", "1.25", "1.63")
-  komafont("paragraph", "1.1", "1.43")
+  komafont("section", HEAD[1][1], HEAD[1][2])
+  komafont("subsection", HEAD[2][1], HEAD[2][2])
+  komafont("subsubsection", HEAD[3][1], HEAD[3][2])
+  komafont("paragraph", HEAD[4][1], HEAD[4][2])
   put("  \\renewcommand*{\\sectionlinesformat}[4]{%")
   put("    \\@hangfrom{\\hskip #2#3}{#4}%")
   put("    \\Ifstr{#1}{section}{\\mdmheadrule{" .. HEAD_RULE_AIR.section ..
@@ -654,6 +700,22 @@ local function ensure_look()
     version = "0.1.0",
     stylesheets = { "resources/mdm-look.css" },
   })
+  -- The roman travels only for a page set in it: four faces are 191 KB, and a
+  -- self-contained export takes every dependency inside the file, so a page in
+  -- the sans would carry a face it never draws a letter with.
+  if look.text_font == "roman" then
+    quarto.doc.add_html_dependency({
+      name = "mdm-roman",
+      version = "2.004",
+      stylesheets = { "resources/lm/mdm-roman.css" },
+      resources = {
+        { name = "fonts/LatinModernRoman-Regular.woff2", path = "resources/lm/fonts/LatinModernRoman-Regular.woff2" },
+        { name = "fonts/LatinModernRoman-Italic.woff2", path = "resources/lm/fonts/LatinModernRoman-Italic.woff2" },
+        { name = "fonts/LatinModernRoman-Bold.woff2", path = "resources/lm/fonts/LatinModernRoman-Bold.woff2" },
+        { name = "fonts/LatinModernRoman-BoldItalic.woff2", path = "resources/lm/fonts/LatinModernRoman-BoldItalic.woff2" },
+      },
+    })
+  end
   quarto.doc.include_text("in-header", look_css(look))
 end
 

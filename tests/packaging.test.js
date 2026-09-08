@@ -66,6 +66,20 @@ test("the notices name a licence for everything the extension ships", () => {
   assert.match(notices, /Musyng Kite/);
   assert.match(notices, /Attribution-ShareAlike\s+3\.0/);
   assert.match(notices, /creativecommons\.org\/licenses\/by-sa\/3\.0/);
+  // Latin Modern is neither MIT nor shared alike: the licence asks that a
+  // derived work say what it changed and where the whole Work can be had, and
+  // four faces out of a distribution of a thousand files is already a derived
+  // work by its own clause 2. Both halves are pinned here, and so is the copy
+  // of the licence text the package carries.
+  assert.match(notices, /Latin\s+Modern\s+Roman/);
+  assert.match(notices, /Jackowski/);
+  assert.match(notices, /GUST\s+Font\s+License/);
+  assert.match(notices, /LaTeX\s+Project\s+Public\s+License\s+1\.3c/);
+  assert.match(notices, /ctan\.org\/pkg\/lm/);
+  assert.ok(
+    fs.existsSync(path.join(EXT, "licenses", "GUST-FONT-LICENSE.txt")),
+    "the extension ships the faces without the licence they came under"
+  );
   // And the tools the export asks of the machine are named as not shipped.
   assert.match(notices, /Lesser\s+General\s+Public\s+License/);
   assert.ok(

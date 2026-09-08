@@ -926,6 +926,39 @@ test("the title block comes out only when the header is on screen", () => {
   assert.ok(!tex.includes("And a subtitle"), "the subtitle survived");
 });
 
+// The other side of the switch, and the one that had nothing holding it: the
+// test above says the block goes away when the editor is hiding the header,
+// and until this was written nothing said it comes back when the editor is
+// showing it. `mdm-front-matter:shown` was only ever exercised as the filter's
+// own fallback, which a document rendered from a terminal takes, so an export
+// that stopped carrying the block would have gone on passing.
+//
+// Both faces, because the face is what the editor changes most often and the
+// two travel through different sheets: the roman brings mdm-roman.css with it
+// and the sans does not, and the block is drawn by neither of them. What is
+// checked is the block itself and the three things it holds, the title, the
+// subtitle and whoever wrote it, since Quarto normalises the author into keys
+// of its own and the hidden branch has to take all of them away.
+test("the title block comes out for either face when the header is on screen", () => {
+  const dir = freshDir("front-matter-shown");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), TITLED_DOC);
+
+  ["roman", "sans"].forEach((face) => {
+    const r = runMdm(
+      ["render", "doc.mdm", "--to", "html",
+        "-M", "mdm-text-font:" + face,
+        "-M", "mdm-front-matter:shown"],
+      dir
+    );
+    assert.equal(r.status, 0, r.stderr);
+    const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+    assert.ok(html.includes("title-block-header"), "no title block in the " + face);
+    assert.ok(html.includes(">A title<"), "the title is missing in the " + face);
+    assert.ok(html.includes("And a subtitle"), "the subtitle is missing in the " + face);
+    assert.ok(html.includes("somebody"), "the author is missing in the " + face);
+  });
+});
+
 test("a PDF takes the side and the palette it is given", () => {
   const dir = freshDir("look-tex-dark");
   fs.writeFileSync(path.join(dir, "doc.mdm"), TEX_DOC);
@@ -1068,6 +1101,187 @@ test("a word the filter does not know falls back to the plain look", () => {
   assert.ok(!("--mdm-score-fill" in look));
   assert.equal(look["--mdm-staff-fill"], "#a3a3a3");
   assert.ok(!("--mdm-score-margin" in look), "an unknown alignment was honoured");
+  assert.ok(!("--mdm-text" in look), "an unknown face was honoured");
+});
+
+// ---------- The face of the text ----------
+
+test("the roman travels to the page, and only when it is asked for", () => {
+  const dir = freshDir("look-roman-html");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), PLAIN_DOC);
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "html", "-M", "mdm-text-font:roman"],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  // The stylesheet reads --mdm-text on the body and the headings; the block
+  // the filter writes is what puts the roman in it.
+  const look = lookBlock(html);
+  assert.match(
+    look["--mdm-text"] || "",
+    /Latin Modern Roman/,
+    "the face did not reach the page"
+  );
+  // The faces themselves ride as their own dependency, with the rule that
+  // takes KaTeX's 1.21 back off the maths: beside the roman, which is the same
+  // drawing as KaTeX's own faces, there is nothing to compensate for.
+  assert.ok(html.includes("mdm-roman.css"), "the roman stylesheet is missing");
+  // The page links the sheet rather than carrying it (only a self-contained
+  // export inlines a dependency), so the rules are read where Quarto put them.
+  const libs = path.join(dir, "doc_files", "libs", "quarto-contrib");
+  const romanDir = fs
+    .readdirSync(libs)
+    .find((name) => name.startsWith("mdm-roman"));
+  assert.ok(romanDir, "the roman dependency was not copied beside the page");
+  const sheet = fs.readFileSync(path.join(libs, romanDir, "mdm-roman.css"), "utf8");
+  // The roman is drawn at the reading size the sans had: its x-height is
+  // 0.431 em against the sans's 0.528, so at a bare 16px it reads a fifth
+  // small while the headings, which are ems of that same 16px, keep theirs.
+  assert.ok(
+    /font-size-adjust: ex-height 0\.528/.test(sheet),
+    "the exported roman is left at its own x-height"
+  );
+  // KaTeX is left exactly as it ships: its own `font` shorthand keeps the
+  // adjust off the maths, and its 1.21 is the compensation that matches a
+  // page set at the sans's x-height.
+  assert.ok(
+    !/\.katex[\s\S]{0,40}font-size:/.test(sheet),
+    "the export is still resizing the maths"
+  );
+  assert.equal(
+    (sheet.match(/font-family: "Latin Modern Roman"/g) || []).length,
+    4,
+    "the four text faces are not all declared"
+  );
+  // And the faces came with it, or every word would be drawn in Georgia.
+  assert.deepEqual(
+    fs.readdirSync(path.join(libs, romanDir, "fonts")).sort(),
+    [
+      "LatinModernRoman-Bold.woff2",
+      "LatinModernRoman-BoldItalic.woff2",
+      "LatinModernRoman-Italic.woff2",
+      "LatinModernRoman-Regular.woff2",
+    ],
+    "the faces the stylesheet names did not come along"
+  );
+
+  // The ladder the roman gives its headings, which is not the ladder the sans
+  // gives them: whoever asks for the roman is asking for the page LaTeX would
+  // have set, so the levels take the sizes an `article` gives its sections
+  // (\huge, \LARGE, \Large, \large, then the body). Measured against the
+  // editor's own rule, `#app.mdm-text--roman .cm-line.mdm-hN` in style.css:
+  // the two are one design and a reader with both open must see one document.
+  // h6 is the anchor at 1em and is left to the sheet underneath.
+  for (const [level, size] of [
+    ["h1", "2.074em"],
+    ["h2", "1.728em"],
+    ["h3", "1.44em"],
+    ["h4", "1.2em"],
+    ["h5", "1.1em"],
+  ]) {
+    assert.ok(
+      new RegExp("body " + level + "[^{]*\\{[^}]*font-size: " + size.replace(".", "\\.")).test(sheet),
+      "the roman's " + level + " is not at " + size
+    );
+  }
+  // It only wins by order, both selectors being one element under `body`, and
+  // the order is the one mdm.lua adds the two dependencies in.
+  assert.ok(
+    html.indexOf("mdm-roman.css") > html.indexOf("mdm-look.css"),
+    "the roman sheet is read before the one it overrides"
+  );
+
+  // And a page that did not ask for it carries none of it: four faces are
+  // 191 KB, and a self-contained export takes every dependency inside the
+  // file. This is also what `bin/mdm render` on its own gets, the sans page
+  // the filter has always drawn.
+  const plain = freshDir("look-roman-none");
+  fs.writeFileSync(path.join(plain, "doc.mdm"), PLAIN_DOC);
+  const p2 = runMdm(["render", "doc.mdm", "--to", "html"], plain);
+  assert.equal(p2.status, 0, p2.stderr);
+  const sans = fs.readFileSync(path.join(plain, "doc.html"), "utf8");
+  assert.ok(!("--mdm-text" in lookBlock(sans)), "the sans page named a face");
+  assert.ok(!sans.includes("mdm-roman.css"), "the roman rode along for nothing");
+  assert.ok(!sans.includes("Latin Modern Roman"), "a face rode along for nothing");
+});
+
+test("a self-contained roman page carries its own faces", () => {
+  const dir = freshDir("roman-selfcontained");
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    PAGE_MATH("format:\n  html:\n    embed-resources: true\n")
+  );
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "html", "-M", "mdm-text-font:roman"],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  // KaTeX's twenty, and the four of the text. A page that fetched the text
+  // faces from beside itself would read in Georgia wherever it was opened.
+  assert.equal(
+    (html.match(/url\(data:font\/woff2;base64,/g) || []).length,
+    24,
+    "the text faces were not taken into the page"
+  );
+  assert.ok(
+    !/href="[^"]*LatinModernRoman[^"]*"/.test(html),
+    "a face was left outside the file"
+  );
+});
+
+test("the roman travels to the paper, and takes the sans preamble with it", () => {
+  const dir = freshDir("look-roman-tex");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), TEX_DOC);
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true",
+     "-M", "mdm-text-font:roman"],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const tex = texOf(dir);
+  // On paper the roman is what LaTeX already is, so the right thing to do is
+  // to stop doing the wrong one: no sans main font, and under pdfTeX no
+  // \familydefault pushed over to it either.
+  assert.ok(
+    !tex.includes("\\setmainfont{TeX Gyre Heros}"),
+    "the page is still set in the sans"
+  );
+  assert.ok(
+    !tex.includes("\\renewcommand{\\familydefault}{\\sfdefault}"),
+    "pdfTeX is still pushed to the sans"
+  );
+  // The sans is still declared, so a \textsf in the document has Helvetica.
+  assert.ok(tex.includes("\\setsansfont{TeX Gyre Heros}"), "the sans is gone entirely");
+  // The maths at the size of the words, in the Latin Modern of the same
+  // family: the 1.21 and the Book weight were both answers to a sans standing
+  // beside them, and no sans stands there now.
+  assert.ok(
+    tex.includes("\\setmathfont{Latin Modern Math}"),
+    "the maths is not the Latin Modern of the text"
+  );
+  assert.ok(!/Scale=1\.21/.test(tex), "the compensation for a sans is still on the maths");
+  // Code is untouched: it is the monospace either way.
+  assert.ok(tex.includes("[Scale=0.88]"), "the code lost its size");
+  // And the headings are the ladder the editor draws the roman with, which
+  // is article.cls's own (\huge, \LARGE, \Large, \large over a 10 pt body)
+  // and not Markdown's. A heading is 15% of its size away between the two
+  // ladders, which is the sort of drift the export rule exists to stop: a
+  // reader with the editor open beside the paper is reading one document.
+  // Both branches of the preamble carry it, the titlesec one for a standard
+  // class and the KOMA one beside it, so each size is asserted twice over.
+  [["2.074", "2.7"], ["1.728", "2.25"], ["1.44", "1.87"], ["1.2", "1.56"]].forEach(
+    (pair) => {
+      assert.equal(
+        tex.split("{" + pair[0] + "\\mdmem}{" + pair[1] + "\\mdmem}").length - 1,
+        2,
+        "the roman heading at " + pair[0] + " ems is not on both branches"
+      );
+    }
+  );
+  assert.ok(!tex.includes("{2\\mdmem}{2.6\\mdmem}"), "the sans ladder is still on the roman");
+  assert.ok(!tex.includes("{1.5\\mdmem}"), "the sans ladder is still on the roman");
 });
 
 // ---------- PDF rendering ----------

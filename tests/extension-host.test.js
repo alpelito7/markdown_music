@@ -1254,6 +1254,16 @@ test("the export carries the look the editor is showing", async () => {
   assert.equal(look["mdm-front-matter"], "shown");
   const hidden = lookOf(await exportWith("html", {}, seedTheme("#e6db74")));
   assert.equal(hidden["mdm-front-matter"], "hidden", "the default is a hidden header");
+  // And the face the words are in. It is named on every render, the default
+  // included, because the filter's own fallback is the other one: `bin/mdm
+  // render` passes no look at all and keeps the sans page it always had, so
+  // an export that said nothing would come out in a face the editor is not
+  // showing.
+  assert.equal(look["mdm-text-font"], "roman", "the default face did not travel");
+  const sans = lookOf(
+    await exportWith("html", { "mdm.textFont": "sans" }, seedTheme("#e6db74"))
+  );
+  assert.equal(sans["mdm-text-font"], "sans");
   // The palette of that same theme, spelt without the `#` a -M value cannot
   // carry (it would open a YAML comment).
   assert.equal(look["mdm-syn-string"], "e6db74");

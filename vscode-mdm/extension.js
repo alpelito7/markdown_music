@@ -53,6 +53,7 @@ const SETTINGS = {
   outline: ["hidden", "shown"],
   multicursorMatch: ["word", "substring"],
   followMusic: ["follow", "still"],
+  textFont: ["roman", "sans"],
 };
 
 // The three values of mdm.theme that are looks of this editor rather than
@@ -271,6 +272,13 @@ function exportLook() {
       "mdm-score-fill:" + settings.scoreFill,
       "-M",
       "mdm-score-align:" + settings.scoreAlign,
+      // The face the editor is showing the words in. Named on every render,
+      // the roman included, because the filter's own fallback is the sans:
+      // `bin/mdm render` passes no look at all and keeps the page it always
+      // had, while a document exported from this toolbar comes out set in
+      // whatever it was being read in.
+      "-M",
+      "mdm-text-font:" + settings.textFont,
       // Not a colour, but the same kind of thing: what the editor is showing.
       // The title block Quarto draws from the YAML belongs to the header, so
       // an export from an editor that is hiding the header renders a document

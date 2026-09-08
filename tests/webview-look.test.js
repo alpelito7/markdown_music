@@ -861,6 +861,11 @@ test("the code sits on the panel material, a step off the page either side", { s
   for (const theme of ["dark", "light"]) {
     const h = await open({
       seed: { settings: { theme: theme, scoreFill: "none", outline: "shown" } },
+      // One score and not the three the helper waits for by default: with
+      // the outline panel open the text column is 579px instead of 800, so
+      // CodeMirror keeps fewer line widgets alive and never builds the third
+      // block at all. Nothing here needs it.
+      scores: 1,
     });
     const g = await grounds(h.page);
     assert.ok(g.code, theme + ": no code line to measure");
@@ -1079,6 +1084,176 @@ test("the alignment button moves narrow scores to the margin", { skip }, async (
   );
   assert.ok((await narrow()).left < 1, "did not reach the margin");
   assert.equal(await tip(), "Centre scores");
+  await h.close();
+});
+
+// ---------- The face of the text ----------
+
+// Everything the face decides, in one round trip: what the document is set in,
+// what the toolbar is set in (which must not move), whether the vendored file
+// actually arrived, and the size KaTeX gives a formula.
+//
+// The arrival is measured and not read off getComputedStyle, which reports the
+// declared list whether or not the file was fetched: a woff2 that 404s leaves
+// the fallback drawing every word and a naive test passes for the wrong
+// reason. The canvas measures a real run of glyphs in each family, and Latin
+// Modern is narrower than both the fallback serif and the sans.
+async function faceOf(page) {
+  return page.evaluate(async () => {
+    await document.fonts.ready;
+    const app = document.getElementById("app");
+    const width = (family) => {
+      const c = document.createElement("canvas").getContext("2d");
+      c.font = '16px ' + family;
+      return c.measureText("Take a string of length, tension and density").width;
+    };
+    // KaTeX's own size rule is on `.katex`, so a bare span of that class reads
+    // it without needing an equation in the fixture.
+    const content = document.querySelector(".cm-content");
+    const probe = document.createElement("span");
+    probe.className = "katex";
+    probe.textContent = "x";
+    content.appendChild(probe);
+    const katex = getComputedStyle(probe).fontSize;
+    probe.remove();
+    // The factor font-size-adjust actually applies: the same run of prose
+    // measured in place, then again with the adjust switched off. Declaring
+    // the property is not applying it, and a computed value of "0.528" is
+    // what the sheet said, not what the browser drew.
+    const run = document.createElement("span");
+    run.textContent = "abcdefghijklmnopqrstuvwxyz";
+    run.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+    content.appendChild(run);
+    const withAdjust = run.getBoundingClientRect().width;
+    run.style.fontSizeAdjust = "none";
+    const without = run.getBoundingClientRect().width;
+    run.remove();
+    const btn = app.querySelector('button[data-type="mdm-text-font"]');
+    return {
+      roman: app.classList.contains("mdm-text--roman"),
+      text: getComputedStyle(document.querySelector(".cm-scroller")).fontFamily,
+      chrome: getComputedStyle(app.querySelector(".mdm-toolbar")).fontFamily,
+      arrived: document.fonts.check('16px "Latin Modern Roman"'),
+      lm: width('"Latin Modern Roman"'),
+      georgia: width("Georgia"),
+      // Every face, not just the one a paragraph of plain prose happens to
+      // ask for. They are fetched by name at start-up so that CodeMirror
+      // cannot measure a character against the fallback and draw the caret
+      // where the text is not; left to be fetched when layout first wants
+      // them, only the roman comes up loaded and the other three arrive
+      // whenever a bold or an italic is first drawn.
+      faces: [...document.fonts]
+        .filter((f) => f.family === "Latin Modern Roman")
+        .map((f) => f.style + "/" + f.weight + "=" + f.status)
+        .sort(),
+      adjust: getComputedStyle(content).fontSizeAdjust,
+      factor: +(withAdjust / without).toFixed(3),
+      katex,
+      lit: btn.classList.contains("mdm-btn--on"),
+      tip: btn.getAttribute("aria-label"),
+    };
+  });
+}
+
+test("the text is set in the roman, and the button hands it back to the sans", { skip }, async () => {
+  const h = await open({ text: EXAMPLE });
+
+  const first = await faceOf(h.page);
+  // Nothing was clicked: this is what mdm.textFont is worth on a fresh editor.
+  assert.ok(first.roman, "the editor did not come up in the roman");
+  assert.match(first.text, /Latin Modern Roman/);
+  assert.ok(first.arrived, "the face was declared but never loaded");
+  assert.deepEqual(
+    first.faces,
+    [
+      "italic/400=loaded",
+      "italic/700=loaded",
+      "normal/400=loaded",
+      "normal/700=loaded",
+    ],
+    "a face was left to be fetched when something first needs it: " +
+      JSON.stringify(first.faces)
+  );
+  assert.ok(
+    Math.abs(first.lm - first.georgia) > 5,
+    "the roman measures like its own fallback, so the woff2 did not arrive: " +
+      first.lm + " vs " + first.georgia
+  );
+  // The chrome is the application's and not the page's: the toolbar keeps the
+  // interface sans whichever face the words are in.
+  assert.match(first.chrome, /-apple-system/);
+  assert.ok(!/Latin Modern/.test(first.chrome), "the roman reached the toolbar");
+  // The roman is drawn at the reading size the sans had. Its x-height is
+  // 0.431 em against the sans's 0.528, so at a bare `font-size: 16px` it reads
+  // about a fifth small and takes the page out of proportion: the headings are
+  // ems of the same 16px and keep their size, and the text abcjs draws in a
+  // score is its own pixels. font-size-adjust leaves the computed size at 16px
+  // and scales the glyphs, so every em in the sheet stays where it was.
+  assert.equal(first.adjust, "0.528", "the roman is left at its own x-height");
+  // Declared is not applied: this is the factor the browser actually drew at,
+  // measured, against the 0.528/0.431 = 1.225 the two faces ask for.
+  assert.ok(
+    first.factor > 1.2 && first.factor < 1.25,
+    "the adjust was declared but not applied: factor " + first.factor
+  );
+  // And KaTeX is left exactly as it ships. Its 1.21 is the compensation a
+  // Computer Modern needs beside a sans, and with the words now drawn at the
+  // sans's x-height that is the measurement it was made against. The vendored
+  // sheet's `font` shorthand keeps the adjust off the maths by itself.
+  assert.equal(first.katex, "19.36px", "the maths was resized under the roman");
+  // The lamp is off on the roman and on on the sans, which is the way round
+  // the staff-line and multicursor toggles work: the roman is the default, so
+  // a lamp lit from the first opening would say nothing.
+  assert.ok(!first.lit, "the button is lit on the face the editor opens in");
+  // The tooltip names the destination of the click, not the state in use, and
+  // names it the way a reader would rather than by the name of the file.
+  assert.equal(first.tip, "Usual Markdown font");
+
+  await h.page.click('#app button[data-type="mdm-text-font"]');
+  await sleep(200);
+  assert.deepEqual(await setSettingPosts(h.page), [
+    { type: "setSetting", key: "textFont", value: "sans" },
+  ]);
+  // The webview never repaints itself: the value comes back from the host.
+  assert.ok((await faceOf(h.page)).roman, "moved before the host answered");
+
+  await postSettings(h.page, { textFont: "sans" });
+  await h.page.waitForFunction(
+    () => !document.getElementById("app").classList.contains("mdm-text--roman")
+  );
+  const second = await faceOf(h.page);
+  assert.match(second.text, /-apple-system/);
+  assert.ok(!/Latin Modern/.test(second.text), "the roman stayed on the text");
+  // The sans is drawn at its own size, with no adjust of any kind, and the
+  // maths is the 1.21 it always was on both sides of the switch.
+  assert.equal(second.adjust, "none", "the sans came out adjusted");
+  assert.equal(second.factor, 1, "something is scaling the sans");
+  assert.equal(second.katex, "19.36px", "the maths did not stay at 1.21");
+  assert.ok(second.lit, "the button is not lit on the face that was asked for");
+  assert.equal(second.tip, "LaTeX font");
+
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The memory of the button, the other way round: an editor opened on a seeded
+// `mdm.textFont` comes up in the sans with nothing clicked, the way a document
+// reopens in the face it was left in.
+test("an editor left in the sans comes back in the sans", { skip }, async () => {
+  const h = await open({ text: EXAMPLE, seed: { settings: { textFont: "sans" } } });
+  const face = await faceOf(h.page);
+  assert.ok(!face.roman, "the seeded sans did not survive the opening");
+  assert.match(face.text, /-apple-system/);
+  assert.equal(face.adjust, "none");
+  assert.equal(face.katex, "19.36px");
+  assert.ok(face.lit, "the seeded sans did not light the button");
+  assert.equal(face.tip, "LaTeX font");
+  await h.page.click('#app button[data-type="mdm-text-font"]');
+  await sleep(200);
+  assert.deepEqual(await setSettingPosts(h.page), [
+    { type: "setSetting", key: "textFont", value: "roman" },
+  ]);
+  assert.deepEqual(h.errors, []);
   await h.close();
 });
 
@@ -2706,3 +2881,72 @@ for (const side of ["light", "dark"]) {
     await h.close();
   });
 }
+
+// ---------- The ladder of headings ----------
+
+const HEADINGS_DOC = [1, 2, 3, 4, 5, 6]
+  .map((n) => "#".repeat(n) + " Level " + n + "\n\nA line of prose under it.\n")
+  .join("\n");
+
+const headingSizes = (page) =>
+  page.evaluate(() => {
+    const out = {
+      body: parseFloat(getComputedStyle(document.querySelector("#app .cm-content")).fontSize),
+    };
+    [1, 2, 3, 4, 5, 6].forEach((n) => {
+      const el = document.querySelector("#app .cm-line.mdm-h" + n);
+      out["h" + n] = el ? +parseFloat(getComputedStyle(el).fontSize).toFixed(3) : null;
+    });
+    return out;
+  });
+
+// The roman is not a choice of face alone: it is Latin Modern, what TeX sets a
+// document in, beside equations drawn in the same shapes, and a reader who
+// asks for it is asking for the page LaTeX would have made. So the headings
+// take the sizes article.cls gives its sections, read off the class rather
+// than invented: \subsubsection and \paragraph are \normalsize, \subsection is
+// \large and \section is \Large, and size10.clo makes those 12, 14.4, 17.28
+// and 20.74 points over the 10 an article is by default. Over the body text
+// that is 1, 1.2, 1.44, 1.728 and 2.074.
+test("the roman heads a section the way article.cls does", { skip }, async () => {
+  const h = await open({
+    text: HEADINGS_DOC,
+    scores: 0,
+    seed: { settings: { textFont: "roman" } },
+  });
+  const s = await headingSizes(h.page);
+  assert.equal(s.body, 16);
+  // \huge and \LARGE, the two steps of LaTeX's own scale above a section.
+  assert.equal(s.h1, +(16 * 2.074).toFixed(3));
+  assert.equal(s.h2, +(16 * 1.728).toFixed(3));
+  // \section and \subsection.
+  assert.equal(s.h3, +(16 * 1.44).toFixed(3));
+  assert.equal(s.h4, +(16 * 1.2).toFixed(3));
+  // The one level LaTeX has no size for, halfway between the two around it.
+  assert.equal(s.h5, +(16 * 1.1).toFixed(3));
+  // The anchor, and the reason the rest of the ladder lands where it does: a
+  // \subsubsection is the body text in bold and nothing else, so `###### x`
+  // and `**x**` have to draw the same.
+  assert.equal(s.h6, s.body, "the sixth level left the size of the prose");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The sans keeps the ladder Markdown is usually drawn with, which is a
+// different one and deliberately so: the LaTeX sizes belong to the face that
+// is asking for a LaTeX page.
+test("the sans keeps the ladder Markdown is usually drawn with", { skip }, async () => {
+  const h = await open({
+    text: HEADINGS_DOC,
+    scores: 0,
+    seed: { settings: { textFont: "sans" } },
+  });
+  const s = await headingSizes(h.page);
+  assert.deepEqual(
+    [s.h1, s.h2, s.h3, s.h4, s.h5, s.h6],
+    [32, 24, 20, 17.6, 16, 16],
+    "the sans took the roman's ladder"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});

@@ -367,6 +367,101 @@
     if (following) revealPlayhead();
   }
 
+  // ---------- The face of the text ----------
+
+  // Which of the two faces the document is set in: Latin Modern Roman, the
+  // one TeX sets a document in, carried inside the extension as four woff2
+  // files, or the interface sans of the system, which is what the editor used
+  // to be set in and what the rest of VS Code is set in. Roman by default: the
+  // equations beside the words are already drawn in those shapes (KaTeX's
+  // faces are Computer Modern, and Latin Modern is Computer Modern too), so
+  // the sans was the odd one out on the page rather than the roman.
+  //
+  // Nothing is installed for it and no LaTeX is involved. The face travels
+  // with the extension the way KaTeX's own faces do.
+  //
+  // Only the text moves. The toolbar, the menus and the outline panel take
+  // their face off #app and stay in the sans; code, the numbers in the margin
+  // and the source of an open block keep the monospace they always had. The
+  // stylesheet holds the whole of it in --mdm-text (style.css).
+  //
+  // A serif A, which is the letter a type specimen shows and the one place
+  // 15px is enough to tell the two faces apart: the feet and the flat top
+  // serif are the whole signal at that size, the thin left stroke and the
+  // thick right one being lost. Rects and polygons, no strokes, since the
+  // toolbar stylesheet sets stroke-width 0.
+  const TEXT_FONT_ICON =
+    '<svg viewBox="0 0 16 16">' +
+    '<polygon points="7.9,2.2 8.7,2.2 6.1,13 5.1,13"/>' +
+    '<polygon points="8.0,2.2 8.9,2.2 11.3,13 9.6,13"/>' +
+    '<rect x="6.05" y="9.15" width="4.2" height="1.05" rx=".5"/>' +
+    '<rect x="7.3" y="1.6" width="2.1" height="1" rx=".5"/>' +
+    '<rect x="3.5" y="12.8" width="4.1" height="1.3" rx=".55"/>' +
+    '<rect x="8.9" y="12.8" width="4.1" height="1.3" rx=".55"/>' +
+    "</svg>";
+
+  // The four faces, asked for by name. Waiting on document.fonts.ready instead
+  // is the trap: it resolves as soon as nothing is loading, and nothing is
+  // loading until layout has asked for a face, so on a cold editor it can
+  // resolve before the woff2 has been fetched at all. document.fonts.load()
+  // starts the fetch here and hands back a promise about that face.
+  const ROMAN_FACES = [
+    '16px "Latin Modern Roman"',
+    'italic 16px "Latin Modern Roman"',
+    'bold 16px "Latin Modern Roman"',
+    'italic bold 16px "Latin Modern Roman"',
+  ];
+
+  let textFont = SETTINGS.textFont || "roman";
+
+  // The tip names the face the click leads to, not the one being read, and it
+  // names it by what the reader would call it rather than by the name of the
+  // file: the roman is the face of a LaTeX document, the sans is the face
+  // Markdown is usually written in.
+  function textFontTip() {
+    return textFont === "roman" ? "Usual Markdown font" : "LaTeX font";
+  }
+
+  // Lit on the sans and not on the roman, which is the way round the rest of
+  // the bar works: the roman is the default, and a lamp that is on from the
+  // first time the editor opens says nothing. The staff-line and multicursor
+  // toggles light the same way, on the setting that was asked for rather than
+  // on the one that came with the editor.
+  function updateTextFontButton() {
+    const btn = document.querySelector('#app button[data-type="mdm-text-font"]');
+    if (!btn) return;
+    btn.setAttribute("aria-label", textFontTip());
+    btn.classList.toggle("mdm-btn--on", textFont === "sans");
+  }
+
+  // The class the stylesheet hangs the face on, and then a re-measure.
+  // CodeMirror keeps the width of a character and the height of a line in a
+  // cache it only refills when its resize observer fires, and a face swap
+  // changes both without changing the size of a single box the observer
+  // watches: without the call the caret and the selection are drawn for a
+  // page ago.
+  //
+  // The second re-measure is for the file arriving. The faces are asked for by
+  // name here rather than left to be fetched when layout first wants one,
+  // which is what closes the window in which CodeMirror can measure a
+  // character against the fallback and draw the caret somewhere the text is
+  // not. It showed up as one stray frame in the caret test on a loaded
+  // machine, and only there: the fetch of a local woff2 is fast enough that on
+  // an idle one the face was always in before the first measure.
+  function applyTextFont() {
+    const root = document.getElementById("app");
+    if (!root) return;
+    root.classList.toggle("mdm-text--roman", textFont === "roman");
+    updateTextFontButton();
+    remeasureText();
+    if (textFont !== "roman" || !document.fonts || !document.fonts.load) return;
+    Promise.all(
+      ROMAN_FACES.map(function (face) {
+        return document.fonts.load(face);
+      })
+    ).then(remeasureText, remeasureText);
+  }
+
   // ---------- Score alignment button ----------
 
   // Where a score sits across the page. Centred by default, like display maths;
@@ -5221,9 +5316,34 @@
         },
       },
       "|",
-      // Theme first: the fill colours are defined per theme, so the wider
-      // switch reads before the one that depends on it.
+      // The page: what it is painted in, what it is set in, and whether it
+      // shows the block at the top that is not prose. Three switches over the
+      // document as a whole, none of which knows there is music in it.
+      // The theme leads them, because the fill colours of the next group are
+      // defined per theme and the wider switch should read before the ones
+      // that depend on it.
       { name: "mdm-theme", icon: THEME_ICON, tip: "Theme", menu: themeMenuItems() },
+      {
+        name: "mdm-text-font",
+        icon: TEXT_FONT_ICON,
+        tip: textFontTip(),
+        click: function () {
+          askSetting("textFont", textFont === "roman" ? "sans" : "roman");
+        },
+      },
+      {
+        name: "mdm-front-matter",
+        icon: FM_ICON,
+        tip: fmTip(),
+        click: function () {
+          if (headerText === "") return;
+          askSetting("frontMatter", frontMatter === "shown" ? "hidden" : "shown");
+        },
+      },
+      "|",
+      // The score: the three that dress the music and touch nothing else on
+      // the page, in the order a reader meets them, the box, then the lines
+      // inside it, then where the box sits.
       { name: "mdm-score-fill", icon: SCORE_ICON, tip: "Score fill", menu: fillMenuItems() },
       {
         name: "mdm-staff-lines",
@@ -5241,21 +5361,16 @@
           askSetting("scoreAlign", alignTarget());
         },
       },
+      "|",
+      // The playing: alone at the end, because it is the only button here
+      // that changes what the editor DOES rather than what anything looks
+      // like, and the only one that means nothing until a tune sounds.
       {
         name: "mdm-follow",
         icon: FOLLOW_ICON,
         tip: followTip(),
         click: function () {
           askSetting("followMusic", following ? "still" : "follow");
-        },
-      },
-      {
-        name: "mdm-front-matter",
-        icon: FM_ICON,
-        tip: fmTip(),
-        click: function () {
-          if (headerText === "") return;
-          askSetting("frontMatter", frontMatter === "shown" ? "hidden" : "shown");
         },
       },
     ];
@@ -5284,6 +5399,12 @@
     const root = app();
     root.innerHTML = "";
     root.appendChild(buildToolbar());
+    // The face goes on before the view is built, and not below with the other
+    // buttons that come up holding a state: CodeMirror measures a character
+    // and a line the moment it is created, and measuring them in the face the
+    // document is not going to be set in is a page laid out for the wrong
+    // font until something else asks for a measure.
+    applyTextFont();
     // Below the bar, a row: the outline panel down the left edge and the
     // editor beside it. The panel is empty and hidden until its button is
     // pressed (#app carries mdm-outline--open).
@@ -5361,6 +5482,7 @@
       outlineWidth = next.outlineWidth || 250;
       matchSubstring = next.multicursorMatch === "substring";
       following = next.followMusic !== "still";
+      textFont = next.textFont || "roman";
       // applyTheme repaints the toolbar and the score styling, whose colours
       // are picked from the effective theme. A theme chosen from the menu
       // also brings a palette message right behind this one, which repaints
@@ -5375,6 +5497,7 @@
       applyOutline();
       updateMatchButton();
       applyFollowMusic();
+      applyTextFont();
       return;
     }
     if (msg.type === "palette") {

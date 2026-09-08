@@ -16,9 +16,18 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
-    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: var(--mdm-sans);
   color: var(--mdm-ink);
+}
+/* The two faces the editor spends. `--mdm-sans` is the chrome's: the toolbar,
+   the menus, the outline panel and everything else that says `font: inherit`
+   off #app. `--mdm-text` is the prose's, and it is the only one mdm.textFont
+   moves; the chrome stays in the system sans whichever face the document is
+   set in, so the buttons read as the application's and not as the page's. */
+#app {
+  --mdm-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --mdm-text: var(--mdm-sans);
 }
 /* Whatever the browser paints itself inside the editor, the scrollbars above
    all, follows the side the editor is showing rather than the side VS Code is
@@ -188,8 +197,15 @@ body {
    the box used to carry as horizontal padding is carried here instead, where
    it is breathing room on a pane too narrow for the column and nothing at all
    on a wide one. */
+/* The face of the prose is named here and not on #app, and this declaration
+   is load-bearing rather than decorative: CodeMirror's own baseTheme sets
+   `font-family: monospace` on .cm-scroller, so without a rule of ours that
+   outranks it the whole document comes up in the code face. It used to say
+   `inherit` for that job; naming the token instead lets mdm.textFont move the
+   text without the toolbar and the menus, which inherit off #app, moving
+   with it. */
 #app .cm-scroller {
-  font-family: inherit;
+  font-family: var(--mdm-text);
   font-size: 16px;
   line-height: 1.7;
   overflow: auto;
@@ -218,6 +234,85 @@ body {
    (html.test.js, every paragraph line by line). */
 #app .cm-lineWrapping {
   white-space: pre-wrap;
+/* ---------- Latin Modern Roman, the roman of mdm.textFont ----------
+
+   The face TeX sets a document in, carried here as four woff2 files under
+   media/fonts/ so that nothing is installed for it and no LaTeX is involved.
+   Latin Modern is Computer Modern redrawn as OpenType, which is the same
+   drawing the equations of this editor are already set in: KaTeX's own faces
+   are Computer Modern thickened for the screen. The words and the maths of a
+   page were two designs before this and are one now.
+
+   The four are the whole text family. A page wants bold and italic of the
+   face it is set in, and a browser asked for one it has not got draws it by
+   slanting or smearing the roman, which on this face is ugly enough to see at
+   reading size.
+
+   `block` and not `swap`, which is what KaTeX's own faces ask for: the file
+   is on disk beside the page, so the wait is a frame or two, and a swap would
+   spend that frame drawing the document in Georgia's much larger x-height and
+   then reflowing every line of it. */
+@font-face {
+  font-family: "Latin Modern Roman";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/LatinModernRoman-Regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/LatinModernRoman-Italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url(fonts/LatinModernRoman-Bold.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman";
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
+}
+/* The token and nothing else: --mdm-text is spent on .cm-scroller alone, so
+   this moves the document and leaves every piece of chrome where it was. */
+#app.mdm-text--roman {
+  --mdm-text: "Latin Modern Roman", Georgia, "Times New Roman", serif;
+}
+/* And the size the roman is drawn at, which is not the size it is asked for.
+   What a reader sees as the size of a text is its x-height, not its em, and
+   Latin Modern's is 0.431 em against the 0.528 of the sans it replaces
+   (measured with fontTools on the files this repository carries; the ink of a
+   16px x comes out 7px against the sans's 9px). At the same `font-size: 16px`
+   the roman therefore reads about a fifth smaller, which is small enough to
+   squint at, and it drags the whole page out of proportion with it: the
+   headings are ems of the same 16px and keep their size, so an h1 that stood
+   right over the sans towers over the roman, and the text abcjs draws inside
+   a score, which is its own pixels and no em of ours, comes out looking
+   oversized beside the words.
+   `font-size-adjust` is the one lever that fixes all three at once: it leaves
+   the computed font-size at 16px, so every em in this sheet is where it was,
+   and scales the glyphs until their x-height is the ratio named. 0.528 is the
+   sans's own, so the roman is drawn at the reading size the sans had and the
+   page keeps the proportions it was designed with.
+   One surface is left out of it and needs no rule here, which is worth
+   knowing before one is added: the vendored KaTeX sheet opens with the `font`
+   shorthand (`.katex { font: normal 1.21em KaTeX_Main }`), and that shorthand
+   resets font-size-adjust to `none`, so the maths keeps its own metrics for
+   free.
+   KaTeX's 1.21 is then right again, and is left alone. That number is the
+   compensation a Computer Modern needs to sit beside a sans (KaTeX_Main's
+   x-height is 0.442 em, and 0.528/0.442 is 1.19), and with the words drawn at
+   the sans's x-height that is exactly the measurement it was made against:
+   the maths lands within 2% of the prose. */
+#app.mdm-text--roman .cm-content {
+  font-size-adjust: ex-height 0.528;
 }
 #app .cm-line {
   padding: 0;
@@ -628,6 +723,44 @@ body {
 #app .cm-line.mdm-h5,
 #app .cm-line.mdm-h6 {
   font-size: 1em;
+}
+/* The ladder above is the one Markdown is usually drawn with, and it stays
+   the ladder of the sans. The roman gets another one, because the roman is
+   not a choice of face alone: it is Latin Modern, the face TeX sets a
+   document in, beside equations drawn in the same shapes, and a reader who
+   asks for it is asking for the page LaTeX would have made. So the headings
+   take the sizes article.cls gives its sections.
+   Read off the class rather than remembered (article.cls and size10.clo of
+   TeX Live 2025, which is what is installed here). article.cls sets
+   \subsubsection and \paragraph in \normalsize\bfseries, \subsection in
+   \large\bfseries and \section in \Large\bfseries; at the 10 pt an article
+   is by default, size10.clo makes \large 12 pt, \Large 14.4, \LARGE 17.28
+   and \huge 20.74. Over the body text that is 1, 1.2, 1.44, 1.728 and 2.074,
+   which is this ladder from the bottom up.
+   The bottom is the anchor: h6 is \subsubsection, which is the body text in
+   bold and nothing else, so `###### Heading` and `**Heading**` draw the same
+   and the base rule above already has it right. h4 is \subsection, h3 is
+   \section, and the two above them continue up LaTeX's own scale rather than
+   inventing steps of their own.
+   h5 is the one level LaTeX has no size for, since \subsubsection and
+   \paragraph share \normalsize and a Markdown ladder wants six distinct
+   steps. It is put halfway between the two it sits between, h6 at 1 and h4
+   at \large; the geometric middle of that interval is 1.095 and this is the
+   round number a rounding away from it. */
+#app.mdm-text--roman .cm-line.mdm-h1 {
+  font-size: 2.074em;
+}
+#app.mdm-text--roman .cm-line.mdm-h2 {
+  font-size: 1.728em;
+}
+#app.mdm-text--roman .cm-line.mdm-h3 {
+  font-size: 1.44em;
+}
+#app.mdm-text--roman .cm-line.mdm-h4 {
+  font-size: 1.2em;
+}
+#app.mdm-text--roman .cm-line.mdm-h5 {
+  font-size: 1.1em;
 }
 /* Paragraph spacing, taken from the Office Viewer preview: a line stands at
    1.7 of an em there (`--editor-line-height` in Vditor's sheet, which that

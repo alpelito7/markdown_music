@@ -1222,6 +1222,10 @@ test("the player row follows the width of the pane, and sheds its parts in order
 test("the outline panel narrows the text, not the player row", { skip }, async () => {
   const h = await open({
     seed: { settings: { outline: "shown", outlineWidth: 260 } },
+    // The panel narrows the column to 579px and CodeMirror stops building
+    // widgets past what fits, so the three the helper waits for by default
+    // never all appear. This presses the headphone on the first.
+    scores: 1,
   });
   await clickToggle(h.page, 0);
   await h.page.waitForFunction(
@@ -1354,9 +1358,9 @@ test("the player keeps the document somebody's, and lets it be put away", { skip
     h.page.evaluate(() => {
       const line = Array.from(
         document.querySelectorAll("#app .cm-content .cm-line")
-      ).find((l) => /^##\s|^From /.test(l.textContent));
+      ).find((l) => /^###\s|^From /.test(l.textContent));
       return {
-        marks: line ? line.textContent.slice(0, 2) === "##" : null,
+        marks: line ? line.textContent.slice(0, 3) === "###" : null,
         focused: window.__mdm.view.hasFocus,
         onBar: !!(document.activeElement.closest &&
           document.activeElement.closest(".mdm-audio")),

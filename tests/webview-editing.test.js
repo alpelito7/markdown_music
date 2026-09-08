@@ -951,7 +951,7 @@ test("the outline panel lists the headings, marks the section and jumps", { skip
     });
   };
   const middle = await landing(2);
-  assert.equal(middle.text, "## From code to scores");
+  assert.equal(middle.text, "### From code to scores");
   assert.equal(middle.open, true, "the panel closed after a pick");
   assert.ok(!middle.bottomed, "the pane ran to its end on a heading with room under it");
   assert.ok(
@@ -963,7 +963,7 @@ test("the outline panel lists the headings, marks the section and jumps", { skip
   // heading lands as high as it can and the document ends at the bottom edge,
   // which is the whole of what "as high as it can" means here.
   const last = await landing(3);
-  assert.equal(last.text, "## From score to sound");
+  assert.equal(last.text, "### From score to sound");
   assert.equal(last.open, true, "the panel closed after a pick");
   assert.ok(
     last.bottomed || (last.top >= 0 && last.top <= 24),
@@ -1718,6 +1718,62 @@ test("a drawn block is numbered by its first line, and by every line once a care
   // beside it, an engraving in the case of a score, is never rebuilt for it.
   await h.page.keyboard.type("New line.\n");
   assert.deepEqual(await numbers(), ["1", "2", "3", "4*", "7", "8", "9"]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The bar is grouped by concept, and the separators are where the concept
+// changes. Written out in full because the order carries a decision that no
+// single button can hold on its own: outline leads, because its panel opens
+// down the left edge and the button sits on the side the panel appears; the
+// export follows alone, being the one button that leaves the editor; then the
+// history, then the marks that act on the caret, then the lists, then the one
+// that changes what a selection matches. The last three groups are the ones
+// that used to be a single run of seven: the page (what it is painted in,
+// what it is set in, whether it shows the block at the top that is not prose),
+// then the score (the three that dress the music and touch nothing else), then
+// the playing, alone at the end because it is the only button here that
+// changes what the editor does rather than what anything looks like.
+const BAR = [
+  "outline",
+  "|",
+  "mdm-export",
+  "|",
+  "undo",
+  "redo",
+  "|",
+  "headings",
+  "bold",
+  "italic",
+  "inline-code",
+  "link",
+  "|",
+  "list",
+  "ordered-list",
+  "|",
+  "mdm-match-substring",
+  "|",
+  "mdm-theme",
+  "mdm-text-font",
+  "mdm-front-matter",
+  "|",
+  "mdm-score-fill",
+  "mdm-staff-lines",
+  "mdm-score-align",
+  "|",
+  "mdm-follow",
+];
+
+test("the toolbar is grouped by what a button is about", { skip }, async () => {
+  const h = await open({});
+  const seen = await h.page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-toolbar > *")).map((el) =>
+      el.classList.contains("mdm-toolbar__sep")
+        ? "|"
+        : el.querySelector("button").getAttribute("data-type")
+    )
+  );
+  assert.deepEqual(seen, BAR);
   assert.deepEqual(h.errors, []);
   await h.close();
 });

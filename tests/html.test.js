@@ -118,6 +118,7 @@ const DARK_LOOK = [
 let PAGE = null;
 let DARK_PAGE = null;
 let EXAMPLE_PAGE = null;
+let EXAMPLE_SANS_PAGE = null;
 
 test.before(() => {
   if (!available) return;
@@ -155,6 +156,20 @@ test.before(() => {
   );
   assert.equal(e.status, 0, e.stderr);
   EXAMPLE_PAGE = "file://" + path.join(DIR, "example.html");
+
+  // And the same document in the other face. The face is the setting the
+  // reader changes most often and it is the one that brings a second
+  // stylesheet with it, so anything the export is asked to hold has to be
+  // measured on both: this page is what the roman is compared against.
+  fs.copyFileSync(path.join(ROOT, "example.mdm"), path.join(DIR, "sans-example.mdm"));
+  const s = spawnSync(
+    MDM,
+    ["render", "sans-example.mdm", "--to", "html",
+      "-M", "mdm-text-font:sans", "-M", "mdm-front-matter:shown"],
+    { cwd: DIR, encoding: "utf8" }
+  );
+  assert.equal(s.status, 0, s.stderr);
+  EXAMPLE_SANS_PAGE = "file://" + path.join(DIR, "sans-example.html");
 });
 
 const OPEN_BROWSERS = new Set();
@@ -748,4 +763,88 @@ test("every paragraph of the page ends its lines where the editor ends them", { 
       "the lines of \"" + k + "...\" end on different words"
     );
   }
+// ---------- The block the YAML asks for, and the face it is set in ----------
+
+// What a page is asked for at the top of it, measured rather than read out of
+// the HTML: render.test.js reads the markup and says the block is there, and
+// markup that is there and painted at nothing is what a stylesheet takes away.
+// So this asks for the ink: the width the title, the subtitle and the author
+// actually cover on screen.
+//
+// Both faces, in the same pass, because the roman brings a second stylesheet
+// with it (mdm-roman.css) and the sans does not, and everything a page is
+// asked to hold has to survive both. What is compared between them is the
+// measure, which is the face's business only in what it puts inside it: the
+// column is the editor's 820 whichever face the words are in.
+const TITLE_BLOCK = function () {
+  const ink = (sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return {
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      size: +parseFloat(cs.fontSize).toFixed(2),
+      hidden: cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0",
+      text: el.textContent.trim(),
+    };
+  };
+  return {
+    column: Math.round(document.querySelector("main.content").getBoundingClientRect().width),
+    body: +parseFloat(getComputedStyle(document.body).fontSize).toFixed(2),
+    header: ink("#title-block-header"),
+    title: ink("#title-block-header h1.title"),
+    subtitle: ink("#title-block-header .subtitle"),
+    author: ink("#title-block-header .quarto-title-meta-contents"),
+  };
+};
+
+async function titleBlocks() {
+  const out = {};
+  for (const [face, url] of [["roman", EXAMPLE_PAGE], ["sans", EXAMPLE_SANS_PAGE]]) {
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+    });
+    OPEN_BROWSERS.add(browser);
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    out[face] = await page.evaluate("(" + TITLE_BLOCK.toString() + ")()");
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+  }
+  return out;
+}
+
+test("the page opens with the block the YAML asks for, in either face", { skip }, async () => {
+  const b = await titleBlocks();
+  ["roman", "sans"].forEach((face) => {
+    const t = b[face];
+    assert.ok(t.header, "the " + face + " page has no title block at all");
+    assert.ok(!t.header.hidden, "the " + face + " page hides its title block");
+    // The three things the block holds, each of them drawn and not merely
+    // present: a heading with no ink is a heading a stylesheet took away.
+    assert.equal(t.title.text, "Markdown and scores in one file", face);
+    assert.ok(t.title.w > 100, "the " + face + " title covers " + t.title.w + "px");
+    assert.equal(t.subtitle.text, "A Markdown Music prototype", face);
+    assert.ok(t.subtitle.w > 100, "the " + face + " subtitle covers " + t.subtitle.w + "px");
+    assert.equal(t.author.text, "alpelito7", face);
+    assert.ok(t.author.w > 20, "the " + face + " author covers " + t.author.w + "px");
+  });
+  // The title takes the size the face gives a first-level heading, which is
+  // where the two faces are meant to differ: \huge over the body in the roman
+  // (the article ladder of mdm-roman.css) and Markdown's own 2em in the sans.
+  // The rule that carries it names `.title` beside `h1`, and losing that half
+  // of the selector is the quiet way for the block to fall out of the ladder.
+  assert.equal(b.roman.title.size, +(b.roman.body * 2.074).toFixed(2), "the roman title");
+  assert.equal(b.sans.title.size, +(b.sans.body * 2).toFixed(2), "the sans title");
+  // And where the two faces are not meant to differ. The measure is the
+  // editor's, whatever the words are set in: the roman used to break the first
+  // paragraph a word earlier than the sans on the very same page, both of them
+  // held to Quarto's 802px track rather than to the editor's 820.
+  assert.equal(b.roman.column, b.sans.column, "the two faces hold different measures");
+  assert.equal(b.roman.column, 820, "the column is not the editor's");
 });

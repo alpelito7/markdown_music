@@ -129,6 +129,16 @@
           ],
           "default": "follow",
           "description": "Whether the page follows a sounding tune. The toolbar toggle writes it."
+        },
+        "mdm.textFont": {
+          "type": "string",
+          "enum": ["roman", "sans"],
+          "enumDescriptions": [
+            "Latin Modern Roman, the face TeX sets a document in, carried inside the extension. Nothing has to be installed and no LaTeX is involved: it is the font on its own, and the equations beside it are already drawn in the same shapes.",
+            "The interface font of the system, which is what the rest of VS Code is set in and what Markdown is usually written in."
+          ],
+          "default": "roman",
+          "description": "The face the text of the document is set in. Code, the numbers in the margin and the toolbar are not affected: they keep the monospace and the sans they have. The toolbar toggle writes it, and an export from the toolbar carries it to the page and to the paper."
         }
       }
     },

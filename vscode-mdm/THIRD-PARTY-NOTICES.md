@@ -66,6 +66,32 @@ Inside `media/vendor/cm6/cm6.bundle.js`, with its stylesheet
 standalone (`katex.min.js`, `katex.min.css`, the woff2 fonts) under
 `render/mdm/resources/katex/`.
 
+## Latin Modern Roman 2.004
+
+The face the text of a document is set in when `mdm.textFont` is `roman`, in
+the editor and in an export. Copyright 2003, 2009 B. Jackowski and J. M.
+Nowacki, on behalf of the TeX users groups. Released under the GUST Font
+License, which is the LaTeX Project Public License 1.3c with one further
+clause, asking (but not requiring) that a derived work rename the fonts it
+carries. Full text in `licenses/GUST-FONT-LICENSE.txt`.
+
+Four text faces, `LatinModernRoman-{Regular,Italic,Bold,BoldItalic}.woff2`,
+under `media/fonts/` and, for the bundled Quarto filter, under
+`render/mdm/resources/lm/fonts/`.
+
+Changes from the original Work, as clause 6b of the licence asks for them:
+only these four files were taken from the Latin Modern 2.005 distribution,
+where they are `lmroman10-{regular,italic,bold,bolditalic}.otf`, the 10 pt
+optical size; each was converted from OpenType to WOFF2 and renamed, and
+nothing else was touched. Outlines, metrics, name table and the 794 characters
+of the character map are those of the originals. The files themselves still
+report Version 2.004: the 2.005 release of the distribution changed the maths
+fonts and not these.
+
+The complete, unmodified Work is at <https://ctan.org/pkg/lm>, which is what
+clause 6d of the licence asks be named. GUST and the authors provide no
+support for this copy.
+
 ## The MIT licence
 
 abcjs, CodeMirror, Lezer and KaTeX are all under the MIT licence, reproduced
