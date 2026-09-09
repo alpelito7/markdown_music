@@ -1184,6 +1184,21 @@ test("the roman travels to the page, and only when it is asked for", () => {
     /font-size-adjust: ex-height 0\.528/.test(sheet),
     "the exported roman is left at its own x-height"
   );
+  // And the engraving is taken back out of it: abcjs draws its titles and
+  // annotations as SVG text at sizes of its own, which would inherit the
+  // adjust off the body and come out a seventh larger than abcjs drew them.
+  // The rule is not in this sheet, though it is this sheet that makes it
+  // necessary: it belongs to the score and not to the face, so it rides with
+  // the look and reaches a page in either face (see below).
+  const lookDir = fs
+    .readdirSync(libs)
+    .find((name) => name.startsWith("mdm-look"));
+  assert.ok(lookDir, "the look dependency was not copied beside the page");
+  const lookSheet = fs.readFileSync(path.join(libs, lookDir, "mdm-look.css"), "utf8");
+  assert.ok(
+    /\.mdm-fit,\s*\n\.mdm-fit svg \{\s*\n\s*font-size-adjust: none/.test(lookSheet),
+    "the adjust reaches the engraving"
+  );
   // KaTeX is left exactly as it ships: its own `font` shorthand keeps the
   // adjust off the maths, and its 1.21 is the compensation that matches a
   // page set at the sans's x-height.
@@ -1241,6 +1256,21 @@ test("the roman travels to the page, and only when it is asked for", () => {
   assert.ok(!("--mdm-text" in lookBlock(sans)), "the sans page named a face");
   assert.ok(!sans.includes("mdm-roman.css"), "the roman rode along for nothing");
   assert.ok(!sans.includes("Latin Modern Roman"), "a face rode along for nothing");
+  // What it does carry is the reset on the engraving, which is the reason
+  // that rule was taken out of the roman sheet. Nothing on a sans page sets a
+  // font-size-adjust today, so the rule costs it nothing and protects it the
+  // day something does: abcjs's text is drawn at the sizes abcjs gives it,
+  // and an adjust inherited from the page would scale it along with the prose.
+  const sansLibs = path.join(plain, "doc_files", "libs", "quarto-contrib");
+  const sansLook = fs
+    .readdirSync(sansLibs)
+    .find((name) => name.startsWith("mdm-look"));
+  assert.ok(
+    /\.mdm-fit,\s*\n\.mdm-fit svg \{\s*\n\s*font-size-adjust: none/.test(
+      fs.readFileSync(path.join(sansLibs, sansLook, "mdm-look.css"), "utf8")
+    ),
+    "the sans page has no reset on the engraving"
+  );
 });
 
 test("a self-contained roman page carries its own faces", () => {

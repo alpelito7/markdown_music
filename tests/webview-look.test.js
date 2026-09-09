@@ -2882,6 +2882,147 @@ for (const side of ["light", "dark"]) {
   });
 }
 
+// ---------- The words a score carries ----------
+
+// Every piece of text abcjs draws around a staff keeps the size abcjs gives
+// it: renderScore (main.js) hands it no `format` block. These words were held
+// to a ladder over the prose's x-height for a while instead, and that was
+// taken back on 2026-09-10, so what this section pins is that the editor
+// draws exactly what abcjs draws when it is left alone, word for word.
+//
+// The comparison is against abcjs itself, in the same page, rather than
+// against a table of sizes: the same tune rendered by the same vendored abcjs
+// into a scratch div outside the editor, with the paddings renderScore passes
+// and nothing else. A few sizes are asserted by number as well, so that the
+// decision reads in the test.
+const SCORE_TUNE = [
+  "%%stretchlast 1",
+  "X:1",
+  "T:A tune with every word on it",
+  "L:1/4",
+  "K:C clef=treble",
+  "P:partials",
+  'C, C "Am"G "^over"c |',
+  "w: one two three four",
+].join("\n");
+
+const scoreDoc = (tune) =>
+  ["A paragraph of prose, which the words on the staff sit beside.",
+   "", "```abc", tune, "```", ""].join("\n");
+
+// Every drawn <text> of the editor's score and of abcjs's own, with the
+// attributes that decide how it is drawn; the adjust the page could still
+// impose on them; the width of ink the browser actually gives each title; and
+// the boxes of the staff and the clef.
+const scoreWords = (page, tune) =>
+  page.evaluate(async (tune) => {
+    await document.fonts.ready;
+    const words = (svg) =>
+      Array.from(svg.querySelectorAll("text"))
+        .filter((t) => t.getAttribute("font-size"))
+        .map((t) =>
+          [
+            (t.getAttribute("class") || "").split(" ")[0],
+            t.textContent,
+            t.getAttribute("font-size"),
+            t.getAttribute("font-family"),
+            t.getAttribute("font-weight"),
+            t.getAttribute("font-style"),
+          ].join(" | ")
+        );
+    const box = (svg, sel) => {
+      const n = svg.querySelector(sel);
+      if (!n) return null;
+      const b = n.getBBox();
+      return [+b.width.toFixed(2), +b.height.toFixed(2)];
+    };
+    const titleOf = (svg) =>
+      Array.from(svg.querySelectorAll(".abcjs-title")).find((e) => e.getAttribute("font-size"));
+    const ours = document.querySelector("#app code.language-abc svg");
+    const scratch = document.createElement("div");
+    scratch.style.cssText = "position:absolute;left:-10000px;top:0";
+    document.body.appendChild(scratch);
+    window.ABCJS.renderAbc(scratch, tune, {
+      add_classes: true,
+      paddingtop: 2,
+      paddingbottom: 2,
+      paddingleft: 0,
+      paddingright: 0,
+    });
+    const stock = scratch.querySelector("svg");
+    const out = {
+      ours: words(ours),
+      stock: words(stock),
+      staff: [box(ours, ".abcjs-staff"), box(stock, ".abcjs-staff")],
+      clef: [box(ours, ".abcjs-clef"), box(stock, ".abcjs-clef")],
+      titleInk: [
+        +titleOf(ours).getBoundingClientRect().width.toFixed(1),
+        +titleOf(stock).getBoundingClientRect().width.toFixed(1),
+      ],
+      adjust: getComputedStyle(titleOf(ours)).fontSizeAdjust,
+      proseAdjust: getComputedStyle(document.querySelector("#app .cm-content")).fontSizeAdjust,
+    };
+    scratch.remove();
+    return out;
+  }, tune);
+
+// The size abcjs wrote on the first drawn word of a role.
+const wordSize = (rows, cls) => {
+  const row = rows.find((r) => r.startsWith(cls + " |"));
+  return row ? row.split(" | ")[2] : null;
+};
+
+test("the words on a score keep abcjs's own sizes", { skip }, async () => {
+  const h = await open({
+    text: scoreDoc(SCORE_TUNE),
+    scores: 1,
+    seed: { settings: { textFont: "roman" } },
+  });
+  const w = await scoreWords(h.page, SCORE_TUNE);
+  assert.ok(w.ours.length >= 5, "too few words drawn to compare: " + JSON.stringify(w.ours));
+  // Word for word what abcjs draws when nobody hands it a format.
+  assert.deepEqual(w.ours, w.stock, "the editor's score text is not abcjs's own");
+  // abcjs states these in points and draws them at 4/3: a 20 pt title at
+  // 27 px, a 15 pt part label at 20, a 13 pt lyric at 17 and in bold, a
+  // 12 pt chord and annotation at 16.
+  assert.equal(wordSize(w.ours, "abcjs-title"), "27");
+  assert.equal(wordSize(w.ours, "abcjs-part"), "20");
+  assert.equal(wordSize(w.ours, "abcjs-lyric"), "17");
+  assert.equal(wordSize(w.ours, "abcjs-chord"), "16");
+  assert.equal(wordSize(w.ours, "abcjs-annotation"), "16");
+  // And drawn at those sizes. The roman prose carries font-size-adjust
+  // 0.528, and the engraving is taken out of it (style.css): the attributes
+  // above would otherwise draw Times a seventh larger than abcjs does.
+  assert.equal(w.proseAdjust, "0.528", "the prose is not adjusted, so this proves nothing");
+  assert.equal(w.adjust, "none", "the score's words inherit the prose's adjust");
+  // Within a pixel, which is what sub-pixel placement leaves between the
+  // editor's centred score and the scratch one (310.8 against 310.9 measured).
+  // An inherited adjust would add a seventh, about 46 px on this title.
+  assert.ok(
+    Math.abs(w.titleInk[0] - w.titleInk[1]) <= 1,
+    "the title is drawn " + w.titleInk[0] + " px wide where abcjs draws it " + w.titleInk[1]
+  );
+  // The engraving is abcjs's as well.
+  assert.deepEqual(w.staff[0], w.staff[1], "the staff is not abcjs's");
+  assert.deepEqual(w.clef[0], w.clef[1], "the clef is not abcjs's");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A document that sets a size of its own gets it: abcjs applies the tune's
+// own directives, and the editor hands it nothing to override them with. What
+// the document does not name keeps abcjs's own size.
+test("a score that names a font size of its own keeps it", { skip }, async () => {
+  const tune = SCORE_TUNE.replace("X:1", "X:1\n%%titlefont Times-Roman 30");
+  const h = await open({ text: scoreDoc(tune), scores: 1 });
+  const w = await scoreWords(h.page, tune);
+  // 30 points as abcjs draws them, which is 4/3 of that in pixels.
+  assert.equal(wordSize(w.ours, "abcjs-title"), "40", "the document's own title size was overridden");
+  assert.equal(wordSize(w.ours, "abcjs-part"), "20", "a size the document did not name moved");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- The ladder of headings ----------
 
 const HEADINGS_DOC = [1, 2, 3, 4, 5, 6]

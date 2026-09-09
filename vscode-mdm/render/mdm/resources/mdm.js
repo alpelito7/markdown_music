@@ -615,6 +615,7 @@
     if (width) controls.style.maxWidth = Math.max(280, Math.ceil(width)) + "px";
   }
 
+
   function renderBlock(block) {
     var srcEl = block.querySelector(".mdm-src");
     var paper = block.querySelector(".mdm-paper");
@@ -634,7 +635,6 @@
     // what is passed here, which is exactly the score this is looking for.
     var box = paper.clientWidth;
     ABCJS.renderAbc(paper, source, {
-      staffwidth: box,
       paddingleft: 0,
       paddingright: 0,
     });

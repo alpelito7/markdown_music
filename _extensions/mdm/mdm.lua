@@ -1291,9 +1291,23 @@ local function chrome_sandbox_flag()
   return sandbox_flag
 end
 
--- The page Chrome prints: the engraving alone, drawn exactly as the export
--- draws it (mdm.js, renderBlock: the same options), on a sheet big enough
--- for any score and trimmed to the ink afterwards. The stylesheet is the
+-- The page Chrome prints: the engraving alone, on a sheet big enough for any
+-- score and trimmed to the ink afterwards.
+--
+-- Two things it does not share with the page the browser draws (mdm.js,
+-- renderBlock), and both are open. It asks for a staffwidth, which that one
+-- no longer does, so the two wrap at 703 px and 740; and it passes no
+-- `format`, so every title, part name, lyric and annotation on paper keeps
+-- the sizes abcjs has had since abcm2ps (a title at 20 pt, drawn at 4/3, so
+-- 27 px against the 23 the screen asks for) where the editor and the page
+-- hold each one to a fraction of the prose's x-height. The score is inserted
+-- at a width the document decides and the drawing scales with it, so the
+-- right sizes here are not the screen's own numbers but those numbers
+-- divided by that scale, which is a measurement this has not been given yet.
+-- Until it is, the words on a printed staff are the one place the paper is
+-- knowingly out of proportion with the screen.
+--
+-- The stylesheet is the
 -- svg slice of mdm-look.css, rule for rule, with one addition: the staff
 -- lines take a hairline stroke of their own colour, which lifts them from
 -- the 0.7 px abcjs fills them at (0.53 pt) to about the 0.9 pt the abcm2ps

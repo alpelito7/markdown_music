@@ -426,6 +426,26 @@ body .code-copy-button:hover {
 
 /* ---------- Scores ---------- */
 
+/* The words on a staff are drawn at the sizes abcjs gives them, and nothing
+   may size them again. abcjs draws its titles, its part names and its chords
+   as SVG text inside .mdm-fit, and a `font-size-adjust` inherited from the
+   body would scale that text along with the prose: the roman's 0.528 over
+   Times' own 0.46 drew a title a seventh wider than abcjs drew it (295px of
+   ink against 257px for a 23px title, measured on example.mdm's first
+   score).
+   Written here and not in the sheet that sets the adjust, which is the roman
+   one, because the compensation belongs to the score and not to the face: the
+   sans sets no adjust today and the rule costs it nothing, and the day the
+   page carries one for any other reason the engraving is already out of it.
+   The editor's stylesheet carries the same rule on the same terms
+   (`#app code.language-abc` in vscode-mdm/media/style.css).
+   The staff, the notes and the clef are untouched either way: they are paths
+   drawn from abcjs's own units and no font property reaches them. */
+.mdm-fit,
+.mdm-fit svg {
+  font-size-adjust: none;
+}
+
 /* abcjs engraves in a hardcoded black; on the dark side it is repainted, and
    only it, so the shapes that declare themselves transparent stay so. */
 .mdm-paper svg [fill="#000000"] {

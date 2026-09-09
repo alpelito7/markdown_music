@@ -305,7 +305,8 @@ body {
    knowing before one is added: the vendored KaTeX sheet opens with the `font`
    shorthand (`.katex { font: normal 1.21em KaTeX_Main }`), and that shorthand
    resets font-size-adjust to `none`, so the maths keeps its own metrics for
-   free.
+   free. The engraving is the surface that does need a rule, and has one
+   below.
    KaTeX's 1.21 is then right again, and is left alone. That number is the
    compensation a Computer Modern needs to sit beside a sans (KaTeX_Main's
    x-height is 0.442 em, and 0.528/0.442 is 1.19), and with the words drawn at
@@ -313,6 +314,24 @@ body {
    the maths lands within 2% of the prose. */
 #app.mdm-text--roman .cm-content {
   font-size-adjust: ex-height 0.528;
+}
+/* And the engraving, which keeps its own metrics the other way round, by a
+   rule. abcjs draws every title, part label, lyric and chord as SVG text at
+   the size it chooses for it, and the 0.528 inherited off .cm-content would
+   scale that text along with the prose: Times, whose own lowercase is 0.46 of
+   its em, came out a seventh larger than abcjs drew it. Measured on
+   example.mdm's first score, with its title at 23px: 295px of width in the
+   editor against the 257px the same string, the same face and the same size
+   took on the exported page, which carries the same rule on the same terms
+   (mdm-look.css, `.mdm-fit`). The sheet used to claim the score was out
+   of the adjust already, by way of the `font` shorthand on a box further
+   down; the measurement says it never was.
+   The staff, the notes and the clef were never affected either way. They are
+   drawn as paths from abcjs's own engraving units, and no font property
+   reaches them. */
+#app code.language-abc,
+#app code.language-abc svg {
+  font-size-adjust: none;
 }
 #app .cm-line {
   padding: 0;

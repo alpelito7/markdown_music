@@ -373,6 +373,21 @@ function looks(page) {
       page: css("body", "backgroundColor"),
       ink: css("body", "color"),
       fontSize: css("body", "fontSize"),
+      // The text abcjs draws inside a score, which is not styled by any sheet
+      // of ours: it is handed to the engine as a size in points, and left to
+      // itself the engine uses defaults of its own that come out a title at
+      // 27px beside a 16px paragraph.
+      scoreTitle: css(".mdm-fit svg text.abcjs-title", "fontSize"),
+      // Every distinct size any score text is drawn at, so a reader of a
+      // failure can see what the engine actually did rather than one probe
+      // coming back null because the fixture spells a role differently.
+      scoreText: [
+        ...new Set(
+          [...document.querySelectorAll(".mdm-fit svg text")].map(
+            (t) => (t.getAttribute("class") || "?").split(" ")[0] + " " + getComputedStyle(t).fontSize
+          )
+        ),
+      ].sort(),
       lineHeight: css("body", "lineHeight"),
       column: document.querySelector("main.content").getBoundingClientRect().width,
       card: css("div.sourceCode", "backgroundColor"),
@@ -446,6 +461,28 @@ test("the page is the editor's: its ground, its ink, its measure", { skip }, asy
   assert.ok(
     luma(l.card) < luma(l.page),
     "the code card is not darker than the page: " + l.card + " on " + l.page
+  );
+  await h.close();
+});
+
+test("the score's own text is drawn at abcjs's own sizes", { skip }, async () => {
+  // The page hands abcjs no `format`, as the editor hands it none (renderScore
+  // in vscode-mdm/media/main.js), so every word on a staff keeps the size
+  // abcjs gives it. They were held to a ladder over the prose's x-height for
+  // a while instead, and that was taken back on 2026-09-10.
+  const h = await open();
+  const l = await looks(h.page);
+  // A 20 pt title, which abcjs draws at 4/3.
+  assert.equal(l.scoreTitle, "27px", "the title is not at abcjs's own size");
+  // The rest as a set, since which roles the fixture happens to use is its
+  // own business: every string at one of the sizes abcjs gives its roles (a
+  // title 27px, a subtitle or free text 21, a part label or tempo 20, a
+  // composer or bar number 19, a lyric or volta 17, a chord 16, a triplet 15).
+  const sizes = [...new Set(l.scoreText.map((t) => t.split(" ").pop()))].sort();
+  assert.deepEqual(
+    sizes.filter((px) => !["15px", "16px", "17px", "19px", "20px", "21px", "27px"].includes(px)),
+    [],
+    "score text at a size abcjs never draws: " + JSON.stringify(l.scoreText)
   );
   await h.close();
 });

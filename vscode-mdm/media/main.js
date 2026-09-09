@@ -4434,6 +4434,13 @@
   // this script (vendor/abcjs), so the engraving is synchronous; what needs
   // the block to be on screen (fitScores measures it) runs afterwards, from
   // the observer below.
+  //
+  // No `format` block, so every word on the staff keeps the size abcjs gives
+  // it: a title at 27 px, a part label at 20, the lyric at 17 in bold, chords
+  // at 16. They were held instead to a ladder over the prose's x-height for a
+  // while, and that was taken back on 2026-09-10. The exported page and the
+  // printed one pass no format either, which is what keeps the three surfaces
+  // drawing the same sizes.
   function renderScore(code, source) {
     try {
       if (!window.ABCJS) return;
