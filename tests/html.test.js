@@ -249,7 +249,7 @@ function blocks(page) {
   );
 }
 
-test("every music block is engraved, and only the narrow one is pinned", { skip }, async () => {
+test("every music block is engraved, and none is stretched to the column", { skip }, async () => {
   const h = await open();
   const out = await blocks(h.page);
   assert.equal(out.length, 3);
@@ -257,24 +257,32 @@ test("every music block is engraved, and only the narrow one is pinned", { skip 
     assert.ok(b.svg.width > 0 && b.svg.height > 0, "a block was not engraved");
     assert.equal(b.fitted, true, "a score was left without its box");
   }
-  // The narrow score keeps the width %%staffwidth asked for and stays well
-  // inside the page. The measurement that decides this is made against the
-  // width of the box: mdm.js engraves the first pass at that width, so a tune
-  // with nothing to say about its own comes out filling it exactly.
-  assert.equal(out[0].pinned, true, "the narrow score was not pinned");
-  assert.match(out[0].maxWidth, /^\d+px$/);
-  assert.ok(
-    out[0].svg.width < out[0].block.width - 40,
-    "the narrow score was stretched: " + out[0].svg.width
-  );
-  // The wide one and the playable one take the text width, at no fixed size.
-  for (const b of [out[1], out[2]]) {
-    assert.equal(b.pinned, false, "a wide score was pinned to a width");
+  // Every score is held at the width it was engraved at, and the two that say
+  // nothing about their own are held at abcjs's, which is what the editor
+  // draws them at. The wide ones used to fill the column instead: mdm.js
+  // engraved its measuring pass at the width of the box, so a tune with
+  // nothing to say came out exactly as wide as the page. That reads well and
+  // is not what the editor does, and a responsive SVG scales its whole
+  // drawing, so the staff, the notes and every word on them came out 11%
+  // larger here than there. The export rule (CLAUDE.md) settles which of the
+  // two moves.
+  for (const b of out) {
+    assert.equal(b.pinned, true, "a score was left to fill the column");
+    assert.match(b.maxWidth, /^\d+px$/);
     assert.ok(
-      b.svg.width > b.block.width - 40,
-      "a wide score did not fill the line: " + b.svg.width
+      b.svg.width < b.block.width - 40,
+      "a score was stretched to the column: " + b.svg.width + " of " + b.block.width
     );
   }
+  // %%staffwidth still decides, and decides downwards: the narrow one comes
+  // out narrower than a tune that names no width at all. (The two that name
+  // none are not engraved to the same width as each other, and should not be:
+  // abcjs leaves a last line at its natural length, so what they come out at
+  // is what their own music takes.)
+  assert.ok(
+    out[0].svg.width < out[1].svg.width,
+    "%%staffwidth stopped deciding the width: " + out[0].svg.width
+  );
   await h.close();
 });
 
@@ -800,6 +808,32 @@ test("every paragraph of the page ends its lines where the editor ends them", { 
       "the lines of \"" + k + "...\" end on different words"
     );
   }
+test("a score is drawn on the page at the size it is drawn in the editor", { skip }, async () => {
+  const s = await sides();
+  // The drawing, which a responsive SVG can scale as a whole.
+  assert.equal(s.exported.svg, s.editor.svg, "the engraving is a different width on the page");
+  assert.equal(s.exported.staff, s.editor.staff, "the staff is a different height on the page");
+  // The words on it: the size asked for, and the size drawn. Both, because
+  // they came apart once: the sizes matched while the ink did not, the page
+  // having taken the score out of the prose's font-size-adjust and the editor
+  // not, which drew the same string at the same size a seventh wider.
+  assert.equal(
+    s.exported.titleSize,
+    s.editor.titleSize,
+    "the title is asked for at a different size on the page"
+  );
+  assert.equal(
+    s.exported.adjust,
+    s.editor.adjust,
+    "one surface adjusts the score's text and the other does not"
+  );
+  assert.equal(
+    s.exported.titleInk,
+    s.editor.titleInk,
+    "the title is drawn a different width on the page"
+  );
+});
+
 // ---------- The block the YAML asks for, and the face it is set in ----------
 
 // What a page is asked for at the top of it, measured rather than read out of

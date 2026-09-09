@@ -627,12 +627,18 @@
     // is then held at that width, so the responsive render that follows can
     // only shrink it on a small screen, never blow it up.
     //
-    // The staff is asked for at the width of the box, which is what makes the
-    // measurement mean anything: left to itself abcjs engraves at a page width
-    // of its own (770 px, measured), so a tune with nothing to say about its
-    // width came out narrower than a box wider than that and was pinned at a
-    // size it never asked for. A %%staffwidth in the source still wins over
-    // what is passed here, which is exactly the score this is looking for.
+    // Nothing is passed for the width, which is the whole of the fix and the
+    // opposite of what used to be here. This asked abcjs for a staff the width
+    // of the box, so that a tune with nothing to say about its width would
+    // fill the column rather than sit at a size it never asked for. The
+    // trouble is that the editor asks for no width either, and abcjs draws
+    // that at 740 px: the page was therefore engraving the same tune 820 px
+    // wide where the editor engraved it 740, and since a responsive SVG scales
+    // its whole drawing, every note, clef, staff line and word came out 11%
+    // larger on the page than in the editor. Filling the column is a defensible
+    // look, but it is not the editor's, and the editor is the reference.
+    // A %%staffwidth in the source still decides, here as there.
+    // The room there is, read before anything is drawn into the box.
     var box = paper.clientWidth;
     ABCJS.renderAbc(paper, source, {
       paddingleft: 0,

@@ -1230,8 +1230,15 @@ local has_pdfcrop = nil
 -- default 11 pt, clamped by letter paper, is 527.4 pt of text, and a CSS px
 -- is 0.75 pt. A document set to another measure only rescales the drawing
 -- (width=\mdmscorewidth below), which is the same shrink `responsive:
--- resize` performs in the browser, so the line breaks of the engraving are
--- the ones the exported HTML shows.
+-- resize` performs in the browser.
+--
+-- The line breaks of the engraving are NOT the ones the exported HTML shows,
+-- and were only ever close: the page asks abcjs for no width at all now
+-- (resources/mdm.js, renderBlock), which it draws at its own 740 px, and this
+-- is 703. A tune that fills its line can therefore wrap a note earlier on
+-- paper than on the page. Two engravers on two measures is the part of the
+-- export rule the PDF is allowed to be close on rather than equal, and the
+-- 5% between them is what "close" is here.
 local ABCJS_STAFFWIDTH = 703
 
 -- The sheet the engraving is printed on, and the scale it is printed at. A
