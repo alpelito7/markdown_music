@@ -3172,3 +3172,40 @@ test("every toggle lights on the setting that was asked for", { skip }, async ()
     await h.close();
   }
 });
+
+// ---------- What is wider than the column ----------
+
+const settle = (page) =>
+  page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
+// A flex item is never narrower than its min-content unless told so, and
+// .cm-content is one: the widest thing that could not wrap used to set the
+// column. On example.mdm that was the display equation of the string, 579 px,
+// so a pane under about 680 px set the prose at 579 while the page set it at
+// min(820, pane - 100), and the whole document scrolled sideways. The column
+// follows the pane, and the equation scrolls inside its own box.
+test("a narrow pane narrows the column, and a wide equation scrolls in its own box", { skip }, async () => {
+  const h = await open({ scores: 0, seed: { settings: { textFont: "roman" } } });
+  for (const width of [600, 500]) {
+    await h.page.setViewport({ width, height: 1600 });
+    await settle(h.page);
+    const m = await h.page.evaluate(() => {
+      const c = document.querySelector("#app .cm-content");
+      const sc = document.querySelector("#app .cm-scroller");
+      const eq = document.querySelector("#app .mdm-math--block .katex-display");
+      return {
+        column: Math.round(c.getBoundingClientRect().width),
+        pane: sc.clientWidth,
+        docScrolls: sc.scrollWidth > sc.clientWidth + 1,
+        eqBox: eq.clientWidth,
+        eqContent: eq.scrollWidth,
+      };
+    });
+    assert.equal(m.column, m.pane - 100, width + ": the column is " + m.column + " px in a pane of " + m.pane);
+    assert.equal(m.docScrolls, false, width + ": the document scrolls sideways");
+    assert.ok(m.eqContent > m.eqBox + 1, width + ": the equation fits its box, so nothing was tested");
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+

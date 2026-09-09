@@ -347,6 +347,22 @@ body pre:not(.sourceCode):not(.mdm-src) {
   padding: 0.55em 0.9em;
   overflow-x: auto;
 }
+/* A display equation wider than the column scrolls sideways inside its own
+   box, as it does in the editor (.mdm-math--block .katex-display in
+   media/style.css), instead of standing out of the column and scrolling the
+   whole page: at a 600 px window the string equation of example.mdm, 579 px,
+   stood out of the 500 px column (measured). Only sideways, for the reason
+   the editor gives: `overflow-x: auto` alone turns the other axis to auto as
+   well. Hidden would then crop what KaTeX draws past the box, 3.3 px under
+   the sum, so the box carries the editor's 0.25em of room above and below.
+   That brings the text 4 px nearer the editor on each side of an equation
+   and not all the way: measured on the same equation at 1200 px, 16.5 px
+   above and 11.7 below on the page against 23.6 and 19.8 in the editor. */
+body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25em 0;
+}
 /* Pandoc's own token classes onto the editor's ten slots. The two engines do
    not cut a line into the same tokens (the editor highlights with Lezer,
    Quarto with skylighting), so what is shared is the palette and not the

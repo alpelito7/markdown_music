@@ -808,6 +808,66 @@ test("every paragraph of the page ends its lines where the editor ends them", { 
       "the lines of \"" + k + "...\" end on different words"
     );
   }
+});
+
+// One surface at one window width: the page in a browser of its own, the
+// editor through the harness.
+async function pageAt(url, width, read) {
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: width, height: 1200 },
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto(url, { waitUntil: "networkidle0" });
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForSelector(".mdm-paper svg");
+  const out = await page.evaluate(read);
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+  return out;
+}
+async function editorAt(settings, width, read) {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const h = await openEditor({ seed: { settings: settings }, scores: 0 });
+  await h.page.waitForFunction(() => document.querySelector("#app .mdm-score code.language-abc svg[data-mdm-fit]"));
+  await h.page.setViewport({ width: width, height: 1200 });
+  await h.page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  );
+  const out = await h.page.evaluate(read);
+  await h.close();
+  return out;
+}
+
+// Below 920 px the two columns narrow together, which the flat 820 above
+// cannot show. At a 600 px window two things kept them apart: the editor's
+// column would not go under its widest equation (579 px, a flex item's
+// min-content), and the page's equation stood out of its column and scrolled
+// the whole page. On both a wide equation now scrolls inside its own box, and
+// the page crops none of what KaTeX draws past that box.
+test("a narrow window narrows both columns alike, and a wide equation scrolls in its own box", { skip }, async () => {
+  const width = 600;
+  const page = await pageAt(EXAMPLE_PAGE, width, () => {
+    const eq = document.querySelector("main.content .katex-display");
+    return {
+      column: Math.round(document.querySelector("main.content").getBoundingClientRect().width),
+      scrolls: document.documentElement.scrollWidth > window.innerWidth + 1,
+      eqBox: eq.clientWidth,
+      eqContent: eq.scrollWidth,
+      cropped: eq.scrollHeight > eq.clientHeight + 1,
+    };
+  });
+  const editor = await editorAt({ textFont: "roman" }, width, () =>
+    Math.round(document.querySelector("#app .cm-content").getBoundingClientRect().width)
+  );
+  assert.equal(page.column, editor, "the page holds its text to " + page.column + " px and the editor to " + editor);
+  assert.equal(page.scrolls, false, "the page scrolls sideways");
+  assert.ok(page.eqContent > page.eqBox + 1, "the equation fits the column, so nothing was tested");
+  assert.equal(page.cropped, false, "the page crops the equation at the top or the bottom of its box");
+});
+
 test("a score is drawn on the page at the size it is drawn in the editor", { skip }, async () => {
   const s = await sides();
   // The drawing, which a responsive SVG can scale as a whole.

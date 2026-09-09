@@ -234,6 +234,18 @@ body {
    (html.test.js, every paragraph line by line). */
 #app .cm-lineWrapping {
   white-space: pre-wrap;
+}
+/* The column follows the pane, whatever it holds. .cm-content is a flex item
+   of the scroller, and a flex item is never narrower than its min-content by
+   default: the widest thing in the document that cannot wrap set the column.
+   On example.mdm that was the display equation of the string, 579 px, so with
+   the pane under about 680 px the prose was set at 579 px while the page set
+   it at min(820, pane - 100), and the whole document scrolled sideways. A
+   wide equation, table or score is its own box and scrolls or scales inside
+   it (the rules for .katex-display and .mdm-table below). */
+#app .cm-content {
+  min-width: 0;
+}
 /* ---------- Latin Modern Roman, the roman of mdm.textFont ----------
 
    The face TeX sets a document in, carried here as four woff2 files under
