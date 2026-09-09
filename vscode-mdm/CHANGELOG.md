@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.5.4
+
+- The document is set in Latin Modern Roman, the face TeX sets a document in.
+  The extension carries it, four woff2 files of 191 KB: nothing is installed
+  for it and no LaTeX is involved. It is the drawing the equations were
+  already in, KaTeX's own faces being Computer Modern and Latin Modern being
+  Computer Modern redrawn as OpenType, so the words and the maths of a page
+  read as one design instead of two. A toolbar button hands the text back to
+  the interface sans of the system, and the choice persists as `mdm.textFont`.
+- It is drawn at the reading size the sans had. What a reader sees as the size
+  of a text is its x-height, and Latin Modern's is 0.431 em against the sans's
+  0.528, so at the same nominal size it reads about a fifth small and leaves
+  the headings, the maths and the words on a staff looking oversized beside
+  it. The page is set at the sans's x-height instead, which keeps the
+  proportions it was designed with and leaves KaTeX's 1.21, made for exactly
+  that measurement, landing within 2% of the prose.
+- On paper the roman is drawn at that same x-height. fontspec's Scale is the
+  lever font-size-adjust is on screen: `\f@size`, and every length hung from
+  it, stays where it was and only the glyphs grow. Left at Latin Modern's own
+  0.431 the paper's roman read a fifth smaller than the maths set into it, the
+  words at 9.96 pt against formulas at 12.06, measured on example.pdf. The two
+  bold files take a Scale of their own, since the editor weighs each face by
+  its own x-height and under one Scale for the four the bold stood 3% taller
+  on paper than on screen. Under pdfTeX there is no fontspec to scale with and
+  the maths still comes out about a fifth larger than the words: that is the
+  one engine this does not reach, and not the one Quarto renders with.
+- The headings take one ladder, the same in either face and on the three
+  surfaces: 2, 1.5 and 1.25 at the top, which are the sizes VS Code's own
+  Markdown preview gives h1 to h3 and the levels a document written in
+  Markdown is headed with, and from there each level halves what the one above
+  stands over the body, so `###### Heading` and `**Heading**` draw the same.
+  The rule under h1 and h2 hangs from the baseline of the heading's last line
+  rather than from its depth, so a heading with descenders no longer pushes it
+  down. And the air the page leaves around a heading is the air the editor
+  leaves: six levels, each over a line of prose, measured 458 px from the
+  first heading to the last line on the page against 573 in the editor.
+- The level a heading is written as is read off the class instead of assumed,
+  so a `#` is a \chapter under report, book, memoir, scrreprt and scrbook, a
+  \part under `top-level-division: part`, and a \section elsewhere. A sixth
+  level reaches the paper as a heading with its label instead of stopping the
+  PDF with titlesec's "No format for this command", and a chapter stands where
+  an article's `#` stands, where the class's own shape had put its baseline
+  6.05 em under the top of the text against 1.82.
+- Only the text moves. The toolbar, the menus and the outline panel keep the
+  interface sans, and code, the numbers in the margin and the source of an
+  open block keep their monospace.
+- An export carries the face to the page and to the paper. The four faces ride
+  with a page only when that page is set in them, and on paper the preamble
+  stops pushing LaTeX to the sans and leaves it in the Computer Modern it
+  already is, where the maths needs no compensation and loses the 1.21 it
+  carries beside a sans.
+- The toolbar is cut into groups by what a button touches: the page it is
+  painted and set on, the score, and the playing.
+- `mdm.followMusic` is now `mdm.followPlayhead`. The playhead is the thing
+  that moves and the thing the page is chasing, and the tooltip is one verb
+  and its negation. Anyone who had set the old id goes back to following:
+  nothing migrates it. Its lamp lights while the page is NOT following, which
+  is the convention of every other toggle on the bar, the setting that was
+  asked for rather than the one that came with the editor.
+
 ## 0.5.3
 
 - A page exported on the dark side carries the dark side's own fallback
