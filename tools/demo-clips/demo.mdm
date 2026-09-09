@@ -1,0 +1,37 @@
+---
+title: "What the editor shows"
+author: alpelito7
+format:
+  html:
+    embed-resources: true
+filters:
+  - mdm
+---
+
+### What the editor shows
+
+An `.mdm` file is Markdown that VS Code opens as a document: prose, `code`,
+equations in LaTeX and scores in ABC notation, each drawn where it is written.
+
+A click on the score opens its ABC: `M:3/4` is the metre, `L:1/8` the unit
+note length, `e` is `E` an octave up and `_e` is `e` flat.
+
+```{.abc .play}
+X:1
+M:3/4
+L:1/8
+Q:1/4=120
+K:C
+G3 E c2 | A4 F2 | [Ec]2 G2 E2 | G2 A2 B2 | [Ec]6 |]
+```
+
+The toolbar sets the theme, draws the staff lines in ink and lets `Ctrl+D`
+find a selection inside other words, as `E` inside `[Ec]`. An equation sits
+in the line, $f_{\texttt{A}} = 440\ \text{Hz}$, or on a line of its own:
+
+$$
+f_{\texttt{e}} = 2\, f_{\texttt{E}}, \qquad f_{\texttt{\_e}} = 2^{-1/12}\, f_{\texttt{e}}
+$$
+
+The headphones on a score open its player, and a playhead walks the staff
+as the tune sounds.

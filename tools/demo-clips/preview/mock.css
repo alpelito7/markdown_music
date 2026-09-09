@@ -1,0 +1,210 @@
+/* ---------------------------------------------------------------------------
+   Marketplace mock. Every number here was measured off the live page
+   (marketplace.visualstudio.com, build M279_20260831.9, read 2026-09-08).
+
+   Two departures, both deliberate:
+
+   1. The live page ships no DOCTYPE and renders in quirks mode. This one is in
+      standards mode, so the one quirk that changes how a README reads is put
+      back by hand below: tables do not inherit font-size in quirks mode, which
+      is why README tables on the real page are set larger than the prose
+      around them.
+   2. Segoe UI is not installed on Linux and the fallback, Liberation Sans,
+      sets wider. The measure (710.5 px) is exact; the line breaks inside it
+      are not.
+--------------------------------------------------------------------------- */
+
+:root {
+  --mp-topbar-bg: #000;
+  --mp-crumb-bg: #232323;
+  --mp-banner-bg: #eff1f3;
+  --mp-link: #0078d4;
+  --mp-tab-active: #106ebe;
+  --mp-install-green: #107c10;
+  --mp-md-fg: #222;
+  --mp-md-rule: #eee;
+  --mp-md-quote-fg: #777;
+  --mp-md-quote-bar: #ddd;
+  --mp-md-pre-bg: #f7f7f7;
+  --mp-md-code-bg: rgba(0, 0, 0, 0.04);
+  --mp-md-table-border: #ddd;
+  --mp-md-row-border: #ccc;
+  --mp-md-row-alt: #f8f8f8;
+  --mp-rail-heading: #555;
+  --mp-rail-muted: #666;
+  --mp-rail-pill-border: #ddd;
+  --mp-tab-border: #ccc;
+
+  --mp-shell: 1160px;
+  --mp-readme-col: 710.5px;
+  --mp-rail-col: 364.5px;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  color: #000;
+  font-family: "Segoe UI", "Segoe UI Web (West European)", -apple-system,
+    BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 12px;
+}
+
+.ms-Fabric { font-family: inherit; font-size: 14px; color: #333; -webkit-font-smoothing: antialiased; }
+
+.shell { width: var(--mp-shell); margin: 0 auto; padding: 0 10px; box-sizing: content-box; }
+@media all and (max-width: 1165px) { .shell { width: auto; padding: 0 25px; } }
+
+/* ---- chrome ---- */
+
+.topbar { background: var(--mp-topbar-bg); color: #fff; height: 48px; display: flex; align-items: center; }
+.topbar .shell { display: flex; align-items: center; gap: 22px; }
+.topbar .brand { font-size: 15px; font-weight: 600; }
+.topbar .nav { display: flex; gap: 18px; font-size: 13px; color: #ddd; }
+.topbar .search {
+  margin-left: auto; background: #6a6a6a; color: #fff; border: 0;
+  height: 28px; width: 240px; padding: 0 10px; font-size: 13px;
+}
+.topbar .search::placeholder { color: #e2e2e2; }
+
+.crumb { background: var(--mp-crumb-bg); color: #fff; font-size: 12px; }
+.crumb .shell { display: flex; align-items: center; height: 34px; gap: 6px; }
+
+/* ---- header band ---- */
+
+.banner { background: var(--mp-banner-bg); }
+.banner .shell { display: flex; gap: 22px; padding-top: 26px; padding-bottom: 26px; align-items: flex-start; }
+.banner .icon { width: 128px; height: 128px; flex: 0 0 128px; }
+.banner .icon img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.banner .meta { padding-top: 4px; }
+.banner h1 { margin: 0 0 2px; font-size: 30px; font-weight: 600; line-height: 1.2; color: #000; }
+.banner .byline { font-size: 15px; color: #000; margin-bottom: 2px; }
+.banner .byline .pub { font-weight: 600; }
+.banner .counts { font-size: 13px; color: #333; margin: 8px 0 14px; display: flex; gap: 14px; align-items: center; }
+.banner .counts .sep { color: #999; }
+.banner .install {
+  background: var(--mp-install-green); color: #fff; border: 0;
+  height: 32px; padding: 0 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.banner .blurb { font-size: 14px; color: #000; margin-top: 14px; max-width: 720px; line-height: 1.5; }
+
+/* ---- tabs ---- */
+
+.tabs { border-bottom: 1px solid var(--mp-tab-border); }
+.tabs .shell { display: flex; gap: 26px; }
+.tabs a {
+  display: block; padding: 12px 2px; font-size: 14px; color: #333;
+  text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tabs a.on { color: var(--mp-tab-active); border-bottom-color: var(--mp-tab-active); font-weight: 600; }
+
+/* ---- body: the two columns, as the real page lays them out ---- */
+
+.body { padding: 6px 12px; }
+.body .shell { padding: 0; }
+.cols { display: flex; align-items: flex-start; margin: 24px 0 34px; }
+.col-readme { width: var(--mp-readme-col); flex: 0 0 var(--mp-readme-col); padding-right: 20px; }
+.col-rail { width: var(--mp-rail-col); flex: 0 0 var(--mp-rail-col); padding-left: 20px; }
+@media all and (max-width: 1165px) {
+  .cols { display: block; }
+  .col-readme, .col-rail { width: auto; flex: none; padding: 0; }
+  .col-rail { margin-top: 30px; }
+}
+
+/* ---- README ---- */
+
+.markdown { font-size: 14px; line-height: 1.6; color: var(--mp-md-fg); word-wrap: break-word; }
+.markdown > *:first-child { margin-top: 0 !important; }
+.markdown h1, .markdown h2 { border-bottom: 1px solid var(--mp-md-rule); padding-bottom: 0.3em; }
+.markdown h1 { font-size: 2em; margin: 0.67em 0; }
+.markdown h2 { font-size: 1.5em; margin: 0.83em 0; }
+.markdown h3 { font-size: 1.17em; margin: 1em 0; }
+.markdown p { margin: 1em 0; }
+.markdown a { color: var(--mp-link); text-decoration: none; }
+.markdown a:hover { text-decoration: underline; }
+.markdown code {
+  background: var(--mp-md-code-bg); padding: 0.2em 0.4em; border-radius: 3px;
+  font-family: Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em;
+}
+.markdown pre { background: var(--mp-md-pre-bg); padding: 16px; overflow: auto; line-height: 1.45; border-radius: 3px; }
+.markdown pre code { background: transparent; padding: 0; font-size: 0.85em; }
+.markdown blockquote { margin: 1em 0; padding: 0 1em; color: var(--mp-md-quote-fg); border-left: 4px solid var(--mp-md-quote-bar); }
+
+/* The one rule the Marketplace has for README media: clamped to the column.
+   No border, shadow, radius or centring; whatever a clip needs to read as a
+   window it carries in its own pixels (rig.js draws the hairline). */
+.markdown img, .markdown video { max-width: 100%; }
+
+.markdown ul, .markdown ol { padding-left: 40px; }
+.markdown hr { border: 0; border-top: 1px solid var(--mp-md-rule); }
+
+/* The live page renders in quirks mode, where tables do not inherit
+   font-size, so a README table is set at 16px/normal/#000 while the prose
+   around it is 14px/1.6/#222. Reproduced rather than corrected: it is what a
+   reader sees. */
+.markdown table, .markdown th, .markdown td { font-size: 16px; line-height: normal; color: #000; }
+.markdown table { border-collapse: collapse; margin: 1em 0; }
+.markdown th, .markdown td { border: 1px solid var(--mp-md-table-border); padding: 6px 13px; }
+.markdown tr { border-top: 1px solid var(--mp-md-row-border); }
+.markdown tr:nth-child(2n) { background: var(--mp-md-row-alt); }
+
+/* ---- rail ---- */
+
+.rail { font-size: 13px; color: #333; }
+.rail h3 { font-size: 13px; color: var(--mp-rail-heading); margin: 0 0 8px; font-weight: 600; }
+.rail section { margin-bottom: 26px; }
+.rail .pill {
+  display: inline-block; border: 1px solid var(--mp-rail-pill-border); border-radius: 2px;
+  padding: 3px 9px; margin: 0 6px 6px 0; color: #333; font-size: 12px;
+}
+.rail table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--mp-rail-muted); }
+.rail td { padding: 4px 0; vertical-align: top; }
+.rail td:first-child { width: 45%; }
+.rail a { color: var(--mp-link); text-decoration: none; }
+
+/* ---------------------------------------------------------------------------
+   Everything below is the review harness, not the Marketplace, and it is
+   meant to look like it is not part of the page.
+--------------------------------------------------------------------------- */
+
+.harness {
+  position: fixed; right: 18px; top: 18px; z-index: 50; width: 236px;
+  background: #17181a; color: #eceae4; border-radius: 10px; padding: 14px 15px 15px;
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.34);
+}
+.harness h4 { margin: 0 0 3px; font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: #b8b2a4; font-weight: 600; }
+.harness .note { color: #9b968c; font-size: 11.5px; margin: 0 0 12px; line-height: 1.4; }
+.harness .grp { margin-bottom: 11px; }
+.harness .lbl { font-size: 11px; color: #9b968c; margin-bottom: 5px; }
+.harness .seg { display: flex; flex-wrap: wrap; border: 1px solid #34363a; border-radius: 6px; overflow: hidden; }
+.harness .seg button {
+  flex: 1 1 auto; background: #202225; color: #cfcbc2; border: 0; padding: 6px 7px;
+  font: inherit; font-size: 12px; cursor: pointer;
+}
+.harness .seg button + button { border-left: 1px solid #34363a; }
+.harness .seg button.on { background: #c39a4e; color: #17181a; font-weight: 600; }
+.harness .tot { border-top: 1px solid #2c2e31; margin-top: 12px; padding-top: 10px; font-size: 11.5px; color: #9b968c; }
+
+.missing {
+  display: block; padding: 40px 16px; background: #fbf3f3; color: #8a3b3b;
+  border: 1px dashed #d9a9a9; font: 12px/1.4 Consolas, "Liberation Mono", monospace;
+}
+
+.appendix { border-top: 3px solid #17181a; margin-top: 60px; padding: 30px 0 80px; }
+.appendix h2 { font-size: 20px; margin: 0 0 6px; }
+.appendix p.lede { color: #555; font-size: 14px; max-width: 710px; margin-top: 0; }
+.appendix .clip-row {
+  display: grid; grid-template-columns: 340px 1fr; gap: 24px;
+  padding: 22px 0; border-top: 1px solid #e6e6e6; align-items: start;
+}
+.appendix .clip-row img, .appendix .clip-row video { width: 100%; display: block; }
+.appendix .clip-row h3 { margin: 0 0 4px; font-size: 15px; }
+.appendix .clip-row .facts { font-size: 12.5px; color: #666; margin: 0 0 10px; }
+.appendix pre {
+  background: #f7f7f7; border: 1px solid #eaeaea; padding: 11px 13px;
+  font: 12px/1.5 Consolas, "Liberation Mono", monospace;
+  overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin: 0;
+}

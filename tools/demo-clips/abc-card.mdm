@@ -1,0 +1,11 @@
+```abc
+X:1             % reference number, the first line of a tune
+T:Four bars     % title
+M:4/4           % metre
+L:1/8           % unit note length: a plain letter is an eighth
+Q:1/4=100       % tempo, in quarter notes a minute
+K:C             % key, the last line of the header
+% C is middle C and c the octave above; a 2 after a note doubles its length
+% ^ sharp, _ flat, = natural, z a rest, [CEG] a chord, |] the end
+CDEF GABc | c2 B2 A2 G2 | ^F2 _B2 =B2 z2 | [CEG]8 |]
+```

@@ -1,0 +1,120 @@
+<!--template
+The template build/index.html is written from: node preview/build.js fills in
+the {{...}} fields and the /*...*/ slots below and leaves this comment out.
+Open that page, not this file. The name does not end in .html so that nothing
+opens it as a page: an .html editor in VS Code opens a file on a single click
+in the explorer, and this one, unfilled, looked like a broken copy of the page.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{displayName}}, Marketplace page (local mock)</title>
+<style>/*CSS*/</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="shell">
+    <span class="brand">Visual Studio Marketplace</span>
+    <nav class="nav"><span>Extensions</span><span>Azure DevOps</span><span>Subscriptions</span><span>Publish</span></nav>
+    <input class="search" placeholder="Search Marketplace" disabled>
+  </div>
+</div>
+
+<div class="crumb">
+  <div class="shell"><span>Visual Studio Code &gt; {{displayName}}</span></div>
+</div>
+
+<div class="banner">
+  <div class="shell">
+    <div class="icon"><img src="icon.png" alt=""></div>
+    <div class="meta">
+      <h1>{{displayName}}</h1>
+      <div class="byline"><span class="pub">{{publisher}}</span></div>
+      <div class="counts"><span>v{{version}}</span><span class="sep">|</span><span>{{license}}</span></div>
+      <button class="install">Install</button>
+      <div class="blurb">{{description}}</div>
+    </div>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="shell">
+    <a href="#" class="on">Details</a>
+    <a href="#">Version History</a>
+    <a href="#">Q &amp; A</a>
+    <a href="#">Rating &amp; Review</a>
+  </div>
+</div>
+
+<div class="body ms-Fabric">
+  <div class="shell">
+    <div class="cols">
+      <div class="col-readme">
+<!--READMES-->
+      </div>
+      <aside class="col-rail">
+        <div class="rail">
+          <section><h3>Categories</h3>{{categories}}</section>
+          <section><h3>Tags</h3>{{tags}}</section>
+          <section>
+            <h3>Resources</h3>
+            <div><a href="#">Repository</a></div>
+            <div><a href="#">License</a></div>
+            <div><a href="#">Changelog</a></div>
+          </section>
+          <section>
+            <h3>More Info</h3>
+            <table>
+              <tr><td>Version</td><td>{{version}}</td></tr>
+              <tr><td>Publisher</td><td>{{publisher}}</td></tr>
+              <tr><td>Unique identifier</td><td>{{identifier}}</td></tr>
+            </table>
+          </section>
+        </div>
+      </aside>
+    </div>
+
+    <div class="appendix">
+      <h2>The clips on their own</h2>
+      <p class="lede">Each clip the README shown above marks, at its delivered size, with what it
+      weighs and the exact line markup.js writes for it in the chosen format (apply.js puts the
+      GIF's in the README). Everything above the rule is the mock of the Marketplace page;
+      everything below it is for reviewing.</p>
+      <div id="clip-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="harness">
+  <h4>Review controls</h4>
+  <p class="note">Not part of the page. These switch what the mock shows.</p>
+  <div class="grp"><div class="lbl">README</div><div class="seg" data-set="source"></div></div>
+  <div class="grp">
+    <div class="lbl">Format</div>
+    <div class="seg" data-set="format"><button data-v="gif">GIF</button><button data-v="mp4">Video</button></div>
+  </div>
+  <div class="grp">
+    <div class="lbl">A video, as the reader gets it</div>
+    <div class="seg" data-set="reader"><button data-v="chrome">Chrome from outside</button><button data-v="plays">Firefox, Safari</button></div>
+  </div>
+  <div class="grp">
+    <div class="lbl">Recorded look</div>
+    <div class="seg" data-set="look"><button data-v="light">Light</button><button data-v="dark">Dark</button></div>
+  </div>
+  <div class="tot" id="stats"></div>
+</div>
+
+<!-- The folder this page is in, as the page reaches it. An .html editor inside
+     VS Code, Office Viewer (cweijan.vscode-office) for one, shows the file in a
+     webview whose own address is elsewhere and fixes up only the relative
+     links written in the file, so a URL built at runtime against the document,
+     as every clip's is, misses the folder. This link gets fixed up or resolved
+     like any other, and mock.js resolves the clips against it. -->
+<a id="page-dir" href="./" hidden></a>
+<script>window.MOCK = /*DATA*/;</script>
+<script>/*JS*/</script>
+</body>
+</html>

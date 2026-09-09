@@ -15,3 +15,10 @@ tests/tmp/
 # A local abcm2ps build, if one is dropped here; the binary is not distributed
 # with the repository (see THIRD-PARTY-NOTICES.md).
 tools/bin/abcm2ps
+
+# The demo clips' working copies: every take in both looks and both formats,
+# the review page built from them, and README drafts under review. What the
+# README ships is written into vscode-mdm/docs/ by tools/demo-clips/apply.js
+# and abc-card.js.
+tools/demo-clips/build/
+tools/demo-clips/drafts/
