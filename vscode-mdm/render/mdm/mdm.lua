@@ -904,6 +904,14 @@ local function look_tex(l)
     put("\\newcommand{\\mdmslice}[1]{#1}")
     put("\\newcommand{\\mdmslicepad}[1]{}")
   end
+  -- The width an abcjs engraving is set at, which insert_score hands over in
+  -- ems: its own, one CSS pixel to a sixteenth of the em, unless that is
+  -- wider than the box a score may take, which a wide %%staffwidth or a
+  -- narrow sheet can ask for; then the box, the shrink the editor's sideways
+  -- scroll stands in for.
+  put("\\newlength{\\mdmscorew}")
+  put("\\newcommand{\\mdmscoreat}[1]{\\setlength{\\mdmscorew}{#1\\mdmem}%")
+  put("  \\ifdim\\mdmscorew>\\mdmscorewidth\\setlength{\\mdmscorew}{\\mdmscorewidth}\\fi}")
   -- The band of air around a score: the editor gives every block 1.5em of
   -- vertical margin (`.mdm-block` in mdm.css), where the PDF set one down
   -- with no more than the gap of a paragraph. The page already puts its
@@ -1226,20 +1234,16 @@ end
 local chrome_path = nil
 local has_pdfcrop = nil
 
--- The engraving is asked for at the measure of the page: 51.25 ems at the
--- default 11 pt, clamped by letter paper, is 527.4 pt of text, and a CSS px
--- is 0.75 pt. A document set to another measure only rescales the drawing
--- (width=\mdmscorewidth below), which is the same shrink `responsive:
--- resize` performs in the browser.
---
--- The line breaks of the engraving are NOT the ones the exported HTML shows,
--- and were only ever close: the page asks abcjs for no width at all now
--- (resources/mdm.js, renderBlock), which it draws at its own 740 px, and this
--- is 703. A tune that fills its line can therefore wrap a note earlier on
--- paper than on the page. Two engravers on two measures is the part of the
--- export rule the PDF is allowed to be close on rather than equal, and the
--- 5% between them is what "close" is here.
-local ABCJS_STAFFWIDTH = 703
+-- The engraving is drawn at the size the editor draws it, in the editor's
+-- own units. abcjs is asked for no width, which it draws at its own 740 px,
+-- as the editor and the exported page do (resources/mdm.js, renderBlock), so
+-- the three break a tune's lines in the same places; and the drawing goes
+-- onto the paper at one CSS pixel to a sixteenth of the body's em
+-- (insert_score), which is what a pixel is beside the editor's 16 px text.
+-- It used to be engraved 703 px wide and stretched to the measure: on
+-- example.pdf the staff lines stood 5.61 bp apart under a 9.96 bp em, 0.563
+-- of it, where the editor draws them 7.75 px apart under 16, 0.484, so every
+-- staff on paper was 16% larger beside the words than the editor draws it.
 
 -- The sheet the engraving is printed on, and the scale it is printed at. A
 -- CSS pixel is 0.75 pt, so this page is 900 x 4500 pt. Both numbers are
@@ -1301,25 +1305,22 @@ end
 -- The page Chrome prints: the engraving alone, on a sheet big enough for any
 -- score and trimmed to the ink afterwards.
 --
--- Two things it does not share with the page the browser draws (mdm.js,
--- renderBlock), and both are open. It asks for a staffwidth, which that one
--- no longer does, so the two wrap at 703 px and 740; and it passes no
--- `format`, so every title, part name, lyric and annotation on paper keeps
--- the sizes abcjs has had since abcm2ps (a title at 20 pt, drawn at 4/3, so
--- 27 px against the 23 the screen asks for) where the editor and the page
--- hold each one to a fraction of the prose's x-height. The score is inserted
--- at a width the document decides and the drawing scales with it, so the
--- right sizes here are not the screen's own numbers but those numbers
--- divided by that scale, which is a measurement this has not been given yet.
--- Until it is, the words on a printed staff are the one place the paper is
--- knowingly out of proportion with the screen.
+-- One thing it does not share with the page the browser draws (mdm.js,
+-- renderBlock), and it is open: it passes no `format`, so every title, part
+-- name, lyric and annotation on paper keeps the size abcjs has had since
+-- abcm2ps (a title at 20 pt, drawn at 4/3, so 27 px against the 23 the
+-- screen asks for) where the editor and the page hold each one to a fraction
+-- of the prose's x-height. The scale no longer stands in the way: a pixel of
+-- this page goes onto the paper as a sixteenth of the em, as it does beside
+-- the editor's text, so the screen's own numbers are the right ones here.
 --
--- The stylesheet is the
--- svg slice of mdm-look.css, rule for rule, with one addition: the staff
--- lines take a hairline stroke of their own colour, which lifts them from
--- the 0.7 px abcjs fills them at (0.53 pt) to about the 0.9 pt the abcm2ps
--- engraving is guarded to, past the pixel grid of a screen. The body is
--- left transparent and Chrome is not asked to print backgrounds, so the
+-- The stylesheet is the svg slice of mdm-look.css, rule for rule. The staff
+-- lines are abcjs's own 0.7 px, which is what the editor draws, 0.44 pt
+-- beside a 10 pt body. This page used to give them a 0.5 px stroke besides,
+-- to meet the 0.9 pt the abcm2ps engraving is guarded to, and that drew them
+-- at 0.87 bp on example.pdf: twice the editor's weight beside the words,
+-- which is how a staff came out heavy on paper and light on screen. The body
+-- is left transparent and Chrome is not asked to print backgrounds, so the
 -- page colour of the document shows through, as it does under an EPS.
 local function chrome_page(source, ink, staff)
   local abcjs = read_abcjs()
@@ -1333,7 +1334,7 @@ local function chrome_page(source, ink, staff)
     -- `color` besides `fill`: abcjs fills a good part of the drawing with
     -- currentColor, which reads the CSS colour, not the fill. The editor
     -- gets it from the body ink; here there is no body ink to inherit.
-    "  .mdm-paper { width: " .. ABCJS_STAFFWIDTH .. "px; color: " .. ink .. "; }",
+    "  .mdm-paper { color: " .. ink .. "; }",
     "  .mdm-paper svg { fill: " .. ink .. "; }",
     '  .mdm-paper svg [fill="#000000"] { fill: ' .. ink .. "; }",
     '  .mdm-paper svg [stroke="#000000"] { stroke: ' .. ink .. "; }",
@@ -1341,8 +1342,7 @@ local function chrome_page(source, ink, staff)
     '  .mdm-paper svg [fill="transparent"],',
     '  .mdm-paper svg [fill="rgba(0,0,0,0)"] { fill: none; }',
     "  .mdm-paper svg .abcjs-staff,",
-    "  .mdm-paper svg .abcjs-staff path { fill: " .. staff ..
-      "; stroke: " .. staff .. "; stroke-width: 0.5; }",
+    "  .mdm-paper svg .abcjs-staff path { fill: " .. staff .. "; }",
     "</style>",
     '<div class="mdm-paper" id="paper"></div>',
     "<script>",
@@ -1352,7 +1352,6 @@ local function chrome_page(source, ink, staff)
     'ABCJS.renderAbc(document.getElementById("paper"), ' ..
       js_string(source) .. ", {",
     "  add_classes: true,",
-    "  staffwidth: " .. ABCJS_STAFFWIDTH .. ",",
     "  paddingtop: 2, paddingbottom: 2, paddingleft: 0, paddingright: 0,",
     "});",
     -- Where one staff system ends and the next begins: the gaps the
@@ -1838,7 +1837,40 @@ end
 -- the rest of the page blank, and a score longer than a page has nowhere
 -- to go at all. Music is written to be read across a page turn, so the
 -- break belongs where the engraving already leaves a gap.
-local function insert_score(digest)
+-- An abcjs engraving on paper, at the size the editor draws it: one CSS
+-- pixel of it, which Chrome printed at 0.75 bp, to a sixteenth of the body's
+-- em, clamped to the box a score may take (\mdmscoreat, in the preamble).
+-- Every such score is narrower than the measure, as it is narrower than the
+-- editor's column, so every one is placed the way the editor places a score
+-- that does not fill the line: centred, or lined up left.
+local function abcjs_score_tex(pdf, width_pt, left, height, cuts)
+  local at = string.format("\\mdmscoreat{%.4f}", width_pt / PX_TO_PT / 16)
+  local align = left and "\\noindent" or "\\centering"
+  if not height then
+    return string.format(
+      "\\mdmscoreband{%s%s\\mdmscore{\\includegraphics[width=\\mdmscorew]{%s}}}",
+      align, at, pdf)
+  end
+  local pad = "\\dimexpr\\mdmscorew+1.4em\\relax"
+  local indent = left and "\\noindent" or ""
+  local out = { "\\mdmscoreband{\\mdmslicestack{%", at }
+  if not left then out[#out + 1] = "\\centering" end
+  out[#out + 1] = "\\mdmslicepad{" .. pad .. "}"
+  for i = 1, #cuts + 1 do
+    out[#out + 1] = string.format(
+      "%s\\mdmslice{\\includegraphics[trim=0bp %.3fbp 0bp %.3fbp,clip," ..
+      "width=\\mdmscorew]{%s}}\\par",
+      indent, cuts[i] or 0, i == 1 and 0 or (height - cuts[i - 1]), pdf)
+  end
+  out[#out + 1] = "\\mdmslicepad{" .. pad .. "}"
+  out[#out + 1] = "}}"
+  return table.concat(out, "\n")
+end
+
+-- `px` says the drawing is abcjs's, in the CSS pixels Chrome printed it in.
+-- An abcm2ps engraving has no pixels, and keeps the older rule below: a
+-- narrow one at its natural size, anything else at the text width.
+local function insert_score(digest, px)
   local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
   local width_pt = nil
   local wf = io.open(CACHE_DIR .. "/" .. digest .. ".w", "r")
@@ -1849,6 +1881,9 @@ local function insert_score(digest)
   local left = look and look.score_align == "left"
   local narrow = width_pt and width_pt < 330
   local height, cuts = read_cuts(digest)
+  if px and width_pt then
+    return pandoc.RawBlock("latex", abcjs_score_tex(pdf, width_pt, left, height, cuts))
+  end
   if not height then
     if narrow then
       return pandoc.RawBlock("latex", string.format(
@@ -1964,17 +1999,18 @@ local function render_latex(el)
   local wants_abcjs = not (look and look.engraver == "abcm2ps")
 
   if wants_abcjs and chrome_path and has_pdfcrop then
-    -- The leading `abcjs 1` is the engraver and the recipe: a change to the
+    -- The leading `abcjs 3` is the engraver and the recipe: a change to the
     -- page it prints from (chrome_page) has to bump it, or a warm cache
-    -- would keep serving the old drawing.
+    -- would keep serving the old drawing. 3 is the page with no staffwidth
+    -- and no stroke on the staff lines.
     local digest = sha1(
-      "abcjs 2 " .. ABCJS_STAFFWIDTH .. "\n" .. source .. "\n" .. ink .. " " .. staff)
+      "abcjs 3\n" .. source .. "\n" .. ink .. " " .. staff)
     if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
-      return insert_score(digest)
+      return insert_score(digest, true)
     end
     run("mkdir -p " .. CACHE_DIR)
     if engrave_abcjs(source, ink, staff, digest) then
-      return insert_score(digest)
+      return insert_score(digest, true)
     end
     quarto.log.warning(
       "mdm: Chrome could not print a music block; it falls back to abcm2ps.")

@@ -50,12 +50,12 @@ function cacheName(abc, ink, staff) {
 }
 
 // What an abcjs engraving is named after: the engraver with its recipe
-// version and staff width (`abcjs 2 703` in mdm.lua), then the block and the
-// colours, as above. The default engraver on a machine with a Chrome, which
-// this one is: the webview suites already need it.
+// version (`abcjs 3` in mdm.lua), then the block and the colours, as above.
+// The default engraver on a machine with a Chrome, which this one is: the
+// webview suites already need it.
 function abcjsCacheName(abc, ink, staff) {
   return sha1(
-    "abcjs 2 703\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF));
+    "abcjs 3\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF));
 }
 
 // And a KaTeX formula: the recipe, the mode (I inline, D display), the TeX
@@ -886,7 +886,7 @@ test("the fill and the alignment of a score travel to the PDF", () => {
   let tex = texOf(dir);
   assert.ok(tex.includes("\\newcommand{\\mdmscore}[1]{#1}"), "an empty fill still boxes");
   assert.ok(
-    tex.includes("\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{"),
+    tex.includes("\\mdmscoreband{\\centering\\mdmscoreat{"),
     "the narrow score is not centred inside the band"
   );
 
@@ -900,14 +900,20 @@ test("the fill and the alignment of a score travel to the PDF", () => {
   tex = texOf(dir);
   assert.ok(tex.includes("\\definecolor{mdmscorefill}{HTML}{F4EFE2}"), "the paper fill is not the light one");
   assert.ok(tex.includes("\\colorbox{mdmscorefill}"), "the fill does not reach the engraving");
-  assert.ok(!tex.includes("\\centering\\mdmscore"), "the score is still centred");
   assert.ok(
-    tex.includes("\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics{"),
+    !/\\centering\\mdmscoreat|\\mdmscoreat\{[\d.]+\}\n\\centering/.test(tex),
+    "the score is still centred"
+  );
+  assert.ok(
+    tex.includes("\\mdmscoreband{\\noindent\\mdmscoreat{"),
     "the score is not lined up left"
   );
-  // A score at the text width gives the padding back, so the box fits the
-  // measure instead of hanging over both margins.
-  assert.ok(tex.includes("width=\\mdmscorewidth"), "the wide score does not take the box into account");
+  // The box a score may take gives the padding back, so a score clamped to
+  // it fits the measure instead of hanging over both margins.
+  assert.ok(
+    tex.includes("\\ifdim\\mdmscorew>\\mdmscorewidth"),
+    "a score is not clamped to the box it may take"
+  );
   assert.ok(tex.includes("\\dimexpr\\linewidth-1.4em"), "the padding is not given back");
 
   // The dark side takes the other paper.
@@ -2018,7 +2024,138 @@ test("on paper the title is the size and weight the page gives it, under both ki
         Math.abs(ratio - 2) < 0.001,
         where + ": the title is " + ratio.toFixed(4) + " of the body where the page draws it at 2"
       );
+      assert.ok([...title.fonts].every((f) => /Bold/.test(f)), where + ": the title is not bold");
+      const subtitle = lineOf("Asubtitleunderit");
+      assert.ok(
+        ![...subtitle.fonts].some((f) => /Bold/.test(f)),
+        where + ": the subtitle took the title's bold"
+      );
     }
+  }
+});
+
+// ---------- A score on paper against the words, measured ----------
+
+// The staff of example.mdm's first score as the editor draws it, measured in
+// the webview harness on the vendored abcjs 6.7.0: five lines 7.75 px apart
+// and 0.7 px thick, beside a 16 px body. The paper is held to the same
+// proportions against its own em.
+const EDITOR_STAFF = { gap: 7.75, line: 0.7, body: 16 };
+
+// The staff lines of a printed page. The page is rasterised grey at `dpi`,
+// the rows that a long run of ink crosses are kept (the lines of a staff are
+// the only marks on a page that run most of the way across it), and adjacent
+// rows are grouped into lines, each reported as its centre and thickness in
+// bp. The raster is a P5 PGM: a header of four whitespace-separated fields
+// (magic, width, height, maxval), one more whitespace byte, then the pixels.
+function staffLines(pdf, page, dpi) {
+  const r = spawnSync(
+    "pdftoppm",
+    ["-gray", "-r", String(dpi), "-f", String(page), "-l", String(page), pdf],
+    { maxBuffer: 1 << 30 }
+  );
+  assert.equal(r.status, 0, String(r.stderr));
+  const buf = r.stdout;
+  const space = (b) => b === 0x20 || b === 0x0a || b === 0x0d || b === 0x09;
+  const fields = [];
+  let at = 0;
+  while (fields.length < 4) {
+    while (space(buf[at])) at++;
+    const start = at;
+    while (!space(buf[at])) at++;
+    fields.push(buf.toString("latin1", start, at));
+  }
+  at++;
+  const w = Number(fields[1]);
+  const h = Number(fields[2]);
+  const bp = 72 / dpi;
+  const lines = [];
+  let current = null;
+  for (let y = 0; y < h; y++) {
+    const row = at + y * w;
+    let best = 0;
+    let run = 0;
+    for (let x = 0; x < w; x++) {
+      if (buf[row + x] < 200) {
+        if (++run > best) best = run;
+      } else {
+        run = 0;
+      }
+    }
+    if (best < 0.4 * w) continue;
+    if (current && current.last === y - 1) {
+      current.last = y;
+    } else {
+      current = { first: y, last: y };
+      lines.push(current);
+    }
+  }
+  return lines.map((l) => ({
+    centre: ((l.first + l.last) / 2) * bp,
+    thickness: (l.last - l.first + 1) * bp,
+  }));
+}
+
+// A function and not a constant: WIDE_ABC is declared further down, and a
+// constant up here would read it before it exists.
+function scoreAndWordsDoc() {
+  return `---
+format:
+  pdf:
+    documentclass: article
+filters:
+  - mdm
+---
+
+A paragraph of words to measure the staff against, and the score under it,
+which names no width of its own and so is drawn at abcjs's.
+
+\`\`\`abc
+${WIDE_ABC}\`\`\`
+`;
+}
+
+// What the owner saw, and what this holds: the staff on paper came out
+// larger than the editor's beside the same words, and its lines heavier.
+// Measured on example.pdf before the fix: lines 5.61 bp apart under a
+// 9.96 bp em (0.563 of it, against the editor's 7.75/16 = 0.484, so 16%
+// larger) and 0.87 bp thick (twice the editor's 0.7/16 of the em), the
+// first from a 703 px engraving stretched to the measure, the second from
+// a 0.5 px stroke the print page added to the lines.
+test("a score on paper is drawn at the size the editor draws it, beside the words", () => {
+  const dir = freshDir("pdf-score-size");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), scoreAndWordsDoc());
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:sans"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const pdf = path.join(dir, "doc.pdf");
+  // The em the page is set at: the size of its words, the sans being drawn
+  // at its own size.
+  const em = paintedX(pdfSpans(pdf), "TeXGyreHeros-Regular").size;
+  const lines = staffLines(pdf, 1, 1200);
+  assert.equal(lines.length, 10, "two staves of five lines, found " + lines.length);
+  const gaps = [];
+  for (let staff = 0; staff < 10; staff += 5) {
+    for (let i = staff; i < staff + 4; i++) gaps.push(lines[i + 1].centre - lines[i].centre);
+  }
+  const gap = gaps.reduce((a, b) => a + b) / gaps.length;
+  const size = gap / em / (EDITOR_STAFF.gap / EDITOR_STAFF.body);
+  assert.ok(
+    Math.abs(size - 1) < 0.02,
+    "the staff is " + size.toFixed(3) + " of the editor's size beside the words (lines " +
+      gap.toFixed(3) + " bp apart under a " + em + " bp em)"
+  );
+  // The weight, as a fraction of the gap, which is what the eye reads as a
+  // heavy or a light staff. A row of the raster is 0.06 bp, so a line of
+  // 0.44 bp is read to within about a seventh of itself.
+  const line = lines.reduce((a, l) => a + l.thickness, 0) / lines.length;
+  const weight = line / gap / (EDITOR_STAFF.line / EDITOR_STAFF.gap);
+  assert.ok(
+    Math.abs(weight - 1) < 0.2,
+    "the staff lines are " + weight.toFixed(2) + " of the editor's weight (" +
+      line.toFixed(3) + " bp on a " + gap.toFixed(3) + " bp gap)"
+  );
+});
+
 test("the maths LaTeX sets itself grows with the words", () => {
   // The route with no KaTeX in it, which is every document without a Chrome
   // at hand and every one that asks for abcm2ps: unicode-math sets the
@@ -2280,32 +2417,44 @@ test("the PDF is engraved by the editor's abcjs when a Chrome is at hand", () =>
   assert.ok(
     !fs.existsSync(path.join(cache, cacheName(NARROW_ABC) + ".pdf")),
     "the render fell back to abcm2ps");
-  // The %%staffwidth 200pt score comes out well under the 330 pt threshold
-  // (132 pt of ink, measured: the one sparse bar does not fill even that):
-  // narrow, centred at natural size. The wide one takes the text width.
+  // The engraving is abcjs's own width, which is what the editor draws a
+  // tune that names none at: 740 px, printed by Chrome at 0.75 bp a pixel,
+  // so 555 bp of staff and a little over with the ink that overhangs it.
+  // It used to be asked for at 703 px, 529 bp, and the paper then broke a
+  // tune's lines where the editor did not.
   const wNarrow = Number(fs.readFileSync(path.join(cache, narrow + ".w"), "utf8"));
   const wWide = Number(fs.readFileSync(path.join(cache, wide + ".w"), "utf8"));
   assert.ok(wNarrow > 0 && wNarrow < 330, "narrow width: " + wNarrow);
-  assert.ok(wWide >= 330, "wide width: " + wWide);
+  assert.ok(
+    wWide >= 555 && wWide < 565,
+    "the wide score is not engraved at abcjs's own width: " + wWide
+  );
+  // And both go onto the paper at their own width, one pixel to a sixteenth
+  // of the em (w / 0.75 / 16 ems), narrower than the measure and so centred,
+  // as the editor centres a score that does not fill its line.
   const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
+  const ems = (w) => (w / 0.75 / 16).toFixed(4);
   assert.ok(
     tex.includes(
-      "\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{mdm_cache/" +
-        narrow + ".pdf}}}"),
-    "narrow abcjs score not centred in TeX");
+      "\\mdmscoreband{\\centering\\mdmscoreat{" + ems(wNarrow) +
+        "}\\mdmscore{\\includegraphics[width=\\mdmscorew]{mdm_cache/" + narrow + ".pdf}}}"),
+    "the narrow abcjs score is not centred at its own width in TeX");
   // The wide score is two labelled systems, so it goes down as one clipped
   // image per system (what the slices are and how they tile is pinned in the
-  // test below); what is asked for here is the text width they are set at.
+  // test below), every slice at the one width the stack was given.
+  assert.ok(
+    tex.includes("\\mdmslicestack{%\n\\mdmscoreat{" + ems(wWide) + "}\n\\centering"),
+    "the wide abcjs score is not set at its own width, centred");
   const wideSlices = tex.match(
     new RegExp(
-      String.raw`\\includegraphics\[trim=[^\]]*,clip,width=\\mdmscorewidth\]` +
+      String.raw`\\includegraphics\[trim=[^\]]*,clip,width=\\mdmscorew\]` +
         String.raw`\{mdm_cache/` + wide + String.raw`\.pdf\}`,
       "g"
     )
   );
   assert.equal(
     wideSlices && wideSlices.length, 2,
-    "wide abcjs score not two slices at the text width in TeX");
+    "the wide abcjs score is not two slices at its own width in TeX");
 });
 
 // A picture is atomic to LaTeX: whole, a score that does not fit the space
@@ -2385,14 +2534,15 @@ test("a long score is cut so a page can break between two of its systems", () =>
   }
 
   // The .tex: one clipped image per system, every one of them the same
-  // drawing at the text width, and the trims tile it exactly, each slice
+  // drawing at the one width the stack was given, and the trims tile it
+  // exactly, each slice
   // starting where the one above it stopped.
   const tex = texOf(dir);
   const slices = [
     ...tex.matchAll(
       new RegExp(
         String.raw`\\mdmslice\{\\includegraphics\[trim=0bp ([\d.]+)bp 0bp ([\d.]+)bp,` +
-          String.raw`clip,width=\\mdmscorewidth\]\{mdm_cache/` + digest + String.raw`\.pdf\}\}`,
+          String.raw`clip,width=\\mdmscorew\]\{mdm_cache/` + digest + String.raw`\.pdf\}\}`,
         "g"
       )
     ),
@@ -2429,7 +2579,7 @@ test("a long score is cut so a page can break between two of its systems", () =>
   const whole = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
   assert.equal(whole.status, 0, whole.stderr);
   assert.ok(
-    texOf(dir).includes("\\mdmscore{\\includegraphics[width=\\mdmscorewidth]"),
+    texOf(dir).includes("\\mdmscore{\\includegraphics[width=\\mdmscorew]"),
     "the score is not one piece without its sidecar"
   );
   assert.equal(pageCount(path.join(dir, "doc.pdf")), 3, "the whole score fitted after all");
