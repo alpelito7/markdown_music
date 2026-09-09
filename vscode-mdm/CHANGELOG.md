@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.5
+
+- The words a score carries are sized against the prose beside them: the
+  title a quarter over the body text, a part name exactly on it, and every
+  lyric, chord and annotation at or below it. Left alone abcjs uses the sizes
+  abcm2ps has had since the nineties, stated in points and drawn at 4/3, so a
+  title landed at 27 px beside a 16 px paragraph and read as a headline over
+  the page rather than as the name of a figure in it. A lyric is set roman
+  rather than in abcjs's bold: it is a word of the language the page is
+  written in, and a bold Times under every note was the one thing on the staff
+  heavier than the sentence above it.
+- The sizes are worked out from the x-height of the prose and not from its
+  nominal size, and each face is measured for it, because Times, Helvetica and
+  the roman do not agree on how much of an em their lowercase is. The
+  engraving itself never moves: the staff, the notes and the clefs are drawn
+  from abcjs's own units and no font property reaches them.
+- The exported page engraves at the width the editor engraves at. It used to
+  ask for a staff the width of the column, 820 px against the editor's 740,
+  and a responsive SVG scales its whole drawing, so every note and every word
+  on a page came out 11% larger than in the editor. A `%%staffwidth` in the
+  source still decides, and a narrow score is still not stretched.
+- The two screenshots are retaken: they were made before the roman and before
+  the toolbar was cut into groups.
+
+Known, and written where the code is: the printed PDF still draws a score's
+words at abcjs's own sizes. It engraves through Chrome at a width the document
+decides and scales the drawing to fit, so the right sizes there are these
+divided by that scale, and that measurement has not been made yet.
+
 ## 0.5.4
 
 - The document is set in Latin Modern Roman, the face TeX sets a document in.
