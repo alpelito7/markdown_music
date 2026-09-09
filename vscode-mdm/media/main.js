@@ -700,6 +700,10 @@
         svg.setAttribute("viewBox", x + " " + y + " " + w + " " + h);
         svg.setAttribute("width", w);
         svg.setAttribute("height", h);
+        // The drawing's own width, which a fill's side padding gives way to
+        // (#app.mdm-score--filled code.language-abc in style.css).
+        const card = svg.closest("code.language-abc");
+        if (card) card.style.setProperty("--mdm-score-natural", w + "px");
         if (box) svg.setAttribute("data-mdm-fit", "1");
       });
   }

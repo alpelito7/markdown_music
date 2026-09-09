@@ -239,7 +239,10 @@ local function look_css(l)
   local fill = SCORE_FILLS[l.score_fill]
   if fill then
     put("score-fill", dark and fill.dark or fill.light)
-    put("score-pad", "0.6em 0.8em")
+    -- The side padding is the most the fill leaves beside a drawing: it
+    -- gives way as the column narrows (.mdm-card in mdm-look.css).
+    put("score-pad-block", "0.6em")
+    put("score-pad-inline", "0.8em")
     put("score-radius", "4px")
   end
   -- A score sits centred like a display equation, unless the editor was set

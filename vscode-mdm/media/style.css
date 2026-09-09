@@ -1265,9 +1265,20 @@ body {
   padding: 0;
   border-radius: 0;
 }
+/* The fill spans the text column, the drawing centred in it (or lined up
+   left), and its side padding gives way before the drawing does: 0.8em while
+   the column has room for the drawing and that much ground beside it, less
+   as the room runs out, none once the column is narrower than the drawing.
+   So a score is drawn at the same size with a fill as without one, at every
+   width; it used to lose the 1.6em of padding as soon as the column was
+   narrower than the drawing and the padding together (574 px against 600 in
+   a 600 px column, measured). --mdm-score-natural is the drawing's own
+   width, which fitScores in main.js writes on each card, and a percentage in
+   a padding is of the width of the containing block, the column. The page
+   does the same (.mdm-card in mdm-look.css). */
 #app.mdm-score--filled code.language-abc {
   background: var(--mdm-score-fill);
-  padding: 0.6em 0.8em;
+  padding: 0.6em clamp(0px, (100% - var(--mdm-score-natural, 0px)) / 2, 0.8em);
   border-radius: 4px;
 }
 

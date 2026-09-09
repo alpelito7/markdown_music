@@ -119,6 +119,7 @@ let PAGE = null;
 let DARK_PAGE = null;
 let EXAMPLE_PAGE = null;
 let EXAMPLE_SANS_PAGE = null;
+let EXAMPLE_FILL_PAGE = null;
 
 test.before(() => {
   if (!available) return;
@@ -170,6 +171,19 @@ test.before(() => {
   );
   assert.equal(s.status, 0, s.stderr);
   EXAMPLE_SANS_PAGE = "file://" + path.join(DIR, "sans-example.html");
+
+  // And with a fill under the scores, which is where the drawing's size came
+  // apart from the editor's: the page took the fill's padding out of the
+  // drawing and the editor only did so on a narrow pane.
+  fs.copyFileSync(path.join(ROOT, "example.mdm"), path.join(DIR, "fill-example.mdm"));
+  const f = spawnSync(
+    MDM,
+    ["render", "fill-example.mdm", "--to", "html",
+      "-M", "mdm-text-font:roman", "-M", "mdm-front-matter:shown", "-M", "mdm-score-fill:paper"],
+    { cwd: DIR, encoding: "utf8" }
+  );
+  assert.equal(f.status, 0, f.stderr);
+  EXAMPLE_FILL_PAGE = "file://" + path.join(DIR, "fill-example.html");
 });
 
 const OPEN_BROWSERS = new Set();
@@ -215,8 +229,8 @@ async function open(url) {
 
 // One entry per music block: the boxes of the figure, the box mdm.js holds the
 // score in, the paper and the engraved SVG. Every score gets that box (it is
-// what carries the fill and the alignment); only one whose source fixed its
-// width is pinned to a size of its own.
+// what carries the alignment, inside the card that carries the fill); only
+// one whose source fixed its width is pinned to a size of its own.
 function blocks(page) {
   return page.evaluate(() =>
     Array.from(document.querySelectorAll(".mdm-block")).map((block) => {
@@ -408,7 +422,7 @@ function looks(page) {
       lineSpan: css("code.sourceCode > span", "color"),
       inlineCode: css("p code", "backgroundColor"),
       staff: css(".mdm-paper svg .abcjs-staff path", "fill"),
-      scoreFill: css(".mdm-fit", "backgroundColor"),
+      scoreFill: css(".mdm-card", "backgroundColor"),
       scoreMargin: css(".mdm-fit", "marginLeft"),
       barButtons: bar
         ? Array.from(bar.querySelectorAll(".abcjs-btn")).map((b) =>
@@ -866,6 +880,31 @@ test("a narrow window narrows both columns alike, and a wide equation scrolls in
   assert.equal(page.scrolls, false, "the page scrolls sideways");
   assert.ok(page.eqContent > page.eqBox + 1, "the equation fits the column, so nothing was tested");
   assert.equal(page.cropped, false, "the page crops the equation at the top or the bottom of its box");
+});
+
+// A fill under a score, on both surfaces: the card spans the column and the
+// drawing on it is the size the editor draws, which is the size of the same
+// score with no fill. The page used to hug the drawing with the fill and take
+// its padding out of it, 714 px against the editor's 740; the editor did the
+// same once the column was narrower than the drawing and the padding.
+test("a filled score is drawn at the editor's size, on a card the width of the column", { skip }, async () => {
+  for (const width of [1200, 700]) {
+    const page = await pageAt(EXAMPLE_FILL_PAGE, width, () => {
+      const card = document.querySelector(".mdm-card");
+      return {
+        column: Math.round(document.querySelector("main.content").getBoundingClientRect().width),
+        card: Math.round(card.getBoundingClientRect().width),
+        drawing: Math.round(card.querySelector(".mdm-paper svg").getBoundingClientRect().width),
+        fill: getComputedStyle(card).backgroundColor,
+      };
+    });
+    const editor = await editorAt({ textFont: "roman", scoreFill: "paper" }, width, () =>
+      Math.round(document.querySelector("#app .mdm-score code.language-abc svg").getBoundingClientRect().width)
+    );
+    assert.notEqual(page.fill, "rgba(0, 0, 0, 0)", "the page has no fill to test");
+    assert.equal(page.card, page.column, width + ": the card is " + page.card + " px in a column of " + page.column);
+    assert.equal(page.drawing, editor, width + ": the page draws the filled score " + page.drawing + " px wide and the editor " + editor);
+  }
 });
 
 test("a score is drawn on the page at the size it is drawn in the editor", { skip }, async () => {

@@ -61,7 +61,8 @@
   --mdm-staff-fill: #a3a3a3;
   /* A score sits in the text the way an equation does: no fill, and centred. */
   --mdm-score-fill: transparent;
-  --mdm-score-pad: 0;
+  --mdm-score-pad-block: 0;
+  --mdm-score-pad-inline: 0;
   --mdm-score-radius: 0;
   --mdm-score-margin: auto;
 
@@ -491,15 +492,29 @@ body .code-copy-button:hover {
 .mdm-paper svg .abcjs-note_selected * {
   fill: var(--mdm-play-accent);
 }
-/* The box that holds a score at its natural width: the fill goes here and
-   not on the paper, which abcjs keeps the drawing's ratio in as a percentage
-   padding and would take any padding of its own out of. Centred like a
-   display equation unless the editor was set to line scores up with the
-   text. */
-.mdm-fit {
+/* The card a score sits on, the width of the column as in the editor. The
+   fill goes here and not on the paper, which abcjs keeps the drawing's ratio
+   in as a percentage padding and would take any padding of its own out of.
+   Its side padding gives way before the drawing does: the most the fill
+   leaves beside a drawing while the column has room for both, less as the
+   room runs out, none once the column is narrower than the drawing, so a
+   score is drawn at the same size with a fill as without one. The fill used
+   to hug the drawing and take its padding out of it, which drew a filled
+   score 714 px wide where the editor drew it 740 (measured on example.mdm).
+   --mdm-score-natural is the drawing's own width, which mdm.js writes on each
+   card, and a percentage in a padding is of the width of the containing
+   block, the column. The editor's rule is #app.mdm-score--filled
+   code.language-abc in media/style.css. */
+.mdm-card {
   background: var(--mdm-score-fill);
-  padding: var(--mdm-score-pad);
+  padding-block: var(--mdm-score-pad-block);
+  padding-inline: clamp(0px, (100% - var(--mdm-score-natural, 0px)) / 2, var(--mdm-score-pad-inline));
   border-radius: var(--mdm-score-radius);
+}
+/* The box that holds a score at its natural width, inside the card. Centred
+   like a display equation unless the editor was set to line scores up with
+   the text. */
+.mdm-fit {
   margin-left: var(--mdm-score-margin);
   margin-right: auto;
 }

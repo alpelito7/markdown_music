@@ -3209,3 +3209,50 @@ test("a narrow pane narrows the column, and a wide equation scrolls in its own b
   await h.close();
 });
 
+// The fill spans the column and its side padding gives way before the
+// drawing does, so a score is drawn at the same size with a fill as without
+// one, at every width. It used to keep its 0.8em and take it out of the
+// drawing as soon as the column was narrower than both: 574 px against 600 in
+// a 600 px column. 850 is a pane where the padding gives way only in part.
+test("a fill under a score never makes the drawing smaller", { skip }, async () => {
+  const sizes = {};
+  for (const fill of ["none", "paper"]) {
+    const h = await open({ scores: 0, seed: { settings: { textFont: "roman", scoreFill: fill } } });
+    await h.page.waitForFunction(() => document.querySelector("#app .mdm-score code.language-abc svg[data-mdm-fit]"));
+    sizes[fill] = [];
+    for (const width of [1400, 850, 700, 400]) {
+      await h.page.setViewport({ width, height: 1600 });
+      await settle(h.page);
+      sizes[fill].push(
+        await h.page.evaluate(() => {
+          const card = document.querySelector("#app .mdm-score code.language-abc");
+          return {
+            column: Math.round(document.querySelector("#app .cm-content").getBoundingClientRect().width),
+            card: Math.round(card.getBoundingClientRect().width),
+            drawing: +card.querySelector("svg").getBoundingClientRect().width.toFixed(1),
+            pad: parseFloat(getComputedStyle(card).paddingLeft),
+          };
+        })
+      );
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+  sizes.paper.forEach((filled, i) => {
+    const bare = sizes.none[i];
+    assert.equal(
+      filled.drawing,
+      bare.drawing,
+      "in a column of " + filled.column + " px the filled drawing is " + filled.drawing + " and the bare one " + bare.drawing
+    );
+    assert.equal(filled.card, filled.column, "the fill does not span the column of " + filled.column + " px");
+  });
+  // The ground beside the drawing: all of it with room to spare, some of it
+  // in between, none once the column is narrower than the drawing.
+  const pads = sizes.paper.map((s) => s.pad);
+  const all = " (the ground at each width: " + JSON.stringify(sizes.paper) + ")";
+  // 0.8em, which Chrome holds as 12.797 px once it goes through a clamp().
+  assert.ok(Math.abs(pads[0] - 12.8) < 0.05, "no ground beside a drawing with room to spare" + all);
+  assert.ok(pads[1] > 0 && pads[1] < 12.8, "the ground did not give way in part" + all);
+  assert.equal(pads[3], 0, "ground kept beside a drawing the column cannot hold" + all);
+});

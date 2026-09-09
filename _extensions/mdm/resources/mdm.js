@@ -646,10 +646,10 @@
     });
     var svgEl = paper.querySelector("svg");
     var natural = svgEl ? parseFloat(svgEl.getAttribute("width")) : 0;
-    // The box the score sits in, always: it is what carries the fill and the
-    // alignment (mdm-look.css), and for a narrow score the width as well. The
-    // limit goes here and not on the paper itself because abcjs keeps the
-    // ratio of the drawing in a percentage padding-bottom, and a percentage is
+    // The box the score sits in, always: it is what carries the alignment
+    // (mdm-look.css), and for a narrow score the width as well. The limit
+    // goes here and not on the paper itself because abcjs keeps the ratio of
+    // the drawing in a percentage padding-bottom, and a percentage is
     // resolved against the width of the containing block: with the max-width
     // on the paper, that padding went on being computed from the width of the
     // page and left a vertical gap under the score.
@@ -658,7 +658,15 @@
     if (natural && box && natural < box) {
       fit.style.maxWidth = Math.ceil(natural) + "px";
     }
-    paper.parentNode.insertBefore(fit, paper);
+    // And the card around it, the width of the column, as in the editor: it
+    // carries the fill, whose side padding gives way before the drawing does
+    // (.mdm-card in mdm-look.css), so it is told the drawing's own width. The
+    // player bar stays outside it, under the card, as it was under the fill.
+    var card = document.createElement("div");
+    card.className = "mdm-card";
+    if (natural) card.style.setProperty("--mdm-score-natural", natural + "px");
+    paper.parentNode.insertBefore(card, paper);
+    card.appendChild(fit);
     fit.appendChild(paper);
     var visual = ABCJS.renderAbc(paper, source, {
       // The classes the stylesheet keys on: the staff lines it recolours, and
