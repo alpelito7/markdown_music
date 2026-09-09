@@ -1,9 +1,0 @@
-```{.abc .play}
-M:3/4
-L:1/8
-Q:1/4=110
-V:1
-G2 G2 A2 | B2 B2 B2 | B2 c B c2 | B4 z2 | z2 A G A2 | G4 z2 |
-V:2 clef=bass
-[G,,B,,D,]4 [G,,B,,D,]2 | [E,G,B,]4 [E,G,B,]2 | [C,E,G,]4 [C,E,G,]2 | [G,,B,,D,]6 | [A,,C,E,]4 [A,,C,E,]2 | [E,G,B,]6 |
-```

@@ -1,188 +1,37 @@
 # Markdown Music
 
-Markdown you read and write in the same window: prose with its
-**emphasis**, LaTeX equations, source code, and music blocks that engrave
-as a score and play it back. The editor around them is a full one, with
-multicursor, an outline down the left edge, a look set from the toolbar and
-an export to HTML or PDF.
+Markdown Music is an editor for `.mdm` files: Markdown with equations, code and playable scores, drawn as you write. Scores are written in [ABC notation](https://abcnotation.com/wiki/abc:standard:v2.1) inside a ```` ```abc ```` block, so the file stays plain Markdown. To try it, download **[example.mdm](https://raw.githubusercontent.com/alpelito7/markdown_music/main/example.mdm)** (or [read it on GitHub](https://github.com/alpelito7/markdown_music/blob/main/example.mdm)), save it with the `.mdm` extension and open it in VS Code.
 
-The music is written in [ABC notation](https://abcnotation.com/wiki/abc:standard:v2.1) inside ordinary fenced blocks, so an
-`.mdm` file is valid Markdown throughout and any other editor shows it as
-code with nothing broken. Every part is drawn in place and every part is still
-plain text underneath.
+<!-- clip: tour -->
+![The document opens in MDM Dark. The theme menu switches it to MDM Light, one toolbar button draws the staff lines in ink and another turns on multicursor matches inside words. A click on the engraved score opens its ABC above the drawing. A click on a bare E, then Ctrl+D four times, selects the four E's of the tune, two of them inside chords; typing e moves all four up an octave, and a flat typed in front of them makes them E flats, each step showing at once in the drawing underneath. The headphones open the player, and play moves a brass playhead across the edited staff, each note turning brass as it sounds.](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/clip-tour.gif)
 
-A document to open it on: **[example.mdm](https://github.com/alpelito7/markdown_music/blob/main/example.mdm)**, the sample of the project, with
-equations, code, scores and player. Download it from the [raw file](https://raw.githubusercontent.com/alpelito7/markdown_music/main/example.mdm), save it
-anywhere with the `.mdm` extension and open it in VS Code: it comes up
-in this editor.
+## Writing a score
 
-![An equation and a score rendered in the editor on the dark side, with the numbers of the source lines drawn in brass down the margin beside them](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-dark.png)
+With a caret inside a score's block, the editor shows its ABC in the extension's colours and the score drawn under it, as below; the grey comments say what each line does.
 
-## How it edits
+<img src="https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/abc-card.png" alt="A score block as the editor shows it with a caret inside, its ABC coloured and the score engraved under it. X:1 % reference number, the first line of a tune / T:Four bars % title / M:4/4 % metre / L:1/8 % unit note length: a plain letter is an eighth / Q:1/4=100 % tempo, in quarter notes a minute / K:C % key, the last line of the header / % C is middle C and c the octave above; a 2 after a note doubles its length / % ^ sharp, _ flat, = natural, z a rest, [CEG] a chord, |] the end / CDEF GABc | c2 B2 A2 G2 | ^F2 _B2 =B2 z2 | [CEG]8 |]">
 
-The editor holds the Markdown of the document and nothing else. Every
-character, the `$$` of an equation, the backticks of a fence, the `#` of a
-heading, is an ordinary character that can be typed and deleted; there is no
-serialization step between what is typed and what is saved, beyond the line
-endings, which are LF in the editor and go back to the file's own when it is
-written. What is drawn
-where follows the carets, the way Obsidian's live preview does:
+Repeats, ties, lyrics, several voices and the rest of the notation are in the [ABC standard](https://abcnotation.com/wiki/abc:standard:v2.1). The headphones on a score open a player, whose piano comes with the extension and is the only instrument it has. A block fenced as ```` ```{.abc .play} ```` also gets a player on the exported page.
 
-- A block no caret touches is rendered: an equation as KaTeX, a score as its
-  engraving, a fenced block as a card of highlighted code, bold as bold.
-- A block a caret is in shows its source, with the rendered equation or the
-  score kept under it as a live preview. Every caret counts, so each of
-  several opens the thing it edits.
-- An equation whose source does not compile stays as source with a red edge,
-  and shows KaTeX's message while it is edited; the moment it compiles, it
-  renders.
+## The toolbar
 
-Multicursor works as in VS Code's own editor: `Alt+click` adds a caret
-(following the `editor.multiCursorModifier` setting), `Shift+Alt+drag`
-selects a column, `Ctrl+D` takes the next occurrence, `Ctrl+Shift+L` every
-one, `Escape` goes back to one caret. `Ctrl+B`, `Ctrl+I`, `Ctrl+E` and
-`Ctrl+K` format each selection, and the toolbar carries the same commands
-with heading and list buttons beside them.
+### Font
 
-## Music that sounds
-
-A fenced block with the class `abc` renders as a score; the headphones in its
-corner open a player in the toolbar, as a row of its own under the buttons:
-play, pause, stop, repeat, a second pair of headphones that shuts the player
-again, a draggable progress bar, volume and mute. It sits up there rather than
-under the score because a score can be a page long, and the controls should
-not have to be scrolled to. Dragging the progress head brings the pane to the
-part that is sounding, so scrubbing through a long score is something you can
-watch, and a tune left to play is followed the same way: the page keeps the
-staff system that is sounding whole on screen and asks nothing more of it, so
-it is still while a line of music is played, a play made with the score under
-the fold brings the page to the head and one made with it already in front of
-you moves nothing, a page you take away from the music comes straight back,
-and a pause hands it to you for good. A toolbar toggle turns the whole of that
-off, and then a long score can sound while you read past it, since the music
-never moves the page. The piano is the Musyng Kite soundfont, all 88 notes vendored with the
-extension, so playback touches no network. A caret in the block opens its ABC
-above the engraving, and while a tune plays a brass cursor glides across the
-score and the notes light up under it as they sound, every voice of them:
-
-![A duet playing with its ABC source open above the engraving: the player bar across the top of the toolbar, under the row of buttons, with its pause button, its lit headphones and the played half of its progress in brass, and the lit follow toggle at the right of the button row; below, the brass cursor standing across both staves, the two notes it has just reached lit in brass under it, one on each staff, and the lit headphones of the block that is sounding](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/screenshot-player.png)
-
-    ```{.abc .play}
-    X:1
-    T:C major scale
-    M:4/4
-    L:1/8
-    K:C
-    CDEF GABc | cBAG FEDC |]
-    ```
-
-A short score can fix its own width with `%%staffwidth 200pt` as the first
-line of the block, and it is then set compact and centred, the way a display
-equation is.
-
-Opening a score's source shows the ABC itself highlighted, and the block is
-read the way the engraving under it is drawn: the staff and its bar lines in
-ink, the field labels with them, and the notes in the brass of the note in
-this extension's icon, the same brass a note lights up in while it sounds.
-Around them the rest of the family: accidentals and the key and meter a
-step lighter, note lengths in copper, ornaments in olive, titles and lyrics
-as text, rests and comments quiet. ABC is the extension's own notation, so
-these colours are its own on both sides, light and dark, whatever theme
-paints the code around them.
-
-## Themes
-
-The editor follows the VS Code theme by default, and the toolbar's theme
-menu offers MDM Light, MDM Dark, MDM White (the light look on a sheet of
-paper), or any colour theme installed in VS Code. The three MDM looks are the
-editor's own and no theme paints them; pick a theme by name instead and the
-syntax colours of the code blocks are read from the theme itself, Monokai's
-from Monokai. Staff lines can be drawn grey (Guitar Pro style) or
-in ink, scores can take a paper, slate or brass fill, and every toolbar
-state persists as an `mdm.*` setting, so a document reopens the way it was
-left.
-
-## The face of the text
-
-The document is set in Latin Modern Roman, the face TeX sets a document in.
-The extension carries it: four woff2 files, 191 KB, nothing to install and no
-LaTeX anywhere near it. It is the face the equations were already drawn in,
-KaTeX's own being Computer Modern, so the words and the maths of a page read
-as one design instead of two.
-
-It is drawn at the reading size the sans had. What a reader sees as the size
-of a text is its x-height, and Latin Modern's is a fifth shorter than the
-sans's, so at the same nominal size it reads small and leaves the headings and
-the text inside a score looking oversized beside it. The page is set at the
-sans's x-height instead, which keeps the proportions it was designed with and
-keeps KaTeX's maths, sized for exactly that, the size of the words it sits in.
-
-A toolbar toggle hands the text back to the interface font of the system, and
-the choice persists as `mdm.textFont`. Only the text moves either way: the
-toolbar, the menus and the outline panel keep the interface sans, and code,
-the numbers in the margin and the source of an open block keep their
-monospace. An export carries the face to the page and to the paper.
-
-## Export
-
-The export button renders the document to HTML, PDF or both through
-[Quarto](https://quarto.org), and both come out dressed as the editor they
-were exported from: the HTML with its theme, palette and players, the PDF with
-the same ground, ink, headings, measure and code cards on the page, and its
-scores engraved in the same colours, staff lines and fill included. The title
-block belongs to the YAML header: it comes out only if the header is on screen
-when the export is asked for. The document is
-read in the dialect the editor reads, so a heading written straight under a
-paragraph or under a score is a heading in the output as well. The editor itself
-needs nothing installed: Quarto (>= 1.4) is looked for only when an export
-is asked for, a PDF needs a TeX installation, and a PDF of a document with
-scores needs Chrome or Chromium, into which the export loads the editor's
-own abcjs and KaTeX, so the scores and the equations in the PDF are the
-very drawings the editor shows (without a Chrome the scores fall back to
-[abcm2ps](https://github.com/lewdlime/abcm2ps), Debian and Ubuntu
-`apt install abcm2ps`, macOS `brew install abcm2ps`, whose engraving reads
-differently, and the equations to LaTeX's own setting). Whichever is
-missing is named in a notification, with the full story one "Show log"
-away.
-
-## Settings
+The text is set in Latin Modern Roman, the face of a LaTeX document, which comes with the extension and needs no LaTeX installed. The font button switches it to the system's sans, the face Markdown is usually written in; code keeps its monospace either way.
 
 
-| Setting                | What it holds                                                              |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| `mdm.theme`            | `auto`, `light`, `dark`, `white`, or the name of an installed colour theme |
-| `mdm.staffLines`       | `gray` or `ink`                                                            |
-| `mdm.scoreFill`        | `none`, `paper`, `slate`, `brass`                                          |
-| `mdm.scoreAlign`       | `center` or `left`                                                         |
-| `mdm.frontMatter`      | whether the YAML header is shown in the document                           |
-| `mdm.outline`          | whether the outline panel is open                                          |
-| `mdm.outlineWidth`     | the outline panel's width in pixels                                        |
-| `mdm.multicursorMatch` | whether `Ctrl+D` matches whole words or inside them                        |
-| `mdm.followPlayhead`   | `follow` or `still`: whether the page keeps up with a sounding tune        |
-| `mdm.textFont`         | `roman` or `sans`: the face the text of the document is set in             |
+### Multicursor
 
-## Notes
+Ctrl+D adds the next occurrence of the selection, as in VS Code, and matches whole words: from "score" it steps over "scores". The multicursor button makes it match inside words too. Alt+click adds a caret, or Ctrl+click when VS Code's multi-cursor modifier is set to it.
 
-- The plain text editor stays available: right click the file, "Open
-  With...". Both can be open at once on the same file; they share the
-  document.
-- Tables are drawn, with the maths of their cells set and the alignment
-  their second row asks for; a caret in one brings back the pipes, in a
-  monospace grid, with the drawing below as the preview.
-- Images render for `https:` addresses and for local paths, relative to the
-  document or absolute. A click on a figure opens its source, as it does on a
-  score or an equation. An export carries the figure with it: one named by an
-  absolute path is copied beside the output, and an SVG is printed to PDF for
-  the paper by the same headless Chrome that engraves the scores.
-- The formulas of an exported page are set by the KaTeX this extension
-  carries, the one the editor draws with, sent along with the page: it asks
-  nothing of the network, breaks its lines where the editor does, and a
-  self-contained export carries the engine inside the file.
-- Only the piano is vendored: a different `%%MIDI program` will not find its
-  notes.
+### Following the playhead
 
-The format, the Quarto filter that renders it outside VS Code and the full
-documentation live in the
-[markdown_music repository](https://github.com/alpelito7/markdown_music).
-The extension is MIT; what it vendors (abcjs, CodeMirror 6, KaTeX, the
-Musyng Kite soundfont) is credited in `THIRD-PARTY-NOTICES.md`.
+While a tune plays, a brass playhead walks the staff and the page scrolls to keep the system being played whole on screen. The follow button turns that off, so a long score can go on sounding while you read elsewhere in the document.
+
+### Export
+
+The export button writes the document as HTML or PDF, with the font the editor is using. It needs [Quarto](https://quarto.org) 1.4 or later, and a PDF also needs TeX; with Chrome or Chromium, the PDF draws scores and equations as the editor does. The editor itself needs none of them.
+
+## Documentation and licence
+
+The documentation is in the [markdown_music repository](https://github.com/alpelito7/markdown_music). The extension is under the MIT licence, and the third-party work it includes is credited in `THIRD-PARTY-NOTICES.md`.

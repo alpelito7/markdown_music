@@ -2,7 +2,8 @@
 // the project, the notices of the work it vendors, and the copies that have
 // to stay identical between the repository and the extension directory.
 // These are the ones that cannot be caught by using the editor: nothing here
-// changes what it does, only what may lawfully be handed to someone else.
+// changes what it does, only what may lawfully be handed to someone else, and
+// what the README shown on the Marketplace page points at.
 // Run with: node --test tests/packaging.test.js
 
 "use strict";
@@ -115,3 +116,79 @@ test("the soundfont's own note agrees with the notices", () => {
   assert.match(note, /gleitz\/midi-js-soundfonts/);
   assert.match(note, /unmodified/);
 });
+
+// The README ships in the package and is what the Marketplace page shows, and
+// every picture in it is fetched by its address on GitHub: vscode-mdm/docs/
+// stays out of the package (.vscodeignore) and the page reads the files from
+// main. A name that folder does not have is a broken picture on the
+// extension's page, seen only after a release. Each needs its alt text too:
+// one is an animation and the other a picture of code.
+const DOCS_URL = "https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/";
+
+function readmePictures() {
+  const md = read(EXT, "README.md");
+  const pics = [];
+  for (const m of md.matchAll(/!\[([^\]]*)\]\(([^)\s]+)\)/g)) pics.push({ alt: m[1], src: m[2] });
+  for (const m of md.matchAll(/<(?:img|video)\b[^>]*>/g)) {
+    const at = (name) => (m[0].match(new RegExp(`\\b${name}="([^"]*)"`)) || [])[1] || "";
+    pics.push({ alt: at("alt") || at("title"), src: at("src") });
+  }
+  return pics;
+}
+
+test("every picture the README shows is in its docs folder, with alt text", () => {
+  const pics = readmePictures();
+  const names = pics.map((p) => p.src.slice(DOCS_URL.length));
+  for (const p of pics) {
+    assert.ok(p.src.startsWith(DOCS_URL), `a picture not fetched from the docs folder on main: ${p.src}`);
+    const name = p.src.slice(DOCS_URL.length);
+    assert.ok(fs.existsSync(path.join(EXT, "docs", name)), `the README shows docs/${name}, which is not there`);
+    assert.ok(p.alt.trim().length >= 40, `docs/${name} has no alt text to speak of`);
+  }
+  // The score block is a picture of the editor (tools/demo-clips/abc-card.js)
+  // so that its ABC reads in the extension's colours; the Marketplace would
+  // set a fenced block in its own.
+  assert.ok(names.includes("abc-card.png"), "the README no longer shows the score block in the editor's colours");
+});
+
+// The docs folder is where the Marketplace page fetches the README's pictures
+// from, so a picture in it that the README no longer names is a file nothing
+// reads. Two screenshots and the documents they were taken from stayed there
+// after the tour clip replaced them. The notes in Markdown are the folder's
+// own; anything else has to be named by the README, as a source or a poster.
+test("the docs folder holds nothing the README does not show", () => {
+  const md = read(EXT, "README.md");
+  const shown = new Set();
+  for (const m of md.matchAll(new RegExp(DOCS_URL.replace(/[.]/g, "\\.") + '([^)"\\s]+)', "g"))) shown.add(m[1]);
+  const loose = fs.readdirSync(path.join(EXT, "docs")).filter((f) => !f.endsWith(".md") && !shown.has(f));
+  assert.deepEqual(loose, [], "files in vscode-mdm/docs/ that the README does not show");
+});
+
+// A clip goes into the README as a GIF, on the line after its
+// <!-- clip: id --> marker (tools/demo-clips/apply.js writes it). A <video>
+// would be lighter, but the Marketplace page strips muted from it, and Chrome
+// then shows a reader who arrives from outside the poster and nothing else.
+test("every clip the README marks is shown as its GIF", () => {
+  const lines = read(EXT, "README.md").split("\n");
+  const base = DOCS_URL.replace(/[.]/g, "\\.");
+  let marks = 0;
+  lines.forEach((line, i) => {
+    const m = line.match(/^<!-- clip: ([a-z0-9-]+) -->\s*$/);
+    if (!m) return;
+    marks++;
+    const next = lines[i + 1] || "";
+    assert.match(next, new RegExp(`^!\\[[^\\]]+\\]\\(${base}clip-${m[1]}\\.gif\\)\\s*$`), `clip ${m[1]} is not followed by its GIF: ${next.slice(0, 80)}`);
+  });
+  assert.ok(marks > 0, "the README marks no clip");
+});
+
+// ABC in the README is shown in the extension's colours, and a code block on
+// the Marketplace page is drawn by the page's own stylesheet: the ABC is the
+// picture above and nothing else. A header line of a tune at the start of a
+// line (X:, T:, M:, L:, Q:, K:) is ABC written as plain code.
+test("the README writes no ABC as plain code", () => {
+  const lines = read(EXT, "README.md").split("\n");
+  const plain = lines.filter((l) => /^\s*[XTMLQK]:\S/.test(l));
+  assert.deepEqual(plain, [], "ABC written as plain code in the README");
+});
+
