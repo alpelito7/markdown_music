@@ -951,7 +951,7 @@ test("the outline panel lists the headings, marks the section and jumps", { skip
     });
   };
   const middle = await landing(2);
-  assert.equal(middle.text, "### From code to scores");
+  assert.equal(middle.text, "## From code to scores");
   assert.equal(middle.open, true, "the panel closed after a pick");
   assert.ok(!middle.bottomed, "the pane ran to its end on a heading with room under it");
   assert.ok(
@@ -963,7 +963,7 @@ test("the outline panel lists the headings, marks the section and jumps", { skip
   // heading lands as high as it can and the document ends at the bottom edge,
   // which is the whole of what "as high as it can" means here.
   const last = await landing(3);
-  assert.equal(last.text, "### From score to sound");
+  assert.equal(last.text, "## From score to sound");
   assert.equal(last.open, true, "the panel closed after a pick");
   assert.ok(
     last.bottomed || (last.top >= 0 && last.top <= 24),

@@ -1360,9 +1360,9 @@ test("the player keeps the document somebody's, and lets it be put away", { skip
     h.page.evaluate(() => {
       const line = Array.from(
         document.querySelectorAll("#app .cm-content .cm-line")
-      ).find((l) => /^###\s|^From /.test(l.textContent));
+      ).find((l) => /^##\s|^From /.test(l.textContent));
       return {
-        marks: line ? line.textContent.slice(0, 3) === "###" : null,
+        marks: line ? line.textContent.slice(0, 2) === "##" : null,
         focused: window.__mdm.view.hasFocus,
         onBar: !!(document.activeElement.closest &&
           document.activeElement.closest(".mdm-audio")),

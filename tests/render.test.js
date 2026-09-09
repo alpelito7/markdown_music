@@ -612,35 +612,40 @@ function texOf(dir) {
   return fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
 }
 
-test("a heading leaves the page's air over its rule", () => {
-  // The rule under a heading sat 0.19 em under its ink on paper against the
-  // 0.625 em the page leaves under a 2 em heading (measured on the pixels of
-  // both), which read as the line being stuck to the text. KOMA is what a
-  // document that names no class gets, and the skip goes in through its hook;
-  // a standard class rules its headings through titlesec, whose own spacing
-  // already leaves what the page does, so it is left alone.
+test("a heading leaves the editor's air over its rule", () => {
+  // The rule under h1 and h2 hangs from the baseline of the heading's last
+  // line and not from the bottom of it, at the distance the editor draws it
+  // at in the face the document is set in (HEAD_RULE_AIR in mdm.lua), and one
+  // command draws it under both kinds of class: KOMA's \sectionlinesformat
+  // hook, and the after-code of titlesec's format, where titlesec's own
+  // \titlerule used to stand with the spacing titlesec computes. It sat at a
+  // different distance in each class, and went down under a last line with
+  // descenders (measured). This render is the sans in an article; the
+  // measured test further down reads both faces under both kinds of class.
   const dir = freshDir("head-rule");
   fs.writeFileSync(path.join(dir, "doc.mdm"), TEX_DOC);
   const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
   assert.equal(r.status, 0, r.stderr);
   const tex = texOf(dir);
-  assert.match(
-    tex,
-    /\\newcommand\*\{\\mdmheadrule\}\[1\]\{\\par\\nobreak\\vskip #1\\mdmem/,
-    "the rule takes no air to skip"
+  assert.ok(
+    tex.includes(
+      "\\newcommand*{\\mdmheadrule}[1]{\\par\\nobreak\\vskip\\dimexpr #1\\mdmem-\\prevdepth\\relax"
+    ),
+    "the rule is not measured from the baseline"
   );
-  assert.match(
-    tex,
-    /\\Ifstr\{#1\}\{section\}\{\\mdmheadrule\{0\.57\}\}/,
-    "a section's rule is not given the page's air"
+  assert.ok(
+    tex.includes("\\Ifstr{#1}{section}{\\mdmheadrule{1.062}}"),
+    "KOMA's rule under h1 is not at the sans's distance"
   );
-  assert.match(
-    tex,
-    /\\Ifstr\{#1\}\{subsection\}\{\\mdmheadrule\{0\.32\}\}/,
-    "a subsection's rule is not given the page's air"
+  assert.ok(
+    tex.includes("\\Ifstr{#1}{subsection}{\\mdmheadrule{0.674}}"),
+    "KOMA's rule under h2 is not at the sans's distance"
   );
-  // titlesec draws its own, with the spacing it computes.
-  assert.match(tex, /\[\{\\color\{mdmrule\}\\titlerule\[0\.8pt\]\}\]/);
+  assert.ok(
+    tex.includes("[\\mdmheadrule{1.062}]") && tex.includes("[\\mdmheadrule{0.674}]"),
+    "titlesec does not draw the same rule"
+  );
+  assert.ok(!tex.includes("\\titlerule"), "titlesec's own rule is still drawn");
 });
 
 test("the look rides on every PDF render, and reads the same metadata", () => {
@@ -667,7 +672,44 @@ test("the look rides on every PDF render, and reads the same metadata", () => {
   assert.ok(!/\\renewcommand\{\\KeywordTok\}[^\n]*textbf/.test(tex), "a keyword came out bold");
   // The heading sizes of the editor, and the hairline under the first two.
   assert.ok(tex.includes("\\titleformat{\\section}"), "a standard class was not restyled");
-  assert.ok(tex.includes("{2\\mdmem}"), "the h1 is not two ems");
+  // The ladder level by level with its leading, on the command that draws
+  // each level and on both branches of the preamble (titlesec for a standard
+  // class, KOMA's hooks beside it): one for both faces, Markdown's 2, 1.5 and
+  // 1.25, then 1.125 and 1.0625, each at 1.3 of its size written to the last
+  // digit (rounded to two places, a wrapped h3 set its lines 1.304 of its
+  // size apart). This render is the sans in an article, where `#` is
+  // \section and `#####` the last level with a command; the test of the roman
+  // on paper reads its own the same way. \linespread{1} goes in each
+  // heading's font with its size: the prose's \linespread{1.417}, multiplied
+  // into a heading's own leading, set a wrapped heading's lines 1.84 of its
+  // size apart (the paper measures it further down; this pins the lever).
+  const commands = ["section", "subsection", "subsubsection", "paragraph", "subparagraph"];
+  [["2", "2.6"], ["1.5", "1.95"], ["1.25", "1.625"], ["1.125", "1.4625"], ["1.0625", "1.38125"]].forEach(
+    ([size, lead], i) => {
+      const font = "\\fontsize{" + size + "\\mdmem}{" + lead + "\\mdmem}";
+      assert.ok(
+        tex.includes(
+          "\\titleformat{\\" + commands[i] + "}[hang]{\\color{mdmink}\\bfseries\\linespread{1}" +
+            font + "\\selectfont}"
+        ),
+        "titlesec does not set \\" + commands[i] + " at " + size + " ems"
+      );
+      assert.ok(
+        tex.includes("\\addtokomafont{" + commands[i] + "}{" + font + "\\linespread{1}\\selectfont}"),
+        "KOMA does not set \\" + commands[i] + " at " + size + " ems"
+      );
+    }
+  );
+  assert.ok(!tex.includes("{1.1\\mdmem}"), "the sans's old fourth level is back");
+  // And a format for the fifth level, which a standard class cannot draw
+  // without one once Quarto has made it stand free of the text: a `#####`
+  // stopped the PDF with "titlesec Error: No format for this command". The
+  // measured test of the headings further down renders one; this pins the
+  // lever.
+  assert.ok(
+    tex.includes("\\titleformat{\\subparagraph}"),
+    "the fifth level has no format under a standard class"
+  );
   assert.ok(tex.includes("\\colorlet{mdmrule}{mdmink!14!mdmpage}"), "the hairline is missing");
   // The maths at the 1.21 KaTeX sets its own at, and code at the 0.88 the
   // stylesheet gives it. The face is NewCM Book, the correction for paper of
@@ -1166,27 +1208,22 @@ test("the roman travels to the page, and only when it is asked for", () => {
     "the faces the stylesheet names did not come along"
   );
 
-  // The ladder the roman gives its headings, which is not the ladder the sans
-  // gives them: whoever asks for the roman is asking for the page LaTeX would
-  // have set, so the levels take the sizes an `article` gives its sections
-  // (\huge, \LARGE, \Large, \large, then the body). Measured against the
-  // editor's own rule, `#app.mdm-text--roman .cm-line.mdm-hN` in style.css:
-  // the two are one design and a reader with both open must see one document.
-  // h6 is the anchor at 1em and is left to the sheet underneath.
-  for (const [level, size] of [
-    ["h1", "2.074em"],
-    ["h2", "1.728em"],
-    ["h3", "1.44em"],
-    ["h4", "1.2em"],
-    ["h5", "1.1em"],
-  ]) {
+  // The roman sheet sizes no heading at all: one ladder serves both faces, and
+  // it is mdm-look.css's, the other end of the editor's (style.css, after
+  // `#app .cm-line.mdm-h6`). The roman sheet carried article.cls's ladder
+  // here at first. What the page draws with it is measured in html.test.js.
+  // Read with the comments out, since a comment that names a selector is not
+  // a rule.
+  const rules = sheet.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const level of ["h1", "h2", "h3", "h4", "h5", "h6", "\\.title"]) {
     assert.ok(
-      new RegExp("body " + level + "[^{]*\\{[^}]*font-size: " + size.replace(".", "\\.")).test(sheet),
-      "the roman's " + level + " is not at " + size
+      !new RegExp("body " + level + "\\b[^{]*\\{[^}]*font-size").test(rules),
+      "the roman sheet sizes " + level.replace("\\", "") + " itself"
     );
   }
-  // It only wins by order, both selectors being one element under `body`, and
-  // the order is the one mdm.lua adds the two dependencies in.
+  // The face's sheet is read after the look's, the order mdm.lua adds the two
+  // dependencies in: whatever it sets on an element the look also sets wins
+  // that way and no other, both being one element under `body`.
   assert.ok(
     html.indexOf("mdm-roman.css") > html.indexOf("mdm-look.css"),
     "the roman sheet is read before the one it overrides"
@@ -1264,19 +1301,32 @@ test("the roman travels to the paper, and takes the sans preamble with it", () =
   assert.ok(!/Scale=1\.21/.test(tex), "the compensation for a sans is still on the maths");
   // Code is untouched: it is the monospace either way.
   assert.ok(tex.includes("[Scale=0.88]"), "the code lost its size");
-  // And the headings are the ladder the editor draws the roman with, which
-  // is article.cls's own (\huge, \LARGE, \Large, \large over a 10 pt body)
-  // and not Markdown's. A heading is 15% of its size away between the two
-  // ladders, which is the sort of drift the export rule exists to stop: a
-  // reader with the editor open beside the paper is reading one document.
-  // Both branches of the preamble carry it, the titlesec one for a standard
-  // class and the KOMA one beside it, so each size is asserted twice over.
-  [["2.074", "2.7"], ["1.728", "2.25"], ["1.44", "1.87"], ["1.2", "1.56"]].forEach(
-    (pair) => {
-      assert.equal(
-        tex.split("{" + pair[0] + "\\mdmem}{" + pair[1] + "\\mdmem}").length - 1,
-        2,
-        "the roman heading at " + pair[0] + " ems is not on both branches"
+  // And the headings are the ladder the editor draws, the same in the roman as
+  // in the sans: Markdown's top three, then 1.125 and 1.0625, at the leadings
+  // written to the last digit. A heading set to another ladder is the sort of
+  // drift the export rule exists to stop: a reader with the editor open beside
+  // the paper is reading one document. Each size is read on the command that
+  // draws its level, on both branches of the preamble, the titlesec one for a
+  // standard class and the KOMA one beside it. What the paper draws with them
+  // is measured further down.
+  const commands = ["section", "subsection", "subsubsection", "paragraph", "subparagraph"];
+  [["2", "2.6"], ["1.5", "1.95"], ["1.25", "1.625"], ["1.125", "1.4625"], ["1.0625", "1.38125"]].forEach(
+    ([size, lead], i) => {
+      const font = "\\fontsize{" + size + "\\mdmem}{" + lead + "\\mdmem}";
+      assert.ok(
+        tex.includes(
+          "\\titleformat{\\" + commands[i] + "}[hang]{\\color{mdmink}\\bfseries\\linespread{1}" +
+            font + "\\selectfont}"
+        ),
+        "titlesec does not set the roman's \\" + commands[i] + " at " + size + " ems"
+      );
+      assert.ok(
+        tex.includes("\\addtokomafont{" + commands[i] + "}{" + font + "\\linespread{1}\\selectfont}"),
+        "KOMA does not set the roman's \\" + commands[i] + " at " + size + " ems"
+      );
+    }
+  );
+  assert.ok(!tex.includes("{2.074\\mdmem}"), "article.cls's ladder is back on the roman");
   // The two bold files at a Scale of their own: the editor's font-size-adjust
   // weighs each face by its own sxHeight, 0.444 for the bold against the
   // regular's 0.431, and under the family's one Scale the bold stood 3% taller
@@ -1458,6 +1508,8 @@ test("on paper the words are the size of the equations set among them, in either
   );
 });
 
+// ---------- The headings on paper, measured ----------
+
 // The four shapes of the roman against each other, which is what a bold
 // heading is drawn in. The editor weighs each face of the family by its own
 // sxHeight, so under its adjust all four are drawn with that height at 0.528
@@ -1500,6 +1552,441 @@ test("on paper the four shapes of the roman are drawn at the editor's x-height",
 // class Quarto gives a document that names none; a class with chapters writes
 // `#` as \chapter and every level under it one command down. `extra` is YAML
 // put in as it stands.
+function headingsDoc(cls, extra) {
+  return (
+    "---\n" +
+    (cls ? "format:\n  pdf:\n    documentclass: " + cls + "\n" : "") +
+    (extra || "") +
+    "filters:\n  - mdm\n---\n\n" +
+    [1, 2, 3, 4, 5, 6]
+      .map((n) => "#".repeat(n) + " Level " + n + "\n\nA line of prose under it.\n")
+      .join("\n")
+  );
+}
+
+// The ladder the editor draws, in ems of the body and level by level
+// (style.css), one for both faces: Markdown's top three, then each level
+// halving what the one above stands over the body, and h6 at the body.
+const HEADING_LADDER = [2, 1.5, 1.25, 1.125, 1.0625, 1];
+
+// The lines of the first page as ghostscript reads them, each with its
+// letters run together, the sizes and the faces they are painted in, and the
+// x its first letter stands at. txtwrite cuts a line into a span per word,
+// and now and then inside one, so the spans are joined by the height they
+// stand at.
+function pdfLines(pdf) {
+  const r = spawnSync(
+    "gs",
+    ["-q", "-dNOPAUSE", "-dBATCH", "-sDEVICE=txtwrite", "-dTextFormat=0",
+     "-dFirstPage=1", "-dLastPage=1", "-sOutputFile=-", pdf],
+    { encoding: "utf8" }
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const lines = new Map();
+  const re = /<span bbox="(-?[\d.]+) (-?[\d.]+) [^"]*" font="([^"]+)" size="([\d.]+)">([\s\S]*?)<\/span>/g;
+  let m;
+  while ((m = re.exec(r.stdout))) {
+    const line = lines.get(m[2]) || { text: "", sizes: new Set(), fonts: new Set(), x: Infinity };
+    line.text += (m[5].match(/ c="[^"]*"/g) || []).map((c) => c.slice(4, -1)).join("");
+    line.sizes.add(Number(m[4]));
+    line.fonts.add(m[3].replace(/^[A-Z]{6}\+/, "").replace(/-Identity-H$/, ""));
+    line.x = Math.min(line.x, Number(m[1]));
+    lines.set(m[2], line);
+  }
+  return [...lines.values()];
+}
+
+// Renders the six levels in one face and one class and gives back, for each
+// heading, how large it reads against the prose of the page, whether it is
+// painted in a bold face, and the x its first letter stands at. How large is
+// what the editor holds, and it holds it by a different measure in each face:
+// the sans by its em, nothing being adjusted, and the roman by its x-height,
+// since font-size-adjust draws each face of the family at 0.528 of the em by
+// that face's own sxHeight. So in the roman a painted size is weighed by the
+// X_HEIGHT of its face: the paper draws the regular at 1.2251 of its size and
+// the bold at 1.1892 (ROMAN_SCALE and ROMAN_BOLD_SCALE in mdm.lua), and by
+// the em alone an h1 reads 1.9414 of the body where by its x-height it reads
+// 2, as it does on screen (1.9985 there, measured off the editor's pixels).
+function paperLadder(face, cls, extra) {
+  const where = face + " under " + (cls || "KOMA") + (extra ? " with " + extra.trim() : "");
+  const dir = freshDir("pdf-headings-" + face + "-" + (cls || "koma") + (extra ? "-extra" : ""));
+  fs.writeFileSync(path.join(dir, "doc.mdm"), headingsDoc(cls, extra));
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:" + face], dir);
+  assert.equal(r.status, 0, where + " did not compile:\n" + r.stderr.slice(-600));
+  const lines = pdfLines(path.join(dir, "doc.pdf"));
+  const lineOf = (text) => {
+    const line = lines.find((l) => l.text === text);
+    assert.ok(line, where + ": no line reads " + text + " (" + lines.map((l) => l.text).join(" | ") + ")");
+    assert.equal(line.sizes.size, 1, where + ": " + text + " is painted at more than one size");
+    return line;
+  };
+  const reads = (line) => {
+    const size = [...line.sizes][0];
+    if (face === "sans") return size;
+    assert.equal(line.fonts.size, 1, where + ": " + line.text + " is painted in more than one face");
+    const font = [...line.fonts][0];
+    assert.ok(font in X_HEIGHT, where + ": no measured x-height for " + font);
+    return size * X_HEIGHT[font];
+  };
+  const body = reads(lineOf("Alineofproseunderit."));
+  return [1, 2, 3, 4, 5, 6].map((n) => {
+    const line = lineOf("Level" + n);
+    return {
+      ratio: reads(line) / body,
+      bold: [...line.fonts].every((f) => /Bold/.test(f)),
+      x: line.x,
+    };
+  });
+}
+
+// Each level of the paper against the level of the screen, in both faces and
+// under four kinds of class: the standard article and KOMA's, which is what
+// Quarto gives a document that names none, and the same two with chapters
+// (report and scrreprt), where `#` is \chapter. By the command's name, as the
+// sizes used to go, a class with chapters drew `#` at its own size (2.488
+// under report, 1.894 under scrreprt) and every level from `##` down at the
+// size of the one above it; under a standard class a `#####` stopped the PDF
+// with "titlesec Error: No format for this command" until it had a format of
+// its own. The sizes come out within 0.0001 of the ladder (measured), so a
+// thousandth is room for rounding and nothing more.
+// Every heading stands flush with the text, `#####` under KOMA with
+// `indent: true` included, which KOMA used to indent by the paragraph indent
+// it keeps aside (14.2 bp in the roman, 11.6 in the sans, measured).
+// Every level is bold, as the editor draws it at 600, h6 included: under
+// chapters `######` is \subparagraph, and in an article, where Pandoc writes a
+// sixth level as a plain paragraph, the Header filter sets it as the
+// preamble's \mdmheadsix (it came out regular, as a line of prose).
+test("on paper every heading is the size the editor draws it, in either face and under four kinds of class", () => {
+  const runs = [];
+  for (const face of ["roman", "sans"]) {
+    for (const cls of ["article", null, "report", "scrreprt"]) runs.push([face, cls, ""]);
+  }
+  runs.push(["roman", null, "indent: true\n"]);
+  for (const [face, cls, extra] of runs) {
+    const where = face + " under " + (cls || "KOMA") + (extra ? " with " + extra.trim() : "");
+    const got = paperLadder(face, cls, extra);
+    const all = got.map((g) => g.ratio.toFixed(4)).join(", ");
+    got.forEach((g, i) => {
+      assert.ok(
+        Math.abs(g.ratio - HEADING_LADDER[i]) < 0.001,
+        where + ": h" + (i + 1) + " is " + g.ratio.toFixed(4) +
+          " of the body where the editor draws it at " + HEADING_LADDER[i] +
+          " (all six: " + all + ")"
+      );
+      assert.ok(g.bold, where + ": h" + (i + 1) + " is not set in a bold face on paper");
+      assert.ok(
+        Math.abs(g.x - got[0].x) <= 1,
+        where + ": h" + (i + 1) + " starts at x " + g.x + " where h1 starts at " + got[0].x
+      );
+    });
+  }
+});
+
+// A heading that wraps is set at the leading the editor gives it, 1.3 of its
+// size from one line to the next. The prose's \linespread{1.417} used to be
+// multiplied into a heading's own, and KOMA set a wrapped \paragraph or
+// \subparagraph at the body's leading: 1.84 of the size, and 1.56 and 1.66
+// (measured). Read off pdftotext's word boxes, whose coordinates are not
+// rounded to the point as txtwrite's are: the step between the first words
+// of a heading's first two lines, over its size in ems of the body (\mdmem,
+// the prose's painted size, over ROMAN_SCALE in the roman).
+const WRAP =
+  "runs on long enough to fill its line and carry over onto a second one " +
+  "below it, which is where its leading shows";
+
+function wrappedDoc(cls) {
+  return (
+    "---\n" +
+    (cls ? "format:\n  pdf:\n    documentclass: " + cls + "\n" : "") +
+    "filters:\n  - mdm\n---\n\n" +
+    [1, 2, 3, 4, 5, 6]
+      .map((n) => "#".repeat(n) + " Wrap" + n + " " + WRAP + "\n\nA line of prose under it.\n")
+      .join("\n")
+  );
+}
+
+function wrappedPitches(face, cls) {
+  const where = face + " under " + (cls || "KOMA");
+  const dir = freshDir("pdf-wrapped-" + face + "-" + (cls || "koma"));
+  fs.writeFileSync(path.join(dir, "doc.mdm"), wrappedDoc(cls));
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:" + face], dir);
+  assert.equal(r.status, 0, where + " did not compile:\n" + r.stderr.slice(-600));
+  const pdf = path.join(dir, "doc.pdf");
+  const prose = pdfLines(pdf).find((l) => l.text === "Alineofproseunderit.");
+  assert.ok(prose, where + ": no line of prose on the first page");
+  const mdmem = [...prose.sizes][0] / (face === "roman" ? 1.2251 : 1);
+  const t = spawnSync("pdftotext", ["-bbox", pdf, "-"], { encoding: "utf8" });
+  assert.equal(t.status, 0, t.stderr);
+  const pages = t.stdout.split("<page ").slice(1).map((p) =>
+    [...p.matchAll(/<word xMin="[\d.]+" yMin="([\d.]+)" xMax="[\d.]+" yMax="[\d.]+">([^<]*)<\/word>/g)]
+      .map((w) => ({ y: Number(w[1]), text: w[2] }))
+  );
+  return [1, 2, 3, 4, 5, 6].map((n) => {
+    for (const words of pages) {
+      const i = words.findIndex((w) => w.text === "Wrap" + n);
+      if (i < 0) continue;
+      const next = words.slice(i + 1).find((w) => w.y > words[i].y + 1);
+      assert.ok(next, where + ": Wrap" + n + " did not wrap");
+      return (next.y - words[i].y) / (HEADING_LADDER[n - 1] * mdmem);
+    }
+    return assert.fail(where + ": no heading reads Wrap" + n);
+  });
+}
+
+test("on paper a heading that wraps is set at the editor's leading, under both kinds of class", () => {
+  for (const face of ["roman", "sans"]) {
+    for (const cls of ["article", null]) {
+      const where = face + " under " + (cls || "KOMA");
+      const got = wrappedPitches(face, cls);
+      got.forEach((p, i) => {
+        assert.ok(
+          Math.abs(p - 1.3) < 0.01,
+          where + ": a wrapped h" + (i + 1) + " steps " + p.toFixed(4) +
+            " of its size from line to line (all six: " + got.map((x) => x.toFixed(4)).join(", ") + ")"
+        );
+      });
+    }
+  }
+});
+
+// The rule under h1 and h2 on paper, where the editor draws it: a fixed
+// distance under the baseline of the heading's last line, whatever its
+// letters (HEAD_RULE_AIR in mdm.lua, 0.749 and 0.486 ems of the body in the
+// roman and 1.062 and 0.674 in the sans, measured in the editor). It used to
+// hang from the depth of the last line with the class's own spacing over it,
+// so it stood somewhere else in each class and went down under a last line
+// with descenders (1.05 em under an h1 in the roman against 0.58 with none,
+// measured). Read off the pixels at 600 dpi: the rule is the one run of the
+// hairline's grey (14% of the ink over the page) most of the way across the
+// sheet, and "Level 1" and "Level 2" have no descender, so the last row of
+// dark ink over it is the heading's baseline, within the overshoot of an `e`.
+// Under a class with chapters `#` is a \chapter and its rule is the h1's,
+// titlesec drawing it with the same format and KOMA through the chapter's
+// own line format: 0.747 and 0.482 em under report and 0.737 and 0.473 under
+// scrreprt in the roman, 1.060 and 0.675, and 1.045 and 0.671, in the sans
+// (measured).
+const RULE_AIR = { roman: [0.749, 0.486], sans: [1.062, 0.674] };
+
+function rulesUnderInk(pdf, dpi) {
+  const r = spawnSync(
+    "pdftoppm",
+    ["-gray", "-r", String(dpi), "-f", "1", "-l", "1", pdf],
+    { maxBuffer: 1 << 30 }
+  );
+  assert.equal(r.status, 0, String(r.stderr));
+  const buf = r.stdout;
+  const space = (b) => b === 0x20 || b === 0x0a || b === 0x0d || b === 0x09;
+  const fields = [];
+  let at = 0;
+  while (fields.length < 4) {
+    while (space(buf[at])) at++;
+    const start = at;
+    while (!space(buf[at])) at++;
+    fields.push(buf.toString("latin1", start, at));
+  }
+  at++;
+  const w = Number(fields[1]);
+  const h = Number(fields[2]);
+  const pixel = (x, y) => buf[at + y * w + x];
+  const rules = [];
+  for (let y = 0; y < h; y++) {
+    let best = 0;
+    let run = 0;
+    for (let x = 0; x < w; x++) {
+      const v = pixel(x, y);
+      if (v > 180 && v < 235) {
+        if (++run > best) best = run;
+      } else {
+        run = 0;
+      }
+    }
+    if (best < 0.4 * w) continue;
+    const last = rules[rules.length - 1];
+    if (last && last.last === y - 1) last.last = y;
+    else rules.push({ first: y, last: y });
+  }
+  const dark = (y) => {
+    for (let x = 0; x < w; x++) if (pixel(x, y) < 128) return true;
+    return false;
+  };
+  return rules.map((rule) => {
+    let y = rule.first - 1;
+    while (y > 0 && !dark(y)) y--;
+    return ((rule.first - (y + 1)) * 72) / dpi;
+  });
+}
+
+test("on paper the rule under h1 and h2 stands where the editor draws it, under four kinds of class", () => {
+  for (const face of ["roman", "sans"]) {
+    for (const cls of ["article", null, "report", "scrreprt"]) {
+      const where = face + " under " + (cls || "KOMA");
+      const dir = freshDir("pdf-rules-" + face + "-" + (cls || "koma"));
+      fs.writeFileSync(path.join(dir, "doc.mdm"), headingsDoc(cls));
+      const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:" + face], dir);
+      assert.equal(r.status, 0, where + " did not compile:\n" + r.stderr.slice(-600));
+      const pdf = path.join(dir, "doc.pdf");
+      const prose = pdfLines(pdf).find((l) => l.text === "Alineofproseunderit.");
+      assert.ok(prose, where + ": no line of prose on the first page");
+      const mdmem = [...prose.sizes][0] / (face === "roman" ? 1.2251 : 1);
+      const air = rulesUnderInk(pdf, 600).map((d) => d / mdmem);
+      assert.equal(air.length, 2, where + ": " + air.length + " rules on the page, where h1 and h2 have one each");
+      air.forEach((a, i) => {
+        assert.ok(
+          Math.abs(a - RULE_AIR[face][i]) < 0.05,
+          where + ": the rule stands " + a.toFixed(3) + " em under h" + (i + 1) +
+            " where the editor draws it at " + RULE_AIR[face][i]
+        );
+      });
+    }
+  }
+});
+
+// A chapter, in a class that has them, is the h1 the editor draws, and the
+// class keeps its page break: every `#` opens a page, a right-hand one where
+// the class opens chapters there (book and scrbook, a blank page going in
+// before it), a `#` straight under another `#` included, and a `##` stays on
+// the page of its chapter. The first `#` stands where it stands in the same
+// document without chapters, under article for report and under KOMA's
+// article for scrreprt: in the top class titlesec keeps \chapter in, its
+// baseline stood 6.05 em under the top of the text where an article's `#`
+// stands 1.82, and KOMA's own skip put it 7.2 em lower than a \section
+// (measured). Now it is the same to the thousandth of an em under report, and
+// under scrreprt 0.187 em lower in the roman and 0.363 in the sans, KOMA
+// hanging a chapter's first line from \topskip (pdftotext's word boxes,
+// measured); half an em is room for that and nothing like the skips it
+// replaced.
+const chaptersDoc = (cls) =>
+  "---\n" +
+  (cls ? "format:\n  pdf:\n    documentclass: " + cls + "\n" : "") +
+  "filters:\n  - mdm\n---\n\n" +
+  "# One\n\n# Two\n\nA line of prose under it.\n\n" +
+  "# Three\n\nA line of prose under it.\n\n## Four\n\nA line of prose under it.\n";
+
+// Every word of a PDF with its page and the bottom of its box, which
+// pdftotext gives in fractions of a point where txtwrite rounds to the point.
+function pdfWords(pdf) {
+  const t = spawnSync("pdftotext", ["-bbox", pdf, "-"], { encoding: "utf8" });
+  assert.equal(t.status, 0, t.stderr);
+  return t.stdout.split("<page ").slice(1).flatMap((p, i) =>
+    [...p.matchAll(/<word xMin="[\d.]+" yMin="[\d.]+" xMax="[\d.]+" yMax="([\d.]+)">([^<]*)<\/word>/g)]
+      .map((w) => ({ page: i + 1, bottom: Number(w[1]), text: w[2] }))
+  );
+}
+
+test("on paper a chapter opens its page and stands where an article's `#` stands", () => {
+  const render = (face, cls) => {
+    const where = face + " under " + (cls || "KOMA");
+    const dir = freshDir("pdf-chapters-" + face + "-" + (cls || "koma"));
+    fs.writeFileSync(path.join(dir, "doc.mdm"), chaptersDoc(cls));
+    const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:" + face], dir);
+    assert.equal(r.status, 0, where + " did not compile:\n" + r.stderr.slice(-600));
+    const pdf = path.join(dir, "doc.pdf");
+    const words = pdfWords(pdf);
+    const word = (text) => {
+      const w = words.find((x) => x.text === text);
+      assert.ok(w, where + ": no word reads " + text);
+      return w;
+    };
+    return { where, pdf, word };
+  };
+  const pages = (doc) => ["One", "Two", "Three", "Four"].map((t) => doc.word(t).page);
+  for (const face of ["roman", "sans"]) {
+    for (const [chapters, plain] of [["report", "article"], ["scrreprt", null]]) {
+      const c = render(face, chapters);
+      const p = render(face, plain);
+      assert.deepEqual(pages(c), [1, 2, 3, 3], c.where + ": the chapters are not a page each");
+      const prose = pdfLines(p.pdf).find((l) => l.text === "Alineofproseunderit.");
+      assert.ok(prose, p.where + ": no line of prose on the first page");
+      const mdmem = [...prose.sizes][0] / (face === "roman" ? 1.2251 : 1);
+      const dy = (c.word("One").bottom - p.word("One").bottom) / mdmem;
+      assert.ok(
+        Math.abs(dy) < 0.5,
+        c.where + ": the first `#` stands " + dy.toFixed(3) + " em lower than " + p.where + " sets it"
+      );
+    }
+  }
+  for (const cls of ["book", "scrbook"]) {
+    assert.deepEqual(
+      pages(render("roman", cls)),
+      [1, 3, 5, 5],
+      "roman under " + cls + ": a chapter does not open a right-hand page"
+    );
+  }
+});
+
+// A sixth-level heading on paper is a heading. Pandoc writes a level past
+// \subparagraph as a plain paragraph, which in an article is `######`, and it
+// came out as a line of prose: the regular face, with no more air over it
+// than two paragraphs leave (measured). The Header filter hands it to the
+// preamble's \mdmheadsix instead, with its label, so that a link to it still
+// lands; under a class with chapters `######` is \subparagraph, a heading
+// already, and is left to it.
+const SIXTH_DOC = `---
+format:
+  pdf:
+    documentclass: article
+filters:
+  - mdm
+---
+
+A paragraph that points at [the sixth level](#six).
+
+###### Six {#six}
+
+A line of prose under it.
+`;
+
+test("a sixth-level heading reaches the paper as a heading, with its label", () => {
+  const dir = freshDir("pdf-sixth");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), SIXTH_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const tex = texOf(dir);
+  assert.ok(tex.includes("\\mdmheadsix{Six}\\label{six}"), "the sixth level is not the preamble's heading");
+  assert.ok(tex.includes("\\hyperref[six]"), "the link to it does not reach its label");
+});
+
+// The title on paper at the size and weight the page draws it: 2 ems of the
+// body and bold, as `body .title` in mdm-look.css draws it (32px and 600 on
+// the 16px body, measured on the exported page). The class drew it at its
+// own \LARGE in an article, 1.728 of the body, and \huge under KOMA, 1.894
+// (measured). The subtitle is not bold, the page setting it at 300.
+const titleDoc = (cls) =>
+  "---\n" +
+  'title: "A title on paper"\n' +
+  'subtitle: "A subtitle under it"\n' +
+  (cls ? "format:\n  pdf:\n    documentclass: " + cls + "\n" : "") +
+  "filters:\n  - mdm\n---\n\n" +
+  "A line of prose under it.\n";
+
+test("on paper the title is the size and weight the page gives it, under both kinds of class", () => {
+  for (const face of ["roman", "sans"]) {
+    for (const cls of ["article", null]) {
+      const where = face + " under " + (cls || "KOMA");
+      const dir = freshDir("pdf-title-" + face + "-" + (cls || "koma"));
+      fs.writeFileSync(path.join(dir, "doc.mdm"), titleDoc(cls));
+      const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:" + face], dir);
+      assert.equal(r.status, 0, where + " did not compile:\n" + r.stderr.slice(-600));
+      const lines = pdfLines(path.join(dir, "doc.pdf"));
+      const lineOf = (text) => {
+        const line = lines.find((l) => l.text === text);
+        assert.ok(line, where + ": no line reads " + text + " (" + lines.map((l) => l.text).join(" | ") + ")");
+        return line;
+      };
+      // By its em in the sans and by its x-height in the roman, as the ladder
+      // of the headings is read (paperLadder).
+      const reads = (line) => {
+        const size = [...line.sizes][0];
+        if (face === "sans") return size;
+        const font = [...line.fonts][0];
+        assert.ok(font in X_HEIGHT, where + ": no measured x-height for " + font);
+        return size * X_HEIGHT[font];
+      };
+      const title = lineOf("Atitleonpaper");
+      const ratio = reads(title) / reads(lineOf("Alineofproseunderit."));
+      assert.ok(
+        Math.abs(ratio - 2) < 0.001,
+        where + ": the title is " + ratio.toFixed(4) + " of the body where the page draws it at 2"
       );
     }
 test("the maths LaTeX sets itself grows with the words", () => {
@@ -1517,8 +2004,6 @@ test("the maths LaTeX sets itself grows with the words", () => {
     Math.abs(faces - 1) < 0.02,
     "the roman's words are " + faces.toFixed(3) + " of the sans's"
   );
-  assert.ok(!tex.includes("{2\\mdmem}{2.6\\mdmem}"), "the sans ladder is still on the roman");
-  assert.ok(!tex.includes("{1.5\\mdmem}"), "the sans ladder is still on the roman");
 });
 
 // ---------- PDF rendering ----------

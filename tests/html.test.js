@@ -834,12 +834,12 @@ test("the page opens with the block the YAML asks for, in either face", { skip }
     assert.equal(t.author.text, "alpelito7", face);
     assert.ok(t.author.w > 20, "the " + face + " author covers " + t.author.w + "px");
   });
-  // The title takes the size the face gives a first-level heading, which is
-  // where the two faces are meant to differ: \huge over the body in the roman
-  // (the article ladder of mdm-roman.css) and Markdown's own 2em in the sans.
-  // The rule that carries it names `.title` beside `h1`, and losing that half
-  // of the selector is the quiet way for the block to fall out of the ladder.
-  assert.equal(b.roman.title.size, +(b.roman.body * 2.074).toFixed(2), "the roman title");
+  // The title takes the size of a first-level heading, which is Markdown's
+  // 2em in either face: the roman's ladder only parts from the sans's below
+  // h3, and the roman once set it at article.cls's \huge (2.074). The rule
+  // that carries it names `.title` beside `h1`, and losing that half of the
+  // selector is the quiet way for the block to fall out of the ladder.
+  assert.equal(b.roman.title.size, +(b.roman.body * 2).toFixed(2), "the roman title");
   assert.equal(b.sans.title.size, +(b.sans.body * 2).toFixed(2), "the sans title");
   // And where the two faces are not meant to differ. The measure is the
   // editor's, whatever the words are set in: the roman used to break the first
@@ -847,4 +847,192 @@ test("the page opens with the block the YAML asks for, in either face", { skip }
   // held to Quarto's 802px track rather than to the editor's 820.
   assert.equal(b.roman.column, b.sans.column, "the two faces hold different measures");
   assert.equal(b.roman.column, 820, "the column is not the editor's");
+});
+
+// ---------- The ladder of headings, page against editor ----------
+
+// Six levels, each over a line of prose, which is the document the editor's
+// own test of the ladder opens (HEADINGS_DOC in webview-look.test.js). It is
+// rendered in each face and set beside the editor opened on it in the same
+// face. The editor takes its sizes from style.css alone and the page from two
+// sheets, mdm-look.css for the sans's ladder and mdm-roman.css over it where
+// the roman's parts from it: a level the roman sheet forgets is drawn at the
+// sans's size, and one mdm-look.css forgets at the size Quarto's own sheets
+// give it. The same numbers out of the three files are what this reads,
+// level by level.
+const HEADINGS = [1, 2, 3, 4, 5, 6]
+  .map((n) => "#".repeat(n) + " Level " + n + "\n\nA line of prose under it.\n")
+  .join("\n");
+
+test("every heading is drawn on the page at the size the editor draws it, in either face", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  for (const face of ["roman", "sans"]) {
+    const name = "headings-" + face;
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + HEADINGS);
+    const r = spawnSync(
+      MDM,
+      ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:" + face],
+      { cwd: DIR, encoding: "utf8" }
+    );
+    assert.equal(r.status, 0, r.stderr);
+
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+    });
+    OPEN_BROWSERS.add(browser);
+    const page = await browser.newPage();
+    await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    const exported = await page.evaluate(() =>
+      [1, 2, 3, 4, 5, 6].map((n) => {
+        const el = Array.from(document.querySelectorAll("h" + n)).find((e) =>
+          e.textContent.trim().startsWith("Level " + n)
+        );
+        return el ? +parseFloat(getComputedStyle(el).fontSize).toFixed(3) : null;
+      })
+    );
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+
+    // Closed whatever happens, so a failure here leaves no editor open to keep
+    // the run waiting.
+    const h = await openEditor({ text: HEADINGS, scores: 0, seed: { settings: { textFont: face } } });
+    let editor;
+    try {
+      editor = await h.page.evaluate(() =>
+        [1, 2, 3, 4, 5, 6].map((n) => {
+          const el = document.querySelector("#app .cm-line.mdm-h" + n);
+          return el ? +parseFloat(getComputedStyle(el).fontSize).toFixed(3) : null;
+        })
+      );
+    } finally {
+      await h.close();
+    }
+
+    assert.ok(editor.every((s) => s), "the editor drew no line for a level: " + editor);
+    assert.deepEqual(
+      exported,
+      editor,
+      "the " + face + " page heads its six levels at other sizes than the editor"
+    );
+  }
+});
+
+// The air around a heading, gap by gap against the editor: from the bottom of
+// each block's line box to the top of the next, and from the top of the
+// column to the first block's text, on the page and in the editor opened on
+// the same document, in both faces. The page used to give a heading its
+// padding as a margin, which collapsed into the paragraph's, and to draw no
+// blank line at all: an h2 stood 16px under a paragraph where the editor sets
+// it 30.4, and the six levels measured 458px on the page against 573 in the
+// editor. A quotation kept Bootstrap's padding, 10.6px more over it and 11.6
+// under it. Three documents, for the head of the column as well as its body:
+// the six levels with a quotation under the prose, which opens on an h1;
+// example.mdm's opening, a paragraph and then `##`, which Quarto's own rules
+// set 34px apart where the editor sets them 30.4; and a column that opens on
+// an h2, which one of those rules set flush with the top where the editor
+// leaves the heading's padding over it, 14.4px (mdm-look.css, after the
+// margins of a heading).
+const AIR_DOCS = {
+  headings: HEADINGS + "\n> A quoted line under the prose.\n\nA line after the quote.\n",
+  opening: "An opening paragraph, one line of it.\n\n## A section\n\nA line of prose under it.\n",
+  h2: "## An opening section\n\nA line of prose under it.\n",
+};
+
+const BLOCK_GAPS = function (column, blocks) {
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return {
+      top: r.top + parseFloat(cs.paddingTop) + parseFloat(cs.borderTopWidth),
+      bottom: r.bottom - parseFloat(cs.paddingBottom) - parseFloat(cs.borderBottomWidth),
+      text: el.textContent.replace(/^[#>\s]+/, "").trim().slice(0, 12),
+    };
+  };
+  const b = blocks.map(box);
+  return {
+    top: +(b[0].top - box(column).top).toFixed(2),
+    gaps: b.slice(1).map((x, i) => ({
+      between: b[i].text + " > " + x.text,
+      gap: +(x.top - b[i].bottom).toFixed(2),
+    })),
+  };
+}.toString();
+
+test("the page leaves the air around a heading that the editor leaves, in either face", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  for (const face of ["roman", "sans"]) {
+    for (const [doc, text] of Object.entries(AIR_DOCS)) {
+      const name = "air-" + doc + "-" + face;
+      const where = face + ", " + doc;
+      fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+      const r = spawnSync(
+        MDM,
+        ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:" + face],
+        { cwd: DIR, encoding: "utf8" }
+      );
+      assert.equal(r.status, 0, r.stderr);
+
+      const browser = await puppeteer.launch({
+        executablePath: CHROME,
+        args: ["--no-sandbox", "--allow-file-access-from-files"],
+        defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+      });
+      OPEN_BROWSERS.add(browser);
+      const page = await browser.newPage();
+      await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      await page.evaluate(() => document.fonts.ready);
+      const exported = await page.evaluate(
+        (f) =>
+          eval("(" + f + ")")(
+            document.querySelector("main.content"),
+            Array.from(
+              document.querySelectorAll("main.content :is(h1, h2, h3, h4, h5, h6):not(.title), main.content p")
+            )
+          ),
+        BLOCK_GAPS
+      );
+      await browser.close();
+      OPEN_BROWSERS.delete(browser);
+
+      const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: face } } });
+      let editor;
+      try {
+        await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+        await h.page.evaluate(
+          () => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)))
+        );
+        editor = await h.page.evaluate(
+          (f) =>
+            eval("(" + f + ")")(
+              document.querySelector("#app .cm-content"),
+              Array.from(document.querySelectorAll("#app .cm-content .cm-line:not(.mdm-blank)"))
+            ),
+          BLOCK_GAPS
+        );
+      } finally {
+        await h.close();
+      }
+
+      assert.ok(
+        Math.abs(exported.top - editor.top) <= 1,
+        where + ": the first block's text stands " + exported.top +
+          "px under the top of the column on the page and " + editor.top + " in the editor"
+      );
+      assert.deepEqual(
+        exported.gaps.map((g) => g.between),
+        editor.gaps.map((g) => g.between),
+        where + ": the two surfaces do not hold the same blocks in the same order"
+      );
+      exported.gaps.forEach((g, i) => {
+        assert.ok(
+          Math.abs(g.gap - editor.gaps[i].gap) <= 1,
+          where + ": " + g.between + " is " + g.gap + "px on the page and " + editor.gaps[i].gap +
+            " in the editor"
+        );
+      });
+    }
+  }
 });

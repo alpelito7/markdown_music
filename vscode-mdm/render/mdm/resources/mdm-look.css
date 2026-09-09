@@ -141,7 +141,9 @@ body .quarto-title-block .quarto-title-meta-heading {
 /* ---------- Headings, quotes, rules, links ---------- */
 
 /* The sizes and the weight of the editor, and the hairline under the first
-   two levels. */
+   two levels. The margins here are the title's, and those of any heading
+   Quarto draws outside the text column; the headings of the document take
+   the editor's air from the rules after the ladder. */
 body h1,
 body h2,
 body h3,
@@ -171,11 +173,81 @@ body h3 {
   font-size: 1.25em;
 }
 body h4 {
-  font-size: 1.1em;
+  font-size: 1.125em;
 }
-body h5,
+body h5 {
+  font-size: 1.0625em;
+}
 body h6 {
   font-size: 1em;
+}
+/* The air around a heading, which is the editor's. There a heading is a line
+   carrying padding over its text, 0.4em over an h1 and 0.6em over the other
+   five (`#app .cm-line.mdm-h`), and the blank lines of the Markdown on either
+   side of it are drawn an em of the body tall (`#app .cm-line.mdm-blank`),
+   16px in either face. The page used to give a heading that padding as a
+   margin and draw no blank line at all, so an h2 stood 16px under a
+   paragraph where the editor sets it 30.4 under one, and the paragraph after
+   it began 7.2px under the rule where the editor leaves 16: the six levels of
+   html.test.js, each over a line of prose, measured 458px from the first
+   heading to the last line on the page and 573 in the editor.
+   The blank line and the padding are one margin here, because a heading's
+   margin collapses into the one of the block above it: a paragraph's 16px, a
+   code card's 14 and a list's 17 all fall inside it, as they do in the
+   editor, where no line carries a margin and the blank line and the padding
+   are the gap whatever stands above. The blank line is a length of the body
+   and is written in px, since a heading's em is its own.
+   What a page cannot follow is a heading with no blank line beside it, which
+   the editor draws without one (a `## Title` straight under a paragraph, or a
+   paragraph straight under it): Pandoc keeps no trace of a blank line, so the
+   page puts one in either way, 16px more than the editor on each side that
+   lacks it. Nor a score: the editor keeps a strip of 28px over every score for
+   its buttons (`#app .mdm-score .mdm-chrome`), which a page, whose player
+   hangs under the score, has never drawn, so a score stands 18.5px closer to
+   what is over it than in the editor and 9.5px further from what is under it
+   (mdm.css's 1.5rem), beside a heading as beside a paragraph (measured).
+   Both open. */
+body {
+  --mdm-blank: 16px;
+}
+body h1,
+body h2,
+body h3,
+body h4,
+body h5,
+body h6 {
+  --mdm-heading-pad: 0.6em;
+}
+body h1 {
+  --mdm-heading-pad: 0.4em;
+}
+body main.content :is(h1, h2, h3, h4, h5, h6):not(.title) {
+  margin-top: calc(var(--mdm-blank) + var(--mdm-heading-pad));
+  margin-bottom: var(--mdm-blank);
+}
+/* Quarto has two rules of its own about the air at the head of the document,
+   and both outrank the one above: the first section's h2 gets no margin
+   (`main.content > section:first-of-type > h2:nth-child(1)`), and a paragraph
+   just before a section gets 2rem under it (`main.content > p:has(+
+   section)`), 34px here, where the root is 17. Between them they set the
+   first heading of example.mdm 34px under the opening paragraph, where the
+   editor sets it 30.4, and put a document that opens on an h2 flush with the
+   top of the column. Each is answered with its own selector and one element
+   more. */
+body main.content > p:has(+ section) {
+  margin-bottom: 1em;
+}
+body main.content > section:first-of-type > h2:nth-child(1) {
+  margin-top: calc(var(--mdm-blank) + var(--mdm-heading-pad));
+}
+/* A heading that opens the column, in a document with no title block, has no
+   blank line over it in the editor, only its padding over the first line of
+   the text, so the margin keeps the padding and drops the blank line. A
+   heading under the title block does not open the column and keeps both.
+   After the rule above and of the same weight, which it has to beat on a
+   document that opens on an h2. */
+body main.content > section:first-child > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: var(--mdm-heading-pad);
 }
 /* Two paragraphs an em apart, the gap the editor draws for the blank line
    between them. */
@@ -195,11 +267,20 @@ body a:hover {
    selector of two elements however it is ordered. Its 1rem is 17px here and
    not 16, since Quarto sets the root font size to 17 while the body stays at
    the editor's 16, so the quotation was indented three pixels further from
-   its bar on the page than in the editor. */
+   its bar on the page than in the editor.
+   The same padding stood a quotation 10.6px further from the paragraph over
+   it than the editor does and 11.6 from the one under it (Bootstrap's
+   `.625rem` over and under the text, where the editor's bar runs the height
+   of the quoted lines and no further; measured), so there is none over or
+   under it here, and the paragraph's em after it. That keeps the editor's
+   air beside a paragraph and beside a heading alike. */
 body blockquote,
 body blockquote.blockquote {
   border-left: 3px solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
   padding-left: 14px;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: 1em;
   color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
 }
 body hr {

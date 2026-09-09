@@ -308,12 +308,21 @@ end
 -- The colours of an engraving are not written here but into the EPS itself,
 -- since what the page says has no bearing on a graphic that carries its own
 -- (paint_eps, further down).
--- The skip a heading takes before its rule under KOMA, in ems of the body
--- text. What the page leaves between the ink and the rule is 0.625 em under a
--- 2 em heading and 0.375 em under a 1.5 em one (10 px and 6 px on a 16 px
--- text, measured on the pixels of the rendered page); the depth of the last
--- line adds about 0.05 em to whatever is skipped here, so these are those two
--- less that much, and they come out at 0.624 and 0.360 em on paper.
+-- Where the rule under h1 and h2 stands: a fixed distance under the baseline
+-- of the heading's last line, whatever its letters, in ems of the body, as
+-- the editor draws it. There the rule is the line's border, under its padding
+-- (0.2 and 0.15 of the heading's own size) and the part of its 1.3 line that
+-- falls under the baseline, which depends on the face: 0.749 and 0.486 em in
+-- the roman, 1.062 and 0.674 in the sans (measured in the editor twice over;
+-- the sans there is Noto Sans, the face this machine gives system-ui, and
+-- another platform's interface face puts it elsewhere).
+-- On paper the rule used to hang from the depth of the last line, with the
+-- class's own spacing over it, so it stood at a different distance in each
+-- class and went down under a last line with descenders (1.05 em under an h1
+-- in the roman against 0.58 with none, measured). \mdmheadrule takes the
+-- depth back out, and the distance is the one named here in either class.
+local HEAD_RULE_AIR = { roman = { "0.749", "0.486" }, sans = { "1.062", "0.674" } }
+
 -- How much larger than its size the paper draws the roman: the x-height the
 -- editor holds the roman to (0.528 em, `font-size-adjust` in style.css and in
 -- mdm-roman.css) over the one Latin Modern has of its own (0.431 em, read off
@@ -331,11 +340,58 @@ local ROMAN_SCALE = string.format("%.4f", 0.528 / 0.431)
 -- 1.1892.
 local ROMAN_BOLD_SCALE = string.format("%.4f", 0.528 / 0.444)
 
+-- The LaTeX command each level of Markdown heading is written as, which is
+-- the writer's to decide and not the class's alone. Measured with Pandoc 3.8.3
+-- through Quarto 1.9.37 (keep-tex): `#` is \section under article, scrartcl,
+-- amsart and amsbook, \chapter under report, book, memoir, scrreprt and
+-- scrbook, \part under `top-level-division: part`, and \section again on a
+-- book given `top-level-division: section`. The levels under it follow one
+-- step at a time down to \subparagraph, and a level past that is written as a
+-- plain paragraph (`######` in an article).
 --
--- Only KOMA: a standard class rules its headings through titlesec, whose own
--- spacing already leaves 0.648 em under a section and 0.504 under a
--- subsection (measured the same way), which is the page's within a rounding.
-local HEAD_RULE_AIR = { section = "0.57", subsection = "0.32" }
+-- So the writer is asked, with a document of one heading that carries this
+-- document's metadata and the two options the choice reads (the
+-- `documentclass` variable first, then the metadata, then the division, in
+-- Writers/LaTeX.hs), and the rule is not copied here. A copy would have to
+-- keep Pandoc's list of chapter classes, which leaves amsbook out, and one of
+-- its quirks besides: a class given on the command line
+-- (`-M documentclass:report`) arrives as a plain string, which Pandoc's own
+-- stringify reads as empty, so the page is \documentclass{report} and `#` is
+-- still \section (measured), where pandoc.utils.stringify reads "report".
+-- The probe carries the document's own metadata for the same reason: a
+-- pandoc.Meta rebuilt around a stringified class answers \section under
+-- report as well (measured). The template is left out of the options: the
+-- choice does not read it, and without it the answer is one line and not a
+-- whole preamble (0.3 to 0.7 ms of CPU against 0.9 to 2.9 with it, measured
+-- over eighteen renders). PANDOC_WRITER_OPTIONS reaches Quarto's filters
+-- (measured in Meta); without it the article's commands are the answer.
+--
+-- What it cannot see is `shift-heading-level-by`, which Pandoc applies after
+-- the filters and which reaches neither the metadata nor the options a filter
+-- is handed: with a shift of 1, `#` is written \subsection and this still
+-- answers \section, so every level is drawn at the size of the one under it.
+-- Open.
+local DIVISIONS = { "part", "chapter", "section", "subsection",
+  "subsubsection", "paragraph", "subparagraph" }
+
+local function heading_commands(meta)
+  local top = "section"
+  if PANDOC_WRITER_OPTIONS then
+    local probe = pandoc.Pandoc({ pandoc.Header(1, "mdmprobe") }, meta)
+    local ok, tex = pcall(pandoc.write, probe, "latex", pandoc.WriterOptions{
+      top_level_division = PANDOC_WRITER_OPTIONS.top_level_division,
+      variables = PANDOC_WRITER_OPTIONS.variables,
+    })
+    top = ok and tex:match("\\(%a+)%*?{mdmprobe}") or "section"
+  end
+  local first = 3
+  for i, name in ipairs(DIVISIONS) do
+    if name == top then first = i end
+  end
+  local heads = {}
+  for level = 1, 6 do heads[level] = DIVISIONS[first + level - 1] end
+  return heads
+end
 
 local function look_tex(l)
   local side = SIDES[l.side] or SIDES.light
@@ -537,14 +593,17 @@ local function look_tex(l)
   -- example.mdm: `source code` where the editor breaks after `source`).
   put("\\@ifpackageloaded{microtype}{\\microtypesetup{expansion=false}}{}")
   put("\\AtBeginDocument{\\raggedright}")
-  -- The air between a heading and the rule under it, in ems of the body text.
-  -- The page leaves the padding of the heading (0.2 of its own size) plus the
-  -- half of its leading that falls under the text; on paper there is no
-  -- leading under the last line, so the whole gap is asked for here. Measured
-  -- off the pixels of both: the page leaves 10 px under a 2 em heading and
-  -- 6 px under a 1.5 em one, on a 16 px text, and the 0.18 em this used to
-  -- skip came out as 0.19 em of white, a third of the page's.
-  put("\\newcommand*{\\mdmheadrule}[1]{\\par\\nobreak\\vskip #1\\mdmem" ..
+  -- The rule under a heading, #1 ems of the body under the baseline of its
+  -- last line (HEAD_RULE_AIR has the distances and where they come from). The
+  -- skip is taken from the baseline and not from the bottom of the line:
+  -- \prevdepth is the last line's depth, so it comes off, and a line with
+  -- descenders no longer pushes the rule down, as in the editor, where the
+  -- rule is the border of a line box of a fixed height (measured with an air
+  -- of 0.57: the rule stood 0.571 em under a one-line h1 and 0.573 under a
+  -- wrapped one whose last line had descenders, where the depth had put it at
+  -- 0.58 and 1.05).
+  put("\\newcommand*{\\mdmheadrule}[1]{\\par\\nobreak" ..
+      "\\vskip\\dimexpr #1\\mdmem-\\prevdepth\\relax" ..
       "{\\color{mdmrule}\\hrule height 0.8pt}}")
   -- Two ways in, since the class is the document's to choose: KOMA, which is
   -- what Quarto gives a document that names none, restyles through its own
@@ -567,20 +626,60 @@ local function look_tex(l)
   -- empty, and the patch is a no-op there rather than an error.
   put("\\RequirePackage{etoolbox}")
   put("\\patchcmd{\\@maketitle}{\\vskip 1.5em}{\\vskip 0.5em}{}{}")
-  -- The heading sizes of the two faces, in ems of the body text and by the
-  -- level of the Markdown heading, not by what LaTeX calls the command that
-  -- draws it: `##` is \subsection here because Pandoc writes it that way, and
-  -- it takes the size the editor gives an h2 in the face the document is set
-  -- in. The sans ladder is Markdown's own (2 / 1.5 / 1.25 / 1.1) and the
-  -- roman one is article.cls's (\huge / \LARGE / \Large / \large over a
-  -- 10 pt body: 2.074 / 1.728 / 1.44 / 1.2), which is where the editor's
-  -- roman ladder was read off too (style.css, `#app.mdm-text--roman
-  -- .cm-line.mdm-h1`, and mdm-roman.css for the exported page). Leading is
-  -- 1.3 of the size in both, as it has been since the sans ladder was
-  -- written.
-  local HEAD = roman
-    and { { "2.074", "2.7" }, { "1.728", "2.25" }, { "1.44", "1.87" }, { "1.2", "1.56" } }
-    or { { "2", "2.6" }, { "1.5", "1.95" }, { "1.25", "1.63" }, { "1.1", "1.43" } }
+  -- The title at the size and weight the page gives it, 2 ems of the body at
+  -- a 1.3 leading and bold (`body .title` in mdm-look.css draws it as an h1:
+  -- 32px and 600 on the 16px body, measured), where the class drew it at its
+  -- own \LARGE in an article, 1.728 of the body, and \huge under KOMA, 1.894
+  -- (measured). Patched in both shapes of \@maketitle; a class that has
+  -- neither keeps its own, the failure branches being empty. The subtitle
+  -- Pandoc hangs off \@title in \large would take the title's bold with it,
+  -- where the page sets it at 300, so it goes back to the medium weight. Its
+  -- size and the author's stay the class's, \large, against the page's 1.33
+  -- and 0.9 of the body, and the block stays centred where the page sets it
+  -- flush left (measured). Open.
+  local title = "\\fontsize{2\\mdmem}{2.6\\mdmem}\\linespread{1}\\selectfont\\bfseries"
+  put("\\patchcmd{\\@maketitle}{\\LARGE \\@title}{" .. title .. " \\@title}{}{}")
+  put("\\patchcmd{\\@maketitle}{\\huge \\@title}{" .. title .. " \\@title}{}{}")
+  put("\\AtBeginDocument{\\patchcmd{\\@title}{\\large}{\\mdseries\\large}{}{}}")
+  -- The heading sizes, in ems of the body text and by the level of the
+  -- Markdown heading, not by what LaTeX calls the command that draws it. One
+  -- ladder for both faces, the editor's (style.css, after
+  -- `#app .cm-line.mdm-h6`): Markdown's 2 / 1.5 / 1.25 at the top, then each
+  -- level halving what the one above stands over the body, 1.125 and 1.0625,
+  -- down to the body at h6. Leading is 1.3 of the size, the editor's, written
+  -- to the last digit: rounded to two places it set a wrapped h3's lines
+  -- 1.304 of its size apart (measured).
+  local HEAD = {
+    { "2", "2.6" }, { "1.5", "1.95" }, { "1.25", "1.625" },
+    { "1.125", "1.4625" }, { "1.0625", "1.38125" }, { "1", "1.3" },
+  }
+  -- The command each level is drawn with (heading_commands, over look_tex):
+  -- `#` is \section in an article and \chapter in a class with chapters, and
+  -- every level under it one command further down. Sized by the command's
+  -- name, as this used to be, a class with chapters drew `#` at its own size
+  -- (2.488 under report and book, 1.894 under scrreprt and scrbook, 2.074
+  -- under memoir) and every level from `##` down at the size of the level
+  -- above it (measured). A sixth level has a command only under chapters,
+  -- where it is \subparagraph; in an article Pandoc has none for it and
+  -- writes a plain paragraph, so the Header filter (sixth_heading) sends it
+  -- to \mdmheadsix below, bold at the body's size as the editor draws it.
+  -- Every level has a format of its own, so Quarto's block-headings wrapper
+  -- decides nothing any more. It rewraps \paragraph and \subparagraph to
+  -- stand free of the text, titlesec then had no format for the rewrapped
+  -- \subparagraph, and a `#####` under `documentclass: article`, or a `######`
+  -- under report or book, stopped the PDF with "titlesec Error: No format for
+  -- this command" (reproduced with the filter as it stood).
+  -- \linespread{1} goes before \selectfont in every heading's font, so that
+  -- the leading written in HEAD is the one drawn: the \linespread{1.417} of
+  -- the prose was multiplied into it, and a heading that wrapped was measured
+  -- at 1.84 of its size from one line to the next. Now 1.300 at every level,
+  -- in both faces, under article, report, book, scrartcl, scrreprt and
+  -- scrbook (measured). The heading's strut comes from the same leading, so
+  -- the air over a heading shrank with it: an h2 stood 4.48 em under the
+  -- prose over it in an article and 5.10 under KOMA, and stands 3.67 and 4.29
+  -- now, where the editor leaves 3.91 (baseline to baseline, measured).
+  local heads = l.heads or { "section", "subsection", "subsubsection", "paragraph", "subparagraph" }
+  local LEAD = "\\linespread{1}"
   put("\\@ifundefined{sectionlinesformat}{%")
   put("  \\def\\ps@plain{\\let\\@mkboth\\@gobbletwo")
   put("    \\let\\@oddhead\\@empty\\let\\@evenhead\\@empty")
@@ -588,15 +687,72 @@ local function look_tex(l)
   put("    \\let\\@evenfoot\\@oddfoot}%")
   put("  \\pagestyle{plain}%")
   put("  \\RequirePackage{titlesec}%")
-  local function titled(cmd, counter, size, leading, rule)
-    put("  \\titleformat{\\" .. cmd .. "}{\\color{mdmink}\\bfseries\\fontsize{" ..
-        size .. "\\mdmem}{" .. leading .. "\\mdmem}\\selectfont}{\\" .. counter ..
-        "}{1em}{}" .. (rule and "[{\\color{mdmrule}\\titlerule[0.8pt]}]" or "") .. "%")
+  -- Under a standard class the air around a heading goes by its level too,
+  -- so that a level has the same air whichever command draws it: left to its
+  -- command, a `##` under report is a \section and took the air of an
+  -- article's `#`. These are article.cls's own skips for \section,
+  -- \subsection and \subsubsection, and for the levels under them the 3ex
+  -- and 2ex titlesec falls back to, which is what an article has drawn them
+  -- with so far. An ex is the body's here, titlesec reading these before it
+  -- sets the heading's own size. The 0pt on the left takes out the
+  -- \parindent article.cls indents a \subparagraph by.
+  -- Against the editor the paper stands 0.18 to 0.26 em short over h2 to h6,
+  -- and from 0.74 em short to 0.20 over under them (in the sans, which the
+  -- editor's roman matches once its heading lines keep their height;
+  -- baseline to baseline, measured). Open.
+  local AIR = {
+    { "3.5ex plus 1ex minus .2ex", "2.3ex plus .2ex" },
+    { "3.25ex plus 1ex minus .2ex", "1.5ex plus .2ex" },
+    { "3.25ex plus 1ex minus .2ex", "1.5ex plus .2ex" },
+    { "3ex plus .9ex minus .18ex", "2ex plus .2ex" },
+    { "3ex plus .9ex minus .18ex", "2ex plus .2ex" },
+    { "3ex plus .9ex minus .18ex", "2ex plus .2ex" },
+  }
+  -- A chapter is drawn the way an article draws its `#`, which takes
+  -- titlesec's straight class. In the top class titlesec keeps \chapter in,
+  -- the air over it goes in through a \vspace* that stays at the top of the
+  -- page, and Quarto's \parskip goes in over and under it besides: the
+  -- chapter's baseline stood 6.05 em under the top of the text where an
+  -- article's `#` stands 1.82 (measured in the roman; the sans within 0.02
+  -- em), and in the straight class it stands where the article's does, to
+  -- the thousandth of an em in both faces (pdftotext's word boxes, measured
+  -- under report and book). The page break is the class's own, the first
+  -- three things report.cls and book.cls do in \chapter: a fresh page (a
+  -- right-hand one where the class opens chapters there), the plain style on
+  -- it, and no float over the heading. The straight class leaves out the
+  -- break under a heading that has just been set, and a `#` straight under
+  -- another `#` came out on the same page as it (measured under report); the
+  -- \@nobreakfalse puts the class's behaviour back. A number, when the
+  -- document asks for them, hangs before the title as a section's does, `1
+  -- Introduction` on one line, where report.cls sets `Chapter 1` on a line
+  -- of its own over it.
+  if heads[1] == "chapter" then
+    put("  \\titleclass{\\chapter}{straight}%")
+    put("  \\providecommand*{\\chapterbreak}{\\if@openright\\cleardoublepage\\else\\clearpage\\fi")
+    put("    \\thispagestyle{plain}\\global\\@topnum\\z@}%")
+    put("  \\preto\\chapter{\\global\\@nobreakfalse}%")
   end
-  titled("section", "thesection", HEAD[1][1], HEAD[1][2], true)
-  titled("subsection", "thesubsection", HEAD[2][1], HEAD[2][2], true)
-  titled("subsubsection", "thesubsubsection", HEAD[3][1], HEAD[3][2], false)
-  titled("paragraph", "theparagraph", HEAD[4][1], HEAD[4][2], false)
+  for level = 1, 6 do
+    local cmd = heads[level]
+    if cmd then
+      put("  \\titleformat{\\" .. cmd .. "}[hang]{\\color{mdmink}\\bfseries" .. LEAD ..
+          "\\fontsize{" .. HEAD[level][1] .. "\\mdmem}{" .. HEAD[level][2] ..
+          "\\mdmem}\\selectfont}{\\the" .. cmd .. "}{1em}{}" ..
+          (level <= 2 and "[\\mdmheadrule{" .. HEAD_RULE_AIR[roman and "roman" or "sans"][level] ..
+            "}]" or "") .. "%")
+      put("  \\titlespacing*{\\" .. cmd .. "}{0pt}{" .. AIR[level][1] .. "}{" ..
+          AIR[level][2] .. "}%")
+    end
+  end
+  -- The sixth level in an article, where Pandoc has no command for it and
+  -- writes it as a plain paragraph (the Header filter, further down, hands it
+  -- here instead): bold, at the body's size and leading, flush, with the air
+  -- the levels over it have, and the paragraph after it neither indented nor
+  -- parted from it by a page.
+  put("  \\newcommand*{\\mdmheadsix}[1]{\\par\\addvspace{" .. AIR[6][1] .. "}" ..
+      "{\\noindent\\color{mdmink}\\bfseries" .. LEAD .. "\\fontsize{" .. HEAD[6][1] ..
+      "\\mdmem}{" .. HEAD[6][2] .. "\\mdmem}\\selectfont #1\\par}" ..
+      "\\nobreak\\vskip " .. AIR[6][2] .. "\\relax\\@afterheading}%")
   put("}{%")
   put("  \\setkomafont{disposition}{\\bfseries\\color{mdmink}}%")
   -- pagenumber and not pageheadfoot alone: KOMA's pagenumber element opens
@@ -604,20 +760,80 @@ local function look_tex(l)
   -- set before it (measured: the folio stayed black on the dark side).
   put("  \\setkomafont{pageheadfoot}{\\color{mdmink}}%")
   put("  \\addtokomafont{pagenumber}{\\color{mdmink}}%")
-  local function komafont(cmd, size, leading)
-    put("  \\addtokomafont{" .. cmd .. "}{\\fontsize{" .. size ..
-        "\\mdmem}{" .. leading .. "\\mdmem}\\selectfont}%")
+  -- KOMA sets a subtitle with an element of its own, which takes the title's
+  -- font and with it the bold of the disposition above; the page sets the
+  -- subtitle at 300 (measured), so it goes back to the medium weight here as
+  -- it does under a standard class (the \@title patch over the headings).
+  put("  \\addtokomafont{subtitle}{\\mdseries}%")
+  for level = 1, 6 do
+    local cmd = heads[level]
+    if cmd then
+      put("  \\addtokomafont{" .. cmd .. "}{\\fontsize{" .. HEAD[level][1] .. "\\mdmem}{" ..
+          HEAD[level][2] .. "\\mdmem}" .. LEAD .. "\\selectfont}%")
+    end
   end
-  komafont("section", HEAD[1][1], HEAD[1][2])
-  komafont("subsection", HEAD[2][1], HEAD[2][2])
-  komafont("subsubsection", HEAD[3][1], HEAD[3][2])
-  komafont("paragraph", HEAD[4][1], HEAD[4][2])
+  -- Under KOMA every level under the first stands on a line of its own,
+  -- flush with the text, with the skips KOMA gives a \subsection, whatever
+  -- command draws it; under chapters that is what gives \section the air of
+  -- the h2 it is (with its own skips it stood 0.13 em further from the prose
+  -- over it and 0.42 em further from the prose under it than the same `##`
+  -- in an article). KOMA runs \paragraph and \subparagraph in, the text going
+  -- on after them on the same line; Quarto's template stands them apart by
+  -- closing each with an empty \mbox, but the heading is then the start of a
+  -- paragraph that ends after its font has closed, so a wrapped one took the
+  -- body's leading, 1.564 and 1.656 of its size (measured). Redeclared with a
+  -- positive afterskip they are displayed headings as \subsubsection is, and
+  -- the redeclaration defines the command anew, so Quarto's wrapper goes with
+  -- it. indent=\z@: KOMA indents a \subparagraph by the paragraph indent it
+  -- keeps aside, which under `indent: true` set `#####` 14.2 bp in from the
+  -- text in the roman and 11.6 in the sans (measured; the prose itself is
+  -- never indented here, the \raggedright above setting \parindent to zero).
+  -- The air under h3 to h6 is left open: 3.17 em from a heading's baseline to
+  -- the prose's on paper, 2.5 to 2.6 in the editor (measured, both faces).
+  local below = {}
+  for level = 2, 6 do
+    local cmd = heads[level]
+    if cmd and cmd ~= "chapter" and cmd ~= "part" then below[#below + 1] = cmd end
+  end
+  put("  \\RedeclareSectionCommands[beforeskip=-3.25ex\\@plus -1ex \\@minus -.2ex," ..
+      "afterskip=1.5ex \\@plus .2ex,indent=\\z@]{" .. table.concat(below, ",") .. "}%")
+  -- The sixth level in an article (the Header filter, further down), with
+  -- the skips every level under the first has here.
+  put("  \\newcommand*{\\mdmheadsix}[1]{\\par\\addvspace{3.25ex\\@plus 1ex\\@minus .2ex}" ..
+      "{\\noindent\\color{mdmink}\\bfseries" .. LEAD .. "\\fontsize{" .. HEAD[6][1] ..
+      "\\mdmem}{" .. HEAD[6][2] .. "\\mdmem}\\selectfont #1\\par}" ..
+      "\\nobreak\\vskip 1.5ex\\@plus .2ex\\relax\\@afterheading}%")
+  -- The rule goes under h1 and h2, whichever commands draw them, at the
+  -- distance the editor draws it at in this face (HEAD_RULE_AIR).
+  local air = HEAD_RULE_AIR[roman and "roman" or "sans"]
+  local ruled = "\\Ifstr{#1}{" .. heads[1] .. "}{\\mdmheadrule{" .. air[1] ..
+    "}}{\\Ifstr{#1}{" .. heads[2] .. "}{\\mdmheadrule{" .. air[2] .. "}}{}}"
   put("  \\renewcommand*{\\sectionlinesformat}[4]{%")
-  put("    \\@hangfrom{\\hskip #2#3}{#4}%")
-  put("    \\Ifstr{#1}{section}{\\mdmheadrule{" .. HEAD_RULE_AIR.section ..
-      "}}{\\Ifstr{#1}{subsection}{\\mdmheadrule{" .. HEAD_RULE_AIR.subsection ..
-      "}}{}}%")
+  put("    \\@hangfrom{\\hskip #2#3}{#4}" .. ruled .. "%")
   put("  }%")
+  -- A \chapter, where there are chapters, is the h1 the editor draws: the
+  -- size, the rule and the afterskip of the \section it stands for in an
+  -- article, the class's page break kept (a new page, and a right-hand one
+  -- under scrbook's open=right). beforeskip is nothing, since a chapter
+  -- always opens a page and a section that opens one loses its skip there:
+  -- with KOMA's default the title stood 7.2 em lower than an article's first
+  -- \section, and with nothing it is 0.187 em lower than KOMA's article sets
+  -- its `#` in the roman and 0.363 in the sans, KOMA hanging a chapter's first
+  -- line from \topskip and the heading's leading where the top of a page
+  -- hangs a section's from the height of its letters (pdftotext's word boxes,
+  -- measured under scrreprt and scrbook); that much is left. afterindent=false
+  -- says what the sign of a negative beforeskip used to, that the paragraph
+  -- after it is not indented. Under `chapterprefix=true`, where "Chapter 1"
+  -- stands on a line of its own over the title, the prefix format puts the
+  -- same rule under the title.
+  if heads[1] == "chapter" then
+    put("  \\@ifundefined{chapterlinesformat}{}{%")
+    put("    \\RedeclareSectionCommand[beforeskip=\\z@,afterindent=false," ..
+        "afterskip=2.3ex \\@plus .2ex]{chapter}%")
+    put("    \\renewcommand*{\\chapterlinesformat}[3]{\\@hangfrom{#2}{#3}" .. ruled .. "}%")
+    put("    \\renewcommand*{\\chapterlineswithprefixformat}[3]{#2#3" .. ruled .. "}%")
+    put("  }%")
+  end
   put("}")
   put("\\makeatother")
 
@@ -1811,6 +2027,10 @@ function Meta(meta)
     has_pdfcrop = command_exists("pdfcrop")
   end
   look = read_look(meta)
+  -- Which command each level of heading is written as, for the paper to size
+  -- the headings by level (heading_commands, over look_tex). A page has h1 to
+  -- h6 and nothing to ask.
+  if quarto.doc.is_format("latex") then look.heads = heading_commands(meta) end
   -- The look rides on every render, HTML or PDF, music in the document or
   -- none: the ground, the ink and the code cards are the document's.
   if quarto.doc.is_format("html") or quarto.doc.is_format("latex") then
@@ -1984,9 +2204,29 @@ local function document(doc)
   return render_math_pass(doc)
 end
 
--- Meta has to run before the CodeBlocks, since it settles the abcm2ps path.
--- Within the second table the Pandoc function runs after the element ones.
+-- A sixth-level heading on paper. Pandoc writes a level past \subparagraph
+-- as a plain paragraph, which in an article is `######`, and on paper it read
+-- as a line of prose: the regular face, with no more air over it than two
+-- paragraphs leave (measured). Where the class has no command for the sixth
+-- level (look.heads, from heading_commands) it goes out as the preamble's
+-- \mdmheadsix with its label, so that a link to it still lands; under a class
+-- with chapters it is \subparagraph, a heading already, and is left to it.
+local function sixth_heading(el)
+  if el.level ~= 6 or not quarto.doc.is_format("latex") then return nil end
+  if look and look.heads and look.heads[6] then return nil end
+  local inlines = pandoc.Inlines({ pandoc.RawInline("latex", "\\mdmheadsix{") })
+  inlines:extend(el.content)
+  local label = el.identifier:match("^[%w%-_.:]+$") and ("\\label{" .. el.identifier .. "}") or ""
+  inlines:insert(pandoc.RawInline("latex", "}" .. label))
+  return pandoc.Plain(inlines)
+end
+
+-- Meta has to run before the CodeBlocks, since it settles the abcm2ps path,
+-- and before the headings, since it settles which command each level of them
+-- is written as (look.heads). Within the second table the Pandoc function
+-- runs after the element ones.
 return {
   { Meta = Meta },
-  { CodeBlock = CodeBlock, HorizontalRule = horizontal_rule, Image = Image, Math = Math, Pandoc = document },
+  { CodeBlock = CodeBlock, Header = sixth_heading, HorizontalRule = horizontal_rule,
+    Image = Image, Math = Math, Pandoc = document },
 }

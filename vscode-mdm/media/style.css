@@ -718,49 +718,41 @@ body {
   font-size: 1.25em;
 }
 #app .cm-line.mdm-h4 {
-  font-size: 1.1em;
+  font-size: 1.125em;
 }
-#app .cm-line.mdm-h5,
+#app .cm-line.mdm-h5 {
+  font-size: 1.0625em;
+}
 #app .cm-line.mdm-h6 {
   font-size: 1em;
 }
-/* The ladder above is the one Markdown is usually drawn with, and it stays
-   the ladder of the sans. The roman gets another one, because the roman is
-   not a choice of face alone: it is Latin Modern, the face TeX sets a
-   document in, beside equations drawn in the same shapes, and a reader who
-   asks for it is asking for the page LaTeX would have made. So the headings
-   take the sizes article.cls gives its sections.
-   Read off the class rather than remembered (article.cls and size10.clo of
-   TeX Live 2025, which is what is installed here). article.cls sets
-   \subsubsection and \paragraph in \normalsize\bfseries, \subsection in
-   \large\bfseries and \section in \Large\bfseries; at the 10 pt an article
-   is by default, size10.clo makes \large 12 pt, \Large 14.4, \LARGE 17.28
-   and \huge 20.74. Over the body text that is 1, 1.2, 1.44, 1.728 and 2.074,
-   which is this ladder from the bottom up.
-   The bottom is the anchor: h6 is \subsubsection, which is the body text in
-   bold and nothing else, so `###### Heading` and `**Heading**` draw the same
-   and the base rule above already has it right. h4 is \subsection, h3 is
-   \section, and the two above them continue up LaTeX's own scale rather than
-   inventing steps of their own.
-   h5 is the one level LaTeX has no size for, since \subsubsection and
-   \paragraph share \normalsize and a Markdown ladder wants six distinct
-   steps. It is put halfway between the two it sits between, h6 at 1 and h4
-   at \large; the geometric middle of that interval is 1.095 and this is the
-   round number a rounding away from it. */
-#app.mdm-text--roman .cm-line.mdm-h1 {
-  font-size: 2.074em;
-}
-#app.mdm-text--roman .cm-line.mdm-h2 {
-  font-size: 1.728em;
-}
-#app.mdm-text--roman .cm-line.mdm-h3 {
-  font-size: 1.44em;
-}
-#app.mdm-text--roman .cm-line.mdm-h4 {
-  font-size: 1.2em;
-}
-#app.mdm-text--roman .cm-line.mdm-h5 {
-  font-size: 1.1em;
+/* The ladder above is one for both faces. Its top three steps are the ones
+   Markdown is usually drawn with, 2, 1.5 and 1.25: the sizes VS Code's own
+   Markdown preview gives h1 to h3 (markdown-language-features/media/
+   markdown.css, in 1.133), and the levels a document written in Markdown is
+   headed with, a title in `#` and its sections straight under it in `##`.
+   Below them that preview goes on to 1, 0.875 and 0.85 and ends under the
+   body; this one ends at it. Each level halves what the one above stands over
+   the body, an eighth at h4 and a sixteenth at h5, and h6 closes the gap, so
+   `###### Heading` and `**Heading**` draw the same.
+   Each face was given a ladder of its own at first. The sans stopped at the
+   body a level early, 1.1 at h4 and then 1 and 1, and the roman took the sizes
+   article.cls gives its sections (2.074, 1.728, 1.44, 1.2, and 1.1 for the
+   level LaTeX has no size for), which drew a section written as `##` at
+   \LARGE, 1.728 of the body, where article.cls itself sets a \section at
+   \Large, 1.44. */
+/* The two buffers CodeMirror puts around the hidden `## ` of a heading
+   (img.cm-widgetBuffer, 1em tall and aligned text-top by its base theme)
+   stood above the line in the roman: Latin Modern's content area at the
+   adjusted size is 40px for a 24px h2, over a line box of 31.2, so the
+   buffer's top rose over it and the line grew, 7px at h1, 5 at h2 and 4 at
+   the rest, the text going down with it. The heading then jumped when a
+   caret came in and the buffers went (55.17 to 50.17px for an h2,
+   measured), and stood that much lower than the exported page draws it.
+   Aligned with the top of the line they sit inside it at every level, and
+   the sans, whose content area is inside the line anyway, does not move. */
+#app .cm-line.mdm-h .cm-widgetBuffer {
+  vertical-align: top;
 }
 /* Paragraph spacing, taken from the Office Viewer preview: a line stands at
    1.7 of an em there (`--editor-line-height` in Vditor's sheet, which that

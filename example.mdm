@@ -14,7 +14,7 @@ filters:
 
 This document is ordinary Markdown, rendered and editable at once: text, **emphasis**, LaTeX equations, source code and, on top of that, music blocks that render as a score and play, with multicursor, an outline, a look set from the toolbar and export options.
 
-### From equations to score
+## From equations to score
 
 Take a string of length $L$, tension $T$ and linear density $\mu$, clamped at both ends. The boundary conditions $y(0,t) = y(L,t) = 0$ leave only the standing waves whose half wavelength fits an integer number of times in $L$, so the general motion is a sum over one integer:
 
@@ -41,7 +41,7 @@ P:ratios
 w: 2:1 3:2 4:3 5:4 6:5 7:6 8:7
 ```
 
-### From code to scores
+## From code to scores
 
 A Python loop is enough to walk the circle of fifths. One modular step, `d = (d + 3) % 7`, drops each root a fifth below the last, the $3:2$ of $\Delta_2 \approx 702$ cents from the previous section, and seven of them exhaust C major and land back at the start. The loop stacks every other note of the scale into a chord, reads its name off the gaps between its own notes, and prints the line that becomes the score below.
 
@@ -87,7 +87,7 @@ K:C
 "Dm7"[DFAc]4 | "G7"[GBdf]4 | "Cmaj7"[CEGB]4 | "Fmaj7"[FAce]4 | "Bm7b5"[Bdfa]4 | "E7"[E^GBd]4 | "Am7"[Aceg]4 | "A7"[A^ceg]4 |]
 ```
 
-### From score to sound
+## From score to sound
 
 In the editor the headphone on the block plays it, and each note lights up on the score as it sounds; in HTML the `.play` class puts a player bar under the score, and the PDF keeps the engraving alone.
 ```{.abc .play}

@@ -2900,55 +2900,87 @@ const headingSizes = (page) =>
     return out;
   });
 
-// The roman is not a choice of face alone: it is Latin Modern, what TeX sets a
-// document in, beside equations drawn in the same shapes, and a reader who
-// asks for it is asking for the page LaTeX would have made. So the headings
-// take the sizes article.cls gives its sections, read off the class rather
-// than invented: \subsubsection and \paragraph are \normalsize, \subsection is
-// \large and \section is \Large, and size10.clo makes those 12, 14.4, 17.28
-// and 20.74 points over the 10 an article is by default. Over the body text
-// that is 1, 1.2, 1.44, 1.728 and 2.074.
-test("the roman heads a section the way article.cls does", { skip }, async () => {
-  const h = await open({
-    text: HEADINGS_DOC,
-    scores: 0,
-    seed: { settings: { textFont: "roman" } },
+// One ladder for both faces: Markdown's own sizes at the top, where a
+// document written in Markdown is headed (a title in `#`, its sections in
+// `##`), and from there each level halving what the one above stands over the
+// body, down to h6 at the body itself. Each face had one of its own at first:
+// the sans stopped at the body a level early (1.1, then 1 and 1), and the
+// roman took article.cls's sizes, which drew a `##` section at \LARGE, 1.728
+// of the body.
+for (const face of ["roman", "sans"]) {
+  test("the " + face + " heads a document the way Markdown does, down to the body", { skip }, async () => {
+    const h = await open({
+      text: HEADINGS_DOC,
+      scores: 0,
+      seed: { settings: { textFont: face } },
+    });
+    const s = await headingSizes(h.page);
+    assert.equal(s.body, 16);
+    // Markdown's own three: the title, a section, a subsection.
+    assert.deepEqual([s.h1, s.h2, s.h3], [32, 24, 20], "the " + face + " left Markdown's top three");
+    // An eighth of the body over it, then a sixteenth.
+    assert.deepEqual([s.h4, s.h5], [18, 17], "the " + face + " left the halving under them");
+    // The anchor: `###### x` and `**x**` draw the same.
+    assert.equal(s.h6, s.body, "the " + face + "'s sixth level left the size of the prose");
+    assert.deepEqual(h.errors, []);
+    await h.close();
   });
-  const s = await headingSizes(h.page);
-  assert.equal(s.body, 16);
-  // \huge and \LARGE, the two steps of LaTeX's own scale above a section.
-  assert.equal(s.h1, +(16 * 2.074).toFixed(3));
-  assert.equal(s.h2, +(16 * 1.728).toFixed(3));
-  // \section and \subsection.
-  assert.equal(s.h3, +(16 * 1.44).toFixed(3));
-  assert.equal(s.h4, +(16 * 1.2).toFixed(3));
-  // The one level LaTeX has no size for, halfway between the two around it.
-  assert.equal(s.h5, +(16 * 1.1).toFixed(3));
-  // The anchor, and the reason the rest of the ladder lands where it does: a
-  // \subsubsection is the body text in bold and nothing else, so `###### x`
-  // and `**x**` have to draw the same.
-  assert.equal(s.h6, s.body, "the sixth level left the size of the prose");
-  assert.deepEqual(h.errors, []);
-  await h.close();
-});
+}
 
-// The sans keeps the ladder Markdown is usually drawn with, which is a
-// different one and deliberately so: the LaTeX sizes belong to the face that
-// is asking for a LaTeX page.
-test("the sans keeps the ladder Markdown is usually drawn with", { skip }, async () => {
-  const h = await open({
-    text: HEADINGS_DOC,
-    scores: 0,
-    seed: { settings: { textFont: "sans" } },
-  });
-  const s = await headingSizes(h.page);
-  assert.deepEqual(
-    [s.h1, s.h2, s.h3, s.h4, s.h5, s.h6],
-    [32, 24, 20, 17.6, 16, 16],
-    "the sans took the roman's ladder"
+// A heading's line keeps the height its line-height gives it, with the caret
+// away and in it. CodeMirror sets two buffers around the hidden `## ` of a
+// heading (img.cm-widgetBuffer, 1em tall, text-top in its base theme), and in
+// the roman they stood over the line: Latin Modern's content area at the
+// adjusted size is taller than a heading's 1.3 line, so the line grew, 7px at
+// h1, 5 at h2 and 4 at the rest, and the heading jumped when a caret came in
+// and the buffers went (55.17 to 50.17px for an h2, measured). The exported
+// page draws no buffer, so the two disagreed about where every heading sits.
+const headingLines = (page) =>
+  page.evaluate(() =>
+    [1, 2, 3, 4, 5, 6].map((n) => {
+      const el = document.querySelector("#app .cm-line.mdm-h" + n);
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const inner =
+        r.height -
+        parseFloat(cs.paddingTop) -
+        parseFloat(cs.paddingBottom) -
+        parseFloat(cs.borderTopWidth) -
+        parseFloat(cs.borderBottomWidth);
+      return { size: parseFloat(cs.fontSize), inner: +inner.toFixed(2) };
+    })
   );
-  assert.deepEqual(h.errors, []);
-  await h.close();
+
+test("a heading's line keeps its height, with the caret away and in it", { skip }, async () => {
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text: HEADINGS_DOC, scores: 0, seed: { settings: { textFont: face } } });
+    const away = await headingLines(h.page);
+    away.forEach((b, i) => {
+      assert.ok(
+        Math.abs(b.inner - 1.3 * b.size) < 0.5,
+        face + ": h" + (i + 1) + "'s line is " + b.inner + "px where 1.3 of its size is " +
+          (1.3 * b.size).toFixed(2)
+      );
+    });
+    for (let n = 1; n <= 6; n++) {
+      await h.page.evaluate((level) => {
+        const { view } = window.__mdm;
+        const at = view.state.doc.toString().indexOf("Level " + level);
+        view.dispatch({ selection: { anchor: at } });
+      }, n);
+      await h.page.evaluate(
+        () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      );
+      const inside = await headingLines(h.page);
+      assert.ok(
+        Math.abs(inside[n - 1].inner - away[n - 1].inner) < 0.5,
+        face + ": h" + n + "'s line went from " + away[n - 1].inner + "px to " +
+          inside[n - 1].inner + " with the caret in it"
+      );
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
 });
 
 // ---------- What a lit button means ----------
