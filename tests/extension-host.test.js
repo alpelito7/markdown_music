@@ -194,7 +194,6 @@ test("setSetting writes the outline and the Ctrl+D toggle, and no other word", a
     ]
   );
 });
-
 test("the webview HTML carries a CSP without eval, and the editor bundle", () => {
   const h = boot("Body\n", {});
   assert.ok(h.html.includes("Content-Security-Policy"));
@@ -284,7 +283,6 @@ test("setSetting drops unknown keys and disallowed values", async () => {
   await h.receive({ type: "setSetting", key: "__proto__", value: "dark" });
   assert.deepEqual(vscode._state.updates, []);
 });
-
 // ---------- ready / update ----------
 
 const DOC = "---\ntitle: t\n---\n\nIntro\n\n```{.abc .play}\nX:1\nK:C\nC\n```\n";
@@ -531,9 +529,17 @@ test("disposing the panel unsubscribes every listener", async () => {
 // ---------- Syntax palette ----------
 
 // A theme contributed the way the built-in ones are, with its file on the
-// real disk so that the extension reads it as it would in VS Code.
+// real disk so that the extension reads it as it would in VS Code. The
+// folders go when the file's tests are done: left behind, each run of the
+// suite added about fifteen mdm-theme-* folders to the system's temp
+// directory, and 562 had piled up there by 2026-09-11.
+const THEME_DIRS = [];
+test.after(() => {
+  for (const dir of THEME_DIRS) fs.rmSync(dir, { recursive: true, force: true });
+});
 function seedTheme(stringColor) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-theme-"));
+  THEME_DIRS.push(dir);
   fs.mkdirSync(path.join(dir, "themes"));
   fs.writeFileSync(
     path.join(dir, "themes", "t.json"),
@@ -609,7 +615,6 @@ test("setSetting writes a theme name and refuses one that is not installed", asy
   );
   h.dispose();
 });
-
 test("a theme name cannot close the script block it is written into", async () => {
   const installed = seedTheme("#e6db74");
   installed[0].packageJSON.contributes.themes[0].id =
@@ -684,7 +689,6 @@ test("a failing settings write surfaces as an error message", async () => {
   assert.equal(vscode._state.errorMessages.length, 1);
   assert.ok(vscode._state.errorMessages[0].message.includes("mdm.theme"));
 });
-
 // ---------- Audio wiring ----------
 
 test("the webview HTML wires the synth engine, the soundfont and the widget stylesheet", () => {
