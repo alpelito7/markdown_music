@@ -8,6 +8,8 @@ const {
   frontMatter,
   hiddenLines,
   toLf,
+  withLang,
+  langOf,
 } = require("./transforms");
 const { syntaxPalette, listThemes } = require("./theme");
 
@@ -22,6 +24,7 @@ function channel() {
 }
 
 function activate(context) {
+  globalState = context.globalState;
   context.subscriptions.push(channel());
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
@@ -43,7 +46,8 @@ function activate(context) {
 // This table is also the editor's memory: every toolbar button that holds a
 // state writes it here rather than painting itself, which is what makes a
 // document reopen looking as it was left, and what keeps two editors open on
-// two files in step.
+// two files in step. Word division is the one exception, kept for each
+// document of its own ("Word division is the document's own", below).
 const SETTINGS = {
   theme: ["auto", "light", "dark", "white"],
   scoreFill: ["none", "paper", "slate", "brass"],
@@ -54,7 +58,16 @@ const SETTINGS = {
   multicursorMatch: ["word", "substring"],
   followPlayhead: ["follow", "still"],
   textFont: ["roman", "sans"],
+  // Off first, and so the fallback as well as the default: words stay whole
+  // until a language is chosen from the hyphenation menu.
+  hyphenation: ["none", "auto"],
 };
+
+// The languages the hyphenation menu offers, which are the ones
+// media/hyphenation-patterns.js carries patterns for; the tests hold the menu,
+// this list and the patterns together. The tag a setLanguage message names is
+// written into the document, so a tag outside this list never is.
+const LANGUAGES = ["de", "en", "es", "fr", "it", "nl", "pl", "pt", "ru", "uk"];
 
 // The three values of mdm.theme that are looks of this editor rather than
 // names of VS Code themes. They carry their own palettes, so nothing of VS
@@ -118,6 +131,73 @@ function readSettings(installed) {
   return out;
 }
 
+// ---------- Word division is the document's own ----------
+//
+// Every other button of the bar is the editor's: one value in settings.json
+// for all the documents at once, which is what keeps two editors open on two
+// files in step. Word division is not, because the language a document is
+// written in belongs to the document, and a reader keeps documents in
+// several languages at once (the owner, 2026-09-11). So mdm.hyphenation is
+// where a document starts, and what a document was left on is kept here: in
+// the extension's globalState, which VS Code keeps across restarts and apart
+// from any workspace, under DOCUMENT_HYPHENATION, one entry per document URI.
+//
+// Nothing about it goes into the file, since turning division on is not an
+// edit; the language itself does, as `lang:` in the YAML header, which is
+// the document's own business either way (writeLanguage below).
+//
+// The URI is the document here, so a file renamed or moved starts over on
+// the setting. The object keeps its keys in the order the documents were
+// last used, opened or pressed in, and holds the DOCUMENTS_KEPT most recent:
+// an entry under an 80-character path is 89 bytes of JSON, so the 500 come
+// to about 46 KB.
+const DOCUMENT_HYPHENATION = "documentHyphenation";
+const DOCUMENTS_KEPT = 500;
+
+// context.globalState, handed over on activation.
+let globalState = null;
+
+// The divisions kept, by document URI. Anything but an object is read as
+// nothing kept: it can only be what a hand or an older version left.
+function keptDivisions() {
+  const all = globalState ? globalState.get(DOCUMENT_HYPHENATION) : undefined;
+  return all && typeof all === "object" && !Array.isArray(all) ? all : {};
+}
+
+// What this document was left on, or undefined. Read as an own key, since
+// what comes back is JSON off the disk and is data and not a prototype.
+function ownDivision(document) {
+  const all = keptDivisions();
+  const uri = document.uri.toString();
+  return Object.prototype.hasOwnProperty.call(all, uri) ? all[uri] : undefined;
+}
+
+// The division kept for this document, with the document moved to the end as
+// the one used last; the documents at the front are forgotten once there are
+// more than DOCUMENTS_KEPT.
+function keepDivision(document, value) {
+  const uri = document.uri.toString();
+  const all = Object.assign({}, keptDivisions());
+  delete all[uri];
+  all[uri] = value;
+  const uris = Object.keys(all);
+  uris.slice(0, Math.max(0, uris.length - DOCUMENTS_KEPT)).forEach((u) => {
+    delete all[u];
+  });
+  return globalState.update(DOCUMENT_HYPHENATION, all);
+}
+
+// The settings in force for one document: the editor's own (readSettings),
+// with the division this document was left on over the setting. A kept value
+// meets the same allowlist as one out of settings.json, since it is written
+// into the webview HTML just the same.
+function documentSettings(document, installed) {
+  const out = readSettings(installed);
+  const own = ownDivision(document);
+  if (SETTINGS.hyphenation.indexOf(own) !== -1) out.hyphenation = own;
+  return out;
+}
+
 // The syntax colours the webview paints the YAML header and the code blocks
 // with (theme.js): those of the theme chosen in mdm.theme, or of the VS Code
 // theme in use while that setting names no theme of its own. `palette` is
@@ -158,16 +238,26 @@ function inlineJson(value) {
 // editor via onDidChangeConfiguration. The value is written where it already
 // lives: a workspace that pinned the setting keeps overriding user settings,
 // so writing globally there would look like the button did nothing.
-async function writeSetting(key, value) {
+//
+// Word division is the exception: it is kept for the document the button was
+// pressed in (keepDivision above) and nothing is written to settings.json, so
+// no other document is touched. What comes back says which of the two
+// happened, and that is what tells the caller whether this editor has to be
+// told by hand: a write to settings.json reaches every editor by itself.
+async function writeSetting(document, key, value) {
   let stored;
   if (SETTINGS[key]) {
-    if (allowedValues(key).indexOf(value) === -1) return;
+    if (allowedValues(key).indexOf(value) === -1) return false;
     stored = value;
   } else if (NUMBER_SETTINGS[key]) {
-    if (typeof value !== "number" || !isFinite(value)) return;
+    if (typeof value !== "number" || !isFinite(value)) return false;
     stored = numberSetting(key, value);
   } else {
-    return;
+    return false;
+  }
+  if (key === "hyphenation") {
+    await keepDivision(document, stored);
+    return true;
   }
   const config = vscode.workspace.getConfiguration("mdm");
   const inspected = config.inspect(key);
@@ -176,6 +266,7 @@ async function writeSetting(key, value) {
       ? vscode.ConfigurationTarget.Workspace
       : vscode.ConfigurationTarget.Global;
   await config.update(key, stored, target);
+  return false;
 }
 
 // ---------- Export ----------
@@ -254,14 +345,28 @@ function metaColor(value) {
     .replace(/./g, (digit) => digit + digit);
 }
 
+// Word division as the editor draws it, which is while its button is lit:
+// division on, and the header naming a language the extension has patterns
+// for. The setting alone would say more than the editor shows. A header that
+// names no language keeps its words whole on screen, yet Quarto hands the
+// filter `lang: en` for it (measured on 1.9.37), so the page and the paper
+// would divide it as English; and a language without patterns here, Catalan
+// say, would go to TeX with division on and be divided on paper alone.
+function exportHyphenation(setting, text) {
+  const lang = langOf(text).split("-")[0];
+  return setting === "auto" && LANGUAGES.indexOf(lang) !== -1 ? "auto" : "none";
+}
+
 // The metadata arguments for one render. The palette goes only while it is on
 // the same side as the editor, again as the webview does (applyPalette):
 // mdm.theme can hold this editor to light with VS Code on a dark theme, and
-// dark syntax colours on a light ground are unreadable.
-function exportLook() {
+// dark syntax colours on a light ground are unreadable. `document` is the one
+// being exported, for the word division it keeps of its own
+// (documentSettings), and `text` its file, for the language its header names.
+function exportLook(document, text) {
   try {
     const installed = themes();
-    const settings = readSettings(installed);
+    const settings = documentSettings(document, installed);
     const side = exportSide(settings, installed);
     const args = [
       "-M",
@@ -279,6 +384,10 @@ function exportLook() {
       // whatever it was being read in.
       "-M",
       "mdm-text-font:" + settings.textFont,
+      // Word division as the editor draws it, not the setting alone
+      // (exportHyphenation above).
+      "-M",
+      "mdm-hyphenation:" + exportHyphenation(settings.hyphenation, text),
       // Not a colour, but the same kind of thing: what the editor is showing.
       // The title block Quarto draws from the YAML belongs to the header, so
       // an export from an editor that is hiding the header renders a document
@@ -681,7 +790,11 @@ async function exportDocument(document, to) {
     return;
   }
   const pretty = path.basename(file);
-  const args = renderArgs(text, copy, target.args.concat(exportLook()));
+  const args = renderArgs(
+    text,
+    copy,
+    target.args.concat(exportLook(document, text))
+  );
   channel().appendLine(
     "[" + new Date().toISOString() + "] " + pretty + " \u2192 " + to
   );
@@ -777,7 +890,15 @@ class MdmEditorProvider {
         docDir,
       ].concat(fileRoot ? [fileRoot] : []),
     };
-    webview.html = this.getHtml(webview, docDir, fileRoot);
+    webview.html = this.getHtml(webview, document, docDir, fileRoot);
+    // Opening a document that keeps a division of its own counts as using it,
+    // so the ones forgotten first are the ones not opened for longest
+    // (keepDivision). One that keeps none gains no entry by being opened. A
+    // failure here costs only that order, which is not worth a message.
+    const openedOn = ownDivision(document);
+    if (openedOn !== undefined) {
+      Promise.resolve(keepDivision(document, openedOn)).catch(() => {});
+    }
 
     // >0 while we apply changes that came from the webview to the
     // TextDocument, so we do not send them back (infinite echo). A counter and
@@ -820,17 +941,27 @@ class MdmEditorProvider {
     const paletteMsg = () =>
       Object.assign({ type: "palette" }, readPalette());
 
+    // The settings in force for this document, the division it keeps of its
+    // own included, and the document again behind them: mdm.frontMatter
+    // decides what the editor text holds, so the text is re-sent in whichever
+    // mode is now in force. The other settings only repaint, and for them
+    // this update lands on identical text and the webview drops it.
+    const sendSettings = () => {
+      webview.postMessage({
+        type: "settings",
+        settings: documentSettings(document),
+      });
+      webview.postMessage(updateMsg());
+    };
+
     const configSub = vscode.workspace.onDidChangeConfiguration((e) => {
       if (
         e.affectsConfiguration("mdm") ||
         e.affectsConfiguration("editor.multiCursorModifier")
       ) {
-        webview.postMessage({ type: "settings", settings: readSettings() });
-        // mdm.frontMatter decides what the editor text holds, so the document
-        // is re-sent in whichever mode is now in force. The other settings only
-        // repaint, and for them this update lands on identical text and the
-        // webview drops it.
-        webview.postMessage(updateMsg());
+        // Every editor hears a settings change, each with the division its
+        // own document keeps over what just changed.
+        sendSettings();
       }
       // mdm.theme can name a colour theme, and then it decides the palette.
       // Only that key: sending a palette after every mdm change made the
@@ -856,17 +987,67 @@ class MdmEditorProvider {
       themeSub.dispose();
     });
 
+    // What this side writes into the document, one write at a time: an edit
+    // typed in the editor, and the language the hyphenation menu puts in the
+    // header. Each reads the text as it stands and writes a whole new one,
+    // and a message's handler starts without waiting for the one before it
+    // to finish (see applyingFromWebview), so two writes in flight at once
+    // would both read the text from before either landed, and the later one
+    // would put back what the earlier one replaced.
+    let writing = Promise.resolve();
+    const inTurn = (write) => {
+      const turn = writing.then(write);
+      writing = turn.catch(() => {});
+      return turn;
+    };
+
+    // The language the hyphenation menu chose, as `lang:` in the header
+    // (withLang in transforms.js). Not counted as coming from the webview:
+    // the update this change sends back is how the editor learns the header
+    // it now has, and with the header hidden it has no other way to.
+    //
+    // A file that had none is given a header here, and what was asked for was
+    // word division and not three lines of YAML over the document: the
+    // document is put on the hidden mode first, so the header never appears
+    // on screen, and the button beside the menu, which greys out only for a
+    // file that has no header at all, is what opens it from then on. Before
+    // the edit, so that no frame of the document is drawn with the header in
+    // it. A file that already had one is left showing what it was showing.
+    const writeLanguage = async (lang) => {
+      const text = document.getText();
+      const newText = withLang(text, lang, eol());
+      if (newText === text) return;
+      // The header about to be written is not one the reader asked to see, so
+      // the editor is put on the hidden mode before the line lands and told at
+      // once. mdm.frontMatter is the editor's own setting and not the
+      // document's, so this hides the header of every open document; the YAML
+      // button of the toolbar, which a file with no header leaves greyed, is
+      // what opens it again from here on.
+      if (frontMatter(text) === "" && readSettings().frontMatter === "shown") {
+        await writeSetting(document, "frontMatter", "hidden");
+        sendSettings();
+      }
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), newText);
+      await vscode.workspace.applyEdit(edit);
+    };
+
     webview.onDidReceiveMessage(async (msg) => {
       if (msg.type === "ready") {
         webview.postMessage(updateMsg());
       } else if (msg.type === "setSetting") {
+        let own = false;
         try {
-          await writeSetting(msg.key, msg.value);
+          own = await writeSetting(document, msg.key, msg.value);
         } catch (e) {
           vscode.window.showErrorMessage(
             "MDM: could not save mdm." + msg.key + " (" + e.message + ")"
           );
         }
+        // A setting written to settings.json reaches this editor and every
+        // other through onDidChangeConfiguration below; a division kept for
+        // this document alone is this editor's to be told of.
+        if (own) sendSettings();
       } else if (msg.type === "export") {
         try {
           await exportDocument(document, msg.to);
@@ -874,37 +1055,43 @@ class MdmEditorProvider {
           vscode.window.showErrorMessage("MDM: export failed (" + e.message + ")");
         }
       } else if (msg.type === "edit") {
-        const newText = fromEditor(
-          msg.text,
-          document.getText(),
-          !!msg.withFrontMatter,
-          eol()
-        );
-        if (newText === document.getText()) return;
-        applyingFromWebview++;
-        try {
-          const edit = new vscode.WorkspaceEdit();
-          const fullRange = new vscode.Range(0, 0, document.lineCount, 0);
-          edit.replace(document.uri, fullRange, newText);
-          await vscode.workspace.applyEdit(edit);
-        } finally {
-          applyingFromWebview--;
-        }
-        // Convergence echo, ONLY when the document ended up differing from
-        // what the webview sent (an external update crossed in flight, or a
-        // host-side canonicalization changed the body). Echoing unconditionally
-        // re-rendered the editor after every first edit, destroying the fresh
-        // empty paragraph a lone Enter creates (empty paragraphs do not
-        // serialize), which read as "my Enter got reverted".
-        const echo = updateMsg();
-        if (echo.text !== msg.text) {
-          webview.postMessage(echo);
-        }
+        await inTurn(async () => {
+          const newText = fromEditor(
+            msg.text,
+            document.getText(),
+            !!msg.withFrontMatter,
+            eol()
+          );
+          if (newText === document.getText()) return;
+          applyingFromWebview++;
+          try {
+            const edit = new vscode.WorkspaceEdit();
+            const fullRange = new vscode.Range(0, 0, document.lineCount, 0);
+            edit.replace(document.uri, fullRange, newText);
+            await vscode.workspace.applyEdit(edit);
+          } finally {
+            applyingFromWebview--;
+          }
+          // Convergence echo, ONLY when the document ended up differing from
+          // what the webview sent (an external update crossed in flight, or a
+          // host-side canonicalization changed the body). Echoing
+          // unconditionally re-rendered the editor after every first edit,
+          // destroying the fresh empty paragraph a lone Enter creates (empty
+          // paragraphs do not serialize), which read as "my Enter got
+          // reverted".
+          const echo = updateMsg();
+          if (echo.text !== msg.text) {
+            webview.postMessage(echo);
+          }
+        });
+      } else if (msg.type === "setLanguage") {
+        if (LANGUAGES.indexOf(msg.lang) === -1) return;
+        await inTurn(() => writeLanguage(msg.lang));
       }
     });
   }
 
-  getHtml(webview, docDir, fileRoot) {
+  getHtml(webview, document, docDir, fileRoot) {
     const mediaUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, "media")
     );
@@ -935,12 +1122,14 @@ class MdmEditorProvider {
 window.MDM_DOC_BASE = ${inlineJson(docBase)};
 window.MDM_FILE_BASE = ${inlineJson(fileBase)};
 window.MDM_SOUNDFONT = "${mediaUri}/vendor/soundfont/";
-window.MDM_SETTINGS = ${inlineJson(readSettings())};
+window.MDM_SETTINGS = ${inlineJson(documentSettings(document))};
 window.MDM_THEMES = ${inlineJson(themes())};
 window.MDM_PALETTE = ${inlineJson(readPalette())};
 </script>
 <script src="${mediaUri}/vendor/cm6/cm6.bundle.js"></script>
 <script src="${mediaUri}/vendor/abcjs/abcjs-basic-min.js"></script>
+<script src="${mediaUri}/hyphenation-patterns.js"></script>
+<script src="${mediaUri}/mdm-hyphenation.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -954,7 +1143,9 @@ function deactivate() {}
 
 // withFilter, withReader, withBreaks, hasScores and renderArgs are pure and
 // are exported for the tests: they decide what Quarto is handed, which is the
-// half of the export that can be checked without running anything.
+// half of the export that can be checked without running anything. The key
+// and the bound of the divisions kept go out for the tests as well, which
+// seed and read VS Code's globalState through them.
 module.exports = {
   activate,
   deactivate,
@@ -965,4 +1156,7 @@ module.exports = {
   renderArgs,
   FILTER,
   READER,
+  LANGUAGES,
+  DOCUMENT_HYPHENATION,
+  DOCUMENTS_KEPT,
 };

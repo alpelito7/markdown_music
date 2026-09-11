@@ -19,6 +19,9 @@ Repeats, ties, lyrics, several voices and the rest of the notation are in the [A
 
 The text is set in Latin Modern Roman, the face of a LaTeX document, which comes with the extension and needs no LaTeX installed. The font button switches it to the system's sans, the face Markdown is usually written in; code keeps its monospace either way.
 
+### Hyphenation
+
+Words are kept whole at line endings until a language is chosen from the hyphenation menu: German, English, Spanish, French, Italian, Dutch, Polish, Portuguese, Russian or Ukrainian. Choosing one divides the prose and writes the language into the YAML header (`lang: en` for English), adding a header if the file had none, which comes up hidden until the YAML button beside the menu opens it. The hyphen is only drawn at the wrap, so copying and saving keep each word as it was typed. Division is remembered per file, since a document in Spanish and one in English can be open side by side; every other button of the bar is the editor's and is shared by all of them.
 
 ### Multicursor
 
@@ -30,7 +33,7 @@ While a tune plays, a brass playhead walks the staff and the page scrolls to kee
 
 ### Export
 
-The export button writes the document as HTML or PDF, with the font the editor is using. It needs [Quarto](https://quarto.org) 1.4 or later, and a PDF also needs TeX; with Chrome or Chromium, the PDF draws scores and equations as the editor does. The editor itself needs none of them.
+The export button writes the document as HTML or PDF, with the font and the hyphenation the editor is using. It needs [Quarto](https://quarto.org) 1.4 or later, and a PDF also needs TeX; with Chrome or Chromium, the PDF draws scores and equations as the editor does. The editor itself needs none of them.
 
 ## Documentation and licence
 

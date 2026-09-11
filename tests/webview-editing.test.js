@@ -1755,6 +1755,7 @@ const BAR = [
   "|",
   "mdm-theme",
   "mdm-text-font",
+  "mdm-hyphenation",
   "mdm-front-matter",
   "|",
   "mdm-score-fill",

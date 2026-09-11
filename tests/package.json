@@ -4,9 +4,10 @@
   "description": "Regression test suite for MDM (Quarto extension + VS Code editor)",
   "scripts": {
     "test": "node --test --test-concurrency=1 *.test.js",
-    "test:fast": "node --test transforms.test.js extension-host.test.js theme.test.js audio-assets.test.js packaging.test.js",
+    "test:fast": "node --test transforms.test.js extension-host.test.js theme.test.js audio-assets.test.js packaging.test.js hyphenation.test.js",
     "test:render": "node --test render.test.js",
     "test:webview": "node --test --test-concurrency=1 webview-*.test.js",
+    "test:hyphenation": "node --test --test-concurrency=1 hyphenation.test.js webview-hyphenation.test.js hyphenation-export.test.js",
     "test:html": "node --test --test-concurrency=1 html.test.js"
   },
   "devDependencies": {

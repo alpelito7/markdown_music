@@ -744,7 +744,11 @@ test("the look rides on every PDF render, and reads the same metadata", () => {
     "the code size is applied twice"
   );
   // Ragged right and no font expansion, which is how a browser sets a line.
+  // Words kept whole, which is what a render that names no mdm-hyphenation
+  // gets: off is the editor's default and the filter's fallback alike. The
+  // divided case is in hyphenation-export.test.js.
   assert.ok(tex.includes("\\AtBeginDocument{\\raggedright}"), "the text is justified");
+  assert.ok(tex.includes("\\hyphenpenalty=10000\\relax"), "words divide on paper with no language chosen");
   assert.ok(
     tex.includes("\\microtypesetup{expansion=false}"),
     "microtype is still squeezing the glyphs of a line"
@@ -826,10 +830,10 @@ filters:
 This document is ordinary Markdown, rendered and editable at once: text, **emphasis**, LaTeX equations, source code and, on top of that, music blocks that render as a score and play, with multicursor, an outline, a look set from the toolbar and export options.
 `;
 
-test("a paragraph breaks where the editor breaks it", () => {
+test("with word division off, a paragraph keeps the editor's whole-word breaks", () => {
   const dir = freshDir("breaks");
   fs.writeFileSync(path.join(dir, "doc.mdm"), PARAGRAPH_DOC);
-  const r = runMdm(["render", "doc.mdm", "--to", "pdf"], dir);
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-hyphenation:none"], dir);
   assert.equal(r.status, 0, r.stderr);
   const gs = spawnSync(
     "gs",

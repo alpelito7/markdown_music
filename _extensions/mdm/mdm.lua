@@ -181,6 +181,13 @@ local function read_look(meta)
     -- toolbar comes out in the face it was being read in; a plain
     -- `bin/mdm render`, which passes no look at all, keeps the sans.
     text_font = meta_word(meta, "mdm-text-font", { roman = true, sans = true }, "sans"),
+    -- Off unless the editor names it. The editor divides only a document
+    -- whose header names a language it has patterns for, and it is the host
+    -- that tells (exportHyphenation in extension.js): by the time this filter
+    -- reads the metadata, Quarto has given a document without a `lang` its
+    -- default `en` (measured on Quarto 1.9.37), so from here a language that
+    -- was written and one that was assumed look the same.
+    hyphenation = meta_word(meta, "mdm-hyphenation", { none = true, auto = true }, "none"),
     -- Which engraver draws the PDF: the editor's own abcjs through Chrome,
     -- unless the document asks for abcm2ps (or no Chrome is found).
     engraver = meta_word(meta, "mdm-engraver", { abcjs = true, abcm2ps = true }, "abcjs"),
@@ -255,6 +262,7 @@ local function look_css(l)
   if l.text_font == "roman" then
     put("text", '"Latin Modern Roman", Georgia, "Times New Roman", serif')
   end
+  put("hyphenation", l.hyphenation)
   return "<style>\nhtml:root {\n" .. table.concat(lines, "\n") .. "\n}\n</style>"
 end
 
@@ -405,6 +413,14 @@ local function look_tex(l)
   end
 
   put("%% ---------- MDM: the page dressed as the editor ----------")
+  -- TeX chooses its own page breaks. The toolbar's choice still decides
+  -- whether words may divide, with the same minimum fragments as the screen.
+  if l.hyphenation == "none" then
+    put("\\hyphenpenalty=10000\\relax")
+  elseif l.hyphenation == "auto" then
+    put("\\hyphenpenalty=50\\relax")
+    put("\\AtBeginDocument{\\lefthyphenmin=3\\righthyphenmin=3}")
+  end
   local fallback = FALLBACK_COLORS[PALETTE_SIDES[l.side] or "light"]
   for _, slot in ipairs(SYNTAX_SLOTS) do
     color("mdmsyn" .. slot, l.colors[slot] or fallback[slot])
@@ -595,7 +611,14 @@ local function look_tex(l)
   -- more per line than the editor showed (measured on the opening paragraph of
   -- example.mdm: `source code` where the editor breaks after `source`).
   put("\\@ifpackageloaded{microtype}{\\microtypesetup{expansion=false}}{}")
-  put("\\AtBeginDocument{\\raggedright}")
+  if l.hyphenation == "auto" then
+    -- Infinite right stretch in raggedright makes a short line cost nothing,
+    -- so TeX never needs a discretionary hyphen. Finite stretch enables word
+    -- division while retaining a ragged edge and fixed interword spaces.
+    put("\\AtBeginDocument{\\raggedright\\rightskip=0pt plus 2em\\relax}")
+  else
+    put("\\AtBeginDocument{\\raggedright}")
+  end
   -- The rule under a heading, #1 ems of the body under the baseline of its
   -- last line (HEAD_RULE_AIR has the distances and where they come from). The
   -- skip is taken from the baseline and not from the bottom of the line:
@@ -1003,6 +1026,13 @@ local function ensure_look()
     })
   end
   quarto.doc.include_text("in-header", look_css(look))
+  if look.hyphenation == "auto" then
+    quarto.doc.add_html_dependency({
+      name = "mdm-hyphenation",
+      version = "1.0.0",
+      scripts = { "resources/hyphenation-patterns.js", "resources/mdm-hyphenation.js" },
+    })
+  end
 end
 
 local function ensure_html_deps()

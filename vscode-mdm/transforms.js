@@ -93,4 +93,51 @@ function hiddenLines(text, withFrontMatter) {
   return (toLf(fm + gapAfter(text, fm)).match(/\n/g) || []).length;
 }
 
-module.exports = { toEditor, fromEditor, frontMatter, hiddenLines, toLf, toEol };
+// The language the header names, read the way the editor reads it to divide
+// words (language() in media/mdm-hyphenation.js, which the tests hold this
+// to): a top-level `lang:` holding a plain BCP 47 tag.
+const LANG_TAG = /^lang:[ \t]*["']?([a-z]{2,3}(?:-[a-z0-9]+)*)["']?[ \t]*(?:#.*)?$/im;
+
+// That language, lowercased, or "" for a file whose header names none, which
+// the editor keeps whole and does not take for English. Any line endings:
+// splitFrontMatter takes both, and a multiline `$` stops before a \r as it
+// does before a \n (a toLf here changed no result, checked by mutation).
+function langOf(text) {
+  const fm = splitFrontMatter(text)[0];
+  const named = fm ? LANG_TAG.exec(fm) : null;
+  return named ? named[1].toLowerCase() : "";
+}
+
+// The file after the hyphenation menu has picked a language: `lang: xx` at
+// the top level of the YAML header, the line Quarto reads for the language of
+// the page and the paper and the one the editor reads for the patterns it
+// divides words with. A header already in that language, a regional tag
+// included (es-CU for es), comes back untouched. Any other top-level `lang:`
+// is replaced along with the indented lines that continue it, since a second
+// key of the same name makes the header invalid YAML. Without one, the line
+// goes last, above the closing fence and at the left margin, so it closes
+// whatever block ends the header instead of joining it. A file with no header
+// gets one holding only that line, and the blank line Pandoc wants under it.
+// `eol` as in fromEditor.
+function withLang(text, lang, eol) {
+  const lf = toLf(text);
+  const fm = splitFrontMatter(lf)[0];
+  const line = "lang: " + lang;
+  if (!fm) return toEol("---\n" + line + "\n---\n\n" + lf, eol);
+  const named = LANG_TAG.exec(fm);
+  if (named && named[1].toLowerCase().split("-")[0] === lang) return text;
+  const lines = fm.replace(/\n$/, "").split("\n");
+  const last = lines.length - 1; // the closing fence
+  const at = lines.findIndex((l, i) => i > 0 && i < last && /^lang[ \t]*:/i.test(l));
+  if (at === -1) {
+    lines.splice(last, 0, line);
+  } else {
+    let end = at + 1;
+    while (end < last && /^[ \t]/.test(lines[end])) end++;
+    lines.splice(at, end - at, line);
+  }
+  const header = lines.join("\n") + (fm.endsWith("\n") ? "\n" : "");
+  return toEol(header + lf.slice(fm.length), eol);
+}
+
+module.exports = { toEditor, fromEditor, frontMatter, hiddenLines, toLf, toEol, withLang, langOf };

@@ -255,6 +255,12 @@ body main.content > section:first-child > :is(h1, h2, h3, h4, h5, h6):first-chil
 body p {
   margin: 0 0 1em;
 }
+body .mdm-hyphen::after {
+  content: "\00ad";
+}
+body main.content {
+  hyphens: manual;
+}
 body a,
 body a:visited {
   color: var(--mdm-link);

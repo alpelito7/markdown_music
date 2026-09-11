@@ -22,13 +22,16 @@
   let staffLines = SETTINGS.staffLines || "gray";
   let scoreAlign = SETTINGS.scoreAlign || "center";
   let frontMatter = SETTINGS.frontMatter || "hidden";
+  let hyphenation = SETTINGS.hyphenation || "none";
   // VS Code's own editor.multiCursorModifier ("alt" or "ctrlCmd"): the click
   // that adds a caret here is the one the user already makes in text editors.
   let multiCursorModifier = SETTINGS.multiCursorModifier || "alt";
 
   // The webview never writes a setting itself: it asks the host, which stores
   // it and echoes the stored value back as a "settings" message. That keeps
-  // every open .mdm editor in step and makes a choice survive a reload.
+  // every open .mdm editor in step and makes a choice survive a reload. Word
+  // division is the exception: the host keeps that one per document, so what
+  // comes back for it is this document's own.
   function askSetting(key, value) {
     vscode.postMessage({ type: "setSetting", key: key, value: value });
   }
@@ -475,6 +478,120 @@
         return document.fonts.load(face);
       })
     ).then(remeasureText, remeasureText);
+  }
+
+  // ---------- Word division ----------
+
+  // A menu, like the theme and the score fill: its first entry keeps words
+  // whole, which is the default, and each of the others divides them in one
+  // of the languages the extension carries patterns for
+  // (hyphenation-patterns.js). A language is two choices at once. Dividing
+  // words at all is a look of the editor, mdm.hyphenation, kept with the
+  // others and carried to the export as the face of the text is; the language
+  // is the document's, so it goes into the header as `lang:`, the line Quarto
+  // reads for the page and the paper. The host writes that line (setLanguage
+  // in extension.js), with the header shown or hidden. "No hyphenation" turns
+  // division off and leaves `lang:` alone: the document is still in the
+  // language it names.
+  //
+  // The glyph is what the menu does to a word: an "a" and a hyphen ending one
+  // line, and the "b" that finishes the word at the start of the next.
+  // Filled, since the toolbar stylesheet sets stroke-width 0.
+  const HYPHENATION_ICON =
+    '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M5.56 1.1c1.8 0 2.85.85 2.85 2.47v3.42H7.08v-.57c-.47.47-1.14.76-1.9.76C3.85 7.18 2.9 6.42 2.9 5.28c0-1.23.95-1.9 2.56-1.9h1.61v-.1c0-.66-.47-1.04-1.42-1.04-.66 0-1.23.19-1.8.57l-.57-.95c.76-.47 1.52-.76 2.28-.76zM5.65 4.33c-.85 0-1.33.28-1.33.85 0 .47.38.85 1.04.85.85 0 1.61-.47 1.71-1.23V4.33z"/><rect x="9.4" y="3.75" width="3.6" height="1.45" rx=".72"/><path fill-rule="evenodd" d="M2.9 8.4h1.26v2.1c.42-.42 1.01-.67 1.68-.67 1.34 0 2.27 1.09 2.27 2.52s-.92 2.52-2.27 2.52c-.67 0-1.26-.25-1.68-.67v.5H2.9zm2.69 2.52c-.84 0-1.43.59-1.43 1.43s.59 1.43 1.43 1.43 1.34-.59 1.34-1.43-.5-1.43-1.34-1.43z"/></svg>';
+
+  // Each language by the name it gives itself, in the order of those names,
+  // which is how a list of languages is read. The host keeps the same tags
+  // (LANGUAGES in extension.js), and the tests hold both to the patterns.
+  const HYPHENATION_LANGUAGES = [
+    { tag: "de", label: "Deutsch" },
+    { tag: "en", label: "English" },
+    { tag: "es", label: "Español" },
+    { tag: "fr", label: "Français" },
+    { tag: "it", label: "Italiano" },
+    { tag: "nl", label: "Nederlands" },
+    { tag: "pl", label: "Polski" },
+    { tag: "pt", label: "Português" },
+    { tag: "ru", label: "Русский" },
+    { tag: "uk", label: "Українська" },
+  ];
+
+  // The language the document is in, read where the editor reads it to
+  // divide words: the header in the text while the editor shows it, so that
+  // a `lang:` being typed counts at once, and the host's copy while hidden.
+  // Whether the text carries the header is the flag of the update it came
+  // with and not the parse: while the file's header is kept aside, a header
+  // at the top of the text is a block typed under it, and the export reads
+  // the language from the file's first header (langOf in transforms.js).
+  function documentLanguage(state) {
+    const fm = editorFrontMatter && CM.syntaxTree(state).topNode.getChild("FrontMatter");
+    return window.MDM_HYPHENATION.language(
+      fm ? state.doc.sliceString(fm.from, fm.to) : headerText
+    );
+  }
+
+  // The entry the tick goes on: the document's language by its base tag
+  // (es-CU is Español) while that language is dividing the prose, and "No
+  // hyphenation" whenever nothing is: division off, a header that names no
+  // language (language() in mdm-hyphenation.js says why that one is not taken
+  // for English) or a language without patterns. The tick says what the page
+  // is doing, so there is always exactly one.
+  function hyphenationChoice() {
+    if (hyphenation !== "auto" || !view) return "none";
+    const lang = documentLanguage(view.state).split("-")[0];
+    return HYPHENATION_LANGUAGES.some(function (entry) {
+      return entry.tag === lang;
+    }) ? lang : "none";
+  }
+
+  // Lit while a language is dividing the prose, which is while the tick is on
+  // a language. Off, a header naming no language and a language without
+  // patterns all keep the words whole and leave the button dark: the lamp
+  // marks what was asked for and is being done, as on the rest of the bar.
+  // The export divides exactly when it is lit (exportHyphenation in
+  // extension.js).
+  function updateHyphenationButton() {
+    const btn = document.querySelector('#app button[data-type="mdm-hyphenation"]');
+    if (!btn) return;
+    btn.classList.toggle("mdm-btn--on", hyphenationChoice() !== "none");
+  }
+
+  // Rebuilt each time the panel opens (a `build` panel, see toolbarButton),
+  // so the tick follows a `lang:` typed into the header as well as the
+  // setting.
+  function hyphenationMenuItems() {
+    const choice = hyphenationChoice();
+    return [{ tag: "none", label: "No hyphenation" }]
+      .concat(HYPHENATION_LANGUAGES)
+      .map(function (entry) {
+        return {
+          name: "mdm-hyphenation-" + entry.tag,
+          label:
+            entry.label +
+            (entry.tag === choice ? '<span class="mdm-swatch__tick">✓</span>' : ""),
+          click: function () {
+            if (entry.tag === "none") {
+              askSetting("hyphenation", "none");
+              return;
+            }
+            // An edit still waiting out its debounce goes first. With the
+            // header shown it carries the header as it was, and landing after
+            // the new `lang:` it would put the old one back.
+            flushEdit();
+            vscode.postMessage({ type: "setLanguage", lang: entry.tag });
+            askSetting("hyphenation", "auto");
+          },
+        };
+      });
+  }
+
+  function applyHyphenation() {
+    const root = app();
+    if (!root) return;
+    root.classList.toggle("mdm-hyphenation--on", hyphenation === "auto");
+    updateHyphenationButton();
+    if (view) view.dispatch({ effects: refreshHyphenation.of(null) });
+    remeasureText();
   }
 
   // ---------- Score alignment button ----------
@@ -3890,6 +4007,55 @@
     },
   });
 
+  // Hyphen opportunities belong to prose alone and survive a caret arriving:
+  // revealing a Markdown mark must not move a whole word to the next row.
+  // A mark on the preceding letter generates a soft hyphen through CSS. No
+  // widget buffer, document character or atomic range intervenes, so normal
+  // Backspace, Delete, selection, copy and undo all retain their text offsets.
+  const refreshHyphenation = CM.StateEffect.define();
+  const HYPHEN_SKIP = /^(?:InlineCode|InlineMath|InlineBlockMath|Image|Autolink|URL|LinkTitle|HTMLTag|Comment|Escape|Entity)$/;
+  const HYPHEN_BLOCK_SKIP = /^(?:FrontMatter|FencedCode|CodeBlock|BlockMath|Table|HTMLBlock|CommentBlock)$/;
+
+  function buildHyphens(state) {
+    if (hyphenation !== "auto") return Decoration.none;
+    const tree = CM.syntaxTree(state), doc = state.doc, decos = [];
+    const lang = documentLanguage(state);
+    function prose(from, to) {
+      window.MDM_HYPHENATION.segments(doc.sliceString(from, to), lang).forEach(function (span) {
+        const at = from + span.to;
+        decos.push(Decoration.mark({ class: "mdm-hyphen" }).range(at - 1, at));
+      });
+    }
+    function inline(node) {
+      if (HYPHEN_SKIP.test(node.name)) return;
+      let from = node.from;
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        prose(from, child.from);
+        inline(child);
+        from = child.to;
+      }
+      prose(from, node.to);
+    }
+    tree.iterate({ enter: function (node) {
+      if (HYPHEN_BLOCK_SKIP.test(node.name)) return false;
+      if (node.name === "Paragraph") {
+        inline(node.node);
+        return false;
+      }
+    } });
+    return Decoration.set(decos, true);
+  }
+
+  const hyphenationField = StateField.define({
+    create: buildHyphens,
+    update: function (value, tr) {
+      return tr.docChanged || CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState) ||
+        tr.effects.some(function (effect) { return effect.is(refreshHyphenation); })
+        ? buildHyphens(tr.state) : value;
+    },
+    provide: function (field) { return EditorView.decorations.from(field); },
+  });
+
   // ---------- Syntax colours in the editor ----------
 
   // Code inside fences and the YAML header are painted from the ten slots of
@@ -4847,11 +5013,15 @@
         focusField,
         hiddenLinesField,
         renderField,
+        hyphenationField,
         EditorView.lineWrapping,
         EditorView.updateListener.of(function (update) {
           if (update.docChanged) {
             if (!applying) queueEdit(update.state.doc.toString());
             if (player) player.pos = update.changes.mapPos(player.pos, 1);
+            // A `lang:` typed into the header on screen lights or darkens
+            // the hyphenation button at once, as it moves the cuts.
+            updateHyphenationButton();
           }
           if (update.docChanged || update.selectionSet) {
             updateUndoButtons();
@@ -4865,6 +5035,8 @@
       state: state,
       parent: document.querySelector("#app .mdm-editor"),
     });
+    // applyHyphenation ran above with no view to read the header from.
+    updateHyphenationButton();
     // For the test harness and for poking at a live editor: the view itself,
     // and the open player, which is the only way in to the synth controller
     // (abcjs keeps it on no element of the bar it builds).
@@ -5342,9 +5514,10 @@
         },
       },
       "|",
-      // The page: what it is painted in, what it is set in, and whether it
-      // shows the block at the top that is not prose. Three switches over the
-      // document as a whole, none of which knows there is music in it.
+      // The page: what it is painted in, what it is set in, where its words
+      // may divide, and whether it shows the block at the top that is not
+      // prose. Switches over the document as a whole, none of which knows
+      // there is music in it.
       // The theme leads them, because the fill colours of the next group are
       // defined per theme and the wider switch should read before the ones
       // that depend on it.
@@ -5356,6 +5529,12 @@
         click: function () {
           askSetting("textFont", textFont === "roman" ? "sans" : "roman");
         },
+      },
+      {
+        name: "mdm-hyphenation",
+        icon: HYPHENATION_ICON,
+        tip: "Hyphenation",
+        build: hyphenationMenuItems,
       },
       {
         name: "mdm-front-matter",
@@ -5431,6 +5610,7 @@
     // document is not going to be set in is a page laid out for the wrong
     // font until something else asks for a measure.
     applyTextFont();
+    applyHyphenation();
     // Below the bar, a row: the outline panel down the left edge and the
     // editor beside it. The panel is empty and hidden until its button is
     // pressed (#app carries mdm-outline--open).
@@ -5500,8 +5680,13 @@
         flushEdit();
         // The button adds or removes the header at the very top of the
         // document, and what was pressed is a button about the header, so
-        // the update right behind this message takes the editor there.
-        scrollToTop = true;
+        // the update right behind this message takes the editor there. Only
+        // where there is a header to move: the hyphenation menu puts a
+        // document on the hidden mode as it writes a `lang:` into a file
+        // that had none (writeLanguage in extension.js), and nothing about
+        // the text moves there, so a reader choosing a language halfway
+        // down a document stays where they were reading.
+        if (headerText !== "") scrollToTop = true;
       }
       frontMatter = nextFm;
       outlineOpen = next.outline === "shown";
@@ -5509,6 +5694,7 @@
       matchSubstring = next.multicursorMatch === "substring";
       following = next.followPlayhead !== "still";
       textFont = next.textFont || "roman";
+      hyphenation = next.hyphenation || "none";
       // applyTheme repaints the toolbar and the score styling, whose colours
       // are picked from the effective theme. A theme chosen from the menu
       // also brings a palette message right behind this one, which repaints
@@ -5524,6 +5710,7 @@
       updateMatchButton();
       applyFollowPlayhead();
       applyTextFont();
+      applyHyphenation();
       return;
     }
     if (msg.type === "palette") {
@@ -5533,11 +5720,15 @@
       return;
     }
     if (msg.type !== "update") return;
+    const previousHeader = headerText;
     headerText = msg.frontMatter || "";
     // Adopted even when the text below turns out to be the one already in
     // the editor: for a file with no header both modes produce the same
-    // text, and the flag still has to follow the setting.
+    // text, and the flag still has to follow the setting. Before the
+    // language is read, which takes the header from the text only while the
+    // text carries it (documentLanguage).
     editorFrontMatter = !!msg.withFrontMatter;
+    if (view && previousHeader !== headerText) applyHyphenation();
     hiddenLines = msg.hiddenLines || 0;
     updateFrontMatter();
     // Before the text, so that one update never draws the new document under

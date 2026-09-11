@@ -292,6 +292,28 @@ const env = {
   },
 };
 
+// The Memento VS Code hands an extension as context.globalState. Values go in
+// and come out as JSON, the way VS Code stores them, so what is kept is only
+// what went through update(): an object changed after get() changes nothing
+// here. A test makes one and passes it to activate(); two activations on the
+// same one are VS Code closed and opened again.
+function memento() {
+  const store = new Map();
+  return {
+    get(key, defaultValue) {
+      return store.has(key) ? JSON.parse(store.get(key)) : defaultValue;
+    },
+    async update(key, value) {
+      if (value === undefined) store.delete(key);
+      else store.set(key, JSON.stringify(value));
+    },
+    keys() {
+      return [...store.keys()];
+    },
+    setKeysForSync() {},
+  };
+}
+
 module.exports = {
   workspace,
   window,
@@ -307,4 +329,5 @@ module.exports = {
   _state: state,
   _reset: reset,
   _makeDocument: makeDocument,
+  _memento: memento,
 };

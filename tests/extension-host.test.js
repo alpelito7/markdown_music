@@ -26,19 +26,29 @@ const ext = require("../vscode-mdm/extension.js");
 
 // Boot the provider against a fake document and webview, returning handles to
 // drive it: the messages it posted, a way to deliver webview messages, and
-// the mock state.
-function boot(initialText, settings, extensions, uriString) {
+// the mock state. `globalState` is what VS Code keeps for the extension from
+// one run to the next (vscode._memento()): a test that hands the same one to
+// two boots has closed VS Code and opened it again in between, and one that
+// hands none starts on a machine where nothing was ever kept.
+function boot(initialText, settings, extensions, uriString, globalState) {
   vscode._reset();
   Object.assign(vscode._state.settings, settings || {});
   if (extensions) vscode._state.extensions = extensions;
   const context = {
     subscriptions: [],
     extensionUri: vscode.Uri.file("/ext"),
+    globalState: globalState || vscode._memento(),
   };
   ext.activate(context);
   const provider = vscode._state.registeredProviders[0].provider;
+  const h = openPanel(provider, initialText, uriString || "file:///doc.mdm");
+  return Object.assign(h, { provider, globalState: context.globalState });
+}
 
-  const uri = uriString || "file:///doc.mdm";
+// A document opened in an editor of the extension already running, with the
+// handles boot returns. A second document beside the first is another call
+// on the provider boot hands back.
+function openPanel(provider, initialText, uri) {
   vscode._state.documents.set(uri, initialText);
   const document = vscode._makeDocument(uri);
 
@@ -84,6 +94,18 @@ function boot(initialText, settings, extensions, uriString) {
   };
 }
 
+// The settings the host wrote into a panel's page, which is what the editor
+// comes up showing.
+function settingsOf(h) {
+  return JSON.parse(/window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html)[1]);
+}
+
+// The word division the host keeps of its own for the document of a panel,
+// read the way VS Code hands it back.
+function keptDivision(h) {
+  const all = h.globalState.get(ext.DOCUMENT_HYPHENATION) || {};
+  return all[h.document.uri.toString()];
+}
 // ---------- Settings allowlist ----------
 
 test("hostile setting values never reach the webview HTML", () => {
@@ -98,6 +120,7 @@ test("hostile setting values never reach the webview HTML", () => {
     "mdm.multicursorMatch": ["substring"],
     "mdm.followPlayhead": 0,
     "mdm.textFont": "roman; drop",
+    "mdm.hyphenation": "auto; drop",
   });
   assert.ok(!h.html.includes("alert(1)"));
   const m = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html);
@@ -112,6 +135,7 @@ test("hostile setting values never reach the webview HTML", () => {
     multicursorMatch: "word",
     followPlayhead: "follow",
     textFont: "roman",
+    hyphenation: "none",
     outlineWidth: 250,
     multiCursorModifier: "alt",
   });
@@ -129,6 +153,7 @@ test("valid setting values pass through to the webview HTML", () => {
     "mdm.multicursorMatch": "substring",
     "mdm.followPlayhead": "still",
     "mdm.textFont": "sans",
+    "mdm.hyphenation": "auto",
   });
   const m = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html);
   assert.deepEqual(JSON.parse(m[1]), {
@@ -141,6 +166,7 @@ test("valid setting values pass through to the webview HTML", () => {
     multicursorMatch: "substring",
     followPlayhead: "still",
     textFont: "sans",
+    hyphenation: "auto",
     outlineWidth: 480,
     multiCursorModifier: "alt",
   });
@@ -526,6 +552,129 @@ test("disposing the panel unsubscribes every listener", async () => {
   assert.equal(vscode._state.colorThemeListeners.length, 0);
 });
 
+// ---------- Word division is the document's own ----------
+
+// Every other button of the bar is the editor's, one value in settings.json
+// for all the documents at once. Word division is the document's, because a
+// reader keeps documents in several languages (the owner, 2026-09-11), so
+// mdm.hyphenation is where a document starts and what it was left on is kept
+// in globalState under the document's URI. Two boots on one globalState are
+// VS Code closed and opened again between them; the same case with the
+// editor in Chrome is webview-memory.test.js.
+test("the division of one document is not another's, and comes back with it", async () => {
+  const memory = vscode._memento();
+  const a = boot(DOC, {}, undefined, "file:///a.mdm", memory);
+  await a.receive({ type: "setSetting", key: "hyphenation", value: "auto" });
+  assert.equal(keptDivision(a), "auto");
+  assert.deepEqual(vscode._state.updates, [], "the division went into settings.json");
+  // The editor that pressed it is told, since no setting changed for the
+  // configuration listener to carry.
+  const told = a.posted.filter((m) => m.type === "settings").pop();
+  assert.equal(told.settings.hyphenation, "auto");
+  a.dispose();
+
+  const b = boot(DOC, {}, undefined, "file:///b.mdm", memory);
+  assert.equal(settingsOf(b).hyphenation, "none", "another document took its division");
+  b.dispose();
+
+  const again = boot(DOC, {}, undefined, "file:///a.mdm", memory);
+  assert.equal(settingsOf(again).hyphenation, "auto", "the document came back whole");
+});
+
+test("a division pressed in one document leaves the document beside it alone", async () => {
+  const a = boot(DOC, {}, undefined, "file:///a.mdm");
+  const b = openPanel(a.provider, DOC, "file:///b.mdm");
+  await a.receive({ type: "ready" });
+  await b.receive({ type: "ready" });
+  a.posted.length = 0;
+  b.posted.length = 0;
+  await a.receive({ type: "setSetting", key: "hyphenation", value: "auto" });
+  assert.deepEqual(b.posted, [], "the document beside was told of a press it did not have");
+  assert.equal(a.posted.filter((m) => m.type === "settings").pop().settings.hyphenation, "auto");
+  // A look, on the other hand, is the editor's: it goes to settings.json and
+  // reaches both editors, each with its own division over it.
+  await a.receive({ type: "setSetting", key: "staffLines", value: "ink" });
+  assert.deepEqual(
+    vscode._state.updates.map((u) => [u.key, u.value]),
+    [["mdm.staffLines", "ink"]]
+  );
+  a.posted.length = 0;
+  b.posted.length = 0;
+  vscode._state.configurationListeners.forEach((l) =>
+    l({ affectsConfiguration: (s) => s === "mdm" })
+  );
+  const toldA = a.posted.find((m) => m.type === "settings").settings;
+  const toldB = b.posted.find((m) => m.type === "settings").settings;
+  assert.deepEqual([toldA.staffLines, toldB.staffLines], ["ink", "ink"]);
+  assert.deepEqual([toldA.hyphenation, toldB.hyphenation], ["auto", "none"]);
+  a.dispose();
+  b.dispose();
+});
+
+test("mdm.hyphenation is where a document starts, and what it was left on outranks it", async () => {
+  const memory = vscode._memento();
+  const on = { "mdm.hyphenation": "auto" };
+  const a = boot(DOC, on, undefined, "file:///a.mdm", memory);
+  assert.equal(settingsOf(a).hyphenation, "auto", "the setting was not where the document started");
+  await a.receive({ type: "setSetting", key: "hyphenation", value: "none" });
+  a.posted.length = 0;
+  vscode._state.configurationListeners.forEach((l) =>
+    l({ affectsConfiguration: (s) => s === "mdm" })
+  );
+  assert.equal(
+    a.posted.find((m) => m.type === "settings").settings.hyphenation,
+    "none",
+    "the setting outranked what the document was left on"
+  );
+  a.dispose();
+  const again = boot(DOC, on, undefined, "file:///a.mdm", memory);
+  assert.equal(settingsOf(again).hyphenation, "none");
+});
+
+test("a division kept for a document meets the allowlist on its way into the HTML", async () => {
+  // Kept by an older version, or by a hand in the storage: whatever it holds,
+  // the page is only ever given a value on the list, and one that is not
+  // falls back to the setting under it.
+  const memory = vscode._memento();
+  for (const junk of ["auto; drop", 42, null, { auto: true }]) {
+    await memory.update(ext.DOCUMENT_HYPHENATION, { "file:///doc.mdm": junk });
+    const h = boot("Body\n", { "mdm.hyphenation": "auto" }, undefined, undefined, memory);
+    assert.equal(settingsOf(h).hyphenation, "auto", JSON.stringify(junk) + " reached the page");
+    assert.ok(!h.html.includes("drop"));
+  }
+  // And a memory that is not an object of URIs reads as nothing kept, with
+  // the next press starting it again.
+  for (const junk of ["junk", 7, ["file:///doc.mdm"], null]) {
+    await memory.update(ext.DOCUMENT_HYPHENATION, junk);
+    const h = boot("Body\n", {}, undefined, undefined, memory);
+    assert.equal(settingsOf(h).hyphenation, "none", JSON.stringify(junk) + " was read as a division");
+    await h.receive({ type: "setSetting", key: "hyphenation", value: "auto" });
+    assert.equal(keptDivision(h), "auto");
+  }
+});
+
+test("the documents whose division was used longest ago are the ones forgotten", async () => {
+  const memory = vscode._memento();
+  const old = {};
+  for (let i = 0; i < ext.DOCUMENTS_KEPT; i++) old["file:///old/" + i + ".mdm"] = "auto";
+  await memory.update(ext.DOCUMENT_HYPHENATION, old);
+  // Opening one that keeps a division counts as using it, and opening one
+  // that keeps none adds nothing.
+  boot("Body\n", {}, undefined, "file:///old/0.mdm", memory).dispose();
+  boot("Body\n", {}, undefined, "file:///never-pressed.mdm", memory).dispose();
+  await settle();
+  const fresh = boot("Body\n", {}, undefined, "file:///new.mdm", memory);
+  await fresh.receive({ type: "setSetting", key: "hyphenation", value: "auto" });
+  const uris = Object.keys(memory.get(ext.DOCUMENT_HYPHENATION));
+  assert.equal(uris.length, ext.DOCUMENTS_KEPT);
+  assert.ok(uris.includes("file:///old/0.mdm"), "a document just opened was forgotten");
+  assert.ok(!uris.includes("file:///old/1.mdm"), "the one used longest ago was kept");
+  assert.ok(!uris.includes("file:///never-pressed.mdm"), "a document with nothing to keep was kept");
+  assert.equal(uris[uris.length - 1], "file:///new.mdm");
+  // And the one forgotten opens on the setting again.
+  const gone = boot("Body\n", {}, undefined, "file:///old/1.mdm", memory);
+  assert.equal(settingsOf(gone).hyphenation, "none");
+});
 // ---------- Syntax palette ----------
 
 // A theme contributed the way the built-in ones are, with its file on the
@@ -1213,13 +1362,18 @@ test("the Quarto filter inside the extension is the one the repository renders w
 // One export against a fake Quarto that writes down its arguments, and what
 // it was called with. `themeKind` is what VS Code itself is showing
 // (vscode.ColorThemeKind), which mdm.theme = "auto" follows.
-async function exportWith(to, settings, extensions, themeKind) {
+async function exportWith(to, settings, extensions, themeKind, source, division) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const restore = usePath(fakeBin(tmp));
   const doc = path.join(tmp, "doc.mdm");
-  fs.writeFileSync(doc, SOURCE);
-  const h = boot("Body\n", settings, extensions, "file://" + doc);
-  vscode._state.workspaceFolder = tmp;
+  fs.writeFileSync(doc, source === undefined ? SOURCE : source);
+  // `division` is the word division the document keeps of its own, as its
+  // hyphenation menu left it.
+  const memory = vscode._memento();
+  if (division) {
+    await memory.update(ext.DOCUMENT_HYPHENATION, { ["file://" + doc]: division });
+  }
+  const h = boot("Body\n", settings, extensions, "file://" + doc, memory);  vscode._state.workspaceFolder = tmp;
   if (themeKind !== undefined) vscode._state.activeColorThemeKind = themeKind;
   await h.receive({ type: "export", to });
   restore();
@@ -1239,6 +1393,25 @@ function lookOf(args) {
   });
   return out;
 }
+
+test("the export divides the words the editor divides, and no others", async () => {
+  // Division on, and the header naming a language there are patterns for:
+  // the two together are what lights the button. Quarto gives a document
+  // without a `lang` its default `en` before the filter reads it, so a look
+  // that sent the setting alone would divide as English a page the editor
+  // keeps whole.
+  const on = { "mdm.hyphenation": "auto" };
+  const named = (lang) => SOURCE.replace("title: T\n", "title: T\nlang: " + lang + "\n");
+  const sent = async (settings, source) =>
+    lookOf(await exportWith("html", settings, seedTheme("#e6db74"), undefined, source))["mdm-hyphenation"];
+  assert.equal(await sent(on, named("es")), "auto");
+  assert.equal(await sent(on, named("es-CU")), "auto", "a regional tag is not its base language");
+  assert.equal(await sent(on, named("es").replace(/\n/g, "\r\n")), "auto", "CRLF hid the language");
+  assert.equal(await sent(on, SOURCE), "none", "a header naming no language was divided");
+  assert.equal(await sent(on, "Body\n"), "none", "a file without a header was divided");
+  assert.equal(await sent(on, named("ca")), "none", "a language without patterns was divided");
+  assert.equal(await sent({}, named("es")), "none", "division off was divided");
+});
 
 test("the export carries the look the editor is showing", async () => {
   const args = await exportWith(
@@ -1272,6 +1445,12 @@ test("the export carries the look the editor is showing", async () => {
     await exportWith("html", { "mdm.textFont": "sans" }, seedTheme("#e6db74"))
   );
   assert.equal(sans["mdm-text-font"], "sans");
+  // Word division is named on every render as well, off included. Off is
+  // both the editor's default and the filter's fallback, but the look says
+  // what the editor shows rather than trusting the two to stay equal.
+  // Division on is pinned beside this test, since what it sends depends on
+  // the document's language as well.
+  assert.equal(look["mdm-hyphenation"], "none", "the default word division did not travel");
   // The palette of that same theme, spelt without the `#` a -M value cannot
   // carry (it would open a YAML comment).
   assert.equal(look["mdm-syn-string"], "e6db74");
@@ -1279,6 +1458,18 @@ test("the export carries the look the editor is showing", async () => {
   assert.equal(look["mdm-syn-bg"], "272822");
 });
 
+// The look of an export is the editor's, and its word division the
+// document's: a file left dividing is divided on the page and on paper
+// whatever settings.json says, and one left whole is left whole.
+test("the export divides as the document it is exported from", async () => {
+  const spanish = SOURCE.replace("title: T\n", "title: T\nlang: es\n");
+  const mine = lookOf(await exportWith("html", {}, null, undefined, spanish, "auto"));
+  assert.equal(mine["mdm-hyphenation"], "auto", "the document's own division did not travel");
+  const other = lookOf(
+    await exportWith("html", { "mdm.hyphenation": "auto" }, null, undefined, spanish, "none")
+  );
+  assert.equal(other["mdm-hyphenation"], "none", "a document left whole was divided by the setting");
+});
 test("the editor's own looks export with their own colours, not VS Code's", async () => {
   // MDM Light, MDM Dark and MDM White carry palettes of their own and the
   // webview refuses VS Code's outright while one of them is chosen
@@ -1358,4 +1549,162 @@ test("a format the webview made up is refused before anything runs", async () =>
   assert.deepEqual(vscode._state.infoMessages, []);
   assert.ok(!fs.existsSync(path.join(tmp, "args.txt")), "a bogus format reached Quarto");
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------- The hyphenation menu writes the document's language ----------
+
+// A language chosen from the menu turns word division on, which the document
+// keeps of its own (above), and goes into the YAML header as `lang:`, which is
+// the document's and travels with it. The host writes the line, header shown or
+// hidden, and the update that change sends back is how the editor learns the
+// header it now has.
+
+test("a language from the menu goes into the header, and the editor is told", async () => {
+  const written = DOC.replace("title: t\n", "title: t\nlang: es\n");
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  await h.receive({ type: "setLanguage", lang: "es" });
+  assert.equal(h.document.getText(), written);
+  const msg = h.posted[h.posted.length - 1];
+  assert.equal(msg.type, "update");
+  assert.equal(msg.frontMatter, "---\ntitle: t\nlang: es\n---\n");
+  assert.ok(msg.text.startsWith("Intro\n"), "the hidden header reached the editor's text");
+  // Shown, the same line lands, and the editor's text carries it.
+  const shown = boot(DOC, { "mdm.frontMatter": "shown" });
+  await shown.receive({ type: "ready" });
+  await shown.receive({ type: "setLanguage", lang: "es" });
+  assert.equal(shown.document.getText(), written);
+  assert.ok(shown.posted[shown.posted.length - 1].text.startsWith("---\ntitle: t\nlang: es\n---\n"));
+});
+
+test("a file with no header gains one, and the margin numbers move with it", async () => {
+  const h = boot("Intro\n", {});
+  await h.receive({ type: "ready" });
+  await h.receive({ type: "setLanguage", lang: "fr" });
+  assert.equal(h.document.getText(), "---\nlang: fr\n---\n\nIntro\n");
+  const msg = h.posted[h.posted.length - 1];
+  assert.equal(msg.text, "Intro\n");
+  assert.equal(msg.hiddenLines, 4);
+  assert.equal(msg.frontMatter, "---\nlang: fr\n---\n");
+  // The document was already hiding the header, so nothing about the mode
+  // was written or said.
+  assert.deepEqual(h.posted.filter((m) => m.type === "settings"), []);
+  assert.deepEqual(vscode._state.updates, []);
+});
+
+// A reader who picks a language for a file with no header asked for word
+// division and not for three lines of YAML over the document. The header is
+// written all the same, since that is where the language of a document goes,
+// and the document is put on the hidden mode as it goes in, so the header
+// never appears on screen; the button beside the menu, greyed while the file
+// had no header, is what opens it from then on. The mode is the editor's own
+// setting and not the document's, so it goes into settings.json and every
+// open document hides its header with it.
+test("a header the menu creates comes up hidden, and the button can open it", async () => {
+  const h = boot("Intro\n", { "mdm.frontMatter": "shown" });
+  await h.receive({ type: "ready" });
+  assert.equal(h.posted[0].withFrontMatter, true, "the file had a header already");
+  await h.receive({ type: "setLanguage", lang: "en" });
+  assert.equal(h.document.getText(), "---\nlang: en\n---\n\nIntro\n");
+  assert.deepEqual(
+    vscode._state.updates.map((u) => [u.key, u.value]),
+    [["mdm.frontMatter", "hidden"]],
+    "the mode was not written"
+  );
+  const settings = h.posted.filter((m) => m.type === "settings").pop();
+  assert.equal(settings.settings.frontMatter, "hidden", "the editor was not told");
+  const msg = h.posted[h.posted.length - 1];
+  assert.equal(msg.type, "update");
+  assert.equal(msg.text, "Intro\n");
+  assert.equal(msg.withFrontMatter, false);
+  // What greys the button out is a file with no header at all, so this one
+  // can be opened by it now, and the margin counts the lines it cannot see.
+  assert.equal(msg.frontMatter, "---\nlang: en\n---\n");
+  assert.equal(msg.hiddenLines, 4);
+  // No frame of the document is ever drawn with the header in it: the mode
+  // is written before the line is.
+  assert.ok(
+    h.posted
+      .filter((m) => m.type === "update")
+      .every((m) => !m.text.includes("lang: en")),
+    "the header was on screen for a moment"
+  );
+});
+
+// A file that has a header is one whose header the reader has seen and may be
+// working in: the language goes into it and the mode is left alone.
+test("a language written into a header already showing leaves it showing", async () => {
+  const h = boot(DOC, { "mdm.frontMatter": "shown" });
+  await h.receive({ type: "ready" });
+  await h.receive({ type: "setLanguage", lang: "es" });
+  assert.deepEqual(
+    h.posted.filter((m) => m.type === "settings"),
+    [],
+    "the mode was changed under the reader"
+  );
+  assert.deepEqual(vscode._state.updates, [], "the mode was written all the same");
+  const msg = h.posted[h.posted.length - 1];
+  assert.equal(msg.withFrontMatter, true);
+  assert.ok(msg.text.startsWith("---\ntitle: t\nlang: es\n---\n"));
+});
+
+test("a language the header already names writes nothing", async () => {
+  const h = boot("---\nlang: es-CU\n---\n\nIntro\n", {});
+  await h.receive({ type: "ready" });
+  const changes = [];
+  vscode._state.textDocumentListeners.push((e) => changes.push(e));
+  await h.receive({ type: "setLanguage", lang: "es" });
+  assert.equal(changes.length, 0);
+});
+
+test("a tag the menu does not offer never reaches the file", async () => {
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  for (const lang of ["ja", "es\nevil: 1", "ES", "__proto__", "", null, 42, ["es"]]) {
+    await h.receive({ type: "setLanguage", lang });
+  }
+  assert.equal(h.document.getText(), DOC);
+});
+
+test("the menu offers the languages there are patterns for", () => {
+  const patterns = require("../vscode-mdm/media/hyphenation-patterns.js");
+  assert.deepEqual([...ext.LANGUAGES].sort(), Object.keys(patterns).sort());
+});
+
+test("an edit in flight and a language chosen beside it both land", async () => {
+  // VS Code applies an edit asynchronously and starts a message's handler
+  // without waiting for the one before it, so each write waits its turn.
+  // Read too early, the language would be written over the text from before
+  // the edit and undo it; and an edit read while the language was landing
+  // would splice the header back without it.
+  const apply = vscode.workspace.applyEdit;
+  const slow = () => {
+    vscode.workspace.applyEdit = async function (edit) {
+      await new Promise((r) => setTimeout(r, 20));
+      return apply.call(this, edit);
+    };
+  };
+  const both = DOC.replace("Intro", "Edited").replace("title: t\n", "title: t\nlang: es\n");
+  try {
+    const shown = boot(DOC, { "mdm.frontMatter": "shown" });
+    slow();
+    await shown.receive({ type: "ready" });
+    const typed = shown.posted[0].text.replace("Intro", "Edited");
+    await Promise.all([
+      shown.receive({ type: "edit", text: typed, withFrontMatter: true }),
+      shown.receive({ type: "setLanguage", lang: "es" }),
+    ]);
+    assert.equal(shown.document.getText(), both, "the language undid the edit before it");
+    const hidden = boot(DOC, {});
+    slow();
+    await hidden.receive({ type: "ready" });
+    const body = hidden.posted[0].text.replace("Intro", "Edited");
+    await Promise.all([
+      hidden.receive({ type: "setLanguage", lang: "es" }),
+      hidden.receive({ type: "edit", text: body, withFrontMatter: false }),
+    ]);
+    assert.equal(hidden.document.getText(), both, "the edit took the language back out");
+  } finally {
+    vscode.workspace.applyEdit = apply;
+  }
 });

@@ -299,6 +299,13 @@ async function open(options) {
       };
     });
   }
+  // A test that runs the real extension.js on the other end of the wire
+  // passes `toHost`, which is handed every message the page posts, together
+  // with the page to answer on (the harness calls window.__toHost). The host
+  // then answers the page's `ready` itself, and no update is made up here.
+  if (opts.toHost) {
+    await page.exposeFunction("__toHost", (msg) => opts.toHost(msg, page));
+  }
   await page.goto(HARNESS);
   // The editor is only built once the first document arrives, so what says
   // the webview is up is the `ready` it posts to the host.
@@ -306,8 +313,12 @@ async function open(options) {
     () => window.__posts.some((m) => m.type === "ready"),
     { timeout: 20000 }
   );
-  const withFrontMatter = opts.withFrontMatter !== false;
-  await update(page, opts.text || EXAMPLE, withFrontMatter, opts.scores, opts.frontMatter);
+  if (opts.toHost) {
+    await rendered(page, opts.scores);
+  } else {
+    const withFrontMatter = opts.withFrontMatter !== false;
+    await update(page, opts.text || EXAMPLE, withFrontMatter, opts.scores, opts.frontMatter);
+  }
   return {
     page,
     browser,
@@ -357,9 +368,13 @@ async function update(page, disk, withFrontMatter, scores, header) {
     hiddenLines(disk, withFrontMatter),
     header === undefined ? "x" : header
   );
-  // The scores are engraved as their widgets are built, and fitted on an
-  // animation frame after; settle before measuring. A document with no score
-  // of its own (`scores: 0`) waits for the first line instead.
+  await rendered(page, scores);
+}
+
+// The scores are engraved as their widgets are built, and fitted on an
+// animation frame after; settle before measuring. A document with no score
+// of its own (`scores: 0`) waits for the first line instead.
+async function rendered(page, scores) {
   const want = scores === undefined ? 3 : scores;
   if (want > 0) {
     await page.waitForFunction(
@@ -483,6 +498,7 @@ function settingsMessage(overrides) {
         multicursorMatch: "word",
         followPlayhead: "follow",
         textFont: "roman",
+        hyphenation: "none",
       },
       overrides || {}
     ),

@@ -450,6 +450,14 @@ What it does:
   them too. The one state deliberately left out is the player's volume: it
   lasts as long as the editor is open. Values are written where they already
   live, so a workspace that pinned one goes on overriding the user's own.
+- **Word division is the exception, and belongs to the document.** A reader
+  keeps documents in several languages, so `mdm.hyphenation` is where a
+  document starts and each document then remembers whether its words divide:
+  the host keeps that in the extension's own storage (VS Code's
+  `globalState`) under the document's URI, out of the file and out of
+  `settings.json`, and an export divides the words the document it came from
+  divides. The memory goes by the file's path, so a file renamed or moved
+  starts again on the setting, and the 500 documents used last are kept.
 - **English interface**, tooltips included. A tooltip names what the click
   leads to rather than the state in force.
 

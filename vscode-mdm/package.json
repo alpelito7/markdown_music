@@ -91,7 +91,7 @@
             "The YAML header is the first block of the document and is edited in place."
           ],
           "default": "hidden",
-          "description": "Whether the YAML header is part of the document in the editor. Shown, it is an ordinary block: what is typed in it goes to the file, and deleting it deletes it from the file."
+          "description": "Whether the YAML header is part of the document in the editor. Shown, it is an ordinary block: what is typed in it goes to the file, and deleting it deletes it from the file. A header the hyphenation menu writes into a file that had none comes up hidden whatever this says, so that choosing a language never puts YAML on screen."
         },
         "mdm.outline": {
           "type": "string",
@@ -129,6 +129,16 @@
           ],
           "default": "follow",
           "description": "Whether the page follows the playhead while a tune sounds. On by default. The toolbar toggle writes it."
+        },
+        "mdm.hyphenation": {
+          "type": "string",
+          "enum": ["none", "auto"],
+          "default": "none",
+          "enumDescriptions": [
+            "Keep words whole at line endings.",
+            "Divide prose words with a visual hyphen when they wrap, in the language the lang field of the YAML header names. A document whose header names no language keeps its words whole."
+          ],
+          "description": "Word division in prose, off by default. The hyphenation menu in the toolbar sets it for the document it is pressed in, and each document keeps the division it was left on, since the language a document is written in is the document's; this setting is where a document starts. Its first entry keeps words whole, and choosing one of its languages turns division on and writes that language into the lang field of the document's YAML header, adding a header when the file has none, which comes up hidden: the button beside the menu is what shows it. The button is lit while a language is dividing the prose. Hyphens are visual: editing, copying and saving keep the original text. Patterns for German, English, Spanish, French, Italian, Dutch, Polish, Portuguese, Russian and Ukrainian come with the extension; a document in any other language keeps its words whole, and so does a document whose header names no language. An export from the toolbar divides the words the editor divides, in HTML and in PDF."
         },
         "mdm.textFont": {
           "type": "string",

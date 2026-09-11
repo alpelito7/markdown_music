@@ -64,6 +64,7 @@ window.MDM_SETTINGS = Object.assign(
     multicursorMatch: "word",
     followPlayhead: "follow",
     textFont: "roman",
+    hyphenation: "none",
     multiCursorModifier: "alt",
   },
   window.__settings || {}
@@ -85,6 +86,8 @@ window.acquireVsCodeApi = function () {
 </script>
 <script src="../../vscode-mdm/media/vendor/cm6/cm6.bundle.js"></script>
 <script src="../../vscode-mdm/media/vendor/abcjs/abcjs-basic-min.js"></script>
+<script src="../../vscode-mdm/media/hyphenation-patterns.js"></script>
+<script src="../../vscode-mdm/media/mdm-hyphenation.js"></script>
 </head>
 <body>
 <div id="app"></div>

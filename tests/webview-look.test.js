@@ -18,6 +18,7 @@ const { toEditor, fromEditor } = require("../vscode-mdm/transforms.js");
 const {
   EXAMPLE,
   open,
+  update,
   lastEdit,
   skip,
   docText,
@@ -548,6 +549,49 @@ test("a file with no YAML header greys the button out", { skip }, async () => {
   await h.page.evaluate((sel) => document.querySelector(sel).click(), btn);
   await sleep(200);
   assert.deepEqual(await setSettingPosts(h.page), []);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The header button's press takes the editor to the top, because the header
+// appears or disappears at the very top of the document. The hyphenation menu
+// now changes the same mode without anything moving: choosing a language for a
+// file with no header writes one and puts the document on the hidden mode
+// (writeLanguage in extension.js), and the text on screen is the same text
+// before and after. A reader halfway down a document stays where they were.
+test("a mode change with no header to move leaves the reader where they were", { skip }, async () => {
+  const body = toEditor(EXAMPLE, false);
+  const header = "---\nlang: en\n---\n";
+  const h = await open({
+    text: body,
+    withFrontMatter: false,
+    frontMatter: "",
+    seed: { settings: { frontMatter: "shown" } },
+  });
+  const scrollTop = () =>
+    h.page.evaluate(() => window.__mdm.view.scrollDOM.scrollTop);
+  await h.page.evaluate(() => {
+    window.__mdm.view.scrollDOM.scrollTop = 600;
+  });
+  await sleep(200);
+  const before = await scrollTop();
+  assert.ok(before > 100, "the document never scrolled, so nothing was under test");
+
+  // What the host sends when the menu writes the language: the mode first,
+  // then the document, which is the same text with a header behind it now.
+  await postSettings(h.page, { frontMatter: "hidden" });
+  await sleep(200);
+  await update(h.page, header + "\n" + body, false, 3, header);
+  await sleep(300);
+  assert.equal(await scrollTop(), before, "choosing a language moved the page");
+
+  // The button itself still goes to the top, now that there is a header to
+  // appear there.
+  await postSettings(h.page, { frontMatter: "shown" });
+  await sleep(200);
+  await update(h.page, header + "\n" + body, true, 3, header);
+  await sleep(300);
+  assert.equal(await scrollTop(), 0, "the header button did not go to the header");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -3129,7 +3173,10 @@ test("a heading's line keeps its height, with the caret away and in it", { skip 
 // One rule for the whole bar: a lamp marks the setting that was asked for, and
 // stays dark on the one the editor does before anybody asks for anything. Two
 // buttons used to light on their own default, which said nothing at all, and
-// this is what keeps the next one from doing the same.
+// this is what keeps the next one from doing the same. The menus that hold a
+// choice (theme, score fill) light on nothing and tick an entry instead; the
+// hyphenation menu ticks its entry and lights while a language is dividing
+// the prose (webview-hyphenation.test.js).
 const TOGGLES = [
   { name: "mdm-staff-lines", key: "staffLines", asked: "ink" },
   { name: "mdm-match-substring", key: "multicursorMatch", asked: "substring" },

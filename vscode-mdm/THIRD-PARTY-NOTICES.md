@@ -144,3 +144,16 @@ at `tools/bin/abcm2ps` beside the document, then on the PATH), and the
 editor works without them. abcm2ps is
 licensed under the GNU Lesser General Public License version 3 or later,
 copyright (C) 1998-2019 Jean-Francois Moine, <http://moinejf.free.fr>.
+
+## hyph-utf8 hyphenation patterns
+
+Offline word division uses the English, Spanish, French, German (reformed),
+Portuguese, Italian, Dutch, Polish, Russian and Ukrainian patterns from
+[hyph-utf8](https://github.com/hyphenation/tex-hyphen). The complete source
+notices, copyrights, versions and licences are preserved at the top of each
+`hyphenation-patterns.js` bundle. English permits redistribution with its
+notices; Portuguese uses BSD-3-Clause; Russian uses LPPL 1.2 or later
+(distributed here under LPPL 1.3c); the other included patterns use MIT.
+The Russian source and licence are included in the hyphenation licence
+folders. The pattern weights are unchanged; only their storage is compacted.
+The JavaScript engine is part of MDM and uses the project licence.

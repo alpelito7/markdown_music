@@ -18,7 +18,10 @@ const {
   hiddenLines,
   toLf,
   toEol,
+  withLang,
+  langOf,
 } = require("../vscode-mdm/transforms.js");
+const hyphen = require("../vscode-mdm/media/mdm-hyphenation.js");
 
 const EXAMPLE = fs.readFileSync(
   path.join(__dirname, "..", "example.mdm"),
@@ -233,4 +236,84 @@ test("hiddenLines agrees with example.mdm line for line", () => {
   // The number the editor draws beside its first line is the number the text
   // editor draws beside the same line of the file.
   assert.equal(hiddenLines(EXAMPLE, false) + 1, lines.indexOf(first) + 1);
+});
+
+// ---------- The language the hyphenation menu writes ----------
+
+// The menu's languages go into the header as `lang:`, and the editor divides
+// words by reading that line back (language() in mdm-hyphenation.js). The two
+// are held to one answer here: whatever the header was, after the write the
+// editor reads the language that was chosen.
+
+const LANGUAGES = Object.keys(require("../vscode-mdm/media/hyphenation-patterns.js"));
+
+const HEADERS = [
+  "", // no header at all
+  "---\ntitle: t\n---\n\n",
+  "---\ntitle: t\nlang: fr\n---\n\n",
+  "---\nlang: 'es-CU' # a comment\ntitle: t\n---\n\n",
+  "---\nlang:\n  pt\ntitle: t\n---\n\n", // the value on a line of its own
+  "---\nlang: ja_JP\n---\n\n", // a tag the editor cannot read
+  "---\nLANG: fr\n---\n\n", // which the editor reads all the same
+  "---\ntitle: |\n  lang: es\nabstract: >\n  last\n---\n\n", // a block closes the header
+  "---\nformat:\n  html:\n    lang: es\n---\n", // nested, and no blank line under it
+];
+
+test("after the menu writes a language, the editor reads that language", () => {
+  for (const head of HEADERS) {
+    for (const lang of LANGUAGES) {
+      const out = withLang(head + "Body\n", lang);
+      const where = JSON.stringify(head) + " with " + lang;
+      assert.equal(hyphen.language(frontMatter(out)).split("-")[0], lang, where);
+      assert.ok(out.endsWith("\nBody\n"), where + ": the body moved");
+      assert.equal(withLang(out, lang), out, where + ": a second write changed it again");
+    }
+  }
+});
+
+// The host reads the same line to decide whether an export divides words
+// (exportHyphenation in extension.js), and has to find there what the editor
+// finds, a header naming no language included, in any line endings.
+test("the host reads the header's language as the editor does", () => {
+  for (const head of HEADERS) {
+    const text = head + "Body\n";
+    const editor = hyphen.language(frontMatter(text));
+    assert.equal(langOf(text), editor, JSON.stringify(head));
+    assert.equal(langOf(text.replace(/\n/g, "\r\n")), editor, JSON.stringify(head) + " in CRLF");
+  }
+  assert.equal(langOf("---\ntitle: t\n---\n\nlang: es\n"), "", "the body named the language");
+});
+
+test("the line goes last in a header without one, and replaces the one there is", () => {
+  assert.equal(withLang("---\ntitle: t\n---\n\nBody\n", "es"), "---\ntitle: t\nlang: es\n---\n\nBody\n");
+  assert.equal(withLang("---\nlang: fr\ntitle: t\n---\n\nBody\n", "es"), "---\nlang: es\ntitle: t\n---\n\nBody\n");
+  // A value continued on the next lines goes with the key it belonged to.
+  assert.equal(withLang("---\nlang:\n  fr\ntitle: t\n---\nBody\n", "es"), "---\nlang: es\ntitle: t\n---\nBody\n");
+  // A file with no header gets one, with the blank line Pandoc wants.
+  assert.equal(withLang("Body\n", "de"), "---\nlang: de\n---\n\nBody\n");
+  assert.equal(withLang("", "de"), "---\nlang: de\n---\n\n");
+  // A `---` further down is not a header to write into (splitFrontMatter).
+  assert.equal(withLang("Body\n\n---\ntitle: t\n---\n", "es"), "---\nlang: es\n---\n\nBody\n\n---\ntitle: t\n---\n");
+});
+
+test("a header already in the language, regional tag included, is left alone", () => {
+  for (const text of [
+    "---\nlang: es\n---\n\nBody\n",
+    "---\nlang: es-CU\n---\n\nBody\n",
+    '---\nlang: "es" # Spanish\n---\n\nBody\n',
+  ]) {
+    assert.equal(withLang(text, "es"), text);
+  }
+  // A header that names no language is written to even for English, which is
+  // what the editor assumes there: from then on the file says so itself.
+  assert.equal(withLang("---\ntitle: t\n---\n\nBody\n", "en"), "---\ntitle: t\nlang: en\n---\n\nBody\n");
+});
+
+test("the language is written with the file's line endings", () => {
+  const crlf = "---\r\ntitle: t\r\n---\r\n\r\nBody\r\n";
+  assert.equal(withLang(crlf, "es", "\r\n"), "---\r\ntitle: t\r\nlang: es\r\n---\r\n\r\nBody\r\n");
+  assert.equal(withLang("Body\r\n", "es", "\r\n"), "---\r\nlang: es\r\n---\r\n\r\nBody\r\n");
+  // Untouched means untouched, the endings included.
+  const same = "---\r\nlang: es\r\n---\r\n\r\nBody\r\n";
+  assert.equal(withLang(same, "es", "\r\n"), same);
 });

@@ -212,7 +212,13 @@ body {
   padding: 0 50px;
   cursor: default;
 }
+/* Generated soft hyphens take the prose's ink and font. They have no width
+   unless used for a wrap, and no text offset for the caret to get stuck on. */
+#app .mdm-hyphen::after {
+  content: "\00ad";
+}
 #app .cm-content {
+  hyphens: manual;
   max-width: 820px;
   margin: 0 auto;
   padding: 18px 0 40vh;
