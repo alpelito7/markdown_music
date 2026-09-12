@@ -1,33 +1,96 @@
 # Changelog
 
+## 0.5.6
+
+- Prose words are kept whole at a line ending until a language is chosen from
+  the hyphenation menu in the toolbar. Choosing one turns division on and
+  writes that language into the `lang` field of the document's YAML header,
+  adding a header when the file has none, which comes up hidden: the button
+  beside the menu is what shows it. What divides the words is Liang's pattern
+  algorithm over the tables hyph-utf8 publishes, ten of them carried with the
+  extension: German, English, Spanish, French, Italian, Dutch, Polish,
+  Portuguese, Russian and Ukrainian. A document in another language, or one
+  whose header names none, keeps its words whole. Nothing is installed and
+  nothing is fetched.
+- The hyphens are visual. Only the opportunities are marked, with a soft
+  hyphen that paints at a wrap, never enters the text and goes as soon as the
+  word fits again, so editing, copying and saving give back the document that
+  was written.
+- The division belongs to the document. A reader keeps documents in several
+  languages, so `mdm.hyphenation` is where a document starts and each document
+  then remembers what it was left on, kept by the extension under the
+  document's URI rather than in the file or in `settings.json`. The five
+  hundred used most recently are kept, and the memory goes by path, so a file
+  renamed or moved starts again on the setting.
+- An export divides the words the document it came from divides, in HTML and
+  in PDF. On paper the work is TeX's own: asked for division, the preamble
+  gives raggedright a finite right stretch, since infinite stretch makes a
+  short line cost nothing and TeX then never needs a discretionary hyphen.
+- Every block keeps itself whole as the editor is made narrow, and what no
+  longer fits is reached by scrolling that block instead of being made smaller
+  or broken. A score is drawn at the size it is engraved at whatever the width
+  of the pane: it used to be scaled down with no floor, to a staff of 2.8 px a
+  space at a 260 px column while the prose beside it stayed at 16. A line of
+  code, of ABC, of TeX or of YAML keeps the line it is written on, and the
+  block scrolls sideways to the end of it, which is what the exported page has
+  always done with a block of code. The prose goes on rewrapping, because that
+  is what prose does.
+- The scrollbar of a score is drawn under the music and not over it. abcjs
+  states a height on the box it engraves into, and a bar inside a box of a
+  stated height is taken out of the content: it covered the bottom 9.6 px of
+  the drawing at a 520 px pane, which is the space under the staff and, on a
+  score with words or a second voice, the words or the voice.
+- The caret is drawn to the letters of the row it stands in, accents included,
+  and no more. It used to be the height of the row's text box, which in Latin
+  Modern is a good deal more than the letters: 12 px over them in a line of
+  prose and nearly 2 under their descenders.
+- The three backticks of a fence, the pair around a run of inline code and the
+  $ and $$ of an equation are drawn in the brass of the numbers in the margin.
+  They say what the number says, that what follows is not prose.
+- The editor no longer slides sideways under a scrollbar with nothing to show.
+  The labels of the toolbar buttons are laid out whether they are showing or
+  not, and on a narrow pane the ones near the right edge hung past it, which
+  was enough to make the whole page scrollable: 68 px of blank page beside the
+  text at a 420 px pane.
+
 ## 0.5.5
 
-- The words a score carries are sized against the prose beside them: the
-  title a quarter over the body text, a part name exactly on it, and every
-  lyric, chord and annotation at or below it. Left alone abcjs uses the sizes
-  abcm2ps has had since the nineties, stated in points and drawn at 4/3, so a
-  title landed at 27 px beside a 16 px paragraph and read as a headline over
-  the page rather than as the name of a figure in it. A lyric is set roman
-  rather than in abcjs's bold: it is a word of the language the page is
-  written in, and a bold Times under every note was the one thing on the staff
-  heavier than the sentence above it.
-- The sizes are worked out from the x-height of the prose and not from its
-  nominal size, and each face is measured for it, because Times, Helvetica and
-  the roman do not agree on how much of an em their lowercase is. The
-  engraving itself never moves: the staff, the notes and the clefs are drawn
-  from abcjs's own units and no font property reaches them.
+- A score on paper is engraved at the size the editor engraves it: one CSS
+  pixel of the drawing, which Chrome prints at 0.75 bp, to a sixteenth of the
+  body's em. The filter used to ask Chrome for a staff 703 px wide and then
+  scale the drawing into the measure, a second scale over the first, so the
+  notes on paper stood at neither the editor's size nor any size the document
+  had asked for. The staff lines lose the half-pixel stroke drawn under them,
+  and the printed engraving carries no `%%staffwidth` of the filter's own, so
+  what the source asks for still decides.
 - The exported page engraves at the width the editor engraves at. It used to
   ask for a staff the width of the column, 820 px against the editor's 740,
   and a responsive SVG scales its whole drawing, so every note and every word
   on a page came out 11% larger than in the editor. A `%%staffwidth` in the
   source still decides, and a narrow score is still not stretched.
-- The two screenshots are retaken: they were made before the roman and before
-  the toolbar was cut into groups.
-
-Known, and written where the code is: the printed PDF still draws a score's
-words at abcjs's own sizes. It engraves through Chrome at a width the document
-decides and scales the drawing to fit, so the right sizes there are these
-divided by that scale, and that measurement has not been made yet.
+- The column follows the pane, whatever the document holds. `.cm-content` is a
+  flex item, and a flex item is never narrower than its min-content, so the
+  widest thing that could not wrap set the column: on example.mdm the display
+  equation of the string, 579 px, so under about 680 px of pane the prose was
+  set at 579 while the page set it at min(820, pane - 100), and the whole
+  document scrolled sideways. What is wider than the column is its own box
+  now, and a display equation on the page scrolls sideways inside it the way
+  the editor already draws one.
+- The fill under a score gives way before the drawing does. A filled score
+  sits on a card the width of the column whose side padding is spent first, so
+  a score is drawn at the same size with a fill as without one. The fill used
+  to keep its 0.8em and take it out of the drawing as soon as the column was
+  narrower than both, 574 px against 600 in a 600 px column, and on the page
+  it hugged the drawing and took its padding out of it, 714 px against the
+  editor's 740.
+- The words a score carries keep the sizes abcjs gives them, and the prose's
+  `font-size-adjust` no longer reaches them. The adjust is inherited and
+  abcjs's faces are not the prose's, so the staff's words were being redrawn
+  at an x-height meant for another face.
+- The README the Marketplace shows opens on a clip of the editor at work and
+  carries a picture of a score block as the editor draws it, in place of the
+  two screenshots it had. A still picture says little about an editor whose
+  point is what happens while you type.
 
 ## 0.5.4
 
