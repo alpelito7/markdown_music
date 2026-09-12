@@ -3529,6 +3529,14 @@ const settle = (page) =>
 // so a pane under about 680 px set the prose at 579 while the page set it at
 // min(820, pane - 100), and the whole document scrolled sideways. The column
 // follows the pane, and the equation scrolls inside its own box.
+//
+// What this asked for as well, until 2026-09-12, was that the document never
+// scrolled sideways at all. That went to webview-narrow.test.js with the rest
+// of the rule about what may scroll and what may not, and what is left here is
+// the equation: its box is the column, and it scrolls inside itself. (Nothing
+// scrolls the editor sideways on this document any more, measured at every
+// pane from 900 px down to 360: a line of source too long for the column is
+// reached inside its own card now.)
 test("a narrow pane narrows the column, and a wide equation scrolls in its own box", { skip }, async () => {
   const h = await open({ scores: 0, seed: { settings: { textFont: "roman" } } });
   for (const width of [600, 500]) {
@@ -3541,13 +3549,15 @@ test("a narrow pane narrows the column, and a wide equation scrolls in its own b
       return {
         column: Math.round(c.getBoundingClientRect().width),
         pane: sc.clientWidth,
-        docScrolls: sc.scrollWidth > sc.clientWidth + 1,
         eqBox: eq.clientWidth,
         eqContent: eq.scrollWidth,
       };
     });
     assert.equal(m.column, m.pane - 100, width + ": the column is " + m.column + " px in a pane of " + m.pane);
-    assert.equal(m.docScrolls, false, width + ": the document scrolls sideways");
+    assert.ok(
+      m.eqBox <= m.column + 1,
+      width + ": the equation stands out of the column, " + m.eqBox + " against " + m.column
+    );
     assert.ok(m.eqContent > m.eqBox + 1, width + ": the equation fits its box, so nothing was tested");
   }
   assert.deepEqual(h.errors, []);

@@ -616,69 +616,92 @@
   }
 
 
+  // The union of the box abcjs declares and the ink it really draws, which is
+  // fitScores() in the editor (media/main.js) on this surface: abcjs sizes a
+  // drawing from the engraved music alone and a title wider than any staff
+  // hangs outside it, which the container's own `overflow: hidden` then
+  // crops. Writing the union into the viewBox and into the width and height
+  // attributes makes the box the whole drawing, here as there.
+  //
+  // Answers with the width of the drawing, which is what the box it sits in
+  // and the fill's side padding are both measured from.
+  function fitPaper(paper) {
+    var svg = paper.querySelector("svg");
+    if (!svg) return 0;
+    var width = parseFloat(svg.getAttribute("width"));
+    var height = parseFloat(svg.getAttribute("height"));
+    if (!width || !height) return 0;
+    var ink = null;
+    try {
+      var box = svg.getBBox();
+      if (box.width > 0 && box.height > 0) ink = box;
+    } catch (e) {
+      // Not laid out yet: the declared box stands.
+    }
+    var x = ink ? Math.min(0, ink.x) : 0;
+    var y = ink ? Math.min(0, ink.y) : 0;
+    var w = (ink ? Math.max(width, ink.x + ink.width) : width) - x;
+    var h = (ink ? Math.max(height, ink.y + ink.height) : height) - y;
+    svg.setAttribute("viewBox", x + " " + y + " " + w + " " + h);
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+    return w;
+  }
+
   function renderBlock(block) {
     var srcEl = block.querySelector(".mdm-src");
     var paper = block.querySelector(".mdm-paper");
     if (!srcEl || !paper) return;
     var source = srcEl.textContent;
-    // A first render without responsive, to measure the natural width of the
-    // engraving: a narrow score (%%staffwidth, say) must not be stretched to
-    // the width of the page, no more than a display equation is. The container
-    // is then held at that width, so the responsive render that follows can
-    // only shrink it on a small screen, never blow it up.
+    // One engraving, at the width abcjs draws on its own, which is the width
+    // the editor draws on: nothing is passed for it, so the three surfaces
+    // break a tune's lines in the same places. This asked abcjs for a staff
+    // the width of the box once, so that a tune with nothing to say about its
+    // width would fill the column; the trouble is that the editor asks for no
+    // width either and abcjs draws that at 740 px, so the page engraved the
+    // same tune 820 px wide where the editor engraved it 740, and every note,
+    // clef, staff line and word came out 11% larger on the page. Filling the
+    // column is a defensible look, but it is not the editor's, and the editor
+    // is the reference. A %%staffwidth in the source still decides, here as
+    // there.
     //
-    // Nothing is passed for the width, which is the whole of the fix and the
-    // opposite of what used to be here. This asked abcjs for a staff the width
-    // of the box, so that a tune with nothing to say about its width would
-    // fill the column rather than sit at a size it never asked for. The
-    // trouble is that the editor asks for no width either, and abcjs draws
-    // that at 740 px: the page was therefore engraving the same tune 820 px
-    // wide where the editor engraved it 740, and since a responsive SVG scales
-    // its whole drawing, every note, clef, staff line and word came out 11%
-    // larger on the page than in the editor. Filling the column is a defensible
-    // look, but it is not the editor's, and the editor is the reference.
-    // A %%staffwidth in the source still decides, here as there.
-    // The room there is, read before anything is drawn into the box.
-    var box = paper.clientWidth;
-    ABCJS.renderAbc(paper, source, {
-      paddingleft: 0,
-      paddingright: 0,
-    });
-    var svgEl = paper.querySelector("svg");
-    var natural = svgEl ? parseFloat(svgEl.getAttribute("width")) : 0;
-    // The box the score sits in, always: it is what carries the alignment
-    // (mdm-look.css), and for a narrow score the width as well. The limit
-    // goes here and not on the paper itself because abcjs keeps the ratio of
-    // the drawing in a percentage padding-bottom, and a percentage is
-    // resolved against the width of the containing block: with the max-width
-    // on the paper, that padding went on being computed from the width of the
-    // page and left a vertical gap under the score.
-    var fit = document.createElement("div");
-    fit.className = "mdm-fit";
-    if (natural && box && natural < box) {
-      fit.style.maxWidth = Math.ceil(natural) + "px";
-    }
-    // And the card around it, the width of the column, as in the editor: it
-    // carries the fill, whose side padding gives way before the drawing does
-    // (.mdm-card in mdm-look.css), so it is told the drawing's own width. The
-    // player bar stays outside it, under the card, as it was under the fill.
-    var card = document.createElement("div");
-    card.className = "mdm-card";
-    if (natural) card.style.setProperty("--mdm-score-natural", natural + "px");
-    paper.parentNode.insertBefore(card, paper);
-    card.appendChild(fit);
-    fit.appendChild(paper);
+    // And no `responsive` either, which is the second half of the same rule:
+    // a responsive SVG is fluid, so it scaled the whole drawing down to
+    // whatever the window left it, with nothing under it (the staff's line
+    // spacing fell from 7.9 px to 2.8 at a 360 px window, with the prose
+    // beside it unmoved). The drawing keeps the size it is engraved at, and a
+    // window too narrow for it scrolls the card sideways, which is what a
+    // wide equation and a wide table already do.
     var visual = ABCJS.renderAbc(paper, source, {
       // The classes the stylesheet keys on: the staff lines it recolours, and
       // the notes the player lights up. The paddings are the editor's, so the
       // engraving sits in the text the same way here as it does there.
       add_classes: true,
-      responsive: "resize",
       paddingtop: 2,
       paddingbottom: 2,
       paddingleft: 0,
       paddingright: 0,
     })[0];
+    // The box the score sits in, which carries the alignment (mdm-look.css)
+    // and, for a score narrower than the column, the width as well: held to
+    // the drawing, its auto margins centre it.
+    var fit = document.createElement("div");
+    fit.className = "mdm-fit";
+    // And the card around it, the width of the column, as in the editor: it
+    // carries the fill, whose side padding gives way before the drawing does
+    // (.mdm-card in mdm-look.css), so it is told the drawing's own width, and
+    // it is the box that scrolls when the column cannot hold the drawing. The
+    // player bar stays outside it, under the card, as it was under the fill.
+    var card = document.createElement("div");
+    card.className = "mdm-card";
+    paper.parentNode.insertBefore(card, paper);
+    card.appendChild(fit);
+    fit.appendChild(paper);
+    var drawn = fitPaper(paper);
+    if (drawn) {
+      fit.style.maxWidth = Math.ceil(drawn) + "px";
+      card.style.setProperty("--mdm-score-natural", drawn + "px");
+    }
     if (
       block.classList.contains("mdm-play") &&
       ABCJS.synth &&

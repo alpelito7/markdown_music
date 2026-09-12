@@ -1291,20 +1291,584 @@ Before and after the round: host 82 of 82, end to end 1 of 1. The rounds run
 that evening against the version where the whole bar was the document's are
 gone with the code they measured.
 
+### Intact, and then a scroll (2026-09-12)
+
+What each kind of block did as the pane was squeezed, measured on example.mdm
+before anything was touched: the prose rewrapped and the column followed the
+pane; a code block rewrapped too, CodeMirror breaking inside a word when a
+line had nothing else to break on (3 rows for one line at a 500 px column); a
+table squeezed its columns; a display equation kept its size and scrolled
+inside its own box from a 680 px pane down; and the score alone was scaled
+down whole, with nothing under it. The staff's line spacing went 7.9 px at a
+820 px column, 7.5 at 700, 6.4 at 600, 5.4 at 500, 4.3 at 400, 2.8 at 260,
+with the prose beside it at 16 px throughout, and the title of the first
+score from 27 px to 9.5.
+
+The rule the owner asked for, and it is the equations' rule made general:
+**every block keeps itself intact while it fits, and a block that no longer
+fits is reached by scrolling, never made smaller and never broken.** So the
+score is drawn at the size abcjs engraves it at whatever the column does
+(`max-width: none`, where `max-width: 100%` used to scale it), and a line of
+source keeps its line (`white-space: pre` on the card's lines, where
+CodeMirror's `pre-wrap` with `overflow-wrap: anywhere` under it used to break
+it). The prose still rewraps, because that is what prose does.
+
+Which box carries the scroll is not the same for the two, and the reason is
+structural rather than a matter of taste: a score is a widget with a box of
+its own, so the part that does not fit belongs to that box, while a code
+block in the editor is a run of editable lines with no box around them, so
+the editor itself scrolls sideways. A page-wide scroll for a score would drag
+the prose along with it, and a per-line scroll for code would lose the caret,
+which CodeMirror keeps in view by scrolling the scroller (measured: with the
+line whole, the caret at the end of an 819 px line put the scroller at 219).
+
+Four things the code change needed, each measured:
+
+- The card's ground stopped at the column, so 269 px of a 819 px line stood
+  on the page's own ground with no card under it. The line box is as wide as
+  the block's longest line now (`width: max-content`).
+- `min-width: 100%` without `box-sizing: border-box` under it made every card
+  25 px wider than the column, padding and all.
+- The copy button is placed against its line, so on a block with a long line
+  it rode off the pane with it. It is held to the right edge of the column by
+  a container query (`.cm-content` is the container, `left: calc(100cqi -
+  32px)`), which is the only piece of this that is new CSS rather than a
+  correction.
+- With every line as wide as its own text, the card's ground came out with a
+  ragged right edge: twenty different edges between 470 and 633 px on the
+  python block of example.mdm at a 520 px pane, and the first of them inside
+  the pane without scrolling at all. The lines of a card share one width now,
+  their longest line's, which the walk that classes them counts off the
+  document and writes on each line (`--mdm-card-chars`, spent in `ch` by the
+  sheet, the advance of the monospace they are all set in). Counted and not
+  measured because CodeMirror renders the lines in view and a little beyond:
+  measured, a card longer than the viewport would change width as it was
+  scrolled through. The count can land a tenth of a pixel under the real
+  advance of a line, which is what `width: max-content` under it is for.
+
+And two on the page, which is the same document on another surface and had
+to stop scaling too (mdm.js no longer asks abcjs for a `responsive` render,
+mdm.css no longer caps the drawing at `max-width: 100%`):
+
+- abcjs writes `overflow: hidden` into the style attribute of the box it
+  draws into, so the drawing was cropped rather than scrollable: at a 500 px
+  column the page showed the left 500 px of a 740 px engraving with nothing
+  to scroll. The paper is `overflow: visible !important` and the card, which
+  carries the fill, is the box that scrolls. The editor has the same trap and
+  the same answer (`overflow-x: auto !important` on the `<code>`, which is
+  abcjs's own box there and carries the fill too).
+- abcjs sizes a drawing from the engraved music alone, so a title wider than
+  any staff hangs outside the box it declares. The editor has widened that
+  box to the ink since 5.10.3 (`fitScores`); the page now does the same
+  (`fitPaper`), and without it the first score of example.mdm lost 20.7 px of
+  its title off the left at a 360 px window.
+
+The two surfaces now agree at every width measured (820 down to 260 px of
+column): the same drawing, the same systems, the same 7.9 px a space, and the
+same number of pixels held back by the box (740 less the column).
+
+The paper is untouched and cannot follow the rule all the way: mdm.lua builds
+its own Chrome page and engraves at abcjs's own width there too, but a page
+has no scroll, so a score wider than the measure is still scaled down to it
+(`\mdmscorewidth`, which is where it has always been). At the default
+geometry that clamp does not bite: 740 CSS px is 46.25 em of the body, about
+16.3 cm at a 10 pt em, inside an 18 cm measure.
+
+Tests: `webview-narrow.test.js`, new, five tests over one fixture carrying one
+of each kind of block and three scores (a wide one, one whose two parts are a
+line each, one that names its own `%%staffwidth`): the prose rewraps and the
+column follows the pane; a line of source keeps its line, the editor scrolls
+to the end of it, the ground runs under the whole line, the lines of a card share
+an edge, a card with nothing long in it is exactly the column, and the copy
+button stays on the pane; an equation and a
+table keep their size and scroll in their own box; a score is drawn at its
+engraved size at 900, 700, 600, 500 and 420 px and its box holds back exactly
+what does not fit; and a wide score never scrolls the document. `html.test.js`
+gains "a narrow window leaves the music at its engraved size on both
+surfaces" (600 px: drawing, systems, staff spacing and pixels held back, side
+by side) and "the page draws the same engraving at every window, and scrolls
+the card" (1000 against 500 px), keeps "a title wider than its staff is not
+cropped on the page" (360 px), and its filled-score test now reads the first
+two scores instead of the first. `editorAt` takes a height, since a narrow
+pane makes the document taller than CodeMirror renders. And one test of an
+earlier round was restated: "a narrow pane narrows the column, and a wide
+equation scrolls in its own box" (webview-look.test.js) asked as well that
+the document never scrolled sideways, which is no longer true of a document
+with a long line of source in it, so it now asks the thing that decision was
+about, that the equation's box is the column and does not stand out of it.
+What may and may not scroll the document is tested in the new file, on a
+document with no line of source to overflow.
+
+Mutations, each applied, run and restored in one command with the file
+checksummed before and after. Caught:
+
+- The card's ground left at the column (`width: max-content` gone): the
+  source-line test failed, the ground ending 269 px before the ink.
+- The card without `box-sizing: border-box` under its `min-width: 100%`:
+  the same test failed, every card 25 px wider than the column.
+- The copy button left riding with its line (the container query swapped back
+  for `right: 8px`): the same test failed, the button off the pane. The
+  fixture had to be written for it first: the button is an inline widget
+  inside the FIRST line of its block, so a block whose first line is short
+  never shows the drift, and the long line was moved up to be first.
+- The score scaled to the column again (`max-width: 100%`): the score test
+  failed.
+- The score's box clipping instead of scrolling: the score test failed.
+- The page back to a responsive drawing: five tests failed, the two of this
+  round among them.
+- abcjs's own box left to clip the drawing on the page (`overflow: hidden`
+  where the paper now says visible): the two tests of this round failed, the
+  page showing the left 500 px of a 740 px engraving with nothing to scroll.
+- The drawing capped at the column on the page (`max-width: 100%` in
+  mdm.css): three tests failed.
+- The card not scrolling the drawing: the page test failed, and so did the
+  equation test of the earlier round, the page scrolling sideways instead.
+- A code card not told its widest line (the call taken out of the walk): the
+  source-line test failed, the lines of one card no longer sharing an edge.
+- The lines of a card not sharing a width (the sheet back to a flat
+  `min-width: 100%`): the same test failed.
+- The page not widening the box to the ink (`fitPaper` handed the declared
+  box): the crop test failed. That test had to be rewritten first: with the
+  reflow gone the page engraves at 740 px whatever the window, so a title
+  narrower than a 740 px staff can no longer overhang, and the case now has
+  a page of its own (a score that asks for 200pt of staff under a title
+  wider than that, which is the editor's own fixture for it).
+
+Not caught, and why:
+
+- `white-space: pre` swapped back to `pre-wrap` on the source cards: no
+  measurement moved. A box as wide as its own max-content has nothing left to
+  wrap, so while the width stands the `white-space` cannot be observed. Left
+  in, with the overlap written down in the sheet: it says what the rule is
+  and it is what would keep a line whole if the width ever went.
+
+Two restores failed on the way, both because the text written back was not
+unique in the file (`white-space: pre-wrap;`, which the prose's own rule also
+carries, and an anchor that had already been changed by the failed one before
+it). Both files were found mutated, put back by hand at once, and the runs in
+between were re-run.
+
+### The bar under the music, the delimiters and the caret (2026-09-12)
+
+What the round above could not see, and two looks the owner asked for after
+seeing the first one in a real window.
+
+**The harness drew no scrollbars at all.** puppeteer launches every headless
+browser it starts with `--hide-scrollbars`, and hidden, a bar takes no room:
+every box in the page measured the same whether it scrolled or not, which is
+why nothing above caught what a bar covers. `open({ bars: true })` in
+`webview/helpers.js` and a fifth argument on `pageAt` in `html.test.js` drop
+that flag for the tests that are about it. It costs the pane 15 px to the
+vertical bar, so a measurement taken with the bars drawn is never compared
+with one from a test that has them hidden.
+
+With them drawn, at a 500 px pane:
+
+- the score's box held a 10 px bar and the bar was taken out of the content
+  box, because abcjs writes a height into the style attribute of the element
+  it engraves into: 9.6 px of the drawing stood under it, which is the space
+  below the staff and, on a score with words or a second voice, the words or
+  the voice;
+- the equation never had that trouble: nothing states a height on a
+  `.katex-display`, so its box grows by the bar instead (65 px to 75) and the
+  maths keeps all of itself. That is what the owner meant by "la ecuación
+  funciona bien";
+- the page never had it either, and for the same reason: the card's height is
+  its content's (368 px to 383 at a 500 px window).
+
+So the score's box takes its height from the drawing now (`height: auto
+!important`, beside the `overflow-x` that already beats abcjs's inline
+`overflow: hidden`): 78 px to 88 at that pane, the drawing whole, and nothing
+added at a width where it does not scroll. Tests: "the bar of a score is
+drawn under the music and not over it" (webview-narrow) and "the bar under a
+score on the page is drawn below the music" (html), which also writes down
+that the two bars are not the same size, 15 px in a browser against the 10 px
+VS Code draws inside a webview: that is the platform's furniture and not the
+document, and what has to agree is that neither of them stands on the music.
+
+**The delimiters of code and of maths** are drawn in the brass of the numbers
+in the margin (`--mdm-line-ink`): the three backticks of a fence, the pair
+around inline code, and the `$` and `$$` of an equation. They said the same
+thing a number says and they were taking the grey every mark Lezer tags a
+processing instruction takes (`.mdm-mark`), which is also the `*` of a bold
+span and the `#` of a heading. `buildDecorations` marks the marker nodes
+themselves (`CodeMark` under `FencedCode` and under `InlineCode`,
+`BlockMathMark`, `InlineMathMark`, `InlineBlockMathMark`) and only while they
+show, so nothing reaches a mark the editor has hidden. Test: "the backticks
+of code and the $ of maths are drawn in the brass of the numbers"
+(webview-look), which counts the ten runs of the fixture, reads the colour off
+the `::before` that prints a number, and checks the other marks kept the grey.
+
+The trap here is the one the `.mdm-fence-info` rule already carried, and it
+was walked into again: a mark decoration wraps whatever the highlighting has
+already put there, so the grey sits on an inner span that carries its own
+colour rule and wins on the text. The first version of the rule named the
+marked run alone, the computed colour on it read brass, the test passed, and
+every backtick on screen was still grey; a zoomed picture is what caught it.
+The rule reaches the inner box now (`#app .mdm-delim *`) and the test reads
+the colour off the deepest box that holds the text, which is what paints the
+glyphs. The `.mdm-mark` runs inside a delimiter are left out of the "other
+marks keep the grey" half, since a backtick's inner span is one of them.
+
+**The caret** was drawn at the height of the text's own box, which in Latin
+Modern is a good deal more than the letters: an ascent of 1.127em against a
+descent of 0.29, drawn at 1.225 of its size. Measured against the ink of
+"Ahgy" in the row's own face (canvas `actualBoundingBoxAscent`/`Descent`,
+with `fontBoundingBoxDescent` placing the baseline inside the box the browser
+laid the row out in):
+
+| row | box | letters | over them | under them |
+| --- | --- | --- | --- | --- |
+| `#` roman | 54 | 29 | 23 | 2 |
+| `##` roman | 40 | 22 | 16 | 2 |
+| prose roman | 28 | 15 | 12 | 1 |
+| prose sans | 17 | 15 | 2 | 0 |
+| code | 19 | 15 | 4 | 0 |
+
+`fitCaret` in main.js cuts it back to the row's own em and a seventh from the
+foot up, and never grows it: 54 px to 36.8 on a `#`, 40 to 27.6, 28 to 18.4,
+19 to 16.2, and the sans left exactly as CodeMirror drew it. The row is
+looked for under the caret's own foot (`elementFromPoint`) rather than taken
+from the selection, so several carets need no bookkeeping and one CodeMirror
+has not drawn is not there to be found; the fit hangs off a MutationObserver
+on the cursor layer, because drawSelection writes the carets in the measure
+phase and an observer callback lands before the frame is painted. Test: "the
+caret is cut back to the letters of the row it stands in" (webview-look), over
+both faces and four kinds of row.
+
+Mutations, each applied, run and restored in one command with the file
+compared before and after. Caught:
+
+- The score's box back to abcjs's height (`height: auto` gone): the score bar
+  test failed, the bar taken out of the music's room (68 px of content where
+  the wide pane gives 78).
+- The page's card given a height of its own: the page bar test failed, 353 px
+  of content against 368.
+- The colour taken off the delimiters: the delimiter test failed on the first
+  fence it read.
+- The fences no longer marked (the call in the `FencedCode` branch gone): the
+  delimiter test failed, six runs found where the fixture has ten. The same
+  with inline code's backticks and with the `$$` of a display equation.
+- The inner span left to the highlighting (the rule back to `.mdm-delim`
+  alone): the delimiter test failed, which is the trap above under test.
+- The caret cut to 0.7 em instead of 1.15: the caret test failed, the caret
+  8.6 px shorter than the letters of a `#`.
+- The caret's height left alone (the write gone): the caret test failed.
+
+One test had to be changed, and it is the kind that must be said out loud:
+"a divided word deletes across rows" (webview-hyphenation, both languages)
+reads the drawn caret against the text's own coordinates, and it read the
+two tops. The caret's top is by design no longer the top of the box the text
+was laid out in, so it now reads the two feet, which is where drawSelection
+puts the caret and where the fit leaves it. The assertion was checked to
+still bite by moving the foot 10 px: both languages failed on it.
+
+Not caught, and why:
+
+- `fitCarets()` called from the update listener as well as from the observer:
+  the caret test passed with it gone, because the observer on the cursor
+  layer already covers every write drawSelection makes and the layer itself
+  is found on the frame after the view is built. The call was taken out
+  rather than left in untested. The layer survives a reconfiguration of the
+  `gestures` compartment, which is the only one the editor makes.
+
+**Left as it is, and it is the owner's call.** The abc source card leaving the
+document is the rule of the round above working as written: a card is as wide
+as its longest line, and the abc of example.mdm's `.play` block has a line of
+121 characters, so the card is 1031.5 px wide whatever the pane. At a 1071 px
+pane the column is 820 and the card runs 86 px past the pane's right edge,
+with the editor holding back 87; at 620 it runs 462 px past, with 463 held
+back. Nothing is unreachable and no ground is ragged, but the card leaves the
+column and is cut at the edge of the pane, and the bar that reaches it is the
+editor's own at the foot of the pane and not the block's.
+
+Two cheaper variants were drawn and looked at rather than guessed:
+
+- the card held to the column (`width: 100%`), which keeps the document's
+  right margin and puts the tail of every long line on the page's own ground
+  outside the card: the ground is a tidy rectangle and the code crosses its
+  edge, which reads as text spilling out of a box;
+- the card left as it is with a margin kept past it, which changes nothing
+  until the reader has scrolled, since a card wider than the pane is cut at
+  the pane's edge whatever is beyond it.
+
+A bar on the block itself cannot be had in CSS: clipping the line at the
+column (`overflow: hidden`, or a `clip-path` on `100cqi`) makes the tail
+unreachable, since the clip travels with the line, and a scroll box per line
+loses the caret, which drawSelection draws in a layer outside the lines. The
+one road left is the block drawn as a card of its own while no caret is in it,
+the way the exported page draws it and the way a score, an equation and a
+table already behave in the editor, with the source lines coming back the
+moment the caret enters. That undoes a decision taken on the record (D1 in
+`vscode-mdm/docs/cm6-migration.md`: "code: never, it always renders"), and it
+needs the colours drawn inside the widget, for which the vendored bundle
+exports no tree highlighter: a read-only CodeMirror inside the widget is the
+way that needs no vendor rebuild.
+
+### A card of source scrolls inside itself (2026-09-12)
+
+The owner asked for the code blocks the exported page has: "que si uno se pasa
+del ancho de la página se habilita el scroll horizontal, que sería además la
+misma barra que se activa al comprimir". The page had that already, and the
+editor was the surface out of step, which is the export rule and was written
+down as Pending 1 rather than fixed: at a 600 px window, both columns 500 px,
+the page held back 91 px of the widest line inside its `pre` and the editor
+scrolled 232 px of the whole document to reach the end of the same line.
+
+The editor has no box to give that scroll to. A card of source is a run of
+editable lines and CodeMirror owns their DOM, so there is nothing around them
+to hang an `overflow` on, and four roads were measured before one was taken:
+
+- **A clip on the line alone** takes the number in the margin with it. The
+  number is a `::before` of the line, absolutely positioned against it, and a
+  scroll box clips what stands outside it: read by screenshot, the margin beside
+  a clipped card came out pixel for pixel what it is with the numbers painted
+  transparent.
+- **A wrapper span inside the line** (a mark decoration over the whole line,
+  `display: inline-block`, the scroll box) keeps the number and costs a
+  decoration per line, the baseline of an inline-block, and a card whose last
+  line is empty has no box to draw the bar in.
+- **The whole editor scrolling** is what it did, and what the owner asked to
+  stop: the prose goes sideways with the code.
+- **The block drawn as a widget when no caret is in it** undoes decision D1
+  (code always renders) and needs colours inside the widget, which the
+  vendored bundle cannot give (no `highlightTree`, no `classHighlighter`).
+
+What was taken is the first road with the number let out of the clip: the
+lines of a card are `position: static`, so the number's containing block is
+`.cm-content` and not the line, and the clip does not reach it. The number's
+place is unchanged because it never had a `top` (it rides on the static
+position of the line's first row), and `right: 100%` against the column is the
+same x as against the line, since a line is exactly as wide as the column and
+starts where it starts. Measured by screenshot: the margin is what it was.
+
+The rest of the round is what that costs, and every piece of it is a
+measurement:
+
+- **The run of boxes has to move as one.** Every line of the card gets the
+  card's own width as scrollable room through an `::after` of
+  `--mdm-card-chars * 1ch + 1.8em` (the same arithmetic the old `min-width`
+  used, since the card's width was already counted in characters), and
+  `syncCards` in main.js writes one offset along the run. Without it the short
+  lines of a card do not scroll at all and the text shears line by line.
+- **One bar for the card, on its last line**, where the page draws it: the
+  other lines carry `scrollbar-width: none`. The bar is added to that row
+  instead of being taken out of it, 28.8 px to 38.8 with the text where it
+  was, which is the lesson the score's box learned this morning.
+- **The caret and the selection are drawn outside the lines.** drawSelection
+  writes them in layers of the scroller, so a card scrolled without a redraw
+  leaves them over the glyphs they were written against (149 px of drift after
+  a 150 px scroll, measured), and `view.requestMeasure()` does not redraw them
+  (a no-op selection dispatch does, and is not used: it would fire on the
+  scroll the browser makes while typing, which is where an IME composition
+  lives). What is remembered instead is where drawSelection put each mark and
+  the offset the card stood at, and every mark of that card is then moved by
+  the difference and cut to the card's window. A mark left outside the window
+  is not drawn and not left standing there either: a caret past the column
+  made the whole document scrollable sideways again (34 px, measured).
+- **A caret set past the window has to be brought back in.** CodeMirror
+  reveals a caret by scrolling the boxes the text is in, and the caret is not
+  in them, so what it scrolled was the document, with the caret still out of
+  sight. `revealCaret` scrolls the card instead, keeping 12 px of the card's
+  own air between the caret and the edge.
+- **Home and End had to be taken over inside a card.** CodeMirror finds the
+  start of a visual line by asking the browser which character sits at the
+  editor's own left edge, because the editor wraps; over a card scrolled 166 px
+  the browser answered with the character at the edge of the card's window, 20
+  into the line, so Home stopped short and Shift-Home selected from there. A
+  line of source does not wrap, so the ends of the line are the answer, which
+  is what CodeMirror itself does when nothing in the editor wraps.
+- **The copy button is the one piece of furniture the card cannot hold.** It is
+  placed against the column instead (it already reached for the container query
+  once, for a different reason), and its `top: auto` puts it on the static
+  position of the card's first row: 4 px under the top of the card before and
+  after, measured. Those two declarations had to move below the chrome's own
+  rules to win against them, which is why they now sit there.
+
+The bar is 10 px in the webview and 15 in a browser, and puppeteer hides the
+bars of every headless browser it launches, so the bar assertions read with
+`bars: true` (`withBars` in webview-narrow.test.js). That trap cost this
+morning's round a measurement and it cost this one a false green: the first
+version of the bar test read 0 for every row.
+
+And a second thing about bars in the harness, found while trying to take a
+picture of this one: with the bars asked for, the page reserves the room (10
+px, which is what every assertion here reads) and Chrome paints nothing in
+it. Read in the pixels, the strip under the card's last line is the page's
+own ground across its whole width, with no thumb and no track, and this
+morning's pictures of the score's bar have the same empty strip while the
+owner sees that bar in VS Code. A plain file with a plain scroll box in the
+same browser does paint one, so it is something about this page rather than
+about the build. What follows is that the bar's geometry is testable here and
+its look is not: that one is judged in a real window, which is what CLAUDE.md
+asks for anyway.
+
+Tests: `webview-narrow.test.js` "a line of source keeps its line, and its card
+scrolls to the end of it" (rewritten: the card holds the line, the document
+holds nothing, the card is the column at every pane and whatever is written in
+it, the lines of one card hold back the same amount, the button at the
+column's edge and 4 px down), "the caret and the selection follow the card they
+stand in" (new: the reveal, the drift after a scroll of the bar, one card not
+moving another, a caret out of the window not drawn and not scrolling the
+document, a selection cut to the window and over its own letters, Home and End
+on the line's ends, and the prose left to CodeMirror), "the bar of a score is
+drawn under the music and not over it" (extended with the card's bar: one bar,
+on the last line, added and not taken), and `html.test.js` "a wide line of code
+scrolls inside its own block on both surfaces" (the export rule: the same size,
+padding and column, each surface holding the end of its own longest line, and
+neither moving its column; the editor holds 25 px more, its own padding, and 13
+more that are the slack of the `ch` it counts in).
+
+Mutations run, each applied, run and restored in one command:
+
+| what was broken | what failed |
+| --- | --- |
+| the card does not scroll (both axes of `overflow`, since a `visible` axis beside one that is not computes to `auto` and the box goes on scrolling) | the document scrolled sideways for a card; and on the page's side, the editor scrolls the document sideways for a line of code |
+| the lines of a card do not share a width (the `::after` at `width: 0`) | the lines of one card do not scroll together: 0 against 316 |
+| every line of the card draws a bar (`scrollbar-width: auto`) | a line of the card other than the last drew a bar: [15,10] |
+| the last line draws no bar (`scrollbar-width: none`) | the last line of the card draws no bar: [0,0] |
+| the line is the frame of its own number (`position: relative` back) | the card clipped the number of its own line away |
+| the column is not the frame of the furniture (`.cm-content` static) | the copy button is not 8 px inside the column at 900: 792 |
+| the button hangs off the column's top (its `top: auto` gone) | the copy button is not 4 px under the top of the card: -293.9 |
+| the marks are not placed on a scroll | the caret stayed where the card had left: 39.4 |
+| the card is not scrolled to show the caret | the caret was left outside the card's window |
+| a mark outside the card's window is drawn anyway | a caret out of the card's window was drawn anyway |
+| a row rendered for the first time is left where it came back (`syncCards` gone) | a row the pane brought in came back at another offset: 60/60/60/0/0/0/0 |
+| the lines of a card are not kept in step (the scroll handler's sibling write gone) | the lines of the card did not follow the one that was scrolled |
+| Home and End are left to CodeMirror | Home stopped short of the start of the line: column 17 |
+| the caret is left at the height CodeMirror drew it | the foot of the caret is 2.4 px off the descenders |
+| the caret keeps the foot of the box it was drawn in | the foot of the caret is 10.79 px off the descenders |
+| the used size of the face is not read (`k = 1`) | the caret is shorter than the letters, by 5.2 px |
+
+Two of them had to be written twice. `overflow-x: visible` on its own changed
+no measurement, because a `visible` axis beside an `overflow-y: hidden`
+computes to `auto`: the card went on scrolling and the test went on passing.
+And the first version of the row-that-came-back mutation was not caught at
+all: a caret entering the block brings the fences out of hiding, and the
+scroll the reveal makes syncs the new rows on its own, so the case that needs
+`syncCards` is the one where nothing scrolls, which is the rows the pane
+builds as the reader goes down a card taller than itself. That is the test
+now, and it fails with the card sheared 60/60/60/0/0/0.
+
+### The caret, cut to the ink of its row (2026-09-12)
+
+The owner read the caret of the morning's round in a real window and reported
+it still too low with the roman. Measured, the low part was the foot: the box
+CodeMirror draws the caret in ends below the letters on both faces (0.084em
+under them in the roman, 0.004 in the sans), and a cut that keeps the foot
+where the box ends keeps the caret down there with it.
+
+Eight variants were drawn in `design-caret.html` (at the root, not
+committed), each in both faces and in four kinds of row, with the numbers
+under every picture. The owner picked **G**, the face's own ink box: the top
+on the ascenders of the plain lowercase (bdfhklt), the foot on the descenders
+(gjpqy). Measured in the harness after the change: the foot lands on the
+deepest ink to within a fortieth of a pixel in all eight rows, the top a
+pixel over the ink of a capital (which is the hair by which those ascenders
+stand over one), and the caret is 19.5 px on a 16 px row of the roman's prose
+against the 28 CodeMirror draws, 36 against 54 on a `#`, 15 against 19 on a
+line of code, 15 against 17 on the sans's prose.
+
+Two things had to be measured rather than assumed:
+
+- **The used size of the face.** `font-size-adjust` changes the used size and
+  not the computed one, so a canvas asked for the size the sheet names
+  measures Latin Modern 22 per cent small. What says how big the face came
+  out is the box the browser gave the row's own text, which is the face's
+  ascent and descent at that used size; the ratio is kept per face, because a
+  row with no text on it has no box to read it from.
+- **Which row the caret stands in.** The first version read the baseline off
+  the row's first letter, and a paragraph is one line of the document and as
+  many rows as the column gives it: a caret three rows down was placed
+  against the baseline of the first and jumped 28.4 px up the paragraph. The
+  hyphenation tests caught it, because they delete through a divided word row
+  by row. The baseline comes from the box the caret itself was drawn in now,
+  which is the box of the text of its own row.
+
+### The caret takes the accents, and the page stops sliding (2026-09-12)
+
+Two reports, one round.
+
+**The caret is variant C now, not G.** Having seen G in a window, the owner
+picked **C** from the same `design-caret.html`: the face's ink box with the
+accents in it, so the probe for the top is `bdfhkltÁÉ` and not `bdfhklt`, and
+an `Á` no longer stands over the caret. The foot is unchanged, on the
+descenders of `gjpqy`. Measured in the harness after the change: the top
+lands on the accent and the foot on the deepest ink, both to within a
+fiftieth of a pixel in all eight rows, and the caret is 23.1 px on a 16 px
+row of the roman's prose against the 28 CodeMirror draws, 43.2 against 54 on
+a `#`, 31.8 against 40 on a `##`, 18 against 19 on a line of code.
+
+The sans is where this stopped being a cut. Its box and its ink very nearly
+coincide, so covering the accent asks for a pixel more than CodeMirror drew
+(18 against 17 in prose here, 35 against 36 on a `#`, 27 against 27 on a
+`##`), and the rule that the caret is only ever made shorter had to go. That
+rule was also what kept a fitted caret from being fitted again, since the
+foot is read off the box the caret stands in and after a pass that box is the
+fitted one, so it was replaced by a record of what the last pass wrote
+(`caretFitted` in main.js). Without it the caret walks 1.2 px up the row per
+pass in the roman's prose, measured.
+
+**The page itself no longer scrolls sideways.** The owner sent two shots: a
+horizontal bar under the editor, and what dragging it uncovers, which is
+blank page beside the text. The editor's own scroller holds nothing back at
+any width (every block that outgrows the column scrolls inside its own box),
+so the overflow was the chrome: a tooltip is an absolutely placed `::after`
+laid out at the width of its label whether it shows or not, and the ones near
+the right edge of a wrapped toolbar hang past it. Measured on `example.mdm`:
+8 px of page at a 480 px pane, 15 at 560, 20 at 700 and 68 at 420, all of it
+blank. `#app` takes `overflow-x: clip` (not `hidden`, so it makes no scroll
+container and the y axis stays visible); the labels are still laid out, and a
+tooltip at the right edge is cut there instead of being scrolled to.
+
+Tests, and the mutations run against them:
+
+- `webview-look.test.js`, "the caret is the ink of the row it stands in",
+  rewritten for C: the top against the ink of `Áhgy` on the row's own face,
+  the foot against the descenders, and the height against the box CodeMirror
+  drew, shorter in the roman and within a pixel either way in the sans.
+  **Mutation**: `CARET_ASCENDERS` back to `"bdfhklt"` (variant G) → *a
+  heading in the roman: the top of the caret is -7.19 px off the accent*.
+- `webview-look.test.js`, "a caret the fit has drawn is not drawn again":
+  four fit passes forced by writing to the cursor layer, the caret's own
+  `style` read before and after. **Mutation**: the `caretFitted` lookup
+  removed → *the caret moved under a second pass of the fit* (top 259.433 →
+  254.537 over four passes).
+- `webview-look.test.js`, "the page never scrolls sideways, whatever the
+  toolbar hangs over the edge", beside the one about the column and the
+  equation: `example.mdm` at 700, 560, 480 and 420, the page asked to scroll
+  and read back, the editor's own scroller held to nothing, the toolbar's
+  overflow asserted non-zero so the test is about the clip and not about a
+  shorter label. **Mutation**: `overflow-x: clip` deleted from `#app` → *the
+  page held something back sideways at a pane of 700: 20*.
+
+The exported page was measured for the same thing and has it not: its four
+tooltips are the ones on a score's player bar, and at 900, 700, 560, 480 and
+420 px of window the page holds nothing back sideways and does not move when
+asked to. So there is nothing to mirror in `mdm-look.css` this time.
+
+Not seen in a real VS Code window yet: both of these are chrome, so the rule
+of the project is that they are not finished until they have been.
+
 ## Pending
 
-1. `h.errors` is asserted empty in many tests but not all; moving it to the
+1. A long line of code is whole on both surfaces and each of them now
+   scrolls the block it is written in, the page 91 px of it and the editor
+   116 at a 600 px window (the 25 between them are the card's own padding).
+   The PDF is the third road and is still unmeasured: what `listings` does
+   with a line too long for the measure has not been looked at.
+2. `h.errors` is asserted empty in many tests but not all; moving it to the
    helper's `close()` would cover the rest for free.
-2. Images (`![alt](path)` shown as a widget from the document's folder) have
+3. Images (`![alt](path)` shown as a widget from the document's folder) have
    no test: the harness passes an empty `MDM_DOC_BASE`.
-3. The keyboard path inside a real VS Code window (the webview host replays
+4. The keyboard path inside a real VS Code window (the webview host replays
    the workbench `undo` into the page as `execCommand("undo")`, which the
    editor now ignores; copy, paste and select-all replayed the same way) is
    covered in Chrome by emulating the replay, not in VS Code itself.
-4. The three webview files share `webview/helpers.js`; a cold-start flake
+5. The three webview files share `webview/helpers.js`; a cold-start flake
    was seen once (the first `open()` of a run timing out on its three SVGs)
    and not reproduced.
-5. Player seek: measured in the harness (a scratch run under `tests/tmp/`),
+6. Player seek: measured in the harness (a scratch run under `tests/tmp/`),
    the audio lands on a single source with no overlap, but the head is drawn
    1 to 5 per cent ahead of where abcjs seeks the sound (larger on a short
    tune), because the head uses the buffer duration, release tail included,

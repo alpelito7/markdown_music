@@ -3489,6 +3489,7 @@
   // in a callout, in a list and in a quote at the same time.
   function lineClassCollector(doc) {
     const lines = new Map(); // line number -> Set of classes
+    const widths = new Map(); // line number -> characters of its card's longest line
     return {
       // Whether a line has been given no class at all, which is what says it
       // is prose: every block of the document (a fence, the front matter, a
@@ -3507,14 +3508,37 @@
           });
         }
       },
+      // The card a line belongs to, in characters of its longest line. A
+      // card's lines keep their lines (style.css) and are therefore as wide
+      // as their text, so without this each line of a block was its own
+      // width and the card's ground came out with a ragged right edge: on
+      // the python block of example.mdm at a 520 px pane, twenty different
+      // edges between 470 and 633 px. The lines of a card share one width
+      // instead, the widest line's, and the sheet works it out from this
+      // number in `ch`, the advance of the monospace they are all set in.
+      //
+      // Counted from the document and not measured from the DOM, because
+      // CodeMirror renders the lines in view and a little beyond: measured,
+      // a card longer than the viewport would change width as it was
+      // scrolled through.
+      card: function (from, to) {
+        const first = doc.lineAt(from).number;
+        const last = doc.lineAt(Math.max(from, to)).number;
+        let most = 0;
+        for (let n = first; n <= last; n++) {
+          most = Math.max(most, doc.line(n).length);
+        }
+        for (let n = first; n <= last; n++) {
+          widths.set(n, Math.max(widths.get(n) || 0, most));
+        }
+      },
       decorations: function () {
         const out = [];
         lines.forEach(function (set, n) {
-          out.push(
-            Decoration.line({ class: Array.from(set).join(" ") }).range(
-              doc.line(n).from
-            )
-          );
+          const spec = { class: Array.from(set).join(" ") };
+          const chars = widths.get(n);
+          if (chars) spec.attributes = { style: "--mdm-card-chars: " + chars };
+          out.push(Decoration.line(spec).range(doc.line(n).from));
         });
         return out;
       },
@@ -3652,6 +3676,7 @@
 
         if (name === "FrontMatter") {
           lines.add(n.from, n.to, "mdm-fm-line");
+          lines.card(n.from, n.to);
           lines.add(n.from, n.from, "mdm-fm-first");
           lines.add(n.to, n.to, "mdm-fm-last");
           node.getChildren("FrontMatterMark").forEach(function (m) {
@@ -3689,6 +3714,7 @@
             // (slurs, ties, the brackets of a chord) included, so it carries
             // a class of its own and no theme ink reaches it.
             lines.add(blockFrom, blockTo, "mdm-code-line mdm-src-line mdm-abc-line");
+            lines.card(blockFrom, blockTo);
             lines.add(openLine.from, openLine.from, "mdm-code-first mdm-fence-line");
             if (closeLine) lines.add(closeLine.from, closeLine.from, "mdm-code-last mdm-fence-line");
             // The word on the fence that says this block is a score, in the
@@ -3711,6 +3737,7 @@
             }).range(body ? body.from : openLine.to)
           );
           lines.add(blockFrom, blockTo, "mdm-code-line");
+          lines.card(blockFrom, blockTo);
           if (open) {
             lines.add(openLine.from, openLine.from, "mdm-code-first mdm-fence-line");
             if (closeLine) lines.add(closeLine.from, closeLine.from, "mdm-code-last mdm-fence-line");
@@ -3737,6 +3764,7 @@
         if (name === "CodeBlock") {
           // Indented code: no fences to hide, the card alone.
           lines.add(n.from, n.to, "mdm-code-line");
+          lines.card(n.from, n.to);
           lines.add(n.from, n.from, "mdm-code-first");
           lines.add(n.to, n.to, "mdm-code-last");
           return false;
@@ -3764,6 +3792,7 @@
           }
           delim(node, "BlockMathMark");
           lines.add(blockFrom, blockTo, "mdm-math-line mdm-src-line" + (out.html ? "" : " mdm-math--broken"));
+          lines.card(blockFrom, blockTo);
           lines.add(blockFrom, blockFrom, "mdm-math-first");
           lines.add(blockTo, blockTo, "mdm-math-last");
           return false;
@@ -4638,7 +4667,6 @@
         paddingright: 0,
       })[0];
       if (visual) SCORE_VISUALS.set(code, visual);
-      code.style.overflowX = "auto";
     } catch (e) {
       // Score rendering must never break editing.
     }
@@ -4659,6 +4687,7 @@
     try {
       fitScores();
       syncPlayer();
+      syncCards();
     } catch (e) {
       // never break editing
     }
@@ -4817,14 +4846,200 @@
         attributeFilter: ["style"],
       };
       caretWatcher.observe(layer, what);
+      // The selection is drawn in a layer of its own, and a card that scrolls
+      // moves its rectangles as it moves the carets.
+      const sel = view.dom.querySelector(".cm-selectionLayer");
+      if (sel) caretWatcher.observe(sel, what);
     }
     layer.querySelectorAll(".cm-cursor").forEach(fitCaret);
+    placeCardMarks(true);
     caretWatcher.takeRecords();
   }
   function watchCarets() {
     requestAnimationFrame(fitCarets);
   }
 
+  // ---- A card of source scrolls inside itself ----
+  //
+  // The card is the column wide and the end of a line too long for it is
+  // reached by scrolling the card, which is the box the exported page has
+  // (one <pre> with `overflow-x: auto`). There is nothing here to hang that
+  // box on: a card is a run of editable lines and CodeMirror owns their DOM.
+  // So every line of the card is a scroll box of its own (style.css,
+  // .mdm-code-line) and the run of them is kept at one offset here, or the
+  // text of a scrolled card shears line by line.
+  //
+  // The rest of this is the other half of the same cost. The caret and the
+  // selection are drawn by drawSelection in layers that sit outside the
+  // lines, in the scroller's own coordinates, so a card scrolled without a
+  // redraw leaves them standing over the glyphs they were written against,
+  // and a caret that has gone past the card's window is drawn out over the
+  // page beside it (34 px of document scroll with the caret still out of
+  // sight, measured in the harness). Both are answered where the layers are
+  // written: what drawSelection put there is remembered together with the
+  // offset the card stood at, and from then on a mark of that card is moved
+  // by the difference and cut to the card's window.
+  const CARD_ROWS = ".mdm-code-line, .mdm-math-line, .mdm-fm-line";
+  const CARD_FIRST = /mdm-(?:code|math|fm)-first/;
+  const CARD_LAST = /mdm-(?:code|math|fm)-last/;
+  // What a caret keeps between itself and the edge of the card it is brought
+  // back into: the card's own air, 0.9em of the monospace it is set in.
+  const CARD_AIR = 12;
+  function isCardRow(el) {
+    return !!(el && el.matches && el.matches(CARD_ROWS));
+  }
+  // The run of lines one card is drawn on, from any one of them. The ends
+  // carry classes of their own, so two cards with no blank line between them
+  // are two runs and not one.
+  function cardRows(row) {
+    const rows = [row];
+    if (!CARD_FIRST.test(row.className)) {
+      for (let el = row.previousElementSibling; isCardRow(el); el = el.previousElementSibling) {
+        rows.unshift(el);
+        if (CARD_FIRST.test(el.className)) break;
+      }
+    }
+    if (!CARD_LAST.test(row.className)) {
+      for (let el = row.nextElementSibling; isCardRow(el); el = el.nextElementSibling) {
+        rows.push(el);
+        if (CARD_LAST.test(el.className)) break;
+      }
+    }
+    return rows;
+  }
+  // Every line of a card at one offset. A line CodeMirror has just rendered
+  // comes back at nothing while the rest of the card stands where the reader
+  // left it, and the rest are always in step (the two writers below move them
+  // together), so the card's offset is the furthest of them.
+  function syncCards() {
+    let rows = [];
+    const flush = function () {
+      if (rows.length > 1) {
+        let left = 0;
+        rows.forEach(function (r) {
+          if (r.scrollLeft > left) left = r.scrollLeft;
+        });
+        rows.forEach(function (r) {
+          if (r.scrollLeft !== left) r.scrollLeft = left;
+        });
+      }
+      rows = [];
+    };
+    for (let el = view.contentDOM.firstElementChild; el; el = el.nextElementSibling) {
+      if (!isCardRow(el)) {
+        flush();
+        continue;
+      }
+      if (rows.length && CARD_FIRST.test(el.className)) flush();
+      rows.push(el);
+      if (CARD_LAST.test(el.className)) flush();
+    }
+    flush();
+  }
+  // The row a drawn mark stands on, read from the geometry rather than from
+  // the selection: several carets need no bookkeeping that way, and a mark
+  // CodeMirror drew for a range that is no longer there is not looked for.
+  function cardRowUnder(box) {
+    const mid = (box.top + box.bottom) / 2;
+    const rows = view.contentDOM.querySelectorAll(CARD_ROWS);
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (mid >= r.top && mid <= r.bottom) return rows[i];
+    }
+    return null;
+  }
+  // A caret set past the card's window is brought into it by scrolling the
+  // card, because CodeMirror cannot: it reveals a caret by scrolling the
+  // boxes the text is in, and the caret is not in them.
+  function revealCaret(caret) {
+    const box = caret.getBoundingClientRect();
+    if (!box.height) return;
+    const row = cardRowUnder(box);
+    if (!row) return;
+    const win = row.getBoundingClientRect();
+    let by = 0;
+    if (box.left < win.left + CARD_AIR) by = box.left - (win.left + CARD_AIR);
+    else if (box.right > win.right - CARD_AIR) by = box.right - (win.right - CARD_AIR);
+    if (!by) return;
+    row.scrollLeft += by;
+    const left = row.scrollLeft;
+    cardRows(row).forEach(function (r) {
+      if (r.scrollLeft !== left) r.scrollLeft = left;
+    });
+  }
+  function rememberCardMark(el) {
+    const box = el.getBoundingClientRect();
+    if (!box.height) return;
+    const row = cardRowUnder(box);
+    if (!row) return;
+    el.mdmLeft = parseFloat(el.style.left);
+    // A caret has no width of its own (drawSelection draws it as a border),
+    // which is what tells the two kinds of mark apart here.
+    el.mdmWidth = parseFloat(el.style.width);
+    el.mdmAt = row.scrollLeft;
+  }
+  function placeCardMark(el) {
+    const box = el.getBoundingClientRect();
+    if (!box.height) return;
+    const row = cardRowUnder(box);
+    if (!row) return;
+    const layer = el.parentElement.getBoundingClientRect();
+    if (!isFinite(el.mdmAt)) rememberCardMark(el);
+    if (!isFinite(el.mdmLeft)) return;
+    const win = row.getBoundingClientRect();
+    // A mark drawn over whole rows is cut and not moved: it says which rows
+    // are in the selection and not where in them, and it is the width of the
+    // window already, so moving it would leave a strip of the window bare.
+    const whole = box.height > row.offsetHeight + 1;
+    const left = layer.left + el.mdmLeft - (whole ? 0 : row.scrollLeft - el.mdmAt);
+    const right = left + (isFinite(el.mdmWidth) ? el.mdmWidth : 0);
+    const from = Math.max(left, win.left);
+    const to = Math.min(right, win.right);
+    if (to < from - 0.01 || (right > left && to <= from)) {
+      // Out of the card's window: not drawn, and not left standing out there
+      // either, since a mark past the column makes the whole document
+      // scrollable sideways.
+      el.style.opacity = "0";
+      el.style.left = win.left - layer.left + "px";
+      if (isFinite(el.mdmWidth)) el.style.width = "0px";
+      return;
+    }
+    el.style.opacity = "";
+    el.style.left = from - layer.left + "px";
+    if (isFinite(el.mdmWidth)) el.style.width = Math.max(0, to - from) + "px";
+  }
+  function placeCardMarks(fresh) {
+    const carets = view.dom.querySelectorAll(".cm-cursorLayer .cm-cursor");
+    const rects = view.dom.querySelectorAll(".cm-selectionLayer .cm-selectionBackground");
+    if (fresh) {
+      // The offset a mark was written against is remembered before the card
+      // is moved to show the caret, so that the move is part of the
+      // difference, and nothing is placed until the card has stopped moving:
+      // a caret placed first is a caret already inside the window, and there
+      // would be nothing left for the card to reveal.
+      carets.forEach(rememberCardMark);
+      rects.forEach(rememberCardMark);
+      carets.forEach(revealCaret);
+    }
+    carets.forEach(placeCardMark);
+    rects.forEach(placeCardMark);
+  }
+  function watchCardScroll() {
+    // Scroll does not bubble, so the run of boxes is heard on the way down.
+    view.dom.addEventListener(
+      "scroll",
+      function (e) {
+        if (!isCardRow(e.target)) return;
+        const left = e.target.scrollLeft;
+        cardRows(e.target).forEach(function (r) {
+          if (r !== e.target && r.scrollLeft !== left) r.scrollLeft = left;
+        });
+        placeCardMarks(false);
+        caretWatcher.takeRecords();
+      },
+      true
+    );
+  }
 
   // Outside the sheet there is no document. The strip of pane either side of
   // the text column belongs to CodeMirror's scroller, which answers a click out
@@ -5141,6 +5356,50 @@
     ];
   }
 
+  // ---- Home and End inside a card of source ----
+  //
+  // A card scrolls inside itself, and CodeMirror finds the start of a visual
+  // line by asking the browser which character sits at the editor's own left
+  // edge, because the editor wraps (moveToLineBoundary takes that road
+  // whenever view.lineWrapping is on). Over a card that is scrolled the
+  // browser answers with the character at the edge of the card's window: at a
+  // 166px offset Home landed 20 characters into the line and Shift-Home
+  // selected from there (measured in the harness). A line of source does not
+  // wrap, so the ends of the line are the answer, which is what CodeMirror
+  // itself does when nothing in the editor wraps at all.
+  const CARD_NODES = /^(?:FencedCode|CodeBlock|BlockMath|FrontMatter)$/;
+  function inCard(state, pos) {
+    let node = CM.syntaxTree(state).resolveInner(pos, 1);
+    while (node) {
+      if (CARD_NODES.test(node.name)) return true;
+      node = node.parent;
+    }
+    return false;
+  }
+  function cardLineBoundary(forward, extend) {
+    return function (view) {
+      const state = view.state;
+      let moved = false;
+      const ranges = state.selection.ranges.map(function (r) {
+        const line = state.doc.lineAt(r.head);
+        // Anywhere else this is CodeMirror's to answer, wrapped rows and all.
+        if (!inCard(state, line.from)) return r;
+        moved = true;
+        const to = forward ? line.to : line.from;
+        return extend
+          ? CM.EditorSelection.range(r.anchor, to)
+          : CM.EditorSelection.cursor(to, forward ? -1 : 1);
+      });
+      if (!moved) return false;
+      view.dispatch({
+        selection: CM.EditorSelection.create(ranges, state.selection.mainIndex),
+        scrollIntoView: true,
+        userEvent: "select",
+      });
+      return true;
+    };
+  }
+
   function buildEditor(text) {
     const mdmKeymap = [
       { key: "Mod-Enter", run: leaveBlock },
@@ -5154,6 +5413,24 @@
       { key: "Ctrl-Alt-ArrowUp", mac: "Cmd-Alt-ArrowUp", run: addCaretVertically(-1) },
       // Before searchKeymap's own Mod-d, so the substring toggle is honoured.
       { key: "Mod-d", run: selectNextOccurrenceMaybe },
+      // Before defaultKeymap's own, and only over a card: everywhere else
+      // these return false and CodeMirror answers them.
+      {
+        key: "Home",
+        run: cardLineBoundary(false, false),
+        shift: cardLineBoundary(false, true),
+      },
+      { key: "End", run: cardLineBoundary(true, false), shift: cardLineBoundary(true, true) },
+      {
+        mac: "Cmd-ArrowLeft",
+        run: cardLineBoundary(false, false),
+        shift: cardLineBoundary(false, true),
+      },
+      {
+        mac: "Cmd-ArrowRight",
+        run: cardLineBoundary(true, false),
+        shift: cardLineBoundary(true, true),
+      },
     ];
     const state = CM.EditorState.create({
       doc: text,
@@ -5220,6 +5497,7 @@
     };
     watchContent();
     watchCarets();
+    watchCardScroll();
     disarmNativeHistory();
     // Not CodeMirror's own focusChangeEffect: it reports the focus of the
     // text alone and it reports it a tick late (its handler defers), so the

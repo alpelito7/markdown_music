@@ -175,6 +175,15 @@ async function open(options) {
       // policy must not hold the AudioContext suspended for it.
       "--autoplay-policy=no-user-gesture-required",
     ],
+    // `bars`: draw the scrollbars, which puppeteer hides in every headless
+    // browser it launches (--hide-scrollbars is one of its default arguments).
+    // Hidden, a bar takes no room: every box in the page measured the same
+    // whether it scrolled or not, and the bar that covered the bottom 15px of
+    // a score inside VS Code could not be seen here at all. Only the tests
+    // about what a bar takes ask for this, because with the bars drawn the
+    // pane loses 15px to the vertical one and every column measurement in the
+    // other files moves with it.
+    ignoreDefaultArgs: opts.bars ? ["--hide-scrollbars"] : [],
     defaultViewport: { width: 900, height: opts.height || 2400 },
   });
   OPEN_BROWSERS.add(browser);

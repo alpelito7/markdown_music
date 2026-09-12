@@ -117,6 +117,7 @@ const DARK_LOOK = [
 // fallbacks) and with the look of a dark editor.
 let PAGE = null;
 let DARK_PAGE = null;
+let NARROW_TITLE_PAGE = null;
 let EXAMPLE_PAGE = null;
 let EXAMPLE_SANS_PAGE = null;
 let EXAMPLE_FILL_PAGE = null;
@@ -142,6 +143,43 @@ test.before(() => {
   );
   assert.equal(d.status, 0, d.stderr);
   DARK_PAGE = "file://" + path.join(DIR, "dark.html");
+
+  // A score that names a width narrower than its own title, which is the one
+  // shape a drawing can be cropped in: abcjs sizes the box from the engraved
+  // music alone, so the title hangs outside it. The editor's twin of this
+  // fixture is NARROW_TITLE in webview-look.test.js.
+  fs.writeFileSync(
+    path.join(DIR, "title.mdm"),
+    [
+      "---",
+      'title: "Titles"',
+      "format:",
+      "  html:",
+      "    embed-resources: true",
+      "filters:",
+      "  - mdm",
+      "---",
+      "",
+      "A score whose title is wider than its staff:",
+      "",
+      "```abc",
+      "%%staffwidth 200pt",
+      "X:1",
+      "T:E(3,8): the tresillo, 3+3+2",
+      "M:4/4",
+      "L:1/8",
+      "K:C",
+      "|: c3 e3 g2 :|",
+      "```",
+      "",
+    ].join("\n")
+  );
+  const t = spawnSync(MDM, ["render", "title.mdm", "--to", "html"], {
+    cwd: DIR,
+    encoding: "utf8",
+  });
+  assert.equal(t.status, 0, t.stderr);
+  NARROW_TITLE_PAGE = "file://" + path.join(DIR, "title.html");
 
   // And the real example, which is the document the export rule is stated in
   // terms of: the editor opens this same file, so the two surfaces can be put
@@ -826,10 +864,18 @@ test("every paragraph of the page ends its lines where the editor ends them", { 
 
 // One surface at one window width: the page in a browser of its own, the
 // editor through the harness.
-async function pageAt(url, width, read) {
+// `then` for a test about what the page does to a window that MOVES after it
+// has loaded, as against the width it opened at: the page is read at that
+// second width, once the reflow of the scores has landed (scheduleReflow in
+// resources/mdm.js waits for the window to settle).
+// `bars` for a test about what a scrollbar takes: puppeteer hides the bars of
+// every headless browser it launches (--hide-scrollbars), and hidden, a bar
+// takes no room, so a box measured the same whether it scrolled or not.
+async function pageAt(url, width, read, then, bars) {
   const browser = await puppeteer.launch({
     executablePath: CHROME,
     args: ["--no-sandbox", "--allow-file-access-from-files"],
+    ignoreDefaultArgs: bars ? ["--hide-scrollbars"] : [],
     defaultViewport: { width: width, height: 1200 },
   });
   OPEN_BROWSERS.add(browser);
@@ -837,19 +883,31 @@ async function pageAt(url, width, read) {
   await page.goto(url, { waitUntil: "networkidle0" });
   await page.evaluate(() => document.fonts.ready);
   await page.waitForSelector(".mdm-paper svg");
+  if (then) {
+    await page.setViewport({ width: then, height: 1200 });
+    await new Promise((r) => setTimeout(r, 500));
+  }
   const out = await page.evaluate(read);
   await browser.close();
   OPEN_BROWSERS.delete(browser);
   return out;
 }
-async function editorAt(settings, width, read) {
+// `height` for a test that has to see more than the first block: CodeMirror
+// renders the lines in view and a little beyond, and a narrow pane makes the
+// document taller, so the scores further down are not in the DOM to measure.
+async function editorAt(settings, width, read, height) {
   const { open: openEditor } = require("./webview/helpers.js");
-  const h = await openEditor({ seed: { settings: settings }, scores: 0 });
+  const h = await openEditor({ seed: { settings: settings }, scores: 0, height: height || 1200 });
   await h.page.waitForFunction(() => document.querySelector("#app .mdm-score code.language-abc svg[data-mdm-fit]"));
-  await h.page.setViewport({ width: width, height: 1200 });
+  await h.page.setViewport({ width: width, height: height || 1200 });
+  // Two frames for the layout, and then the wait the reflow of the scores
+  // asks for: it lands when the pane settles and not on the frame the width
+  // changes (scheduleReflow in media/main.js, 120 ms), so a measurement taken
+  // two frames after a resize is of the engraving that was there before.
   await h.page.evaluate(
     () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   );
+  await new Promise((r) => setTimeout(r, 400));
   const out = await h.page.evaluate(read);
   await h.close();
   return out;
@@ -882,6 +940,298 @@ test("a narrow window narrows both columns alike, and a wide equation scrolls in
   assert.equal(page.cropped, false, "the page crops the equation at the top or the bottom of its box");
 });
 
+// The music at a narrow window, on both surfaces. A score is drawn at the
+// size it is engraved at whatever the column does, and a drawing the column
+// cannot hold is reached by scrolling the box it sits on: the card here, the
+// <code> the engraving sits in in the editor. So what has to agree is the
+// size of the drawing, the systems it is dealt into, and how much of it the
+// box is holding back.
+//
+// The first two scores of example.mdm, because the fill and the alignment
+// treat them differently: the first is narrower than the column with a title
+// wider than its staff, the second is a plain wide one.
+test("a narrow window leaves the music at its engraved size on both surfaces", { skip }, async () => {
+  const width = 600;
+  const page = await pageAt(EXAMPLE_PAGE, width, () =>
+    Array.prototype.slice.call(document.querySelectorAll(".mdm-card"), 0, 2).map(function (card) {
+      const svg = card.querySelector(".mdm-paper svg");
+      const view = (svg.getAttribute("viewBox") || "").split(/\s+/).map(Number);
+      const drawn = svg.getBoundingClientRect().width;
+      const staff = svg.querySelector(".abcjs-staff");
+      return {
+        drawn: Math.round(drawn),
+        systems: svg.querySelectorAll(".abcjs-staff").length,
+        // Four spaces of the staff as drawn: the number that says whether the
+        // engraving was made smaller.
+        gap: Math.round((staff.getBBox().height / 4) * (drawn / view[2]) * 10) / 10,
+        held: Math.round(card.scrollWidth - card.clientWidth),
+      };
+    })
+  );
+  const editor = await editorAt(
+    { textFont: "roman" },
+    width,
+    () =>
+      Array.prototype.slice.call(document.querySelectorAll("#app code.language-abc"), 0, 2).map(function (code) {
+        const svg = code.querySelector("svg");
+        const view = (svg.getAttribute("viewBox") || "").split(/\s+/).map(Number);
+        const drawn = svg.getBoundingClientRect().width;
+        const staff = svg.querySelector(".abcjs-staff");
+        return {
+          drawn: Math.round(drawn),
+          systems: svg.querySelectorAll(".abcjs-staff").length,
+          gap: Math.round((staff.getBBox().height / 4) * (drawn / view[2]) * 10) / 10,
+          held: Math.round(code.scrollWidth - code.clientWidth),
+        };
+      }),
+    2600
+  );
+  assert.equal(page.length, 2);
+  assert.equal(editor.length, 2);
+  for (let i = 0; i < 2; i++) {
+    const which = "score " + (i + 1) + ": ";
+    assert.ok(
+      Math.abs(page[i].drawn - editor[i].drawn) <= 1,
+      which + "the page draws it " + page[i].drawn + " px wide and the editor " + editor[i].drawn
+    );
+    assert.equal(
+      page[i].systems,
+      editor[i].systems,
+      which + "the page draws " + page[i].systems + " systems and the editor " + editor[i].systems
+    );
+    assert.ok(
+      Math.abs(page[i].gap - editor[i].gap) < 0.2,
+      which + "the staff is " + page[i].gap + " px a space on the page and " + editor[i].gap + " in the editor"
+    );
+    assert.ok(
+      Math.abs(page[i].held - editor[i].held) <= 2,
+      which + "the page holds back " + page[i].held + " px of the drawing and the editor " + editor[i].held
+    );
+  }
+  // And the drawing was not made smaller to fit: the second score is wider
+  // than the 500 px column at this window, so its box is holding some of it
+  // back, and the staff is at the size abcjs draws it (7.9 px a space).
+  assert.ok(editor[1].held > 100, "nothing was held back, so nothing was tested");
+  assert.ok(editor[1].gap > 7.5, "the engraving was made smaller: " + editor[1].gap);
+});
+
+// A wide line of code at a narrow window, on both surfaces. A line of source
+// is left whole and the end of it is reached by scrolling the block it is
+// written in, the <pre> on the page and the card's own lines in the editor,
+// so what has to agree is how much of the line each of them holds back and
+// that neither of them moves its column to show it.
+//
+// This is the one difference between the two surfaces that had been written
+// down instead of fixed: at this window the page hid 91 px of the widest line
+// inside its block while the editor scrolled 232 px of the whole document,
+// dragging the prose sideways with it.
+test("a wide line of code scrolls inside its own block on both surfaces", { skip }, async () => {
+  const width = 600;
+  const page = await pageAt(EXAMPLE_PAGE, width, () => {
+    const pre = document.querySelector("div.sourceCode pre.sourceCode");
+    // The widest line of the block, as ink: the <pre> holds the lines as
+    // spans with the newlines between them, so each line is measured on its
+    // own range.
+    let ink = 0;
+    Array.prototype.forEach.call(pre.querySelectorAll("code > span"), function (line) {
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      const w = range.getBoundingClientRect().width;
+      if (w > ink) ink = w;
+    });
+    return {
+      box: Math.round(pre.clientWidth),
+      held: Math.round(pre.scrollWidth - pre.clientWidth),
+      ink: Math.round(ink),
+      pad: Math.round(parseFloat(getComputedStyle(pre).paddingLeft)),
+      size: Math.round(parseFloat(getComputedStyle(pre).fontSize) * 100) / 100,
+      scrolls: document.documentElement.scrollWidth > window.innerWidth + 1,
+    };
+  });
+  const editor = await editorAt(
+    { textFont: "roman" },
+    width,
+    () => {
+      // The widest line of the only card the editor draws as source: the
+      // scores of example.mdm are engraved and their source is not rendered,
+      // so these are the lines of its one code block.
+      const rows = Array.prototype.slice.call(
+        document.querySelectorAll("#app .cm-line.mdm-code-line")
+      );
+      let wide = rows[0];
+      let ink = 0;
+      rows.forEach(function (r) {
+        const range = document.createRange();
+        range.selectNodeContents(r);
+        const w = range.getBoundingClientRect().width;
+        if (w > ink) {
+          ink = w;
+          wide = r;
+        }
+      });
+      const scroller = document.querySelector("#app .cm-scroller");
+      return {
+        box: Math.round(wide.clientWidth),
+        held: Math.round(wide.scrollWidth - wide.clientWidth),
+        ink: Math.round(ink),
+        pad: Math.round(parseFloat(getComputedStyle(wide).paddingLeft)),
+        size: Math.round(parseFloat(getComputedStyle(wide).fontSize) * 100) / 100,
+        scrolls: scroller.scrollWidth > scroller.clientWidth + 1,
+      };
+    },
+    2600
+  );
+  assert.equal(page.scrolls, false, "the page scrolls sideways for a line of code");
+  assert.equal(editor.scrolls, false, "the editor scrolls the document sideways for a line of code");
+  // The same block of the same document: the same size of type, the same
+  // padding and the same column.
+  assert.equal(page.size, editor.size, "the code is set at two sizes");
+  assert.equal(page.pad, editor.pad, "the block carries two paddings");
+  assert.ok(
+    Math.abs(page.box - editor.box) <= 2,
+    "the block is " + page.box + " px wide on the page and " + editor.box + " in the editor"
+  );
+  // And each of them holds back the part of its own longest line that the
+  // column cannot take, so the end of that line is inside the block on both
+  // surfaces. What is not the same is the face: the editor draws source in
+  // VS Code's own editor font, which the page cannot know and answers with a
+  // stack of its own, so the same line is not the same number of pixels of
+  // ink on the two of them (574 px on the page against 565 in the harness,
+  // where the editor's font setting is unset and it falls back to the
+  // generic monospace; measured at this window).
+  [["page", page], ["editor", editor]].forEach(function (pair) {
+    const which = pair[0], out = pair[1];
+    const past = out.ink + out.pad - out.box;
+    assert.ok(past > 50, "the longest line fits the column on the " + which + ", so nothing was tested");
+    assert.ok(
+      out.held >= past - 2,
+      "the " + which + " holds back " + out.held + " px of a line that stands " + past + " px past its column"
+    );
+  });
+  // The editor holds a little more back than the page, and stops there: 91 px
+  // against 116 at this window, which is 38 px past the end of its longest
+  // line. 25 of those are the card's own padding, both sides of it, so the
+  // card is scrolled to the end of the line and then stops with the air to
+  // its right that it has to its left (a browser's own scroll box drops the
+  // padding on that side and leaves the last character flush against the
+  // edge, which is what the page does). The other 13 are the slack of the
+  // `ch` the card counts its width in: 68 of them stand 13 px over the ink of
+  // the same 68 characters in this font, and the sheet says as much where it
+  // counts them (.mdm-code-line in style.css). What this holds down is the
+  // card that scrolls far past the end of its text.
+  const past = editor.ink + editor.pad - editor.box;
+  assert.ok(
+    editor.held - past <= 2 * editor.pad + 15,
+    "the card holds back " + (editor.held - past) + " px past the end of its longest line"
+  );
+});
+// And the same page at two windows: the engraving is the same drawing at
+// both, and the only thing the narrow one does differently is hold part of it
+// back inside the card. This is what `max-width: none` on the drawing and the
+// card's own overflow buy; a responsive SVG scaled the whole engraving down
+// to the window instead.
+test("the page draws the same engraving at every window, and scrolls the card", { skip }, async () => {
+  const read = () =>
+    Array.prototype.slice.call(document.querySelectorAll(".mdm-card"), 0, 2).map(function (card) {
+      const svg = card.querySelector(".mdm-paper svg");
+      const staff = svg.querySelector(".abcjs-staff");
+      const view = (svg.getAttribute("viewBox") || "").split(/\s+/).map(Number);
+      const drawn = svg.getBoundingClientRect().width;
+      return {
+        drawn: Math.round(drawn),
+        systems: svg.querySelectorAll(".abcjs-staff").length,
+        gap: Math.round((staff.getBBox().height / 4) * (drawn / view[2]) * 10) / 10,
+        box: Math.round(card.clientWidth),
+        held: Math.round(card.scrollWidth - card.clientWidth),
+        scrolls: getComputedStyle(card).overflowX,
+      };
+    });
+  const wide = await pageAt(EXAMPLE_PAGE, 1000, read);
+  const narrow = await pageAt(EXAMPLE_PAGE, 500, read);
+  for (let i = 0; i < 2; i++) {
+    assert.equal(wide[i].drawn, narrow[i].drawn, "the drawing changed size with the window");
+    assert.equal(wide[i].systems, narrow[i].systems, "the music was dealt differently");
+    assert.equal(wide[i].gap, narrow[i].gap, "the staff changed size with the window");
+  }
+  // The wide window holds nothing back, the narrow one holds back exactly
+  // what does not fit, and the card is the box that scrolls it.
+  assert.equal(wide[1].held, 0, "a window with room for the score still held part of it back");
+  assert.equal(narrow[1].held, narrow[1].drawn - narrow[1].box);
+  assert.equal(narrow[1].scrolls, "auto");
+});
+
+// And the bar the card holds it back with is drawn under the music, not over
+// it. The card's height is its content's, so a bar is added below the paper;
+// the editor's box had a height of its own (abcjs writes one into the style
+// attribute of what it engraves into) and the bar was taken out of it
+// instead, covering the bottom 9.6 px of the drawing at a 520 px pane. The
+// two bars are not the same height, 15 px here against the 10 px VS Code
+// draws inside a webview, which is the platform's furniture and not the
+// document: what has to agree is that neither of them stands on the music.
+// The editor's twin is "the bar of a score is drawn under the music and not
+// over it" in webview-narrow.test.js.
+test("the bar under a score on the page is drawn below the music", { skip }, async () => {
+  const read = () => {
+    const card = document.querySelector(".mdm-card");
+    const svg = card.querySelector(".mdm-paper svg");
+    const box = card.getBoundingClientRect();
+    return {
+      bar: card.offsetHeight - card.clientHeight,
+      content: card.clientHeight,
+      held: Math.round(card.scrollWidth - card.clientWidth),
+      // What of the drawing sits past the bottom of the card's content.
+      covered: Math.round((svg.getBoundingClientRect().bottom - (box.top + card.clientHeight)) * 10) / 10,
+    };
+  };
+  const wide = await pageAt(EXAMPLE_PAGE, 1000, read, null, true);
+  const narrow = await pageAt(EXAMPLE_PAGE, 500, read, null, true);
+  assert.equal(wide.bar, 0, "a card with room for its drawing still holds a bar");
+  assert.ok(narrow.held > 0, "the card does not scroll at a 500 px window");
+  assert.ok(narrow.bar > 0, "the card holds no bar at a 500 px window");
+  assert.equal(
+    narrow.content,
+    wide.content,
+    "the bar was taken out of the music's own room: " + narrow.content + " against " + wide.content
+  );
+  assert.ok(narrow.covered <= 0.5, "the bar covers " + narrow.covered + " px of the drawing");
+});
+
+// The drawing is never cropped by the box it sits in. abcjs sizes a drawing
+// from the engraved music alone, so a title wider than any staff hangs
+// outside the box it declares and the SVG viewport cuts it: the engraving
+// here asks for 200pt of staff and carries a title wider than that. The
+// editor has widened that box to the ink since abcjs 5.10.3 (fitScores) and
+// the page does the same (fitPaper); without it the title lost its first and
+// last letters. The editor's twin of this test is "a title wider than its
+// staff is not cropped" in webview-look.test.js.
+test("a title wider than its staff is not cropped on the page", { skip }, async () => {
+  const out = await pageAt(NARROW_TITLE_PAGE, 900, () =>
+    Array.prototype.slice.call(document.querySelectorAll(".mdm-paper svg")).map(function (svg) {
+      const view = (svg.getAttribute("viewBox") || "").split(/\s+/).map(Number);
+      const ink = svg.getBBox();
+      return {
+        left: Math.round((view[0] - ink.x) * 10) / 10,
+        right: Math.round((ink.x + ink.width - (view[0] + view[2])) * 10) / 10,
+        // The title has to be the thing that overhangs, or the fixture has
+        // stopped testing what it was written for.
+        titleOver: Math.round(
+          (svg.querySelector(".abcjs-title").getBBox().width -
+            svg.querySelector(".abcjs-staff").getBBox().width) *
+            10
+        ) / 10,
+      };
+    })
+  );
+  assert.equal(out.length, 1);
+  for (const b of out) {
+    assert.ok(b.titleOver > 0, "the title fits its staff, so nothing was tested");
+    // Half a pixel of slack for the sub-pixel jitter of text measurement, the
+    // same the editor's test allows.
+    assert.ok(b.left <= 0.5, "cropped on the left by " + b.left + " px");
+    assert.ok(b.right <= 0.5, "cropped on the right by " + b.right + " px");
+  }
+});
+
 // A fill under a score, on both surfaces: the card spans the column and the
 // drawing on it is the size the editor draws, which is the size of the same
 // score with no fill. The page used to hug the drawing with the fill and take
@@ -894,16 +1244,44 @@ test("a filled score is drawn at the editor's size, on a card the width of the c
       return {
         column: Math.round(document.querySelector("main.content").getBoundingClientRect().width),
         card: Math.round(card.getBoundingClientRect().width),
-        drawing: Math.round(card.querySelector(".mdm-paper svg").getBoundingClientRect().width),
         fill: getComputedStyle(card).backgroundColor,
+        // The first two scores, because they take the two roads a narrow
+        // column offers and the fill is measured differently on each: the
+        // first is scaled inside the card (a reflow would cost it a system),
+        // the second is engraved again for the room the card leaves, which is
+        // the room the fill's own padding is taken out of. The page measured
+        // that room before it knew the drawing's width once, and engraved a
+        // reflowed score 574 px wide where the editor drew it 600.
+        drawings: Array.prototype.slice
+          .call(document.querySelectorAll(".mdm-card"), 0, 2)
+          .map(function (c) {
+            return Math.round(c.querySelector(".mdm-paper svg").getBoundingClientRect().width);
+          }),
       };
     });
-    const editor = await editorAt({ textFont: "roman", scoreFill: "paper" }, width, () =>
-      Math.round(document.querySelector("#app .mdm-score code.language-abc svg").getBoundingClientRect().width)
+    const editor = await editorAt(
+      { textFont: "roman", scoreFill: "paper" },
+      width,
+      () =>
+        Array.prototype.slice
+          .call(document.querySelectorAll("#app .mdm-score code.language-abc"), 0, 2)
+          .map(function (code) {
+            return Math.round(code.querySelector("svg").getBoundingClientRect().width);
+          }),
+      2600
     );
     assert.notEqual(page.fill, "rgba(0, 0, 0, 0)", "the page has no fill to test");
     assert.equal(page.card, page.column, width + ": the card is " + page.card + " px in a column of " + page.column);
-    assert.equal(page.drawing, editor, width + ": the page draws the filled score " + page.drawing + " px wide and the editor " + editor);
+    assert.equal(page.drawings.length, 2);
+    assert.equal(editor.length, 2);
+    for (let i = 0; i < 2; i++) {
+      assert.equal(
+        page.drawings[i],
+        editor[i],
+        width + ": the page draws filled score " + (i + 1) + " " + page.drawings[i] +
+          " px wide and the editor " + editor[i]
+      );
+    }
   }
 });
 

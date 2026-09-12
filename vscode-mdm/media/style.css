@@ -271,6 +271,20 @@ body {
    it (the rules for .katex-display and .mdm-table below). */
 #app .cm-content {
   min-width: 0;
+  /* And the column is the frame the furniture of a card is placed against:
+     the number in the margin and the copy button of a code block are placed
+     against the line everywhere else, and the lines of a card cannot hold
+     them because a card clips what stands outside it (.mdm-code-line below).
+     Against the column they are in the same place, since a line is exactly
+     as wide as the column and starts where it starts, and the clip does not
+     reach them. Without this they fell through to the scroller, which is the
+     pane and 50 px of margin wider on each side. */
+  position: relative;
+  /* And it is the container the copy button of a code block is held to the
+     width of, which is the other half of the same story (the chrome's rule
+     below). The containment is inline-size only, so nothing about the height
+     of the document is promised away. */
+  container-type: inline-size;
 }
 /* ---------- Latin Modern Roman, the roman of mdm.textFont ----------
 
@@ -377,7 +391,10 @@ body {
      in the margin below, and the copy button of a code block, which is an
      inline widget of the first line and asked for this on code lines alone
      before the numbers arrived. Relative and nothing more, so no line moves
-     and no line box changes height. */
+     and no line box changes height.
+
+     The lines of a card of source are the exception, and they say why: a box
+     that clips cannot be the frame of the furniture that stands outside it. */
   position: relative;
 }
 
@@ -982,6 +999,85 @@ body {
   color: var(--mdm-syn-base);
   background: var(--mdm-syn-card);
   padding: 0 0.9em;
+  /* A line of source keeps its line. The prose rewraps at the column because
+     that is what prose does, and this is the other kind of text in the
+     document: a line of code, of ABC, of TeX or of YAML means the line it is
+     written on, so it is left whole and the card scrolls sideways to the end
+     of it, the way an equation is left whole and its box scrolls. It used to
+     rewrap with the prose (CodeMirror's own `pre-wrap` with
+     `overflow-wrap: anywhere` under it), which broke a long path at
+     whatever character happened to sit at the column: 3 rows for one line at
+     a 500 px column, and the break inside a word (measured on example.mdm).
+
+     The card is the column wide and the scroll is its own, which is the box
+     the exported page has: a block of code there is one <pre> with
+     `overflow-x: auto`, so the column stays where it is and the block
+     scrolls inside itself. The editor used to be the other way round, the
+     card as wide as its longest line and the whole document scrolling
+     sideways to reach the end of it, and that was the one difference between
+     the two surfaces that had been written down instead of fixed (measured
+     on example.mdm at a 600 px window, both columns 500 px: the page hid
+     91 px of the widest line inside the block, the editor 232 px of the
+     document; the note stood in mdm-look.css and in tests/README.md under
+     Pending).
+
+     There is no box around the lines of a card to give that scroll to: a
+     card is a run of editable lines and CodeMirror owns their DOM. So every
+     line of the card is a scroll box of its own and main.js keeps the run of
+     them at one offset (syncCards). Three things follow, and each is a
+     declaration here or just below:
+
+     - `white-space: pre` does the work it names now. It could not be
+       measured while the width stood (a box as wide as its own max-content
+       has nothing left to wrap, and a mutation round found that swapping it
+       for `pre-wrap` changed nothing); with the box at the column it is what
+       keeps the line whole.
+     - The bar belongs to the card and not to each of its lines, so the lines
+       hide theirs and the last one draws it (.mdm-code-last below). One bar
+       under the card, which is where the page draws it.
+     - Every line of the card has to scroll exactly as far as the longest one
+       or the text shears as the card moves, so each of them is given the
+       card's own width as scrollable room (the ::after below).
+
+     And the line is not `position: relative`, against the rule every other
+     line follows: a scroll box clips what stands outside it, and the number
+     in the margin is placed against the line it counts. Static, the number's
+     containing block is .cm-content instead, which the clip does not reach,
+     and its place is unchanged because the number never had a `top`: it
+     rides on the static position of the line's first row either way. Read by
+     screenshot in the harness with the card clipped, the margin came out
+     pixel for pixel what it was. The copy button is the other piece of
+     furniture placed against the line, and the chrome's rule below answers
+     it the same way. */
+  white-space: pre;
+  overflow-x: auto;
+  /* Only sideways, for the reason the score's box gives: `overflow-x: auto`
+     alone turns the other axis to auto as well, and a row of source has
+     nothing to be scrolled down to. */
+  overflow-y: hidden;
+  scrollbar-width: none;
+  position: static;
+}
+/* The scrollable room of every line of a card is the card's, so that the run
+   of boxes moves over one distance: --mdm-card-chars is the card's longest
+   line in characters, written on every line of it by the walk that classes
+   them (lineClassCollector.card in main.js), and `ch` is the advance of the
+   monospace they are all set in, so the arithmetic is the one the text does.
+   Counted rather than measured, because CodeMirror renders the lines in view
+   and a little beyond: a card longer than the viewport would otherwise
+   change width as it was scrolled through. The 1.8em is the card's own
+   padding, both sides of it, so the card scrolls to the end of the line and
+   then stops with the same air to its right that it has to its left. Each
+   line being as wide as its own text gave the python block of example.mdm
+   twenty different scroll extents between 470 and 633 px at a 520 px pane,
+   and the text of a scrolled card sheared line by line. */
+#app .cm-line.mdm-code-line::after,
+#app .cm-line.mdm-math-line::after,
+#app .cm-line.mdm-fm-line::after {
+  content: "";
+  display: block;
+  height: 0;
+  width: calc(var(--mdm-card-chars, 0) * 1ch + 1.8em);
 }
 #app .cm-line.mdm-code-first,
 #app .cm-line.mdm-math-first,
@@ -996,6 +1092,14 @@ body {
   padding-bottom: 0.55em;
   border-bottom-left-radius: 4px;
   border-bottom-right-radius: 4px;
+  /* And the last line is the one that draws the card's bar, under the text of
+     the card and inside its ground, which is where the page draws it. The
+     line's height is its own, so the bar is added to it instead of being
+     taken out of it: 28.8 px to 38.8 with a bar, and the text of the row
+     stays where it was (the same lesson as the score's box, whose bar used to
+     cover the bottom 9.6 px of the engraving). A card with nothing to scroll
+     draws no bar and keeps its height. */
+  scrollbar-width: thin;
 }
 /* The fences and the --- of the header, when they show: small and quiet. */
 #app .cm-line.mdm-fence-line,
@@ -1133,6 +1237,33 @@ body {
 #app .mdm-chrome .mdm-audio-toggle {
   right: 34px;
 }
+/* The copy button of a code block is the one piece of furniture the card
+   cannot hold. The chrome is an inline widget inside the card's first line,
+   so the button was placed against that line, and a card clips what stands
+   outside it and carries a scroll of its own for the button to ride away
+   with. It is placed against the COLUMN instead, which is what the container
+   query is for: .cm-content is the container, so 100cqi is the column
+   whatever the line under it measures, and 32px is the button's 24 and the 8
+   it stands off the edge by. It reached for the same thing once before and
+   for a different reason, when a line of source was as wide as its own text
+   and the button sat at the end of the longest line, off the pane.
+
+   Its top is where the chrome stands in the line rather than where the line's
+   box starts, since the line is not the frame any more: `top: auto` is the
+   static position, the top of the first row of the card's text, and the
+   card's own padding-top comes back off it so the button keeps the 4px of
+   clearance it had. Measured from the card's top edge: 4px before, 4.96
+   after, the difference being the half-leading of the code line's inline box.
+
+   Both of them stand here, after the rules of the chrome they are an
+   exception to, for the plain reason that they have to win against them: the
+   selectors are the same weight and it is the later one that is drawn. */
+#app .mdm-chrome--code .mdm-copy {
+  right: auto;
+  left: calc(100cqi - 32px);
+  top: auto;
+  margin-top: calc(4px - 0.55em);
+}
 /* 17px against the headphones' 18: the two shapes carry different amounts of
    ink at the same box, the headphones a solid band and the copy two thin
    rectangles, so a copy drawn at the toolbar's 15 read small beside it. */
@@ -1179,14 +1310,51 @@ body {
   cursor: pointer;
   color: inherit;
   font: inherit;
+  /* The box a drawing too wide for it is pushed sideways in; see the note
+     under the next rule for when that happens. Only sideways:
+     `overflow-x: auto` alone turns the other axis to auto as well, and abcjs
+     overflows the height it declares by a fraction of a pixel, which grew a
+     vertical scrollbar beside every equation inside VS Code (the same trap
+     the .katex-display rule above carries).
+     !important because abcjs writes `overflow: hidden` into the style
+     attribute of the element it draws into, which no rule of ours outranks:
+     this was set from JavaScript for that reason (renderScore) and the
+     exported page beats the same inline styles the same way (mdm.css). */
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  /* And the box takes its height from the drawing instead of the height
+     abcjs writes into the same style attribute, so that the scrollbar has
+     somewhere of its own to be drawn. A bar inside a box of a stated height
+     is taken out of the content box: at a 520px pane the bar covered the
+     bottom 9.6px of the engraving, which is the space under the staff and,
+     on a score with words or a second voice, the words or the voice
+     (measured with the bars drawn, which is what a webview does and what
+     puppeteer hides; see the `bars` option in tests/webview/helpers.js).
+     With the height off the drawing the box grows by the bar instead, 78px
+     to 88, and the engraving keeps all of itself, which is what the
+     equation beside it always did (its box was never given a height). */
+  height: auto !important;
 }
-/* A score wider than the pane is scaled down whole. This needs the viewBox
-   that fitScores() adds in main.js: abcjs sizes the SVG with width/height
-   attributes only, and without a viewBox shrinking the element crops the
-   drawing instead of scaling it. */
+/* A score is drawn at the size it is engraved at and at no other: whatever
+   the column does, the staff, the notes and the words on them keep the size
+   they have on a wide pane, and a drawing the column cannot hold is reached
+   by scrolling its box sideways, which is what an equation and a table
+   already do.
+
+   `max-width: none` is the whole of that, and it is a correction: the rule
+   here used to be `max-width: 100%`, which scaled the whole drawing down to
+   whatever room there was, with nothing under it. The staff's line spacing
+   went from 7.9 px at a 820 px column to 7.5 at 700, 6.4 at 600, 5.4 at 500
+   and 2.8 at 260, and the title of the first score of example.mdm from 27 px
+   to 9.5, while the prose beside it stayed at 16 px throughout (measured). A
+   staff drawn at 2.8 px a space is not music.
+
+   The width and height the drawing is laid out at are the attributes abcjs
+   writes and fitScores() in main.js widens to the ink (a title wider than
+   its staff hangs outside the box abcjs declares), so nothing here needs to
+   name a size. */
 #app code.language-abc svg {
-  max-width: 100%;
-  height: auto;
+  max-width: none;
 }
 /* abcjs marks a spot above the staff with a shape it declares transparent;
    declared transparency is honoured back, in both themes. */

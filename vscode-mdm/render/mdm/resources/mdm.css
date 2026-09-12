@@ -5,19 +5,26 @@
   margin: 1.5rem 0;
 }
 .mdm-paper {
-  /* The responsive render of abcjs sets display:inline-block inline, as part
-     of its padding-bottom trick for the aspect ratio. The trick works just as
-     well on a block, and there the auto margins do centre it. */
+  /* abcjs sets display:inline-block inline on the box it draws into. A block
+     is what the auto margins can centre. */
   display: block !important;
   margin-left: auto;
   margin-right: auto;
-  /* Beside that percentage padding, abcjs also writes the natural height of
-     the engraving in px. Once the drawing is scaled, that height is no longer
-     its height and a gap is left underneath. The ratio is the padding's to
-     keep. */
-  height: 0 !important;
+  /* And it sets `overflow: hidden` there, which cut a drawing wider than the
+     column instead of letting the card scroll it: at a 500 px column the
+     page showed the left 500 px of a 740 px engraving and there was nothing
+     to scroll, since a clipped overflow is not a scrollable one. The box
+     that scrolls is the card, because the card is what carries the fill, and
+     the fill has to travel with the music the way it does in the editor
+     (there abcjs's own box is the one carrying both). */
+  overflow: visible !important;
 }
+/* The drawing is drawn at the size it is engraved at and at no other, as in
+   the editor (#app code.language-abc svg in vscode-mdm/media/style.css):
+   `max-width: 100%` was here and it scaled the whole engraving down to
+   whatever the window left, staff, notes and words with it. A drawing the
+   column cannot hold is reached by scrolling the card it sits on
+   (.mdm-card in mdm-look.css). */
 .mdm-paper svg {
-  max-width: 100%;
-  height: auto;
+  max-width: none;
 }
