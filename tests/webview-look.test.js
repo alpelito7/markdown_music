@@ -1653,6 +1653,112 @@ test("inline code sits on the code ground, not the theme's own wash", { skip }, 
   }
 });
 
+// ---------- The delimiters of code and of maths ----------
+
+// The backticks of a fence and of a run of inline code, and the $ and $$
+// around an equation, are drawn in the brass the numbers in the margin are
+// drawn in (--mdm-line-ink): they say the same thing the number says, that
+// what follows is not prose. Every other mark Lezer tags as a processing
+// instruction keeps the grey it had (.mdm-mark): the # of a heading, the *
+// of a bold span, the > of a quote. All of them show only while a caret is
+// on their node, which is why the carets below are put in six places at
+// once.
+const DELIMS = `---
+title: "Delimiters"
+---
+
+## A heading
+
+A paragraph with \`inline code\`, some **bold words** and $e^{i\\pi} = -1$ in it.
+
+$$
+\\int_0^1 x^2\\,dx = \\frac{1}{3}
+$$
+
+\`\`\`python
+x = 1
+\`\`\`
+
+\`\`\`abc
+X:1
+K:C
+CDEF|
+\`\`\`
+`;
+
+test("the backticks of code and the $ of maths are drawn in the brass of the numbers", { skip }, async () => {
+  for (const side of ["light", "dark"]) {
+    const h = await open({
+      text: DELIMS,
+      scores: 1,
+      seed: { settings: { theme: side, frontMatter: "hidden" } },
+    });
+    const marks = await Promise.all([
+      posOf(h.page, "inline code", 2),
+      posOf(h.page, "bold words", 2),
+      posOf(h.page, "e^{i", 2),
+      posOf(h.page, "\\int_0", 2),
+      posOf(h.page, "x = 1", 2),
+      posOf(h.page, "CDEF", 2),
+      posOf(h.page, "A heading", 2),
+    ]);
+    for (const at of marks) assert.ok(at > 0, "the fixture lost a place to put a caret in");
+    await setSelection(h.page, marks.map((at) => ({ anchor: at })));
+    await sleep(250);
+    const seen = await h.page.evaluate(() => {
+      const app = document.getElementById("app");
+      const number = document.querySelector("#app .cm-line[data-mdm-line]");
+      return {
+        // The colour a number in the margin is printed in, read off the
+        // generated box that prints it.
+        numbers: number ? getComputedStyle(number, "::before").color : null,
+        // The colour is read off the deepest box that holds the text, not off
+        // the marked run: a mark decoration wraps whatever the highlighting
+        // put there, and an inner span carries its own colour and paints the
+        // glyphs. Read off the outer run, this test passed while every
+        // backtick on screen was still grey.
+        delims: Array.from(document.querySelectorAll("#app .mdm-delim")).map((el) => {
+          let deep = el;
+          while (deep.firstElementChild && deep.firstElementChild.textContent === deep.textContent) {
+            deep = deep.firstElementChild;
+          }
+          return { text: deep.textContent, colour: getComputedStyle(deep).color };
+        }),
+        // The marks that keep the grey: whatever else is showing. A
+        // delimiter's own inner span is one of these (the highlighting tags
+        // every mark a processing instruction, backticks and dollars
+        // included), so the ones inside a marked delimiter are left out.
+        marks: Array.from(document.querySelectorAll("#app .mdm-mark"))
+          .filter((el) => !el.closest(".mdm-delim"))
+          .map((el) => ({ text: el.textContent, colour: getComputedStyle(el).color })),
+        ink: getComputedStyle(app).color,
+      };
+    });
+    const which = " (" + side + ")";
+    assert.ok(seen.numbers, "the margin printed no number to read a colour off" + which);
+    // The six places: two backticks around the inline code, two $ around the
+    // inline maths, the two $$ lines of the display equation, and the three
+    // backticks opening and closing each of the two fences.
+    assert.equal(seen.delims.length, 10, "delimiters found: " + JSON.stringify(seen.delims) + which);
+    assert.deepEqual(
+      seen.delims.map((d) => d.text).sort(),
+      ["$", "$", "$$", "$$", "```", "```", "```", "```", "`", "`"].sort(),
+      "the wrong runs were taken for delimiters" + which
+    );
+    for (const d of seen.delims) {
+      assert.equal(d.colour, seen.numbers, "`" + d.text + "` is not in the numbers' brass" + which);
+    }
+    // And the change is theirs alone: the # of the heading and the ** of the
+    // bold span are showing too, in the grey of a mark.
+    const others = seen.marks.filter((m) => m.text.trim());
+    assert.ok(others.length > 0, "no other mark was showing, so nothing was compared" + which);
+    for (const m of others) {
+      assert.notEqual(m.colour, seen.numbers, "the mark " + m.text + " took the numbers' brass" + which);
+    }
+    await h.close();
+  }
+});
+
 // ---------- Staff lines ----------
 
 // The fill of the five staff lines, which carry the .abcjs-staff class that

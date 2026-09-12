@@ -812,6 +812,29 @@ body {
 #app .mdm-mark-line {
   color: color-mix(in srgb, var(--mdm-ink) 45%, transparent);
 }
+/* The delimiters of code and of maths: the three backticks of a fence, the
+   pair around inline code, and the $ and $$ of an equation. Drawn in the
+   brass of the numbers in the margin (--mdm-line-ink, the greyer of the two
+   brasses, which is what the part of the chrome nobody presses is written
+   in), because that is what they are: the mark that says "what follows is
+   not prose", the same job the number does in the margin, and not a word of
+   the document. The grey above says the same about a backtick as about the
+   * of a bold span or the # of a heading; these three are the ones the
+   owner asked to tell apart. The class comes from buildDecorations in
+   main.js, which puts it on the marker nodes themselves and only while they
+   show, so nothing here reaches a mark the editor has hidden.
+
+   The inner selector is not decoration: a mark decoration wraps whatever the
+   Markdown highlighting has already put there, and the grey of .mdm-mark is
+   on that inner span, which carries its own colour rule and therefore wins
+   on the text. With the outer element alone the computed colour read brass
+   and the glyphs went on being painted grey (the same trap the
+   .mdm-fence-info rule further down carries, and the reason the test for
+   this reads the colour off the deepest box that holds the text). */
+#app .mdm-delim,
+#app .mdm-delim * {
+  color: var(--mdm-line-ink);
+}
 #app .mdm-link {
   color: #0969da;
   text-decoration: none;

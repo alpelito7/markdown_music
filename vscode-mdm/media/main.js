@@ -3607,6 +3607,17 @@
     const hide = function (from, to) {
       if (to > from) decos.push(Decoration.replace({}).range(from, to));
     };
+    // The delimiters of code and of maths, in the brass the line numbers are
+    // drawn in: the backticks of a fence and of inline code, and the $ and $$
+    // around an equation. They are the document's punctuation and not its
+    // words, which is what a number in the margin is as well, and the grey of
+    // the other marks (.mdm-mark, on every mark Lezer tags as a processing
+    // instruction) said as much about a backtick as about a * or a #.
+    const delim = function (node, kind) {
+      node.getChildren(kind).forEach(function (m) {
+        if (m.to > m.from) decos.push(Decoration.mark({ class: "mdm-delim" }).range(m.from, m.to));
+      });
+    };
     // Whole lines taken out of the flow. Block replace decorations cover whole
     // lines, and there are two kinds of cover: over a block that is drawn
     // instead of its source (a score, an equation, a table), which carries the
@@ -3660,6 +3671,7 @@
           const blockFrom = openLine.from;
           const blockTo = closeLine ? closeLine.to : doc.lineAt(n.to).to;
           const open = touched(blockFrom, blockTo);
+          if (open) delim(node, "CodeMark");
           if (isAbcInfo(infoText)) {
             decos.push(
               Decoration.widget({
@@ -3750,6 +3762,7 @@
             hideBlock(blockFrom, blockTo);
             return false;
           }
+          delim(node, "BlockMathMark");
           lines.add(blockFrom, blockTo, "mdm-math-line mdm-src-line" + (out.html ? "" : " mdm-math--broken"));
           lines.add(blockFrom, blockFrom, "mdm-math-first");
           lines.add(blockTo, blockTo, "mdm-math-last");
@@ -3769,6 +3782,7 @@
             decos.push(
               Decoration.mark({ class: "mdm-math-src" + (out.html ? "" : " mdm-math--broken") }).range(n.from, n.to)
             );
+            delim(node, display ? "InlineBlockMathMark" : "InlineMathMark");
             // Editing it: the source stays and, once the LaTeX compiles, the
             // rendered equation appears just after the closing delimiter as a
             // live preview. While it does not compile there is nothing to draw
@@ -3942,6 +3956,7 @@
         if (marks) {
           if (name === "InlineCode") {
             decos.push(Decoration.mark({ class: "mdm-inline-code" }).range(n.from, n.to));
+            if (touched(n.from, n.to)) delim(node, "CodeMark");
           }
           if (!touched(n.from, n.to)) {
             marks.forEach(function (kind) {
