@@ -1653,6 +1653,198 @@ test("inline code sits on the code ground, not the theme's own wash", { skip }, 
   }
 });
 
+// ---------- The caret ----------
+
+// What the caret covers, measured against the ink of the letters it stands
+// among. CodeMirror draws it at the height of the text's own box, which in
+// Latin Modern is far more than the letters (an ascent of 1.127em against a
+// descent of 0.29, drawn at 1.225 of its size): the caret stood 12 px over
+// the letters in a line of prose, 16 over an `##` and 23 over a `#`.
+//
+// It is drawn to the face's own ink box instead, accents included, which is
+// variant C of design-caret.html (fitCaret in main.js): the top on an
+// accented capital and the foot on the deepest descender. The box is the
+// face's and not the row's, so the caret does not change height with the
+// word that happens to stand beside it, and that is why the accent below is
+// measured on a canvas rather than on what the fixture says.
+//
+// In the roman that is a good deal shorter than the box CodeMirror drew
+// (23.1 px against 28 in prose, 43.2 against 54 on a `#`). In the sans, whose
+// box is very nearly its ink already, it is within a pixel either way
+// (18 against 17 in prose, 35 against 36 on a `#`, 27 against 27 on a `##`):
+// covering the accent there asks for a pixel more than CodeMirror gave, so
+// the caret is written whichever way the difference falls.
+//
+// The ink is measured off a canvas in the row's own face:
+// actualBoundingBoxAscent and Descent are the letters, fontBoundingBoxDescent
+// places the baseline inside the box the browser laid the row out in.
+const CARETS = `---
+title: "Caret"
+---
+
+# A big heading Ahgy
+
+## A heading Ahgy
+
+A line of prose Ahgy with a caret in it, set in the face of the day.
+
+\`\`\`python
+x = 1  # Ahgy in the code
+\`\`\`
+`;
+
+function caretAgainstInk(page) {
+  return page.evaluate(() => {
+    const px = (n) => Math.round(n * 100) / 100;
+    const caret = document.querySelector("#app .cm-cursor");
+    const view = window.__mdm.view;
+    const dom = view.domAtPos(view.state.selection.main.head).node;
+    const el = dom.nodeType === 1 ? dom : dom.parentElement;
+    const row = el.closest(".cm-line");
+    const cs = getComputedStyle(row);
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    const m = ctx.measureText("Ahgy");
+    // The same letters with the capital accented, which is the top of the
+    // face's ink box and what the caret is drawn to.
+    const accented = ctx.measureText("Áhgy");
+    // The row's first letter, for the box the browser gave the text.
+    const walk = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    let text = null;
+    while (walk.nextNode()) {
+      if (walk.currentNode.textContent.trim()) {
+        text = walk.currentNode;
+        break;
+      }
+    }
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 1);
+    const box = range.getBoundingClientRect();
+    // What font-size-adjust did to the size the sheet names: a canvas asked
+    // for the computed size measures Latin Modern 22 per cent small, and the
+    // box the browser gave the row's text is what says how big the face
+    // really came out.
+    const k = box.height / (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent);
+    const baseline = box.bottom - m.fontBoundingBoxDescent * k;
+    const rect = caret.getBoundingClientRect();
+    return {
+      height: px(rect.height),
+      // The box the text was laid out in, which is the height CodeMirror
+      // gives the caret.
+      textBox: px(box.height),
+      size: px(parseFloat(cs.fontSize)),
+      k: px(k),
+      // Over the tallest letters, over the accent above them, and under the
+      // deepest.
+      over: px(baseline - m.actualBoundingBoxAscent * k - rect.top),
+      overAccent: px(baseline - accented.actualBoundingBoxAscent * k - rect.top),
+      under: px(rect.bottom - (baseline + m.actualBoundingBoxDescent * k)),
+    };
+  });
+}
+
+test("the caret is the ink of the row it stands in", { skip }, async () => {
+  const places = [
+    ["a heading", "big heading"],
+    ["a subheading", "A heading Ahgy"],
+    ["prose", "line of prose"],
+    ["code", "Ahgy in the code"],
+  ];
+  for (const face of ["roman", "sans"]) {
+    const h = await open({
+      text: CARETS,
+      scores: 0,
+      seed: { settings: { textFont: face, frontMatter: "hidden" } },
+    });
+    for (const [what, needle] of places) {
+      const at = await posOf(h.page, needle, 3);
+      assert.ok(at > 0, "the fixture lost " + what);
+      await setSelection(h.page, at);
+      await sleep(200);
+      const m = await caretAgainstInk(h.page);
+      const which = what + " in the " + face + ": ";
+      // The foot on the deepest ink of the face, which is the half of this
+      // the owner asked for: the box CodeMirror draws the caret in ends below
+      // the letters (0.084em under them in the roman, 0.004 in the sans), and
+      // a caret cut from the top alone stayed down there with it.
+      assert.ok(
+        Math.abs(m.under) <= 0.4,
+        which + "the foot of the caret is " + m.under + " px off the descenders"
+      );
+      // And the top on the accent of a capital, which is the half the owner
+      // changed his mind about: the caret used to stop at the ascenders of
+      // the plain lowercase (variant G) and an Á stood over it.
+      assert.ok(
+        Math.abs(m.overAccent) <= 0.4,
+        which + "the top of the caret is " + m.overAccent + " px off the accent"
+      );
+      // Which leaves the unaccented letters covered with the accent's own
+      // clearance over them, and nothing of the row outside the caret.
+      assert.ok(m.over > 0.3, which + "the caret does not clear the letters, by " + m.over + " px");
+      // In the roman that is far shorter than the box it was drawn in: 23.1 px
+      // against 28 on a 16px row of prose, 43.2 against 54 on a `#`, 31.8
+      // against 40 on a `##`, 18 against 19 on a line of code (measured here;
+      // the eight variants and their numbers are in design-caret.html).
+      if (face === "roman") {
+        assert.ok(
+          m.height < m.textBox - 0.5,
+          which + "the caret is " + m.height + " px in a box of " + m.textBox
+        );
+      } else {
+        // And in the sans it is the box, within a pixel either way.
+        assert.ok(
+          Math.abs(m.height - m.textBox) <= 2,
+          which + "the caret is " + m.height + " px in a box of " + m.textBox
+        );
+      }
+    }
+    await h.close();
+  }
+});
+
+// A caret the fit has already drawn is left alone. The numbers it writes are
+// read off the box the caret stands in, and after a pass that box is the
+// fitted one, so a second pass over the same caret would measure its own
+// work and walk the caret up the row (1.2 px a pass in the roman's prose,
+// measured with the record in main.js taken out). Nothing but CodeMirror writes
+// the two properties, so what says a caret is untouched is that they are
+// still the ones the fit left there.
+//
+// The fit hangs off the writes drawSelection makes in the cursor layer, so a
+// write to the layer is a pass: four of them here, a frame apart, because the
+// callback of a MutationObserver coalesces what arrives in one turn.
+test("a caret the fit has drawn is not drawn again", { skip }, async () => {
+  for (const face of ["roman", "sans"]) {
+    const h = await open({
+      text: CARETS,
+      scores: 0,
+      seed: { settings: { textFont: face, frontMatter: "hidden" } },
+    });
+    const at = await posOf(h.page, "line of prose", 3);
+    assert.ok(at > 0, "the fixture lost the line of prose");
+    await setSelection(h.page, at);
+    await sleep(250);
+    const read = () =>
+      h.page.evaluate(() => {
+        const caret = document.querySelector("#app .cm-cursor");
+        return { height: caret.style.height, top: caret.style.top };
+      });
+    const first = await read();
+    assert.ok(parseFloat(first.height) > 0, face + ": the caret was never drawn");
+    for (let pass = 0; pass < 4; pass++) {
+      await h.page.evaluate((n) => {
+        document
+          .querySelector("#app .cm-cursorLayer")
+          .style.setProperty("--mdm-test-poke", String(n));
+      }, pass);
+      await sleep(80);
+    }
+    assert.deepEqual(await read(), first, face + ": the caret moved under a second pass of the fit");
+    await h.close();
+  }
+});
+
 // ---------- The delimiters of code and of maths ----------
 
 // The backticks of a fence and of a run of inline code, and the $ and $$
@@ -3357,6 +3549,60 @@ test("a narrow pane narrows the column, and a wide equation scrolls in its own b
     assert.equal(m.column, m.pane - 100, width + ": the column is " + m.column + " px in a pane of " + m.pane);
     assert.equal(m.docScrolls, false, width + ": the document scrolls sideways");
     assert.ok(m.eqContent > m.eqBox + 1, width + ": the equation fits its box, so nothing was tested");
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// And the page under the editor does not scroll sideways either, which is the
+// same rule one storey up: every block that can outgrow the column carries a
+// scroll of its own, so a bar under the whole editor could only uncover blank
+// page. One was there, and what it uncovered was blank: a tooltip is an
+// absolutely placed ::after laid out at the width of its label whether it is
+// showing or not, and the ones near the right edge of a toolbar that has
+// wrapped into two rows hang past it. On example.mdm that was 8 px of page at
+// a 480 px pane, 15 at 560, 20 at 700 and 68 at 420, with the editor's own
+// scroller holding back nothing at any of them; dragging it moved the text
+// out from under the reader to show a label nobody was hovering.
+//
+// The labels are still laid out at their full width, which is what the
+// toolbar's own overflow says here: the fix is a clip on #app, not a shorter
+// label.
+test("the page never scrolls sideways, whatever the toolbar hangs over the edge", { skip }, async () => {
+  const h = await open({ scores: 3 });
+  for (const width of [700, 560, 480, 420]) {
+    await h.page.setViewport({ width: width, height: 1600 });
+    await settle(h.page);
+    const m = await h.page.evaluate(() => {
+      const px = (n) => Math.round(n * 10) / 10;
+      const doc = document.scrollingElement;
+      const scroller = document.querySelector("#app .cm-scroller");
+      const bar = document.querySelector("#app .mdm-toolbar");
+      // Asked to move, and where it went: the width alone would not catch a
+      // page that scrolls without reporting it.
+      doc.scrollLeft = 500;
+      const moved = doc.scrollLeft;
+      doc.scrollLeft = 0;
+      return {
+        pageHeld: px(doc.scrollWidth - doc.clientWidth),
+        moved: px(moved),
+        documentHeld: px(scroller.scrollWidth - scroller.clientWidth),
+        // The labels, still laid out past the bar's right edge.
+        tips: px(bar.scrollWidth - bar.clientWidth),
+      };
+    });
+    const where = " at a pane of " + width + ": ";
+    assert.equal(m.pageHeld, 0, "the page held something back sideways" + where + m.pageHeld);
+    assert.equal(m.moved, 0, "the page scrolled sideways" + where + m.moved);
+    // And there was never anything out there to reach: the editor itself
+    // holds nothing back at any of these widths, so the bar was uncovering
+    // blank page.
+    assert.equal(
+      m.documentHeld,
+      0,
+      "the editor held something back sideways" + where + m.documentHeld
+    );
+    assert.ok(m.tips > 0, "no tooltip hangs past the bar, so nothing was tested" + where);
   }
   assert.deepEqual(h.errors, []);
   await h.close();

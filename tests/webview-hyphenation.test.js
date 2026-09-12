@@ -159,13 +159,20 @@ for (const [lang, prose] of [
       expected = expected.slice(0, pos - 1) + expected.slice(pos);
       assert.equal(await docText(h.page), expected);
       assert.deepEqual(await selectionRanges(h.page), [[pos - 1, pos - 1]]);
+      // The foot of the caret and not its head: a caret is drawn as the ink
+      // of the row it stands in (fitCaret in main.js, and "the caret is the
+      // ink of the row it stands in" in webview-look), so neither its top nor
+      // its foot is the edge of the box the text was laid out in, and the
+      // foot is the nearer of the two (the descenders of the face, about two
+      // pixels over the foot of that box). A caret that drifted from its text
+      // would take both with it, which is what this reads.
       const gap = await h.page.evaluate(async () => {
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const v = window.__mdm.view, caret = document.querySelector(".cm-cursor-primary, .cm-cursor");
         const actual = caret.getBoundingClientRect(), expected = v.coordsAtPos(v.state.selection.main.head);
-        return { x: Math.abs(actual.left - expected.left), y: Math.abs(actual.top - expected.top) };
+        return { x: Math.abs(actual.left - expected.left), y: Math.abs(actual.bottom - expected.bottom) };
       });
-      assert.ok(gap.x < 2 && gap.y < 2, "the drawn caret drifted from the text: " + JSON.stringify(gap));
+      assert.ok(gap.x < 2 && gap.y < 4, "the drawn caret drifted from the text: " + JSON.stringify(gap));
     }
     await sleep(350);
     assert.equal(await lastEdit(h.page), expected, "saved text acquired a visual hyphen");

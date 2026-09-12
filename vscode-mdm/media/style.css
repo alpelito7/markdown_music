@@ -18,6 +18,26 @@ body {
   flex-direction: column;
   font-family: var(--mdm-sans);
   color: var(--mdm-ink);
+  /* And the pane is the pane: nothing the editor draws is reached by moving
+     the whole thing sideways. Every part of the document that can outgrow
+     the column carries a scroll of its own (the card of source, the box of
+     an equation, of a table and of a score), so a bar under the whole
+     editor can only ever uncover empty page, and one was there: the
+     tooltips. A tooltip is an absolutely placed ::after on the button
+     (.mdm-tip below), laid out at the width of its label whether it is being
+     shown or not, and the ones near the right edge hang past it, which is
+     scrollable overflow like any other. Measured on example.mdm in the
+     harness: 8px of page at a 480px pane, 15 at 560, 20 at 700 and 68 at
+     420, while the editor's own scroller held back nothing at any of them,
+     so all of it was blank page. Dragging that bar moved the text out from
+     under the reader to show a hidden label.
+
+     `clip` and not `hidden`, so this makes no scroll container of its own:
+     the y axis stays visible (the pair is legal only with clip), and no box
+     inside changes. What it costs is that a tooltip at the right edge is now
+     cut there instead of being scrolled to, which is what it already looked
+     like: nobody scrolls a document sideways to read a label. */
+  overflow-x: clip;
 }
 /* The two faces the editor spends. `--mdm-sans` is the chrome's: the toolbar,
    the menus, the outline panel and everything else that says `font: inherit`

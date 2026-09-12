@@ -4670,6 +4670,162 @@
     });
   }
 
+  // ---- The caret, drawn to the ink of the row it stands in ----
+  //
+  // drawSelection draws the caret at the height of the text's own box, and in
+  // a face with a tall body that is a good deal more than the letters: Latin
+  // Modern's box is 1.127 of ascent and 0.29 of descent against 0.9em of ink,
+  // and the sheet draws the face at 1.225 of its size, so a 16px line of
+  // prose stood in a 28px box with the caret 12px over the letters and 1.9px
+  // under their descenders. The owner's report was that the caret sat too
+  // low, and the low part was the foot: the box's foot is below the ink on
+  // both faces (0.084em in the roman, 0.004 in the sans), and a cut that
+  // keeps the foot where the box ends keeps the caret there too.
+  //
+  // So the caret is the face's own ink box, accents included: from the top of
+  // an accented capital (the probe is the plain ascenders bdfhklt with ÁÉ
+  // after them) down to the descenders (gjpqy). That is variant C of
+  // design-caret.html and the owner's pick of the eight drawn there, over
+  // variant G, which was the same box without the accents and left an Á
+  // standing over the caret. What it comes to, measured in the harness:
+  // 23.1px on a 16px row of the roman's prose against the 28 CodeMirror
+  // draws, 43.2 against 54 on a `#`, 31.8 against 40 on a `##`, 18 against 19
+  // on a line of code, and in the sans 18 against 17 on prose, 35 against 36
+  // on a `#`. The foot lands on the deepest ink and the top on the accent,
+  // both to within a fiftieth of a pixel, so nothing of the row's face stands
+  // outside the caret on either side.
+  //
+  // The sans is the one place this is not a cut: its box and its ink very
+  // nearly coincide, so covering the accent asks for a pixel more than
+  // CodeMirror drew (18 against 17 in prose here). The caret is therefore
+  // written whatever the direction, and what keeps a fitted caret from being
+  // fitted again is the record below rather than a refusal to grow one.
+  //
+  // The accents are measured on the row's own face, so a face with no Á in it
+  // falls back to another for that glyph and the caret follows the fallback.
+  // Both faces the editor ships with carry them, and the monospace is the
+  // reader's own.
+  //
+  // The metrics are the row's own, read at the size the row is really drawn
+  // at: font-size-adjust changes the used size and not the computed one, so a
+  // canvas asked for the size the sheet names measures Latin Modern 22 per
+  // cent small. What says how big the face came out is the box the browser
+  // gave the row's text, which is the face's ascent and descent at that used
+  // size; `k` below is that ratio, and it is kept per face because a row with
+  // no text on it has no box to read it from.
+  //
+  // The row is looked for under the caret's own foot rather than taken from
+  // the selection, so several carets need no bookkeeping and one CodeMirror
+  // has not drawn is not there to be found.
+  const CARET_ASCENDERS = "bdfhkltÁÉ";
+  const CARET_DESCENDERS = "gjpqy";
+  const caretFaces = Object.create(null);
+  // What was last written on a caret, so that a caret already cut is not cut
+  // again: the foot below is taken from the box the caret stands in, which
+  // after a fit is the fitted box, and a second pass would measure its own
+  // work. CodeMirror writes both properties fresh whenever it redraws a
+  // caret, and nothing else here writes either of them, so a caret whose two
+  // properties are still the ones left here is a caret nothing has redrawn.
+  // The height guard used to do this job on the side, by refusing to grow a
+  // caret; variant C grows the sans's prose caret by a pixel and needed it
+  // said plainly instead.
+  const caretFitted = new WeakMap();
+  const caretPad = document.createElement("canvas").getContext("2d");
+  // The box the browser gave the row's own text, which is where the baseline
+  // and the used size of the face are read from.
+  function rowTextBox(row) {
+    const walk = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    while (walk.nextNode()) {
+      const node = walk.currentNode;
+      if (!node.textContent.trim()) continue;
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.setEnd(node, 1);
+      const box = range.getBoundingClientRect();
+      if (box.height) return box;
+    }
+    return null;
+  }
+  function caretFace(row, text) {
+    const cs = getComputedStyle(row);
+    const key = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    let face = caretFaces[key];
+    if (!face) {
+      caretPad.font = key;
+      const up = caretPad.measureText(CARET_ASCENDERS);
+      const down = caretPad.measureText(CARET_DESCENDERS);
+      face = caretFaces[key] = {
+        asc: up.actualBoundingBoxAscent,
+        desc: down.actualBoundingBoxDescent,
+        fAsc: up.fontBoundingBoxAscent,
+        fDesc: up.fontBoundingBoxDescent,
+        k: 0,
+      };
+    }
+    if (!face.k && text && face.fAsc + face.fDesc > 0) {
+      face.k = text.height / (face.fAsc + face.fDesc);
+    }
+    return face;
+  }
+  function fitCaret(caret) {
+    const done = caretFitted.get(caret);
+    if (done && done.height === caret.style.height && done.top === caret.style.top) return;
+    const box = caret.getBoundingClientRect();
+    if (!box.height) return;
+    const under = document.elementFromPoint(box.left + 1, box.bottom - 2);
+    const row = under && under.closest ? under.closest("#app .cm-line") : null;
+    if (!row) return;
+    const text = rowTextBox(row);
+    const face = caretFace(row, text);
+    if (!face.k) return;
+    const want = Math.round((face.asc + face.desc) * face.k * 10) / 10;
+    if (!want) return;
+    const top = parseFloat(caret.style.top);
+    if (!isFinite(top)) return;
+    // The baseline the caret stands on, taken from the box the caret was
+    // drawn in: that box is the box of the text of the caret's own row, which
+    // the row's first letter is not. A paragraph is one line of the document
+    // and as many rows as the column gives it, so a caret three rows down was
+    // placed against the baseline of the first and jumped 28.4px up the
+    // paragraph (caught by the hyphenation tests, which delete through a
+    // divided word row by row).
+    const foot = box.bottom - face.fDesc * face.k;
+    caret.style.height = want + "px";
+    caret.style.top = top + (foot + face.desc * face.k - want - box.top) + "px";
+    caretFitted.set(caret, { height: caret.style.height, top: caret.style.top });
+  }  // drawSelection writes the carets in the measure phase, which runs after an
+  // update, so the fit hangs off that write rather than off the update: a
+  // MutationObserver callback is delivered before the frame is painted, so no
+  // caret is ever painted at the height it was given. The layer itself is
+  // built on the first measure, hence the frame the setup below waits.
+  let caretLayer = null;
+  // The writes of a pass are writes to the layers being watched, so the
+  // records they queue are dropped at the end of it and the callback they
+  // still deliver arrives with nothing in it.
+  const caretWatcher = new MutationObserver(function (records) {
+    if (records.length) fitCarets();
+  });
+  function fitCarets() {
+    const layer = view.dom.querySelector(".cm-cursorLayer");
+    if (!layer) return;
+    if (layer !== caretLayer) {
+      caretLayer = layer;
+      const what = {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["style"],
+      };
+      caretWatcher.observe(layer, what);
+    }
+    layer.querySelectorAll(".cm-cursor").forEach(fitCaret);
+    caretWatcher.takeRecords();
+  }
+  function watchCarets() {
+    requestAnimationFrame(fitCarets);
+  }
+
+
   // Outside the sheet there is no document. The strip of pane either side of
   // the text column belongs to CodeMirror's scroller, which answers a click out
   // there like any other: the caret lands on the line at that height, and
@@ -5063,6 +5219,7 @@
       },
     };
     watchContent();
+    watchCarets();
     disarmNativeHistory();
     // Not CodeMirror's own focusChangeEffect: it reports the focus of the
     // text alone and it reports it a tick late (its handler defers), so the
