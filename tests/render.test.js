@@ -1335,19 +1335,29 @@ test("the roman travels to the page, and only when it is asked for", () => {
     .find((name) => name.startsWith("mdm-roman"));
   assert.ok(romanDir, "the roman dependency was not copied beside the page");
   const sheet = fs.readFileSync(path.join(libs, romanDir, "mdm-roman.css"), "utf8");
-  // The roman is drawn at the reading size the sans had: its x-height is
-  // 0.431 em against the sans's 0.528, so at a bare 16px it reads a fifth
-  // small while the headings, which are ems of that same 16px, keep theirs.
-  assert.ok(
-    /font-size-adjust: ex-height 0\.528/.test(sheet),
-    "the exported roman is left at its own x-height"
+  // The roman is drawn at the reading size the sans had: its regular x-height
+  // is 0.431 em against the sans's 0.528, and its bold x-height is 0.444.
+  // Keep that scale on the faces rather than inherited from the body. Chrome
+  // keeps @font-face size-adjust when it prints HTML to PDF, but drops the
+  // inherited font-size-adjust and used to leave prose at 9.96 pt beside
+  // inline KaTeX at 12.05 pt.
+  assert.equal(
+    (sheet.match(/size-adjust: 122\.51%/g) || []).length,
+    2,
+    "the regular exported roman is left at its own x-height"
   );
-  // And the engraving is taken back out of it: abcjs draws its titles and
-  // annotations as SVG text at sizes of its own, which would inherit the
-  // adjust off the body and come out a seventh larger than abcjs drew them.
-  // The rule is not in this sheet, though it is this sheet that makes it
-  // necessary: it belongs to the score and not to the face, so it rides with
-  // the look and reaches a page in either face (see below).
+  assert.equal(
+    (sheet.match(/size-adjust: 118\.92%/g) || []).length,
+    2,
+    "the bold exported roman is left at its own x-height"
+  );
+  assert.ok(
+    !/body\s*\{[^}]*font-size-adjust/s.test(sheet),
+    "the PDF-fragile inherited adjustment returned"
+  );
+  // The look still carries its protective reset for engraving text. It is
+  // inert for faces abcjs names itself, but prevents a future inherited text
+  // adjustment from changing the pixel sizes abcjs chose.
   const lookDir = fs
     .readdirSync(libs)
     .find((name) => name.startsWith("mdm-look"));
@@ -1355,11 +1365,19 @@ test("the roman travels to the page, and only when it is asked for", () => {
   const lookSheet = fs.readFileSync(path.join(libs, lookDir, "mdm-look.css"), "utf8");
   assert.ok(
     /\.mdm-fit,\s*\n\.mdm-fit svg \{\s*\n\s*font-size-adjust: none/.test(lookSheet),
-    "the adjust reaches the engraving"
+    "the engraving lost its protective adjustment reset"
   );
-  // KaTeX is left exactly as it ships: its own `font` shorthand keeps the
-  // adjust off the maths, and its 1.21 is the compensation that matches a
-  // page set at the sans's x-height.
+  assert.match(
+    lookSheet,
+    /@page\s*\{[^}]*margin:\s*calc\(2\.5cm \* 12 \/ 10 \* 803 \/ 800\) 0;/s,
+    "the printed sheets do not reserve their block margin"
+  );
+  assert.ok(
+    !/padding-block:\s*calc\(2\.5cm/.test(lookSheet),
+    "the page margin went back to padding Chrome drops at a page break"
+  );
+  // KaTeX is left exactly as it ships: it names its own faces, and its 1.21 is
+  // the compensation that matches a page set at the sans's x-height.
   assert.ok(
     !/\.katex[\s\S]{0,40}font-size:/.test(sheet),
     "the export is still resizing the maths"

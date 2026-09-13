@@ -15,6 +15,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: block;
+  size-adjust: 122.51%;
   src: url(fonts/LatinModernRoman-Regular.woff2) format("woff2");
 }
 @font-face {
@@ -22,6 +23,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: block;
+  size-adjust: 122.51%;
   src: url(fonts/LatinModernRoman-Italic.woff2) format("woff2");
 }
 @font-face {
@@ -29,6 +31,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: block;
+  size-adjust: 118.92%;
   src: url(fonts/LatinModernRoman-Bold.woff2) format("woff2");
 }
 @font-face {
@@ -36,6 +39,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: block;
+  size-adjust: 118.92%;
   src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
 }
 
@@ -48,19 +52,14 @@
    page out of proportion with it: the headings are ems of that same 16px and
    keep their size, and the text abcjs draws inside a score is its own pixels
    and no em of ours, so both come out looking oversized beside the words.
-   `font-size-adjust` leaves the computed font-size at 16px, so every em in
-   mdm-look.css is where it was, and scales the glyphs until their x-height is
-   the ratio named. 0.528 is the sans's own, so the page is set at the reading
-   size it had and keeps the proportions it was designed with.
-   The maths is left out of it for free: the vendored KaTeX sheet opens with
-   the `font` shorthand (`.katex { font: normal 1.21em KaTeX_Main }`), and that
-   shorthand resets font-size-adjust to `none`. Its 1.21 is then right again
-   and is left alone, being the compensation a Computer Modern needs beside a
-   sans (0.528/0.442 is 1.19) and the words now being drawn at the sans's
-   x-height.
-   The engraving is not left out for free, and what takes it out is not here:
-   the reset lives in mdm-look.css beside the rest of the score's rules,
-   because it belongs to the score and not to the face. */
-body {
-  font-size-adjust: ex-height 0.528;
-}
+   `size-adjust` on each @font-face leaves the computed font-size at 16px, so
+   every em in mdm-look.css is where it was, and scales the glyphs until their
+   x-height is 0.528 of that em. The regular and italic have an x-height of
+   0.431 (0.528 / 0.431 = 122.51%); the two bold faces have 0.444 and therefore
+   take 118.92%. Keeping the scale on the face instead of inheriting
+   `font-size-adjust` matters on paper: Chrome honours the former when it
+   writes a PDF but drops the latter, which left the prose at 9.96 pt beside
+   inline KaTeX at 12.05 pt.
+   KaTeX and the engraving name faces of their own, so neither inherits this
+   scale. KaTeX's 1.21 is then right again, being the compensation Computer
+   Modern needs beside words drawn at the sans's x-height. */

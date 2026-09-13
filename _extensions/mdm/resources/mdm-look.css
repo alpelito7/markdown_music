@@ -880,3 +880,216 @@ body .mdm-audio .abcjs-loading-svg circle {
   left: 50%;
   transform: translate(-50%, -6px);
 }
+
+/* ---------- Paper ----------
+
+   Nothing here reaches the screen. The exported page in a browser is the page
+   it is today; these rules are only what it is set by when it is printed, and
+   that is two occasions: a reader's Ctrl+P on the export, and the PDF the
+   extension hands back when there is no TeX to typeset one, since printInstead
+   in vscode-mdm/extension.js prints this same file with headless Chrome. The
+   isolated pages mdm.lua engraves a single score on are not reached, since
+   chrome_page writes its own stylesheet and never links this one.
+
+   What paper has to look like is settled by the typeset PDF, and every number
+   below is read off it. example.mdm rendered both ways at the editor's
+   defaults, 2026-09-13, on Quarto 1.9.37, LuaTeX 1.21.0 and Chrome 151:
+
+     three pages
+     text block  50.2 to 561.8 bp, a measure of 511.5
+     first ink   60.4 bp below the head of the sheet
+     ground      #f2f2f2 out to all four edges
+     the ratios row under the partials, 384.3 bp wide
+
+   The same page printed without these rules came out four pages, a measure of
+   482.6, a white frame around the ground, both wide scores cut off at the edge
+   of their card ("8:7" and the whole A7 bar gone from the text layer), and a
+   scrollbar and an audio transport drawn onto the paper. */
+@media print {
+  /* The sheet, and the document scaled onto it rather than re-flowed into it.
+     The typeset page sets the editor's own measure, 51.25 em, at the class's
+     10 pt, where the editor sets it at 16 px; so the page is printed at the
+     ratio between those two ems, and the prose, the engravings, the rules and
+     the cards all arrive at the size they have on screen. That is what the
+     export rule asks of a PDF: one document at two sizes, not two documents.
+     800/803 is TeX's point expressed in CSS's (1/72.27 of an inch against
+     1/72), without which the measure lands 1.9 bp wide.
+
+     Measured after: 50.7 to 561.3, a measure of 510.6 against the typeset
+     511.5, and the ratios row 383.4 bp against 384.3.
+
+     Re-flowing instead was measured, and it is worse exactly where it counts.
+     Setting the body to 10 pt and letting the column find its own width gives
+     the same text block to a tenth of a point, but the engraving inside it is
+     then stretched to fill the measure: the same ratios row comes out 424.8
+     bp, 10 % wider than the typeset page draws it, because abcjs engraves a
+     score at the width of the box it is drawn in and the clamp below can only
+     shrink what it is handed.
+
+     The block margin belongs to @page. Padding on a fragmented body looked
+     right at the first and last edge but Chrome did not repeat all of it at
+     an automatic page break: prose could end 15 pt above one edge and resume
+     13 pt below the next. A physical page margin is the boundary Chrome does
+     honour on every sheet. Chrome scales that margin with the html below, so
+     the inverse factor leaves 2.5 cm on paper. Page margins are outside the
+     document canvas and stay paper-white; that small cost on a dark export is
+     preferable to running one sheet's text into the next. */
+  @page {
+    size: auto;
+    margin: calc(2.5cm * 12 / 10 * 803 / 800) 0;
+  }
+  html {
+    zoom: calc(10 / 12 * 800 / 803);
+  }
+  body {
+    /* The ground carries the look, and on the dark and the white sides the
+       words are unreadable without it, so it is printed even for a reader who
+       turned background graphics off to save toner. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  /* The measure in its own pixels. The rule this overrides is written against
+     the window (`min(820px, 100vw - 100px)`, the editor's pane playing the
+     viewport), and a sheet of paper has no window to give way to: left to it,
+     the column came out 664 px and the scores hung over it again. */
+  body main.content {
+    width: 820px;
+    margin-inline: auto;
+  }
+  /* A score wider than the measure. On screen its card scrolls, which is the
+     decision the narrow editor is built on, every block kept whole and its
+     box moving what does not fit; paper has nowhere to scroll to, so Chrome
+     printed the bar and cut the music behind it. The drawing is clamped to
+     the box instead, which is what \mdmscoreat already does to an engraving
+     on the typeset side, and the paper div's inline height is released with
+     it or the score stands over the slack abcjs pinned there (measured on
+     example.mdm: 37.5 bp of blank paper under the partials).
+     Nothing in example.mdm needs the clamp now that the column is the
+     editor's own 820 px, since abcjs engraves at 740; it is what holds a
+     score whose %%staffwidth asks for more than the measure (measured on a
+     1596 px fixture: 294.5 bp of staff cut to 118.4 and nothing lost). */
+  body .mdm-paper svg {
+    max-width: 100%;
+    height: auto;
+  }
+  body .mdm-paper {
+    height: auto !important;
+  }
+  /* The player bar. Measured on the print of example.mdm before this rule:
+     the transport, the seek track, the clock and the volume under the
+     sounding score on page 4, the clock coming out of pdftotext as "0:00",
+     which is the one line the whole text layer loses to this block. Nothing
+     on a sheet of paper can be pressed, and the typeset PDF has never drawn
+     it: render_latex in mdm.lua does not read the `play` class at all, and
+     example.mdm says so in its own words, that "in HTML the .play class puts
+     a player bar under the score, and the PDF keeps the engraving alone".
+     It takes the four tooltips with it and they need no rule of their own:
+     mdm.js hangs .mdm-tip on the mute, the stop, and the play and loop
+     buttons and nowhere else, all of them inside this box. */
+  body .mdm-audio {
+    display: none;
+  }
+  /* Scrollbars, and the gutter each one is reserved in. Every box and not a
+     list of the ones this document happens to have: the bundled sheets also
+     put `overflow-x: auto` on div.column (Pandoc's columns), on
+     .table-responsive and the .overflow-* utilities (bootstrap) and on
+     .cell-output-display (Quarto). `body` is named beside the star because
+     the property does not inherit and `body { scrollbar-width: thin }` above
+     outranks a bare `*`: with the star alone, getComputedStyle on the body
+     still came back "thin" under print media.
+     The overflow itself is left alone, so nothing about where a line breaks
+     changes. A score no longer needs it, the clamp above having fitted the
+     drawing to the card, but a line of code longer than its card is still
+     cut at the card's edge on paper, and with the bar gone there is nothing
+     left on the sheet to say it was cut. That one is written down and not
+     answered here: the typeset page breaks such a line instead, and making
+     the printed page break it is a change to what the page shows and not to
+     what the printer does. */
+  *,
+  body {
+    scrollbar-width: none;
+  }
+  /* Quarto's copy button. It draws nothing as things stand, the
+     self-contained export carrying no icon font for it and the button
+     measuring 12x2 px out of the flow, but a sheet of paper has no clipboard
+     and a later Quarto that bundles the icon would start drawing it. */
+  body .code-copy-button {
+    display: none;
+  }
+  /* A card of code that runs on past the foot of a sheet. Chrome gives a box
+     broken across two sheets its padding once, over the first piece and under
+     the last, so the card went on at the head of the next sheet with its first
+     line against the card's top edge: 1.0 pt from it, where a card that begins
+     on its sheet leaves 7.0 (the line's box against the card, measured on the
+     prose and code of example.mdm three times over, six sheets with three
+     cards going on past a foot, Chrome 151, 2026-09-14). `clone` gives every
+     piece the edges the whole card has, and it is owed to each box of the card
+     that has one: the pre its 0.55em of padding, the code inside it the 1.83px
+     of padding it computes to, and the card around them its rounded
+     corners. With the pre alone the next sheet's first line stood 5.5 pt from
+     the edge and not 7.0; with all three, 7.0 on all three sheets. What it
+     costs is where a line goes, since the padding under a piece can send the
+     sheet's last line on to the next one; the same document still came out six
+     sheets. The foot of a piece is not held to the card's own foot, since what
+     is left under the last line that fits is whatever the sheet had left. */
+  body div.sourceCode,
+  body div.sourceCode pre.sourceCode,
+  body div.sourceCode code.sourceCode,
+  body pre:not(.sourceCode):not(.mdm-src),
+  body pre > code {
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  /* A heading belongs to what is under it. Chrome strands one at the foot of
+     a page otherwise: 2 of 30 headings in one fixture and 4 of 24 in another,
+     0 in both with this. It is a no-op on example.mdm, whose four printed
+     pages come out pixel for pixel the same with it and without.
+     The cost is named because there is one: where the block under the
+     heading is a score taller than the sheet, the heading is moved to a fresh
+     page, the score still does not fit, and the heading prints alone anyway,
+     which cost the stress fixture one page. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    break-after: avoid;
+    break-inside: avoid;
+  }
+  /* The blank sheet at the end. Quarto's page grid keeps a trailing band of
+     60 px under the content and the last elements carry 38 px of margin
+     under them, and a document that ends anywhere inside that spent a whole
+     extra sheet on it: 7 of 7 fixtures built to end near a page bottom came
+     out two pages with the second blank, and 1 page with these. A document
+     that genuinely runs over is untouched (3 of 3), and so are example.mdm
+     and the heading fixtures, pixel for pixel. */
+  #quarto-content.page-rows-contents {
+    grid-template-rows:
+      [content-top] minmax(max-content, 1fr)
+      [content-bottom] minmax(0, max-content)
+      [page-bottom];
+  }
+  main.content {
+    margin-bottom: 0;
+  }
+  main.content > :last-child,
+  main.content > :last-child > :last-child,
+  main.content > :last-child > :last-child > :last-child,
+  main.content > :last-child > :last-child > :last-child > :last-child,
+  main.content
+    > :last-child
+    > :last-child
+    > :last-child
+    > :last-child
+    > :last-child,
+  main.content
+    > :last-child
+    > :last-child
+    > :last-child
+    > :last-child
+    > :last-child
+    > :last-child {
+    margin-bottom: 0;
+  }
+}

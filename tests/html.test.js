@@ -118,6 +118,7 @@ const DARK_LOOK = [
 let PAGE = null;
 let DARK_PAGE = null;
 let NARROW_TITLE_PAGE = null;
+let WIDE_STAFF_PAGE = null;
 let EXAMPLE_PAGE = null;
 let EXAMPLE_SANS_PAGE = null;
 let EXAMPLE_FILL_PAGE = null;
@@ -180,6 +181,48 @@ test.before(() => {
   });
   assert.equal(t.status, 0, t.stderr);
   NARROW_TITLE_PAGE = "file://" + path.join(DIR, "title.html");
+
+  // A score that asks for more width than the measure has. On screen its card
+  // scrolls the rest, which is the narrow editor's decision; on paper there
+  // is nowhere to scroll to, and this is the document that says whether the
+  // printed page fits the drawing or cuts it. 900pt is 1200px against the
+  // editor's 820px column, so nothing about the window can make it fit.
+  fs.writeFileSync(
+    path.join(DIR, "widestaff.mdm"),
+    [
+      "---",
+      'title: "Wider than the measure"',
+      "format:",
+      "  html:",
+      "    embed-resources: true",
+      "filters:",
+      "  - mdm",
+      "---",
+      "",
+      "A score drawn wider than any page:",
+      "",
+      "```abc",
+      "%%staffwidth 900pt",
+      "X:1",
+      "T:Wider than the measure",
+      "M:4/4",
+      "L:1/8",
+      "K:C",
+      "CDEF GABc | cBAG FEDC | CDEF GABc | cBAG FEDC |]",
+      "```",
+      "",
+    ].join("\n")
+  );
+  // With the header hidden, which is what the editor exports with by default,
+  // so this page is also the one that says whether a document keeps its own
+  // name when its title block goes.
+  const w = spawnSync(
+    MDM,
+    ["render", "widestaff.mdm", "--to", "html", "-M", "mdm-front-matter:hidden"],
+    { cwd: DIR, encoding: "utf8" }
+  );
+  assert.equal(w.status, 0, w.stderr);
+  WIDE_STAFF_PAGE = "file://" + path.join(DIR, "widestaff.html");
 
   // And the real example, which is the document the export rule is stated in
   // terms of: the editor opens this same file, so the two surfaces can be put
@@ -962,7 +1005,10 @@ test("every paragraph of the page ends its lines where the editor ends them", { 
 // `bars` for a test about what a scrollbar takes: puppeteer hides the bars of
 // every headless browser it launches (--hide-scrollbars), and hidden, a bar
 // takes no room, so a box measured the same whether it scrolled or not.
-async function pageAt(url, width, read, then, bars) {
+// `media` for the tests about paper: the page is laid out as a screen, as it
+// always is, and only the reading is taken under print media, which is what a
+// browser does when it prints.
+async function pageAt(url, width, read, then, bars, media) {
   const browser = await puppeteer.launch({
     executablePath: CHROME,
     args: ["--no-sandbox", "--allow-file-access-from-files"],
@@ -978,6 +1024,7 @@ async function pageAt(url, width, read, then, bars) {
     await page.setViewport({ width: then, height: 1200 });
     await new Promise((r) => setTimeout(r, 500));
   }
+  if (media) await page.emulateMediaType(media);
   const out = await page.evaluate(read);
   await browser.close();
   OPEN_BROWSERS.delete(browser);
@@ -1330,6 +1377,237 @@ test("the link on a heading costs the heading nothing", { skip }, async () => {
     assert.ok(
       out.scroll <= out.client,
       "the page scrolls sideways at " + width + "px (" + out.scroll + " over " + out.client + ")"
+    );
+  }
+});
+
+// The same page on paper, which is the other surface the export has: a
+// reader's Ctrl+P, and the PDF the extension prints with headless Chrome when
+// there is no TeX to typeset one (printInstead in vscode-mdm/extension.js).
+// Paper cannot scroll, so the card that holds a wide score back on screen
+// would simply cut it, and it did: printed at Chrome's own page box, the
+// partials of example.mdm lost "8:7" and the chord row lost its whole A7 bar,
+// and a scrollbar and the audio transport were drawn onto the sheet
+// (measured 2026-09-13, before the Paper block of mdm-look.css).
+//
+// What is checked here is the three decisions that block takes, in the print
+// media itself: the page is scaled rather than re-flowed, so the column is
+// still the editor's 820 px and the engraving inside it keeps the size it has
+// on screen; a drawing wider than the column is fitted to it instead of cut;
+// and nothing that answers a pointer is drawn. The measured page the numbers
+// come from is in tests/README.md.
+test("on paper the page is scaled, the scores fit and the transport is gone", { skip }, async () => {
+  const h = await open();
+  await h.page.emulateMediaType("print");
+  const out = await h.page.evaluate(() => {
+    const main = document.querySelector("main.content");
+    return {
+      zoom: getComputedStyle(document.documentElement).zoom,
+      column: getComputedStyle(main).width,
+      audio: Array.from(document.querySelectorAll(".mdm-audio")).map(
+        (el) => getComputedStyle(el).display
+      ),
+      cards: Array.from(document.querySelectorAll(".mdm-card")).map((card) => ({
+        over: card.scrollWidth - card.clientWidth,
+        slack:
+          card.querySelector(".mdm-paper").getBoundingClientRect().height -
+          card.querySelector(".mdm-paper svg").getBoundingClientRect().height,
+      })),
+    };
+  });
+  await h.page.emulateMediaType(null);
+  await h.close();
+
+  // 10 TeX pt on a 16 px body, which is what the typeset page sets the same
+  // 51.25 em measure at: 10/12 with TeX's point converted to CSS's (800/803).
+  assert.equal(Math.round(Number(out.zoom) * 10000) / 10000, 0.8302);
+  // 819.982 and not 820: the column is measured after the scale above, and
+  // the scale is a ratio the browser has already rounded.
+  assert.ok(
+    Math.abs(parseFloat(out.column) - 820) <= 0.05,
+    "the printed column is " + out.column + " and not the editor's 820px"
+  );
+  assert.ok(out.audio.length > 0, "the fixture has no player to hide");
+  for (const display of out.audio) {
+    assert.equal(display, "none", "the player bar is drawn on paper");
+  }
+  for (const card of out.cards) {
+    assert.ok(card.over <= 0.5, `a score hangs ${card.over.toFixed(1)}px past its card`);
+    assert.ok(
+      Math.abs(card.slack) <= 0.5,
+      `the box keeps ${card.slack.toFixed(1)}px of height the drawing does not use`
+    );
+  }
+
+  // And the score that asks for more width than the measure has, which is the
+  // one the clamp is there for: this fixture's %%staffwidth is 900pt, 1200px
+  // against the 820px column, so no window makes it fit and only the clamp
+  // does. On screen the same card holds the rest back and scrolls it.
+  const read = () =>
+    Array.prototype.slice.call(document.querySelectorAll(".mdm-card")).map(function (card) {
+      const svg = card.querySelector(".mdm-paper svg");
+      return {
+        over: Math.round((svg.getBoundingClientRect().right - card.getBoundingClientRect().right) * 10) / 10,
+        held: Math.round(card.scrollWidth - card.clientWidth),
+      };
+    });
+  const onScreen = await pageAt(WIDE_STAFF_PAGE, 1400, read);
+  const onPaper = await pageAt(WIDE_STAFF_PAGE, 1400, read, null, false, "print");
+  assert.ok(onScreen[0].held > 0, "the fixture no longer asks for more width than the measure");
+  assert.ok(
+    onPaper[0].over <= 0.5,
+    `the wide score hangs ${onPaper[0].over}px past the paper's card`
+  );
+  assert.equal(onPaper[0].held, 0, "the printed card still has something to scroll");
+});
+
+// A card of code longer than what is left of a sheet, printed the way the
+// extension prints a page when there is no TeX (printHtmlToPdf in
+// vscode-mdm/extension.js: headless Chrome's --print-to-pdf, with its flags).
+// Chrome gives a box broken across two sheets its padding once, over the first
+// piece and under the last, so the card went on at the head of the next sheet
+// with its first line against its top edge: 1.0 pt from it, where the card's
+// own start leaves 7.0 (seen on 2026-09-14 in the PDF of a document with no
+// scores; the rule is "A card of code that runs on past the foot of a sheet"
+// in mdm-look.css). The paper itself is what is read. A sheet that changes
+// colours and nothing else paints the card magenta and its text blue, the
+// sheets are rasterized to find each piece of the card, and poppler's word
+// boxes give where each line's box begins, which is the same for every glyph
+// on a line and so does not depend on the letters that open it. The foot of
+// a piece is not read: what is left under the last line that fits is
+// whatever the sheet had left.
+function readPpm(file) {
+  const buf = fs.readFileSync(file);
+  const head = /^P6\s+(\d+)\s+(\d+)\s+(\d+)\s/.exec(buf.toString("latin1", 0, 64));
+  return { width: +head[1], height: +head[2], data: buf.subarray(head[0].length) };
+}
+
+const POPPLER =
+  spawnSync("pdftoppm", ["-v"]).status === 0 && spawnSync("pdftotext", ["-v"]).status === 0;
+
+test("on paper a card of code that goes on past the foot of a sheet opens the next sheet as it opens anywhere", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, () => {
+  const lines = Array.from(
+    { length: 150 },
+    (_, i) => "value_" + String(i).padStart(3, "0") + " = compute(" + i + ")  # one line of a long card"
+  );
+  fs.writeFileSync(
+    path.join(DIR, "longcode.mdm"),
+    [
+      "---",
+      'title: "A long card"',
+      "format:",
+      "  html:",
+      "    embed-resources: true",
+      "filters:",
+      "  - mdm",
+      "---",
+      "",
+      "A card of code longer than a sheet:",
+      "",
+      "```python",
+      ...lines,
+      "```",
+      "",
+    ].join("\n")
+  );
+  const r = spawnSync(MDM, ["render", "longcode.mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+
+  const paint =
+    "<style>@media print {" +
+    " body div.sourceCode, body div.sourceCode pre.sourceCode { background: #ff00ff !important; }" +
+    " body pre code, body pre code * { color: #0000ff !important; } }</style>";
+  const page = fs.readFileSync(path.join(DIR, "longcode.html"), "utf8");
+  fs.writeFileSync(path.join(DIR, "longcode-painted.html"), page.replace("</head>", paint + "</head>"));
+  const pdf = path.join(DIR, "longcode.pdf");
+  const profile = fs.mkdtempSync(path.join(DIR, "profile-"));
+  const c = spawnSync(
+    CHROME,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-pdf-header-footer",
+      "--virtual-time-budget=6000",
+      "--no-sandbox",
+      "--user-data-dir=" + profile,
+      "--print-to-pdf=" + pdf,
+      path.join(DIR, "longcode-painted.html"),
+    ],
+    { encoding: "utf8", timeout: 60000 }
+  );
+  fs.rmSync(profile, { recursive: true, force: true });
+  assert.ok(fs.existsSync(pdf), "Chrome printed nothing: " + c.stderr);
+
+  const prefix = path.join(DIR, "longcode-sheet");
+  assert.equal(spawnSync("pdftoppm", ["-r", "144", pdf, prefix]).status, 0);
+  const sheets = fs
+    .readdirSync(DIR)
+    .filter((n) => n.startsWith("longcode-sheet-") && n.endsWith(".ppm"))
+    .sort((a, b) => parseInt(a.slice(15), 10) - parseInt(b.slice(15), 10));
+  const words = Array.from(
+    spawnSync("pdftotext", ["-bbox", pdf, "-"], { encoding: "utf8" }).stdout.matchAll(/<page [^>]*>([\s\S]*?)<\/page>/g),
+    (m) =>
+      Array.from(
+        m[1].matchAll(/<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">/g),
+        (w) => w.slice(1).map(Number)
+      )
+  );
+
+  // Every piece of the card, sheet by sheet: its top edge and how far under
+  // it the box of its first line begins, in pt (the raster is 2 px a pt).
+  const pieces = [];
+  sheets.forEach((file, i) => {
+    const { width, height, data } = readPpm(path.join(DIR, file));
+    const magenta = (x, y) => {
+      const o = (y * width + x) * 3;
+      return data[o] > 220 && data[o + 1] < 60 && data[o + 2] > 220;
+    };
+    const rows = [];
+    for (let y = 0; y < height; y++) {
+      let left = -1;
+      let right = -1;
+      for (let x = 0; x < width; x++) {
+        if (magenta(x, y)) {
+          if (left < 0) left = x;
+          right = x;
+        }
+      }
+      rows.push(left < 0 ? null : [left, right]);
+    }
+    for (let y = 0; y < height; ) {
+      if (!rows[y]) {
+        y++;
+        continue;
+      }
+      const top = y;
+      let left = width;
+      let right = -1;
+      for (; y < height && rows[y]; y++) {
+        left = Math.min(left, rows[y][0]);
+        right = Math.max(right, rows[y][1]);
+      }
+      const t = top / 2;
+      const b = y / 2;
+      const inside = words[i].filter(
+        (w) => w[0] >= left / 2 && w[2] <= (right + 1) / 2 + 1 && w[1] >= t - 0.5 && w[3] <= b + 0.5
+      );
+      if (inside.length) {
+        pieces.push({ sheet: i + 1, gap: Math.min(...inside.map((w) => w[1])) - t });
+      }
+    }
+  });
+
+  // One card of 150 lines, a sheet and a half of them and more: if it no
+  // longer runs on past a foot twice, this reads nothing.
+  assert.ok(pieces.length >= 3, "the card came out in " + pieces.length + " pieces, and the test needs three");
+  const opens = pieces[0].gap;
+  for (const piece of pieces.slice(1)) {
+    assert.ok(
+      Math.abs(piece.gap - opens) <= 0.6,
+      "on sheet " + piece.sheet + " the card's first line stands " + piece.gap.toFixed(1) +
+        " pt under its top edge, where the card opens with it " + opens.toFixed(1) + " pt under"
     );
   }
 });

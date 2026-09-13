@@ -401,14 +401,16 @@ What it does:
   Modern's is 0.431 em against the sans's 0.528, so at a bare 16 px it reads
   about a fifth small and pulls the page out of proportion with it: the
   headings are ems of that same 16 px and keep their size, and the text abcjs
-  draws inside a score is its own pixels and no em of ours. `font-size-adjust`
-  fixes all three at once, leaving the computed size at 16 px, so every em of
-  the stylesheet stays where it was, and scaling the glyphs until their
-  x-height is the sans's. The maths keeps KaTeX's own 1.21, which is the
-  compensation a Computer Modern needs beside a sans and is exactly right for
-  a page set at the sans's x-height; the engraving keeps its own pixels. An
-  export carries the face to the page and to the paper, where the roman is
-  what LaTeX is already set in.
+  draws inside a score is its own pixels and no em of ours. In the editor,
+  `font-size-adjust` fixes all three at once, leaving the computed size at
+  16 px, so every em of the stylesheet stays where it was, and scaling the
+  glyphs until their x-height is the sans's. The exported page carries the
+  equivalent adjustment on each embedded font face: unlike an inherited
+  `font-size-adjust`, Chrome preserves that scale when it prints the page to a
+  PDF without TeX. The maths keeps KaTeX's own 1.21, which is the compensation
+  a Computer Modern needs beside a sans and is exactly right for a page set at
+  the sans's x-height; the engraving keeps its own pixels. With TeX, the roman
+  is what LaTeX is already set in and fontspec applies the same scale.
 - **Justified prose**: paragraphs, list items and quotations are set to both
   edges of the column, every row but the last, with the spaces widened as the
   text is typed; a toolbar toggle (`mdm.textAlign`) sets them ragged right.
