@@ -1251,6 +1251,24 @@ test("the page draws the same engraving at every window, and scrolls the card", 
   assert.equal(narrow[1].scrolls, "auto");
 });
 
+// The name the page goes by, which is the browser's tab and the Title a PDF
+// printed from that page carries, since Chrome copies <title> into it. The
+// editor hides the header by default, and the title block goes with it, so
+// nearly every page it exported came out called `quarto-inputdae4994f30dfed2f`,
+// a temporary of Quarto's own (measured on Quarto 1.9.37, 2026-09-13). The
+// filter copies the title into `pagetitle` before the block goes; a document
+// with no title at all is named by the export instead, which writes one into
+// the copy it renders (withPageTitle in vscode-mdm/extension.js, held by
+// extension-host.test.js).
+test("a document keeps its own name when its title block is hidden", { skip }, async () => {
+  const out = await pageAt(WIDE_STAFF_PAGE, 1000, () => ({
+    title: document.title,
+    block: document.querySelectorAll("#title-block-header").length,
+  }));
+  assert.equal(out.title, "Wider than the measure");
+  assert.equal(out.block, 0, "the header was hidden and the title block was drawn anyway");
+});
+
 // And the bar the card holds it back with is drawn under the music, not over
 // it. The card's height is its content's, so a bar is added below the paper;
 // the editor's box had a height of its own (abcjs writes one into the style

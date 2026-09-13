@@ -1166,6 +1166,30 @@ function withReader(text, from) {
   );
 }
 
+// The name the page goes by, when the document itself gives it none: the
+// browser's tab, and the Title a PDF printed from that page carries, since
+// Chrome copies <title> into it. Left alone, Quarto falls back to the stem of
+// the file it was handed, which is the copy, and on the print road the copy
+// has a private stem: an untitled document came out of it called
+// `doc.mdm-print-17284-1789330020713-1` (measured 2026-09-13).
+//
+// It goes in the header of the copy and not in a `-M pagetitle:`, which is
+// worse than doing nothing: Quarto settles the page title after the filters
+// and the `-M` came out `quarto-inputd921f1d56f4c3069`, its own temporary.
+// From the header it arrives whole, spaces and all, which is what a file name
+// is full of. A document that names a `pagetitle` itself keeps it, and one
+// that has a title keeps that, since the filter copies the title over this
+// (page_name in mdm.lua).
+function withPageTitle(text, name) {
+  const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  if (header && /^[ \t]*pagetitle[ \t]*:/m.test(header[1])) return text;
+  const line = "pagetitle: " + quoteYaml(name);
+  if (!header) return "---\n" + line + "\n---\n\n" + text;
+  return (
+    "---\n" + line + "\n" + header[1] + "\n---\n" + text.slice(header[0].length)
+  );
+}
+
 // ---------- The rules the copy draws ----------
 
 // A line of nothing but dashes, which is how a thematic break is written, and
@@ -1556,7 +1580,10 @@ async function runExport(document, to) {
         try {
           fs.writeFileSync(
             copy,
-            withReader(withFilter(withBreaks(text), FILTER), READER)
+            withPageTitle(
+              withReader(withFilter(withBreaks(text), FILTER), READER),
+              path.basename(base)
+            )
           );
         } catch (e) {
           // A read-only folder, or a full disk. Quarto never ran, so the
@@ -1946,6 +1973,7 @@ module.exports = {
   withFilter,
   withReader,
   withBreaks,
+  withPageTitle,
   hasScores,
   renderArgs,
   quartoInstalls,

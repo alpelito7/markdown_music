@@ -1044,6 +1044,52 @@ test("the export is named after the document, whatever its extension", async () 
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// The name the page goes by: the browser's tab, and the Title a PDF printed
+// from that page carries, since Chrome copies <title> into it. Quarto falls
+// back to the stem of the file it was handed, which is the copy, and on the
+// print road the copy has a private stem of its own: an untitled document
+// came out of it called `doc.mdm-print-17284-1789330020713-1`. It goes in the
+// copy's header because Quarto settles the page title after the filters, and
+// a `-M pagetitle:` came out `quarto-inputd921f1d56f4c3069`, its own
+// temporary (both measured on Quarto 1.9.37, 2026-09-13).
+test("the copy is named after the document, and says so where Quarto reads it", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "song notes.mdm");
+  fs.writeFileSync(doc, "Body only, and no header at all.\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "html" });
+  restore();
+
+  const copy = fs.readFileSync(path.join(tmp, "copy.qmd"), "utf8");
+  assert.match(copy, /^pagetitle: 'song notes'$/m, "the copy carries no name for the page");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a document that names its own page keeps it, and one with a title needs none", () => {
+  // The extension in front of it, so that a name of the reader's is not
+  // overwritten and a title is left to the filter, which copies it over.
+  assert.match(
+    ext.withPageTitle("---\ntitle: T\n---\n\nBody\n", "doc"),
+    /^pagetitle: 'doc'$/m
+  );
+  assert.equal(
+    ext.withPageTitle("---\npagetitle: mine\n---\n\nBody\n", "doc"),
+    "---\npagetitle: mine\n---\n\nBody\n",
+    "a page the document named itself was renamed"
+  );
+  // No header at all: one is made, as withReader and withFilter do.
+  assert.equal(
+    ext.withPageTitle("Body\n", "doc"),
+    "---\npagetitle: 'doc'\n---\n\nBody\n"
+  );
+  // A quote in the name is doubled, the way a single-quoted YAML scalar
+  // carries one: a file may be called anything.
+  assert.match(ext.withPageTitle("Body\n", "it's mine"), /^pagetitle: 'it''s mine'$/m);
+});
+
 test("the copy names the filter by absolute path, and the .mdm is left alone", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const restore = usePath(fakeBin(tmp));

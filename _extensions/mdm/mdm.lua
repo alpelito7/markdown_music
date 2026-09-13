@@ -2140,6 +2140,30 @@ local TITLE_BLOCK = {
   "date", "abstract", "doi", "keywords",
 }
 
+-- The name the page goes by: the browser's tab, and the Title a PDF printed
+-- from that page carries, since Chrome copies <title> into it. Pandoc writes
+-- `$pagetitle$` there and Quarto fills it from the document's title. A
+-- document whose header the editor is hiding lost it below, where the title
+-- block goes, and came out called `quarto-inputdae4994f30dfed2f`, a temporary
+-- of Quarto's own (measured on Quarto 1.9.37 and Chrome 151, 2026-09-13).
+-- Since the editor hides the header by default, that was the name of nearly
+-- every page it exported.
+--
+-- The title is copied here, before the block goes, and `pagetitle` is not in
+-- TITLE_BLOCK, so the page keeps its name and still opens without the block.
+-- A document with no title at all is named by the export instead, which
+-- writes a `pagetitle` into the copy it renders (withPageTitle in
+-- vscode-mdm/extension.js); it cannot be done from here, because the copy's
+-- own stem is what Quarto falls back to and it settles that after the
+-- filters, and `-M pagetitle:` is worse than nothing (it came out
+-- `quarto-inputd921f1d56f4c3069`, measured the same day).
+local function page_name(meta)
+  if not quarto.doc.is_format("html") then return false end
+  if meta.title == nil then return false end
+  meta.pagetitle = meta.title
+  return true
+end
+
 function Meta(meta)
   local opt = meta.mdm
   if opt and opt.abcm2ps then
@@ -2167,10 +2191,15 @@ function Meta(meta)
   end
   local header = meta_word(
     meta, "mdm-front-matter", { shown = true, hidden = true }, "shown")
+  -- Before the title block goes, since the page's name is taken out of it.
+  -- TITLE_BLOCK does not hold `pagetitle`, so the hidden branch below does not
+  -- undo the naming.
+  local named = page_name(meta)
   if header == "hidden" then
     for _, key in ipairs(TITLE_BLOCK) do meta[key] = nil end
     return meta
   end
+  if named then return meta end
   return nil
 end
 

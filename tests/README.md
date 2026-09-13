@@ -2159,6 +2159,41 @@ Not covered, and named so it is not taken for covered:
   it, and that puts every score on a page of its own.
 - The notices themselves have still not been seen in a real VS Code window.
 
+### The name of a page (2026-09-13)
+
+The print turned this up, and it is about the exported page rather than the
+paper. **The page went by a machine name.** `pdfinfo` on the printed PDF gave
+`quarto-inputdae4994f30dfed2f`, and the page it was printed from said the same
+in its `<title>`, so Chrome was only copying what it was given. Pandoc writes
+`$pagetitle$` there and Quarto fills it from the document's title; the filter
+takes the title away when the editor is hiding the header, which is the
+editor's default, so nearly every page the extension exported was named after
+a temporary of Quarto's. Two ends to it, and both were needed:
+
+- The filter copies the title into `pagetitle` before the title block goes.
+  `pagetitle` is not in `TITLE_BLOCK`, so the page keeps its name and still
+  opens without the block.
+- A document with no title at all is named by the export, which writes a
+  `pagetitle` into the copy it renders. It cannot be done from the filter:
+  Quarto settles the page title after the filters run, from the stem of the
+  file it was handed, which on the print road is that road's private stem. The
+  three roads were measured against each other on Quarto 1.9.37: a
+  `pagetitle` in the copy's header gives `song notes @ work` whole, spaces and
+  all; `-M pagetitle:My Tune` gives `quarto-inputd921f1d56f4c3069`, worse than
+  doing nothing; and setting `meta.pagetitle` from the filter is overwritten.
+
+Three mutations, each applied, run and reverted in one command:
+
+- **M10** the copy not named after the document → *the copy carries no name
+  for the page*.
+- **M11** the guard on a `pagetitle` of the reader's own removed → *a page the
+  document named itself was renamed*.
+- **M12** the filter not carrying the title over the hidden block → *Expected
+  values to be strictly equal* (the tab went back to Quarto's temporary).
+
+`widestaff.mdm` is rendered with the header hidden for M12, which costs no
+extra render: it is the fixture the score clamp already needed.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
