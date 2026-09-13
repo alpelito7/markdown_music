@@ -159,6 +159,11 @@
           ],
           "default": "justify",
           "description": "How the prose meets the right edge of the text: paragraphs, list items and quotations. Headings, code, equations, tables and scores are not affected. The toolbar toggle writes it, and an export from the toolbar carries it to the page and to the paper."
+        },
+        "mdm.showPdfFallbackNotice": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a warning when a PDF is printed from the HTML page because TeX is unavailable. The PDF is still created when this is off. The warning's Don't show again button turns this setting off; turn it on here to restore the warning."
         }
       }
     },

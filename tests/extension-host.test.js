@@ -120,6 +120,7 @@ test("hostile setting values never reach the webview HTML", () => {
     "mdm.multicursorMatch": ["substring"],
     "mdm.followPlayhead": 0,
     "mdm.textFont": "roman; drop",
+    "mdm.textAlign": "justify; drop",
     "mdm.hyphenation": "auto; drop",
   });
   assert.ok(!h.html.includes("alert(1)"));
@@ -135,6 +136,7 @@ test("hostile setting values never reach the webview HTML", () => {
     multicursorMatch: "word",
     followPlayhead: "follow",
     textFont: "roman",
+    textAlign: "justify",
     hyphenation: "none",
     outlineWidth: 250,
     multiCursorModifier: "alt",
@@ -153,6 +155,7 @@ test("valid setting values pass through to the webview HTML", () => {
     "mdm.multicursorMatch": "substring",
     "mdm.followPlayhead": "still",
     "mdm.textFont": "sans",
+    "mdm.textAlign": "left",
     "mdm.hyphenation": "auto",
   });
   const m = /window\.MDM_SETTINGS = (\{.*?\});/.exec(h.html);
@@ -166,6 +169,7 @@ test("valid setting values pass through to the webview HTML", () => {
     multicursorMatch: "substring",
     followPlayhead: "still",
     textFont: "sans",
+    textAlign: "left",
     hyphenation: "auto",
     outlineWidth: 480,
     multiCursorModifier: "alt",
@@ -859,13 +863,25 @@ test("the webview HTML wires the synth engine, the soundfont and the widget styl
 
 // ---------- Export ----------
 
-// A fake Quarto on the PATH. The extension looks the real one up there
-// (onPath), so a directory holding this one, and a PATH holding only that
+// A fake Quarto on the PATH. The extension looks the real one up there first
+// (findQuarto), so a directory holding this one, and a PATH holding only that
 // directory, is the whole of the substitution and leaves nothing of the real
-// machine in the way. Shell builtins only, for the same reason: under that
-// PATH there is no cat and no cp. It writes down its arguments and its
-// working directory, and keeps a copy of the file it was handed, which is the
-// one whose header the extension has just rewritten and deletes afterwards.
+// machine in the way; the folders Quarto's installers write are looked in
+// only after it, and a test about them says which machine it runs on
+// (useMachine). Shell builtins only, for the same reason: under that PATH
+// there is no cat and no cp. It writes down its arguments and its working
+// directory, and keeps a copy of the file it was handed, which is the one
+// whose header the extension has just rewritten and deletes afterwards. The
+// other tools a PDF with scores looks for are empty stand-ins, by the names
+// the export searches the PATH for.
+const STAND_INS = {
+  abcm2ps: "abcm2ps",
+  chrome: "google-chrome",
+  pdfcrop: "pdfcrop",
+  gs: "gs",
+  epstopdf: "epstopdf",
+};
+
 function fakeBin(tmp, opts) {
   const options = opts || {};
   const bin = path.join(tmp, "bin");
@@ -882,16 +898,12 @@ function fakeBin(tmp, opts) {
       "exit " + (options.code || 0) + "\n"
   );
   fs.chmodSync(quarto, 0o755);
-  if (options.abcm2ps) {
-    const engraver = path.join(bin, "abcm2ps");
-    fs.writeFileSync(engraver, "#!/bin/sh\nexit 0\n");
-    fs.chmodSync(engraver, 0o755);
-  }
-  if (options.chrome) {
-    const chrome = path.join(bin, "google-chrome");
-    fs.writeFileSync(chrome, "#!/bin/sh\nexit 0\n");
-    fs.chmodSync(chrome, 0o755);
-  }
+  Object.keys(STAND_INS).forEach((key) => {
+    if (!options[key]) return;
+    const tool = path.join(bin, STAND_INS[key]);
+    fs.writeFileSync(tool, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(tool, 0o755);
+  });
   return bin;
 }
 
@@ -904,13 +916,65 @@ function usePath(dir) {
   };
 }
 
+// Chrome refuses --no-sandbox only when the extension host runs as root.
+// Both sides of that platform branch are exercised without depending on the
+// account that launched the tests, and the real process function is restored
+// before the next test sees it.
+function useUid(uid) {
+  const before = Object.getOwnPropertyDescriptor(process, "getuid");
+  Object.defineProperty(process, "getuid", {
+    configurable: true,
+    writable: true,
+    value: function () {
+      return uid;
+    },
+  });
+  return function () {
+    if (before) Object.defineProperty(process, "getuid", before);
+    else delete process.getuid;
+  };
+}
+
+// The machine the export believes it runs on: process.platform, and the
+// variables the folders it looks in are built from, put back when the test is
+// done with them. It matters for Quarto, which is looked for where its
+// installer writes when the PATH has none, and those folders are fixed on
+// Linux: the machine these tests were written on has a Quarto at
+// /opt/quarto/bin, which a test that meant "no Quarto anywhere" would find and
+// run. A Mac's second folder is under HOME, which a test can point at a folder
+// of its own.
+function useMachine(platform, env) {
+  const platformBefore = Object.getOwnPropertyDescriptor(process, "platform");
+  const envBefore = {};
+  Object.defineProperty(
+    process,
+    "platform",
+    Object.assign({}, platformBefore, { value: platform })
+  );
+  Object.keys(env || {}).forEach((key) => {
+    envBefore[key] = process.env[key];
+    process.env[key] = env[key];
+  });
+  return function () {
+    Object.defineProperty(process, "platform", platformBefore);
+    Object.keys(envBefore).forEach((key) => {
+      if (envBefore[key] === undefined) delete process.env[key];
+      else process.env[key] = envBefore[key];
+    });
+  };
+}
+
+// A real Mac with Quarto installed has it in the one folder a test cannot
+// point elsewhere, and a test that needs no Quarto there is skipped on it.
+const MAC_QUARTO = "/Applications/quarto/bin/quarto";
+
 // The MDM channel as the extension left it.
 function exportLog() {
   const channel = vscode._state.outputChannels.find((c) => c.name === "MDM");
   return channel ? channel : { lines: [], shown: 0 };
 }
 
-// The buttons of an error notification are answered on a microtask; let it run.
+// The buttons of a notification are answered on a microtask; let it run.
 function settle() {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -944,6 +1008,7 @@ test("export saves a dirty document and runs Quarto on a copy of it", async () =
   assert.match(vscode._state.infoMessages[0].message, /doc\.html/);
   assert.deepEqual(vscode._state.infoMessages[0].buttons, ["Open HTML"]);
   assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.warningMessages, []);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -975,6 +1040,7 @@ test("the export is named after the document, whatever its extension", async () 
   );
   assert.ok(!/notes\.md\.html/.test(vscode._state.infoMessages[0].message));
   assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.warningMessages, []);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -1146,52 +1212,194 @@ test("a document that asks for the format links keeps them", async () => {
 // None of these tools is looked for when the extension starts: the editor
 // draws and plays scores knowing nothing about Quarto. An export is the only
 // thing that asks, and what it has to do when the answer is no is say which
-// tool is missing and where the whole story is.
+// tool is missing, where to get it, and where the whole story is. The reader
+// is a musician: a notice of a missing tool is a warning with a button to the
+// page that fixes it, and its log opens on the steps. Settled on 2026-09-12,
+// after a Mac reported the old notice, which named Quarto and kept the page to
+// get it from in the log, behind a PATH of 33 folders.
 
-test("without Quarto the export says which tool is missing and logs where to get it", async () => {
+test("without Quarto the export names it, offers its page and logs where it looked", async (t) => {
+  if (fs.existsSync(MAC_QUARTO)) {
+    t.skip("this machine has a Quarto at " + MAC_QUARTO);
+    return;
+  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const empty = path.join(tmp, "empty");
   fs.mkdirSync(empty);
-  const restore = usePath(empty);
+  const home = path.join(tmp, "home");
+  fs.mkdirSync(home);
+  const restorePath = usePath(empty);
+  const restoreMachine = useMachine("darwin", { HOME: home });
   const doc = path.join(tmp, "doc.mdm");
   fs.writeFileSync(doc, SOURCE);
   const h = boot("Body\n", {}, null, "file://" + doc);
   vscode._state.workspaceFolder = tmp;
-  vscode._state.errorChoices["Quarto is not installed"] = "Show log";
 
+  vscode._state.warningChoices["needs Quarto"] = "Download Quarto";
   await h.receive({ type: "export", to: "html" });
   await settle();
-  restore();
+  vscode._state.warningChoices["needs Quarto"] = "Show log";
+  await h.receive({ type: "export", to: "html" });
+  await settle();
+  restoreMachine();
+  restorePath();
 
-  assert.equal(vscode._state.errorMessages.length, 1);
-  assert.match(vscode._state.errorMessages[0].message, /Quarto is not installed/);
-  assert.match(vscode._state.errorMessages[0].message, /editor works without it/);
-  assert.deepEqual(vscode._state.errorMessages[0].buttons, ["Show log"]);
+  assert.deepEqual(vscode._state.errorMessages, [], "a missing program was reported as a failure");
+  assert.equal(vscode._state.warningMessages.length, 2);
+  const notice = vscode._state.warningMessages[0];
+  assert.match(notice.message, /^MDM: exporting needs Quarto, a free program/);
+  assert.match(notice.message, /Install it and export again\./);
+  assert.match(notice.message, /The editor works without it\.$/);
+  assert.deepEqual(notice.buttons, ["Download Quarto", "Show log"]);
+  assert.deepEqual(
+    vscode._state.openedExternal,
+    ["https://quarto.org/docs/get-started/"],
+    "Download Quarto did not open the page Quarto is installed from"
+  );
   const channel = exportLog();
-  assert.match(channel.lines.join("\n"), /quarto\.org/, "the log does not say where to get it");
   assert.equal(channel.shown, 1, "the Show log button did not open the channel");
+  const log = channel.lines.join("\n");
+  assert.match(log, /^Exporting needs Quarto/, "the log does not open on what to do");
+  assert.match(log, /1\. Download Quarto from https:\/\/quarto\.org\/docs\/get-started\/ and install it\./);
+  assert.match(log, /quit Visual Studio Code completely and open it again/);
+  assert.ok(log.includes("  " + MAC_QUARTO + "\n"), "the installer's folder was not named");
+  assert.ok(
+    log.includes("  " + path.join(home, "Applications", "quarto", "bin", "quarto") + "\n"),
+    "the installer's folder under HOME was not named"
+  );
+  assert.ok(
+    log.indexOf("Download Quarto from") < log.indexOf("PATH: " + empty),
+    "the PATH comes before the way out"
+  );
   assert.equal(vscode._state.progressTitles.length, 0, "a render was started with no Quarto");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test("a PDF of a document with scores says both engravers are missing before rendering", async () => {
+// The PATH the editor runs with is the one it started with (VS Code reads the
+// shell's environment once), so a Quarto installed while it was open is on
+// disk and not on it, and the macOS installer's link into /usr/local/bin fails
+// where that folder does not exist. The notice asks the reader to install
+// Quarto and export again; this is what makes the second half true.
+test("a Quarto installed while the editor was open is found where its installer put it", async (t) => {
+  if (fs.existsSync(MAC_QUARTO)) {
+    t.skip("this machine has a Quarto at " + MAC_QUARTO + ", which is looked in first");
+    return;
+  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
-  const restore = usePath(fakeBin(tmp));
+  const empty = path.join(tmp, "empty");
+  fs.mkdirSync(empty);
+  const installed = path.join(tmp, "Applications", "quarto", "bin");
+  fs.mkdirSync(installed, { recursive: true });
+  fs.renameSync(path.join(fakeBin(tmp), "quarto"), path.join(installed, "quarto"));
+  const restorePath = usePath(empty);
+  const restoreMachine = useMachine("darwin", { HOME: tmp });
   const doc = path.join(tmp, "doc.mdm");
-  fs.writeFileSync(doc, SOURCE + "\n```{.abc}\nX:1\nK:C\nCDEF|\n```\n");
+  fs.writeFileSync(doc, SOURCE);
   const h = boot("Body\n", {}, null, "file://" + doc);
   vscode._state.workspaceFolder = tmp;
 
-  await h.receive({ type: "export", to: "pdf" });
-  restore();
+  await h.receive({ type: "export", to: "html" });
+  restoreMachine();
+  restorePath();
 
-  assert.equal(vscode._state.errorMessages.length, 1);
-  assert.match(
-    vscode._state.errorMessages[0].message,
-    /neither Chrome nor abcm2ps is installed/);
-  assert.match(exportLog().lines.join("\n"), /apt install abcm2ps/);
-  assert.equal(vscode._state.progressTitles.length, 0, "the PDF would have come out with no scores");
+  assert.deepEqual(vscode._state.warningMessages, [], "the export said Quarto is not installed");
+  assert.equal(vscode._state.progressTitles.length, 1, "the export did not start");
+  assert.ok(
+    fs.existsSync(path.join(tmp, "args.txt")),
+    "the Quarto in the installer's folder was not the one that ran"
+  );
+  assert.ok(
+    exportLog().lines.join("\n").includes(path.join(installed, "quarto") + " render"),
+    "the log does not say which Quarto ran"
+  );
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// The folders of the systems a test cannot run on. The list is the one
+// Quarto's own VS Code extension scans (context.ts in quarto-dev/quarto)
+// less the RStudio bundles, and the macOS and Windows paths are the install
+// locations of Quarto's .pkg (installer.ts) and .msi (quarto.wxs).
+test("Quarto is looked for in the folders its installers write, on each system", () => {
+  assert.deepEqual(ext.quartoInstalls("darwin", { HOME: "/Users/u" }), [
+    "/Applications/quarto/bin/quarto",
+    "/Users/u/Applications/quarto/bin/quarto",
+  ]);
+  assert.deepEqual(
+    ext.quartoInstalls("win32", {
+      ProgramFiles: "D:\\Programs",
+      LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local",
+    }),
+    [
+      "D:\\Programs\\Quarto\\bin\\quarto.exe",
+      "C:\\Users\\u\\AppData\\Local\\Programs\\Quarto\\bin\\quarto.exe",
+    ]
+  );
+  // Without the variables: the folder Windows puts programs in by default,
+  // and no folder of the user's.
+  assert.deepEqual(ext.quartoInstalls("win32", {}), [
+    "C:\\Program Files\\Quarto\\bin\\quarto.exe",
+  ]);
+  assert.deepEqual(ext.quartoInstalls("linux", { HOME: "/home/u" }), [
+    "/opt/quarto/bin/quarto",
+  ]);
+  // A system Quarto ships no installer for has nowhere to look but the PATH.
+  assert.deepEqual(ext.quartoInstalls("freebsd", { HOME: "/home/u" }), []);
+});
+
+// What the filter needs to draw the scores of a PDF, and what the notice asks
+// for when the machine lacks it. The filter's first road is Chrome, trimmed
+// by pdfcrop, and its second abcm2ps through epstopdf; both run Ghostscript.
+// The check used to ask for Chrome or abcm2ps and nothing else, and let a
+// machine with Chrome and no pdfcrop through to a PDF with its scores left as
+// text. The notice always asks for Chrome's road, the one that draws the
+// scores the editor draws.
+test("a PDF with scores names what it lacks when no Chrome can print it", async () => {
+  const cases = [
+    {
+      what: "nothing but Quarto",
+      tools: {},
+      message: /^MDM: a PDF with scores needs Google Chrome and a complete TeX to draw them, and this computer does not have them\. Install both, then quit Visual Studio Code, open it again and export\.$/,
+      buttons: ["Download Chrome", "Download TeX", "Show log"],
+      missing: "Not found on this computer: Google Chrome, pdfcrop, Ghostscript (gs).",
+    },
+    {
+      what: "TeX, and no Chrome",
+      tools: { pdfcrop: true, gs: true },
+      message: /^MDM: a PDF with scores needs Google Chrome to draw them, and it is not installed on this computer\. Install it and export again\.$/,
+      buttons: ["Download Chrome", "Show log"],
+      missing: "Not found on this computer: Google Chrome.",
+      press: "Download Chrome",
+      opens: ["https://www.google.com/chrome/"],
+    },
+  ];
+  for (const c of cases) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+    const restore = usePath(fakeBin(tmp, c.tools));
+    const doc = path.join(tmp, "doc.mdm");
+    fs.writeFileSync(doc, SOURCE + "\n```{.abc}\nX:1\nK:C\nCDEF|\n```\n");
+    const h = boot("Body\n", {}, null, "file://" + doc);
+    vscode._state.workspaceFolder = tmp;
+    if (c.press) vscode._state.warningChoices["with scores"] = c.press;
+
+    await h.receive({ type: "export", to: "pdf" });
+    await settle();
+    restore();
+
+    assert.deepEqual(vscode._state.errorMessages, [], c.what + ": reported as a failure");
+    assert.equal(vscode._state.warningMessages.length, 1, c.what + ": no notice");
+    assert.match(vscode._state.warningMessages[0].message, c.message, c.what);
+    assert.deepEqual(vscode._state.warningMessages[0].buttons, c.buttons, c.what);
+    const log = exportLog().lines.join("\n");
+    assert.ok(log.includes(c.missing), c.what + ": the log does not name what is missing");
+    assert.match(log, /sudo apt install abcm2ps/, c.what + ": the other road is not offered");
+    if (c.opens) assert.deepEqual(vscode._state.openedExternal, c.opens, c.what);
+    assert.equal(
+      vscode._state.progressTitles.length,
+      0,
+      c.what + ": the PDF was rendered with scores it cannot draw"
+    );
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // A document that points mdm.chrome somewhere is waved through even when
@@ -1214,27 +1422,35 @@ test("a document that names mdm.chrome is left to the filter", async () => {
   restore();
 
   assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.warningMessages, []);
   assert.equal(vscode._state.progressTitles.length, 1, "the export did not start");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-// Chrome alone carries the export: it is the engraver the filter prefers,
-// and abcm2ps is only the fallback, so neither being on the machine is the
-// one state that stops a PDF.
-test("a PDF of a document with scores exports with Chrome alone", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
-  const restore = usePath(fakeBin(tmp, { chrome: true }));
-  const doc = path.join(tmp, "doc.mdm");
-  fs.writeFileSync(doc, SOURCE + "\n```{.abc}\nX:1\nK:C\nCDEF|\n```\n");
-  const h = boot("Body\n", {}, null, "file://" + doc);
-  vscode._state.workspaceFolder = tmp;
+// Either road of the filter carries the export when it is whole: Chrome with
+// pdfcrop and Ghostscript, the one that draws the editor's own scores, or
+// abcm2ps with epstopdf and Ghostscript, without a Chrome.
+test("a PDF with scores exports when one of the filter's roads is whole", async () => {
+  const roads = [
+    { what: "Chrome's", tools: { chrome: true, pdfcrop: true, gs: true } },
+    { what: "abcm2ps's", tools: { abcm2ps: true, epstopdf: true, gs: true } },
+  ];
+  for (const road of roads) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+    const restore = usePath(fakeBin(tmp, road.tools));
+    const doc = path.join(tmp, "doc.mdm");
+    fs.writeFileSync(doc, SOURCE + "\n```{.abc}\nX:1\nK:C\nCDEF|\n```\n");
+    const h = boot("Body\n", {}, null, "file://" + doc);
+    vscode._state.workspaceFolder = tmp;
 
-  await h.receive({ type: "export", to: "pdf" });
-  restore();
+    await h.receive({ type: "export", to: "pdf" });
+    restore();
 
-  assert.deepEqual(vscode._state.errorMessages, []);
-  assert.equal(vscode._state.progressTitles.length, 1, "the export did not start");
-  fs.rmSync(tmp, { recursive: true, force: true });
+    assert.deepEqual(vscode._state.errorMessages, [], road.what + " road");
+    assert.deepEqual(vscode._state.warningMessages, [], road.what + " road was refused");
+    assert.equal(vscode._state.progressTitles.length, 1, road.what + " road: the export did not start");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test("a document with no scores exports to PDF without abcm2ps", async () => {
@@ -1249,6 +1465,7 @@ test("a document with no scores exports to PDF without abcm2ps", async () => {
   restore();
 
   assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.warningMessages, []);
   assert.equal(vscode._state.progressTitles.length, 1);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -1275,6 +1492,524 @@ test("a render that fails keeps its whole log and offers to show it", async () =
   assert.ok(lines.includes(path.join(tmp, "doc.qmd")), "the call itself was not written down");
   assert.ok(!fs.existsSync(path.join(tmp, "doc.qmd")), "a failed render left the copy behind");
   assert.deepEqual(vscode._state.infoMessages, [], "a failed export announced a file");
+  assert.deepEqual(vscode._state.warningMessages, [], "a failed render was taken for a missing tool");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// A PDF Quarto finds no TeX for is a missing tool and not a failure: the
+// notice names TeX and sends its reader to the TeX for the system in hand.
+// On a Mac that is MacTeX, which brings the pdfcrop and the Ghostscript the
+// scores need; TinyTeX, the one Quarto's own words suggest, holds no pdfcrop
+// in either of its package lists (rstudio/tinytex, tools/pkgs-custom.txt and
+// tools/pkgs-yihui.txt). The words are Quarto's (latex.ts in
+// quarto-dev/quarto-cli), the same in 1.9.37 and on main.
+test("a PDF Quarto finds no TeX for names TeX and offers the page for the system in hand", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const quartoSays =
+    "No TeX installation was detected. Please run 'quarto install tinytex' to install TinyTex.";
+  const restorePath = usePath(fakeBin(tmp, { code: 1, say: quartoSays }));
+  const restoreMachine = useMachine("darwin", {});
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  vscode._state.warningChoices["needs TeX"] = "Download TeX";
+
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+  restoreMachine();
+  restorePath();
+
+  assert.deepEqual(vscode._state.errorMessages, [], "a machine without TeX was told the export failed");
+  assert.equal(vscode._state.warningMessages.length, 1);
+  assert.match(
+    vscode._state.warningMessages[0].message,
+    /^MDM: a PDF needs TeX, a free program that lays out the pages, and it is not installed on this computer\. Install it, then quit Visual Studio Code, open it again and export\.$/
+  );
+  assert.deepEqual(vscode._state.warningMessages[0].buttons, ["Download TeX", "Show log"]);
+  assert.deepEqual(vscode._state.openedExternal, ["https://www.tug.org/mactex/"]);
+  const log = exportLog().lines.join("\n");
+  assert.ok(
+    log.indexOf(quartoSays) !== -1 && log.indexOf(quartoSays) < log.indexOf("A PDF needs TeX"),
+    "Quarto's own words are not above the way out"
+  );
+  assert.match(log, /1\. Install MacTeX from https:\/\/www\.tug\.org\/mactex\/ \(it brings pdfcrop and Ghostscript as well\)\./);
+  assert.match(log, /2\. Quit Visual Studio Code completely and open it again/);
+  assert.ok(!fs.existsSync(path.join(tmp, "doc.qmd")), "the copy was left behind");
+  assert.deepEqual(vscode._state.infoMessages, [], "an export with no PDF announced one");
+  // The other systems, which a test cannot run on.
+  assert.equal(ext.texPage("win32"), "https://www.tug.org/texlive/windows.html");
+  assert.equal(ext.texPage("linux"), "https://www.tug.org/texlive/");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------- Printed instead of typeset, when there is a Chrome but no TeX ----------
+//
+// A quarto stand-in whose behaviour depends on --to, matching a real 1.9.37
+// measured on 2026-09-12: it fails on a lone --to pdf with Quarto's own
+// words and writes nothing; --to html,pdf writes the .html and fails the
+// same way; --to html alone writes the .html and succeeds. And a chrome
+// stand-in that writes real bytes to whatever --print-to-pdf names, standing
+// in for the filter's own Chrome invocation for a score.
+function fakeQuartoTexFallback(tmp) {
+  const bin = path.join(tmp, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const quarto = path.join(bin, "quarto");
+  const noTex = "No TeX installation was detected. Please run quarto install tinytex.";
+  fs.writeFileSync(
+    quarto,
+    "#!/bin/sh\n" +
+      'echo "$@" >> "' + tmp + '/calls.txt"\n' +
+      'file=${2##*/}\n' +
+      'base=${file%.qmd}\n' +
+      // The .tex goes down the way Quarto's own does: named after the copy's
+      // stem and left there when the engine fails. Without it the test that
+      // says the reader's .tex survives cannot fail, and it did not: an
+      // 11-byte file of the reader's came back 14,160 bytes of preamble from
+      // a real Quarto 1.9.37 while the suite stayed green (2026-09-13).
+      'case " $* " in\n' +
+      '  *" --to pdf "*)\n' +
+      "    printf 'quarto wrote this\\n' > \"$base.tex\"\n" +
+      '    echo "' + noTex + '" >&2\n' +
+      "    exit 1 ;;\n" +
+      '  *" --to html,pdf "*)\n' +
+      "    printf '<!doctype html><title>printed</title><p>hi</p>' > \"$base.html\"\n" +
+      "    printf 'quarto wrote this\\n' > \"$base.tex\"\n" +
+      '    echo "' + noTex + '" >&2\n' +
+      "    exit 1 ;;\n" +
+      '  *" --to html "*)\n' +
+      "    printf '<!doctype html><title>printed</title><p>hi</p>' > \"$base.html\"\n" +
+      "    exit 0 ;;\n" +
+      "esac\n" +
+      "exit 0\n"
+  );
+  fs.chmodSync(quarto, 0o755);
+  return bin;
+}
+
+function fakeChromePrint(bin, opts) {
+  const options = opts || {};
+  const chrome = path.join(bin, "google-chrome");
+  fs.writeFileSync(
+    chrome,
+    "#!/bin/sh\n" +
+      'echo "$@" >> "' + path.dirname(bin) + '/chrome-calls.txt"\n' +
+      "pdf=\"\"\nprofile=\"\"\n" +
+      'for a in "$@"; do case "$a" in\n' +
+      '  --print-to-pdf=*) pdf="${a#--print-to-pdf=}";;\n' +
+      '  --user-data-dir=*) profile="${a#--user-data-dir=}";;\n' +
+      "esac; done\n" +
+      '[ -n "$profile" ] && [ -d "$profile" ] || exit 22\n' +
+      'printf "%s\\n" "$profile" > "' + path.dirname(bin) + '/chrome-profile.txt"\n' +
+      (options.hang
+        ? // By absolute path: the PATH a test runs under holds the stand-ins
+          // and nothing else, so a bare `sleep` is not found and the
+          // stand-in exits at once, which is the opposite of the case.
+          (["/bin/sleep", "/usr/bin/sleep"].find((p) => fs.existsSync(p)) ||
+            "sleep") + " 30\n"
+        : options.fail
+          ? "exit 1\n"
+          : "printf '%s\\n' '%PDF-1.4 fake' > \"$pdf\"\nexit 0\n")
+  );
+  fs.chmodSync(chrome, 0o755);
+}
+
+// A Quarto whose HTML render fails, which is what the print fallback meets
+// when the document itself is what Quarto cannot read.
+function fakeQuartoHtmlFails(tmp) {
+  const bin = path.join(tmp, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const quarto = path.join(bin, "quarto");
+  fs.writeFileSync(
+    quarto,
+    "#!/bin/sh\n" +
+      'echo "$@" >> "' + tmp + '/calls.txt"\n' +
+      'echo "ERROR: could not parse YAML" >&2\n' +
+      "exit 1\n"
+  );
+  fs.chmodSync(quarto, 0o755);
+  return bin;
+}
+
+function chromeCalls(tmp) {
+  try {
+    return fs.readFileSync(path.join(tmp, "chrome-calls.txt"), "utf8").trim().split("\n");
+  } catch (e) {
+    return [];
+  }
+}
+
+function chromeProfile(tmp) {
+  try {
+    return fs.readFileSync(path.join(tmp, "chrome-profile.txt"), "utf8").trim();
+  } catch (e) {
+    return "";
+  }
+}
+
+test("with Chrome but no TeX, a PDF asked alone is printed from a page rendered just for it", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp);
+  fakeChromePrint(bin);
+  const restorePath = usePath(bin);
+  const restoreUid = useUid(0);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  fs.writeFileSync(path.join(tmp, "doc.html"), "an earlier HTML export\n");
+  fs.writeFileSync(path.join(tmp, "doc.tex"), "a file that was already here\n");
+  fs.mkdirSync(path.join(tmp, "doc_files"));
+  fs.writeFileSync(path.join(tmp, "doc_files", "keep.txt"), "keep\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  vscode._state.warningChoices["was printed from the HTML page"] = "Open PDF";
+
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+  restoreUid();
+  restorePath();
+
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.infoMessages, [], "the plain success toast fired instead");
+  assert.equal(vscode._state.warningMessages.length, 1);
+  assert.equal(
+    vscode._state.warningMessages[0].message,
+    "MDM: no TeX was found, so doc.pdf was printed from the HTML page instead of typeset with LaTeX. Install TeX for a typeset PDF."
+  );
+  // "pdf" alone never asked for an HTML, so there is no "Open HTML" to offer.
+  assert.deepEqual(vscode._state.warningMessages[0].buttons, [
+    "Open PDF", "Download TeX", "Show log", "Don't show again",
+  ]);
+  assert.ok(fs.existsSync(path.join(tmp, "doc.pdf")), "no PDF was left at the requested path");
+  assert.equal(fs.readFileSync(path.join(tmp, "doc.pdf"), "utf8"), "%PDF-1.4 fake\n");
+  assert.deepEqual(
+    vscode._state.openedExternal,
+    ["file://" + path.join(tmp, "doc.pdf")],
+    "Open PDF did not open the file that was printed"
+  );
+  // The page rendered only to be printed has a private name and leaves no
+  // debris. Files already beside the document belong to the reader and stay
+  // byte for byte as they were.
+  assert.equal(fs.readFileSync(path.join(tmp, "doc.html"), "utf8"), "an earlier HTML export\n");
+  assert.equal(fs.readFileSync(path.join(tmp, "doc.tex"), "utf8"), "a file that was already here\n");
+  assert.equal(fs.readFileSync(path.join(tmp, "doc_files", "keep.txt"), "utf8"), "keep\n");
+  assert.deepEqual(
+    fs.readdirSync(tmp).filter((name) => name.includes(".mdm-print-")),
+    [],
+    "the private page or staged PDF was left behind"
+  );
+  assert.ok(!fs.existsSync(path.join(tmp, "doc.qmd")), "the copy was left behind");
+  const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n");
+  assert.equal(calls.length, 2, "one call for the PDF that failed, one for the page to print");
+  assert.match(calls[0], /--to pdf/);
+  assert.match(calls[1], /--to html(?! ?,)/, "the fallback did not ask for exactly the HTML");
+  // Root is the one case a container runs this as; Chrome refuses to start
+  // without being told so.
+  assert.match(chromeCalls(tmp)[0], /--no-sandbox/);
+  const profile = chromeProfile(tmp);
+  assert.ok(profile, "Chrome was not given a private profile");
+  assert.ok(!fs.existsSync(profile), "Chrome's temporary profile was left behind");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("with Chrome but incomplete TeX, a PDF with scores is printed from HTML", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp);
+  fakeChromePrint(bin);
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE + "\n```abc\nX:1\nK:C\nCDEF|\n```\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  vscode._state.warningChoices["was printed from the HTML page"] = "Don't show again";
+
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.equal(vscode._state.warningMessages.length, 1);
+  assert.match(
+    vscode._state.warningMessages[0].message,
+    /^MDM: a complete TeX was not found, so doc\.pdf was printed from the HTML page/
+  );
+  assert.deepEqual(
+    vscode._state.warningMessages[0].buttons,
+    ["Open PDF", "Download TeX", "Show log", "Don't show again"]
+  );
+  assert.deepEqual(vscode._state.updates, [
+    {
+      key: "mdm.showPdfFallbackNotice",
+      value: false,
+      target: vscode.ConfigurationTarget.Global,
+    },
+  ]);
+  assert.ok(fs.existsSync(path.join(tmp, "doc.pdf")), "the score PDF was not printed");
+  const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n");
+  assert.equal(calls.length, 1, "the LaTeX render ran even though its score tools were missing");
+  assert.match(calls[0], /--to html(?! ?,)/);
+  assert.match(
+    exportLog().lines.join("\n"),
+    /lacks pdfcrop and Ghostscript \(gs\)/,
+    "the warning log did not name the missing score tools"
+  );
+  // The setting hides only the notice: the next export still makes its PDF
+  // through exactly the same fallback and records the road in the MDM log.
+  vscode._state.warningMessages = [];
+  fs.unlinkSync(path.join(tmp, "doc.pdf"));
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+  assert.deepEqual(vscode._state.warningMessages, [], "the fallback notice came back");
+  assert.ok(fs.existsSync(path.join(tmp, "doc.pdf")), "hiding the notice hid the export");
+  assert.equal(
+    fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n").length,
+    2,
+    "the silent export did not run"
+  );
+  restorePath();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("with Chrome but no TeX, both formats print the PDF from the HTML already made and keep it", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp);
+  fakeChromePrint(bin);
+  const restorePath = usePath(bin);
+  const restoreUid = useUid(1000); // not root: no --no-sandbox
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "both" });
+  await settle();
+  restoreUid();
+  restorePath();
+
+  assert.equal(vscode._state.warningMessages.length, 1);
+  assert.deepEqual(
+    vscode._state.warningMessages[0].buttons,
+    ["Open PDF", "Open HTML", "Download TeX", "Show log", "Don't show again"],
+    "both wanted the HTML too, and it is real"
+  );
+  assert.ok(fs.existsSync(path.join(tmp, "doc.html")), "both asked for the HTML and it was thrown away");
+  assert.ok(fs.existsSync(path.join(tmp, "doc.pdf")));
+  assert.ok(!fs.existsSync(path.join(tmp, "doc.tex")), "the stray .tex was left behind");
+  const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n");
+  assert.equal(calls.length, 1, "both already made the HTML the PDF was printed from; no second call was needed");
+  assert.doesNotMatch(chromeCalls(tmp)[0], /--no-sandbox/, "a non-root call carried the flag anyway");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("with Chrome but no TeX, a print that itself fails falls back to naming TeX", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp);
+  fakeChromePrint(bin, { fail: true });
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+  restorePath();
+
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.equal(vscode._state.warningMessages.length, 1);
+  assert.match(vscode._state.warningMessages[0].message, /^MDM: a PDF needs TeX/, "the print's own failure was not folded back into the TeX notice");
+  assert.match(exportLog().lines.join("\n"), /Chrome exited with 1\./);
+  assert.ok(!fs.existsSync(path.join(tmp, "doc.pdf")), "a PDF was left at the path Chrome failed to write");
+  assert.ok(!fs.existsSync(path.join(tmp, "doc.html")), "the page rendered to print from was left behind");
+  assert.ok(!fs.existsSync(chromeProfile(tmp)), "a failed Chrome left its profile behind");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a Chrome that never finishes printing is stopped, and the export says so", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp);
+  fakeChromePrint(bin, { hang: true });
+  const restorePath = usePath(bin);
+  // Without a wall clock the export never came back at all: the progress
+  // notification stayed up, no notice was ever shown, and the copy stayed
+  // beside the document, where it refuses every later export of it.
+  const before = process.env.MDM_PRINT_TIMEOUT;
+  process.env.MDM_PRINT_TIMEOUT = "400";
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+  if (before === undefined) delete process.env.MDM_PRINT_TIMEOUT;
+  else process.env.MDM_PRINT_TIMEOUT = before;
+  restorePath();
+
+  assert.equal(vscode._state.warningMessages.length, 1, "the export did not come back");
+  assert.match(vscode._state.warningMessages[0].message, /^MDM: a PDF needs TeX/);
+  assert.match(
+    exportLog().lines.join("\n"),
+    /Chrome did not finish printing within 0\.4 seconds, and was stopped\./
+  );
+  // And nothing of the run is left to refuse the next one.
+  assert.ok(!fs.existsSync(path.join(tmp, "doc.qmd")), "the copy was left behind");
+  assert.deepEqual(
+    fs.readdirSync(tmp).filter((name) => name.includes(".mdm-print-")),
+    [],
+    "the private page was left behind"
+  );
+  assert.ok(!fs.existsSync(chromeProfile(tmp)), "a stopped Chrome left its profile behind");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a document whose .tex the reader wrote comes back untouched from a failed render", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp);
+  fakeChromePrint(bin, { fail: true }); // no PDF either way: the .tex is the point
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  fs.writeFileSync(path.join(tmp, "doc.tex"), "the reader's own LaTeX\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+  restorePath();
+
+  // Quarto names its LaTeX after the copy's stem and writes it before
+  // anything here can decline to delete it, so the only guard is to move the
+  // reader's out of the way for the length of the render.
+  assert.equal(
+    fs.readFileSync(path.join(tmp, "doc.tex"), "utf8"),
+    "the reader's own LaTeX\n",
+    "the render wrote over a .tex of the reader's"
+  );
+  assert.deepEqual(
+    fs.readdirSync(tmp).filter((name) => name.includes(".mdm-kept-")),
+    [],
+    "the file put aside was not put back"
+  );
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a folder the export cannot write to names the folder, and not Quarto", {
+  // Root writes into a read-only folder all the same, so the case cannot be
+  // built there.
+  skip: typeof process.getuid === "function" && process.getuid() === 0
+    ? "runs as root"
+    : false,
+}, async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeBin(tmp);
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  fs.chmodSync(tmp, 0o555);
+
+  await h.receive({ type: "export", to: "html" });
+  await settle();
+  fs.chmodSync(tmp, 0o755);
+  restorePath();
+
+  // It used to end in "Quarto exited with -1", naming a program that was
+  // never started and leaving the reader nothing to act on.
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.match(
+    vscode._state.errorMessages[0].message,
+    /^MDM: the export could not write beside doc\.mdm\./
+  );
+  const log = exportLog().lines.join("\n");
+  assert.match(log, /Writing the copy the export renders, .*doc\.qmd, failed: /);
+  assert.doesNotMatch(log, /Quarto exited with/, "it blamed a Quarto that never ran");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a second export of one document while the first runs is turned away, and says so", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp);
+  fakeChromePrint(bin);
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  const first = h.receive({ type: "export", to: "html" });
+  const second = h.receive({ type: "export", to: "html" });
+  await Promise.all([first, second]);
+  await settle();
+  restorePath();
+
+  // The second run used to find the first run's copy and tell the reader
+  // that a file of their own was in the way of the export.
+  assert.deepEqual(vscode._state.warningMessages, []);
+  assert.equal(vscode._state.infoMessages.length, 2);
+  const said = vscode._state.infoMessages.map((m) => m.message).sort();
+  assert.match(said[0], /^MDM: doc\.mdm is already being exported\./);
+  assert.match(said[1], /^MDM: exported doc\.html$/);
+  const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n");
+  assert.equal(calls.length, 1, "the export ran twice over the same copy");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a page the fallback cannot render is not reported as a missing program", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoHtmlFails(tmp);
+  fakeChromePrint(bin);
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  // Scores, and none of the programs LaTeX draws them with: the export goes
+  // straight to printing the page, and here Quarto cannot render that page.
+  fs.writeFileSync(doc, SOURCE + "\n```abc\nX:1\nK:C\nCDEF|\n```\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+  restorePath();
+
+  // A reader told to install TeX here would install it and get the same
+  // failure back: what stopped this was the document, and Quarto said so.
+  assert.deepEqual(vscode._state.warningMessages, []);
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.match(vscode._state.errorMessages[0].message, /^MDM: the export of doc\.mdm failed\.$/);
+  assert.match(exportLog().lines.join("\n"), /Quarto exited with 1\./);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("when both were asked and only the page landed, the notice offers the page", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp);
+  fakeChromePrint(bin, { fail: true });
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  vscode._state.warningChoices["a PDF needs TeX"] = "Open HTML";
+
+  await h.receive({ type: "export", to: "both" });
+  await settle();
+  restorePath();
+
+  // Quarto writes the page before the PDF half reports that it found no TeX,
+  // so this run did produce something and the notice has to say where it is.
+  assert.equal(vscode._state.warningMessages.length, 1);
+  assert.match(
+    vscode._state.warningMessages[0].message,
+    /^MDM: a PDF needs TeX.*doc\.html was exported\.$/
+  );
+  assert.deepEqual(
+    vscode._state.warningMessages[0].buttons,
+    ["Open HTML", "Download TeX", "Show log"]
+  );
+  assert.deepEqual(
+    vscode._state.openedExternal,
+    ["file://" + path.join(tmp, "doc.html")],
+    "Open HTML did not open the page that landed"
+  );
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -1290,7 +2025,14 @@ test("a .qmd already in the way stops the export instead of overwriting it", asy
   await h.receive({ type: "export", to: "html" });
   restore();
 
-  assert.match(vscode._state.errorMessages[0].message, /doc\.qmd is in the way/);
+  // Something the reader moves out of the way, like a tool the reader
+  // installs: a warning that says what to do, and not a failure.
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.match(
+    vscode._state.warningMessages[0].message,
+    /^MDM: a file named doc\.qmd is in the way of the export\. Rename it or move it, and export again\.$/
+  );
+  assert.deepEqual(vscode._state.warningMessages[0].buttons, ["Show log"]);
   assert.equal(
     fs.readFileSync(path.join(tmp, "doc.qmd"), "utf8"),
     "someone else's file\n",
@@ -1445,6 +2187,14 @@ test("the export carries the look the editor is showing", async () => {
     await exportWith("html", { "mdm.textFont": "sans" }, seedTheme("#e6db74"))
   );
   assert.equal(sans["mdm-text-font"], "sans");
+  // How the prose meets the right edge, on every render for the same reason:
+  // the editor justifies by default and the filter falls back to the ragged
+  // right a page from the command line has always had.
+  assert.equal(look["mdm-text-align"], "justify", "the default justification did not travel");
+  const ragged = lookOf(
+    await exportWith("html", { "mdm.textAlign": "left" }, seedTheme("#e6db74"))
+  );
+  assert.equal(ragged["mdm-text-align"], "left");
   // Word division is named on every render as well, off included. Off is
   // both the editor's default and the filter's fallback, but the look says
   // what the editor shows rather than trusting the two to stay equal.
@@ -1546,6 +2296,7 @@ test("a format the webview made up is refused before anything runs", async () =>
 
   assert.equal(vscode._state.progressTitles.length, 0, "a bogus format started a render");
   assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.warningMessages, []);
   assert.deepEqual(vscode._state.infoMessages, []);
   assert.ok(!fs.existsSync(path.join(tmp, "args.txt")), "a bogus format reached Quarto");
   fs.rmSync(tmp, { recursive: true, force: true });

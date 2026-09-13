@@ -37,7 +37,7 @@ While a tune plays, a brass playhead walks the staff and the page scrolls to kee
 
 ### Export
 
-The export button writes the document as HTML or PDF, with the font, the justification and the hyphenation the editor is using. It needs [Quarto](https://quarto.org) 1.4 or later, and a PDF also needs TeX; with Chrome or Chromium, the PDF draws scores and equations as the editor does. The editor itself needs none of them.
+The export button writes the document as HTML or PDF, with the font, the justification and the hyphenation the editor is using. It needs [Quarto](https://quarto.org) 1.4 or later. With Chrome or Chromium it can print a PDF from the HTML page without TeX, including scores and equations; installing TeX adds its typeset line breaking and page layout. The first kind of PDF says which road it took. Its **Don't show again** button hides that notice, and `mdm.showPdfFallbackNotice` in Settings turns it back on. The editor itself needs none of them.
 
 ## Documentation and licence
 

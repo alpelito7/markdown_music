@@ -15,6 +15,8 @@ const state = {
   colorThemeListeners: [],
   errorMessages: [], // {message, buttons}
   errorChoices: {}, // message fragment -> button the user "presses"
+  warningMessages: [], // {message, buttons}
+  warningChoices: {}, // message fragment -> button the user "presses"
   infoMessages: [], // {message, buttons}
   outputChannels: [], // {name, lines, shown}
   progressTitles: [],
@@ -38,6 +40,8 @@ function reset() {
   state.colorThemeListeners = [];
   state.errorMessages = [];
   state.errorChoices = {};
+  state.warningMessages = [];
+  state.warningChoices = {};
   state.infoMessages = [];
   state.outputChannels = [];
   state.progressTitles = [];
@@ -205,6 +209,11 @@ const Uri = {
   file(p) {
     return { path: p, toString: () => "file://" + p };
   },
+  // The pages a notice of a missing tool opens. Kept as written: the ones
+  // the export uses have nothing in them that VS Code would encode.
+  parse(value) {
+    return { toString: () => value };
+  },
 };
 
 const window = {
@@ -219,6 +228,13 @@ const window = {
     state.errorMessages.push({ message, buttons });
     const hit = Object.keys(state.errorChoices).find((k) => message.includes(k));
     return Promise.resolve(hit ? state.errorChoices[hit] : undefined);
+  },
+  // The same for a warning, which is what an export that cannot start until
+  // something is installed shows; seeded through _state.warningChoices.
+  showWarningMessage(message, ...buttons) {
+    state.warningMessages.push({ message, buttons });
+    const hit = Object.keys(state.warningChoices).find((k) => message.includes(k));
+    return Promise.resolve(hit ? state.warningChoices[hit] : undefined);
   },
   // The MDM channel the export writes its log to. One object per name, so a
   // test reads back everything the extension appended over a whole run.
@@ -286,6 +302,8 @@ const extensions = {
 const ProgressLocation = { Notification: 15 };
 
 const env = {
+  // What the notices call the editor to quit.
+  appName: "Visual Studio Code",
   openExternal(uri) {
     state.openedExternal.push(uri.toString());
     return Promise.resolve(true);
