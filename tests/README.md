@@ -2194,6 +2194,30 @@ Three mutations, each applied, run and reverted in one command:
 `widestaff.mdm` is rendered with the header hidden for M12, which costs no
 extra render: it is the fixture the score clamp already needed.
 
+### The link on a heading (2026-09-13)
+
+**The link on a heading cost the heading a line.** AnchorJS hangs one on every
+heading of a Quarto page, drawn at opacity 0 until the heading is pointed at,
+and in the flow it is an inline box 24 px wide at the end of the last line.
+Swept the window from 600 to 916 px in 2 px steps over fourteen headings of
+growing length, 2,226 measurements: 74 of them, 3.3 %, are a 36 px heading
+standing 67 px for that reason alone, and since the editor carries no AnchorJS
+at all, each of those is a heading of one line in the editor and two on the
+page, which is the export rule's own case.
+
+The owner asked for the link kept rather than hidden, standing in the margin
+and taking no width, and not making a narrow window scroll sideways. Measured
+with `position: absolute; top: 0; left: -1.4rem`: the same 74 come back to
+36 px, exactly as they do with the link taken out of the document altogether,
+and at 1400, 900, 700, 520, 420 and 360 px the document's `scrollWidth` equals
+its `clientWidth` and the icon is whole, standing in the 50 px the column
+leaves either side of itself.
+
+One mutation, applied, run and reverted in one command:
+
+- **M13** the heading's link back in the flow → *the link is in the flow at
+  1400*.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

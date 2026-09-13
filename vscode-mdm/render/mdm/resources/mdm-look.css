@@ -284,6 +284,40 @@ body a:visited {
 body a:hover {
   text-decoration: underline;
 }
+/* The link AnchorJS hangs on every heading of a Quarto page, moved out of the
+   flow and into the margin. It is drawn at opacity 0 until the heading is
+   pointed at, so it has never been seen, but in the flow it is an inline box
+   24px wide at the end of the heading's last line, and 24px is enough to send
+   a heading that filled its line onto a second one: the reader then sees a
+   heading of one line with an empty line under it. Swept the window from 600
+   to 916px in 2px steps over fourteen headings of growing length, 2,226
+   measurements in all, and 74 of them, 3.3%, are a 36px heading standing 67px
+   for this reason alone. The editor carries no AnchorJS, so each of those is
+   the export rule's own case: one line in the editor, two on the page.
+   Out of the flow it costs nothing and is still there. The same 74 come back
+   to 36px, exactly as they do with the link taken out of the document
+   altogether (both measured 2026-09-13), and a reader keeps the link to a
+   section, which `display: none` would have taken away.
+   In the margin rather than at its own static position, which is what
+   AnchorJS's own `placement: "left"` does (`margin-left: -1.25em`) and what
+   Quarto does not ask it for. 1.4rem is 23.8px against the 50px the column
+   leaves either side of itself at every window (`100vw - 100px` in the
+   measure above), so the icon has room to stand in and never reaches the edge
+   of the page: measured at 1400, 900, 700, 520, 420 and 360px, the document
+   scrolls sideways at none of them and the icon is whole at all of them.
+   `top: 0` puts it beside the heading's first line, where its static position
+   would have put it beside the last. */
+body main.content :is(h1, h2, h3, h4, h5, h6) {
+  position: relative;
+}
+body .anchorjs-link {
+  position: absolute;
+  top: 0;
+  left: -1.4rem;
+  /* AnchorJS writes `margin-left: .1875em` into the element itself for the
+     placement Quarto asks it for, and an inline style outranks this sheet. */
+  margin-left: 0 !important;
+}
 /* The class as well as the element: Quarto puts `.blockquote` on a quotation
    and Bootstrap gives that class a padding of its own, which outranks a
    selector of two elements however it is ordered. Its 1rem is 17px here and

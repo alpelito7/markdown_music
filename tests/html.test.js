@@ -1269,6 +1269,71 @@ test("a document keeps its own name when its title block is hidden", { skip }, a
   assert.equal(out.block, 0, "the header was hidden and the title block was drawn anyway");
 });
 
+// The link AnchorJS hangs on every heading, which the editor has none of. In
+// the flow it is an inline box 24px wide at the end of the heading's last
+// line, and that is enough to send a heading that filled its line onto a
+// second one, where the editor keeps it on one: the export rule's own case.
+// It is in the margin now, so it costs the heading nothing and a reader still
+// has the link to a section.
+test("the link on a heading costs the heading nothing", { skip }, async () => {
+  // Only the headings that carry one: Quarto anchors the document's own
+  // headings and not the h1 it draws from the title.
+  const read = () =>
+    Array.prototype.slice.call(document.querySelectorAll("main.content .anchored"))
+      .map(function (h) {
+        const a = h.querySelector(".anchorjs-link");
+        if (!a) return null;
+        const was = Math.round(h.getBoundingClientRect().height * 10) / 10;
+        // Read before the link goes: a computed style is live, and it comes
+        // back empty once the element it belongs to is out of the document.
+        const position = getComputedStyle(a).position;
+        const box = a.getBoundingClientRect();
+        const head = h.getBoundingClientRect();
+        // What the heading measures with the link taken out of the document
+        // altogether, which is the editor's own case.
+        a.remove();
+        const without = Math.round(h.getBoundingClientRect().height * 10) / 10;
+        return {
+          position: position,
+          // How far into the margin it stands, measured on its own left edge:
+          // the box carries AnchorJS's own padding either side of the glyph,
+          // so its right edge sits about where the text begins.
+          leftOfText: Math.round((head.left - box.left) * 10) / 10,
+          inside: box.left >= 0,
+          was: was,
+          without: without,
+        };
+      })
+      .filter(Boolean);
+  for (const width of [1400, 900, 520, 420]) {
+    const out = await pageAt(EXAMPLE_PAGE, width, read);
+    assert.ok(out.length >= 3, "the example has no anchored headings to measure");
+    for (const h of out) {
+      assert.equal(h.position, "absolute", "the link is in the flow at " + width);
+      assert.equal(
+        h.was,
+        h.without,
+        "the link changes its heading's height at " + width + "px"
+      );
+      // In the margin, and inside the sheet: the column leaves 50px either
+      // side of itself at every window, which is where the icon stands.
+      assert.ok(h.leftOfText > 0, "the link is not in the margin at " + width);
+      assert.ok(h.inside, "the link is off the left edge of the page at " + width);
+    }
+  }
+  // And nothing of it makes the page scroll sideways, at any window.
+  for (const width of [1400, 900, 520, 420, 360]) {
+    const out = await pageAt(EXAMPLE_PAGE, width, () => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    assert.ok(
+      out.scroll <= out.client,
+      "the page scrolls sideways at " + width + "px (" + out.scroll + " over " + out.client + ")"
+    );
+  }
+});
+
 // And the bar the card holds it back with is drawn under the music, not over
 // it. The card's height is its content's, so a bar is added below the paper;
 // the editor's box had a height of its own (abcjs writes one into the style
