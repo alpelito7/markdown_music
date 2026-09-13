@@ -10,7 +10,8 @@ frameworks.
 ```sh
 cd tests
 npm install          # first time only (puppeteer-core, for the webview suite)
-npm test             # everything
+npm test             # everything (~22 min on the owner's machine, 2026-09-12)
+npm run test:quick   # everything but render.test.js, which alone is ~13 min of PDF renders (~9 min)
 npm run test:fast    # unit only (transforms + host + theme + audio assets + packaging), < 1 s
 npm run test:render  # Quarto integration only (HTML + PDF, ~20 s, compiles LaTeX)
 npm run test:webview # the webview suites in Chrome only
