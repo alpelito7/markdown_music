@@ -480,6 +480,86 @@
     ).then(remeasureText, remeasureText);
   }
 
+  // ---------- Justified text ----------
+
+  // Whether the prose is set to both edges of the column, the way a printed
+  // page is, or ragged on the right, the way a browser sets text. Justified by
+  // default. It is the same line breaking either way: Chromium justifies a
+  // line after choosing where it breaks and only widens the spaces of the
+  // lines it has, so the words a line ends on are the words it ended on
+  // ragged, and the export's line by line test holds for both (html.test.js).
+  // The last row of a paragraph is left alone, which is what `text-align:
+  // justify` does with a last line and what TeX does with one.
+  //
+  // What moves is prose, the lines a paragraph, a list item, a quotation or a
+  // callout is written on. Headings stay ragged, as they are on a printed page
+  // and on the paper the export sets, and so does the source of a block being
+  // edited, code, maths, the header, a table or HTML, which is set as typed
+  // (style.css).
+  //
+  // The glyph is the one a word processor gives the command: three rows out
+  // to both edges and a short last one. It stands apart from the staff lines
+  // toggle, which is the same rows closed by barlines, by the missing
+  // barlines and the short row, and the score alignment toggle no longer
+  // draws text at all (ALIGN_ICON below).
+  //
+  // It works as the score alignment toggle does, at the owner's request: the
+  // glyph and the tip name what the click leads to, and the button is never
+  // lit, since the glyph that changes already says which way the text is
+  // set. So justified text shows the ragged glyph (TEXT_RAGGED_ICON: the same
+  // four rows, flush left and of four lengths) and ragged text shows this one.
+  const TEXT_ALIGN_ICON =
+    '<svg viewBox="0 0 16 16">' +
+    '<rect x="1" y="2.3" width="14" height="1.4" rx=".7"/>' +
+    '<rect x="1" y="5.7" width="14" height="1.4" rx=".7"/>' +
+    '<rect x="1" y="9.1" width="14" height="1.4" rx=".7"/>' +
+    '<rect x="1" y="12.5" width="8.4" height="1.4" rx=".7"/>' +
+    "</svg>";
+
+  const TEXT_RAGGED_ICON =
+    '<svg viewBox="0 0 16 16">' +
+    '<rect x="1" y="2.3" width="14" height="1.4" rx=".7"/>' +
+    '<rect x="1" y="5.7" width="9.6" height="1.4" rx=".7"/>' +
+    '<rect x="1" y="9.1" width="12.4" height="1.4" rx=".7"/>' +
+    '<rect x="1" y="12.5" width="7.2" height="1.4" rx=".7"/>' +
+    "</svg>";
+
+  let textAlign = SETTINGS.textAlign || "justify";
+
+  // The glyph of what the click leads to.
+  function textAlignIcon() {
+    return textAlign === "justify" ? TEXT_RAGGED_ICON : TEXT_ALIGN_ICON;
+  }
+
+  function textAlignTip() {
+    return textAlign === "justify" ? "Align text left" : "Justify text";
+  }
+
+  function updateTextAlignButton() {
+    const btn = document.querySelector('#app button[data-type="mdm-text-align"]');
+    if (!btn) return;
+    btn.setAttribute("aria-label", textAlignTip());
+    btn.innerHTML = textAlignIcon();
+  }
+
+  // The class the stylesheet justifies the prose by. The carets and the
+  // selection are drawn by CodeMirror from where the letters were when it
+  // last measured, and widening the spaces moves every letter of a row but
+  // its first without changing the height of a line or the width of the
+  // column, which is all its measure looks at. So the selection is handed
+  // back to the view as it stands: a transaction that sets a selection is
+  // the one the layers redraw on, and it changes nothing else.
+  function applyTextAlign() {
+    const root = app();
+    if (!root) return;
+    const was = root.classList.contains("mdm-text--justify");
+    root.classList.toggle("mdm-text--justify", textAlign === "justify");
+    updateTextAlignButton();
+    if (view && was !== (textAlign === "justify")) {
+      view.dispatch({ selection: view.state.selection });
+    }
+  }
+
   // ---------- Word division ----------
 
   // A menu, like the theme and the score fill: its first entry keeps words
@@ -603,13 +683,34 @@
   //
   // Same convention as the theme button: the icon and the tooltip name what the
   // click does, not the state in use, so the centred glyph shows while the
-  // scores are left-aligned. Text-alignment glyphs, four bars of two lengths,
-  // drawn as rects because the toolbar stylesheet sets stroke-width 0.
+  // scores are left-aligned.
+  //
+  // A quarter note between a line of text over it and one under it, standing
+  // at the left edge or in the middle. The glyph used to be the bars of a
+  // text-alignment icon, which was unambiguous while nothing else on the bar
+  // aligned anything; with the prose justified from the toggle beside the
+  // hyphenation menu (TEXT_ALIGN_ICON) two sets of bars would have left a
+  // reader guessing which one moves the words, so this one draws the music
+  // it moves. The owner's pick of the six in design-text-align-icon.html: a
+  // staff with a head on it ran together into a smudge at 15px, and one
+  // closed by barlines read as a box.
+  // The two lines of text and the stem are drawn at 1.5, a shade heavier than
+  // the 1.3 rules of the playhead toggle (FOLLOW_ICON). The lines stand at the
+  // very edges of the box so the note takes the room left between them. The
+  // owner's corrections, in turn: the first 0.95 drawing was lighter than the
+  // rest of the bar, 1.3 made all three marks even with the playhead, and the
+  // whole glyph wanted one last small lift. The head is
+  // 2.2 by 1.55 tilted 25 degrees, and the stem stands on its rightmost point,
+  // 2.1 right of its centre, and runs down to the centre inside it: stood off
+  // the head and stopped short, its rounded foot left a notch between head and
+  // stem that read as a gap. Head and stem span 2.1 either side of the centre,
+  // so the centred one is at 8 and the left one at 3.1. Filled, since the
+  // toolbar stylesheet sets stroke-width 0.
   const ALIGN_ICON = {
     center:
-      '<svg viewBox="0 0 16 16"><rect x="1" y="2.4" width="14" height="1.2" rx=".6"/><rect x="4" y="5.8" width="8" height="1.2" rx=".6"/><rect x="1" y="9.2" width="14" height="1.2" rx=".6"/><rect x="4" y="12.6" width="8" height="1.2" rx=".6"/></svg>',
+      '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="1.5" rx=".75"/><ellipse cx="8" cy="11" rx="2.2" ry="1.55" transform="rotate(-25 8 11)"/><rect x="8.6" y="3.4" width="1.5" height="7.6" rx=".75"/><rect x="1" y="13.5" width="14" height="1.5" rx=".75"/></svg>',
     left:
-      '<svg viewBox="0 0 16 16"><rect x="1" y="2.4" width="14" height="1.2" rx=".6"/><rect x="1" y="5.8" width="8" height="1.2" rx=".6"/><rect x="1" y="9.2" width="14" height="1.2" rx=".6"/><rect x="1" y="12.6" width="8" height="1.2" rx=".6"/></svg>',
+      '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="1.5" rx=".75"/><ellipse cx="3.1" cy="11" rx="2.2" ry="1.55" transform="rotate(-25 3.1 11)"/><rect x="3.7" y="3.4" width="1.5" height="7.6" rx=".75"/><rect x="1" y="13.5" width="14" height="1.5" rx=".75"/></svg>',
   };
 
   // The other side of the toggle: what the click leads to.
@@ -684,6 +785,10 @@
     root.classList.toggle("mdm-staff--gray", staffLines === "gray");
     root.style.setProperty("--mdm-score-fill", color || "transparent");
     updateFillMenu();
+    // The menu lights while a fill is on, the way the hyphenation menu does
+    // while a language divides: None is the default, and dark.
+    const btn = document.querySelector('#app button[data-type="mdm-score-fill"]');
+    if (btn) btn.classList.toggle("mdm-btn--on", !!color);
   }
 
   function fillMenuItems() {
@@ -4367,6 +4472,13 @@
       const sel = v.state.selection;
       if (sel.ranges.length !== 1 || !sel.main.empty) return false;
       const line = v.state.doc.lineAt(sel.main.head);
+      // A wrapped paragraph is one document line but several visual rows.
+      // The hidden block may therefore be the next document line while an
+      // ordinary vertical move still belongs inside the paragraph. Let
+      // CodeMirror make that move; only take over at the paragraph's visual
+      // edge, where its own move leaves this document line.
+      const natural = v.moveVertically(sel.main, dir > 0);
+      if (v.state.doc.lineAt(natural.head).number === line.number) return false;
       const n = line.number + dir;
       if (n < 1 || n > v.state.doc.lines) return false;
       const target = v.state.doc.line(n);
@@ -5964,9 +6076,9 @@
         },
       },
       "|",
-      // The page: what it is painted in, what it is set in, where its words
-      // may divide, and whether it shows the block at the top that is not
-      // prose. Switches over the document as a whole, none of which knows
+      // The page: what it is painted in, what it is set in, how its lines
+      // meet the right edge and where its words may divide there, and whether
+      // it shows the block at the top that is not prose. Switches over the document as a whole, none of which knows
       // there is music in it.
       // The theme leads them, because the fill colours of the next group are
       // defined per theme and the wider switch should read before the ones
@@ -5978,6 +6090,16 @@
         tip: textFontTip(),
         click: function () {
           askSetting("textFont", textFont === "roman" ? "sans" : "roman");
+        },
+      },
+      // Beside the hyphenation menu, since the two decide together how a
+      // line of prose meets the right edge.
+      {
+        name: "mdm-text-align",
+        icon: textAlignIcon(),
+        tip: textAlignTip(),
+        click: function () {
+          askSetting("textAlign", textAlign === "justify" ? "left" : "justify");
         },
       },
       {
@@ -6060,6 +6182,7 @@
     // document is not going to be set in is a page laid out for the wrong
     // font until something else asks for a measure.
     applyTextFont();
+    applyTextAlign();
     applyHyphenation();
     // Below the bar, a row: the outline panel down the left edge and the
     // editor beside it. The panel is empty and hidden until its button is
@@ -6144,6 +6267,7 @@
       matchSubstring = next.multicursorMatch === "substring";
       following = next.followPlayhead !== "still";
       textFont = next.textFont || "roman";
+      textAlign = next.textAlign || "justify";
       hyphenation = next.hyphenation || "none";
       // applyTheme repaints the toolbar and the score styling, whose colours
       // are picked from the effective theme. A theme chosen from the menu
@@ -6160,6 +6284,7 @@
       updateMatchButton();
       applyFollowPlayhead();
       applyTextFont();
+      applyTextAlign();
       applyHyphenation();
       return;
     }

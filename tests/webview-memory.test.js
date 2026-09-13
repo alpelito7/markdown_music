@@ -41,6 +41,7 @@ const LAMPS = [
   "outline",
   "mdm-match-substring",
   "mdm-text-font",
+  "mdm-text-align",
   "mdm-hyphenation",
   "mdm-front-matter",
   "mdm-staff-lines",

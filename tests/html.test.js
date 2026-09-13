@@ -185,12 +185,14 @@ test.before(() => {
   // terms of: the editor opens this same file, so the two surfaces can be put
   // side by side. Rendered in the roman, because that is the face the editor
   // opens in and the filter's own default is the sans (the first trap named in
-  // CLAUDE.md); the toolbar's export passes the same -M.
+  // CLAUDE.md); the toolbar's export passes the same -M. Justified for the
+  // same reason: the editor opens justified and the filter falls back to the
+  // ragged right.
   fs.copyFileSync(path.join(ROOT, "example.mdm"), path.join(DIR, "example.mdm"));
   const e = spawnSync(
     MDM,
     ["render", "example.mdm", "--to", "html",
-      "-M", "mdm-text-font:roman", "-M", "mdm-front-matter:shown"],
+      "-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-front-matter:shown"],
     { cwd: DIR, encoding: "utf8" }
   );
   assert.equal(e.status, 0, e.stderr);
@@ -204,7 +206,7 @@ test.before(() => {
   const s = spawnSync(
     MDM,
     ["render", "sans-example.mdm", "--to", "html",
-      "-M", "mdm-text-font:sans", "-M", "mdm-front-matter:shown"],
+      "-M", "mdm-text-font:sans", "-M", "mdm-text-align:justify", "-M", "mdm-front-matter:shown"],
     { cwd: DIR, encoding: "utf8" }
   );
   assert.equal(s.status, 0, s.stderr);
@@ -217,7 +219,7 @@ test.before(() => {
   const f = spawnSync(
     MDM,
     ["render", "fill-example.mdm", "--to", "html",
-      "-M", "mdm-text-font:roman", "-M", "mdm-front-matter:shown", "-M", "mdm-score-fill:paper"],
+      "-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-front-matter:shown", "-M", "mdm-score-fill:paper"],
     { cwd: DIR, encoding: "utf8" }
   );
   assert.equal(f.status, 0, f.stderr);
@@ -512,6 +514,15 @@ test("the page is the editor's: its ground, its ink, its measure", { skip }, asy
   assert.equal(l.fontSize, "16px");
   assert.equal(l.lineHeight, "27.2px", "the editor's 1.7 of a line");
   assert.ok(l.column <= 820, "the text column is wider than the editor's 820");
+  // A render from the command line names no look, and its prose keeps the
+  // ragged right a page has always had: justified is the editor's default
+  // and travels only when the editor sends it (the justified page is
+  // measured against the editor further down).
+  assert.equal(
+    await h.page.$eval("main.content p", (p) => getComputedStyle(p).textAlign),
+    "left",
+    "a page with no look came out justified"
+  );
   // The two grounds of the editor, on the light side, which is the side a
   // render with no look at all comes out on: the code keeps the slate it has
   // always had and the page takes the shallower wash above it, so the card is
@@ -739,6 +750,57 @@ const LINE_ENDS = function (els) {
   return out;
 }.toString();
 
+// Every paragraph as the gaps its rows leave before the right edge of its box,
+// keyed as LINE_ENDS keys them, the last row left out, since justification
+// leaves a last row alone. A formula is one piece of ink here and not its
+// letters, so a row ending on one ends where the formula does, and a
+// sub- or superscript cannot pass for a row of its own; a row counts as new
+// when its middle is half a line below the middle of the one before.
+const ROW_GAPS = function (els) {
+  const out = {};
+  Array.from(els).forEach((el) => {
+    const cs = getComputedStyle(el);
+    const half = (parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2) / 2;
+    const right = el.getBoundingClientRect().right - parseFloat(cs.paddingRight);
+    const rows = [];
+    let text = "";
+    const ink = (rect, s) => {
+      if (!rect || !rect.width) return;
+      const mid = rect.top + rect.height / 2;
+      let row = rows[rows.length - 1];
+      if (!row || mid > row.mid + half) {
+        row = { mid: mid, right: -Infinity };
+        rows.push(row);
+      }
+      if (/\S/.test(s)) row.right = Math.max(row.right, rect.right);
+    };
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (n) =>
+        n.nodeType === 1 && n.parentElement && n.parentElement.closest(".katex")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    });
+    let n;
+    while ((n = walk.nextNode())) {
+      if (n.nodeType === 1) {
+        if (n.classList.contains("katex")) ink(n.getBoundingClientRect(), "x");
+        continue;
+      }
+      if (n.parentElement.closest(".katex")) continue;
+      text += n.data;
+      for (let i = 0; i < n.data.length; i++) {
+        const rg = document.createRange();
+        rg.setStart(n, i);
+        rg.setEnd(n, i + 1);
+        ink(rg.getClientRects()[0], n.data[i]);
+      }
+    }
+    if (rows.length < 2 || el.querySelector(".katex-display")) return;
+    out[text.slice(0, 30)] = rows.slice(0, -1).map((row) => +(right - row.right).toFixed(1));
+  });
+  return out;
+}.toString();
+
 // What both surfaces are asked for, in the same words: the column, where the
 // first paragraph breaks, and the score as it is actually drawn. On screen and
 // not in user units, since an SVG scaled to its container reports the same
@@ -777,7 +839,7 @@ async function sides() {
   await page.evaluate(() => document.fonts.ready);
   const paper = await page.waitForSelector(".mdm-paper svg");
   assert.ok(paper, "the page engraved no score to measure");
-  const exported = await page.evaluate((f, fl, le) => {
+  const exported = await page.evaluate((f, fl, le, rg) => {
     const para = Array.from(document.querySelectorAll("p")).find((e) =>
       e.textContent.startsWith("This document is ordinary Markdown")
     );
@@ -788,8 +850,9 @@ async function sides() {
       fl
     );
     out.ends = eval("(" + le + ")")(document.querySelectorAll("main.content p"));
+    out.rows = eval("(" + rg + ")")(document.querySelectorAll("main.content p"));
     return out;
-  }, m, FIRST_VISUAL_LINE, LINE_ENDS);
+  }, m, FIRST_VISUAL_LINE, LINE_ENDS, ROW_GAPS);
   await browser.close();
   OPEN_BROWSERS.delete(browser);
 
@@ -798,7 +861,7 @@ async function sides() {
   await h.page.evaluate(
     () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   );
-  const editor = await h.page.evaluate((f, fl, le) => {
+  const editor = await h.page.evaluate((f, fl, le, rg) => {
     const line = Array.from(document.querySelectorAll("#app .cm-line")).find((e) =>
       e.textContent.startsWith("This document is ordinary Markdown")
     );
@@ -809,8 +872,9 @@ async function sides() {
       fl
     );
     out.ends = eval("(" + le + ")")(document.querySelectorAll("#app .cm-line"));
+    out.rows = eval("(" + rg + ")")(document.querySelectorAll("#app .cm-line"));
     return out;
-  }, m, FIRST_VISUAL_LINE, LINE_ENDS);
+  }, m, FIRST_VISUAL_LINE, LINE_ENDS, ROW_GAPS);
   await h.close();
 
   SIDES = { exported: exported, editor: editor };
@@ -844,6 +908,33 @@ test("the page breaks the first paragraph where the editor breaks it", { skip },
 // second (or was divided there, with hyphenation on). Compared only where the
 // two surfaces show the same characters, formulas aside: a paragraph holding
 // the caret shows its marks in the editor and not on the page.
+// And the other half of how a line meets the edge: which rows are set out to
+// it. The editor justifies its prose by default and the toolbar's export says
+// so, so every row the editor carries to the right edge the page carries
+// there too, and a row either leaves short (the last before a break the
+// source forces) is short on both. Compared on the paragraphs whose text is
+// the same on both surfaces, as above, and with no display formula inside,
+// whose rows the page and the editor draw as different boxes.
+test("the page justifies the rows the editor justifies", { skip }, async () => {
+  const s = await sides();
+  const same = Object.keys(s.exported.rows).filter(
+    (k) => s.editor.rows[k] && s.exported.ends[k] && s.editor.ends[k] &&
+      s.editor.ends[k].text === s.exported.ends[k].text
+  );
+  let reached = 0;
+  for (const k of same) {
+    const flush = (gaps) => gaps.map((g) => Math.abs(g) < 1.5);
+    assert.deepEqual(
+      flush(s.exported.rows[k]),
+      flush(s.editor.rows[k]),
+      "the rows of \"" + k + "...\" reach the edge differently: editor " +
+        JSON.stringify(s.editor.rows[k]) + ", page " + JSON.stringify(s.exported.rows[k])
+    );
+    reached += flush(s.editor.rows[k]).filter(Boolean).length;
+  }
+  assert.ok(reached >= 8, "only " + reached + " rows reach the edge on " + same.length + " paragraphs; nothing was justified");
+});
+
 test("every paragraph of the page ends its lines where the editor ends them", { skip }, async () => {
   const s = await sides();
   const same = Object.keys(s.exported.ends).filter(

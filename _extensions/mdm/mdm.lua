@@ -181,6 +181,10 @@ local function read_look(meta)
     -- toolbar comes out in the face it was being read in; a plain
     -- `bin/mdm render`, which passes no look at all, keeps the sans.
     text_font = meta_word(meta, "mdm-text-font", { roman = true, sans = true }, "sans"),
+    -- How the prose meets the right edge. Ragged is what the page and the
+    -- paper have always been, and so the fallback, as the sans is above; the
+    -- editor justifies by default and names it on every render it makes.
+    text_align = meta_word(meta, "mdm-text-align", { justify = true, left = true }, "left"),
     -- Off unless the editor names it. The editor divides only a document
     -- whose header names a language it has patterns for, and it is the host
     -- that tells (exportHyphenation in extension.js): by the time this filter
@@ -263,6 +267,9 @@ local function look_css(l)
     put("text", '"Latin Modern Roman", Georgia, "Times New Roman", serif')
   end
   put("hyphenation", l.hyphenation)
+  -- Spent on the paragraphs and list items (mdm-look.css), whose fallback is
+  -- the ragged `left`.
+  put("text-align", l.text_align)
   return "<style>\nhtml:root {\n" .. table.concat(lines, "\n") .. "\n}\n</style>"
 end
 
@@ -605,13 +612,36 @@ local function look_tex(l)
   -- body size and land where the editor puts them; \\small on top of that
   -- would shrink them twice.
   put("\\@ifundefined{fvset}{}{\\fvset{fontsize=\\normalsize}}")
-  -- The editor sets its text ragged right, as a browser does, and squeezes no
-  -- glyph to fit one more word into a line. Justified, and with microtype
-  -- expanding the font, the same paragraph at the same measure took a word
-  -- more per line than the editor showed (measured on the opening paragraph of
-  -- example.mdm: `source code` where the editor breaks after `source`).
+  -- The editor squeezes no glyph to fit one more word into a line. With
+  -- microtype expanding the font, the same paragraph at the same measure took
+  -- a word more per line than the editor showed (measured on the opening
+  -- paragraph of example.mdm: `source code` where the editor breaks after
+  -- `source`).
   put("\\@ifpackageloaded{microtype}{\\microtypesetup{expansion=false}}{}")
-  if l.hyphenation == "auto" then
+  -- How a line meets the right edge is the editor's to say (mdm.textAlign).
+  -- Justified, which is the editor's default, is what LaTeX does left to
+  -- itself, with the one thing put back that the ragged right used to see to:
+  -- no paragraph indent, which the editor never draws and which \\raggedright
+  -- set to zero. A column too narrow for its words is already answered by the
+  -- template, whose \\emergencystretch of 3em lets TeX widen the spaces of a
+  -- line rather than let it run past the margin, as a browser would: the
+  -- prose of a justified 200 pt column comes out inside it, and set to 0pt
+  -- the same column ran two lines 11 and 28 pt over (measured, in the roman;
+  -- render.test.js holds the column to that).
+  -- The breaks are TeX's and not the browser's. A browser fills each line in
+  -- turn at the natural width of its spaces, and TeX weighs the whole
+  -- paragraph and may shrink them, so a justified line on paper can take a
+  -- word the editor sends down. On example.mdm two lines do, and they are the
+  -- only two where the justified paper and the ragged one differ: the string's
+  -- second line ends on `integer` for the editor's `an`, and the partials'
+  -- fourth on `the` for `over`; the ragged paper ends both where the editor
+  -- does (measured in the roman, with the words kept whole and divided alike).
+  -- Taking the shrink out of the spaces made it worse, not better: TeX then
+  -- balances the lines, and the partials' first line ended a word short, on
+  -- `name` for `acoustics`. Open.
+  if l.text_align == "justify" then
+    put("\\AtBeginDocument{\\setlength{\\parindent}{0pt}}")
+  elseif l.hyphenation == "auto" then
     -- Infinite right stretch in raggedright makes a short line cost nothing,
     -- so TeX never needs a discretionary hyphen. Finite stretch enables word
     -- division while retaining a ragged edge and fixed interword spaces.
@@ -758,10 +788,19 @@ local function look_tex(l)
     put("    \\thispagestyle{plain}\\global\\@topnum\\z@}%")
     put("  \\preto\\chapter{\\global\\@nobreakfalse}%")
   end
+  -- \\filright in every format: a heading is ragged in the editor, where
+  -- justification is for prose (style.css), and it never divides there. Under
+  -- a standard class titlesec sets a heading in the paragraph shape of the
+  -- text, so with the prose justified a heading that wrapped reached both
+  -- margins (measured: the two lines of a wrapped `##` in an article both
+  -- ended at 561.3 bp), and with the prose ragged and divided it took the
+  -- finite stretch that lets TeX divide a word. KOMA's own \\raggedsection
+  -- already does this for its classes; the sixth level, which is ours under
+  -- both, says \\raggedright for itself.
   for level = 1, 6 do
     local cmd = heads[level]
     if cmd then
-      put("  \\titleformat{\\" .. cmd .. "}[hang]{\\color{mdmink}\\bfseries" .. LEAD ..
+      put("  \\titleformat{\\" .. cmd .. "}[hang]{\\filright\\color{mdmink}\\bfseries" .. LEAD ..
           "\\fontsize{" .. HEAD[level][1] .. "\\mdmem}{" .. HEAD[level][2] ..
           "\\mdmem}\\selectfont}{\\the" .. cmd .. "}{1em}{}" ..
           (level <= 2 and "[\\mdmheadrule{" .. HEAD_RULE_AIR[roman and "roman" or "sans"][level] ..
@@ -776,7 +815,7 @@ local function look_tex(l)
   -- the levels over it have, and the paragraph after it neither indented nor
   -- parted from it by a page.
   put("  \\newcommand*{\\mdmheadsix}[1]{\\par\\addvspace{" .. AIR[6][1] .. "}" ..
-      "{\\noindent\\color{mdmink}\\bfseries" .. LEAD .. "\\fontsize{" .. HEAD[6][1] ..
+      "{\\noindent\\raggedright\\color{mdmink}\\bfseries" .. LEAD .. "\\fontsize{" .. HEAD[6][1] ..
       "\\mdmem}{" .. HEAD[6][2] .. "\\mdmem}\\selectfont #1\\par}" ..
       "\\nobreak\\vskip " .. AIR[6][2] .. "\\relax\\@afterheading}%")
   put("}{%")
@@ -826,7 +865,7 @@ local function look_tex(l)
   -- The sixth level in an article (the Header filter, further down), with
   -- the skips every level under the first has here.
   put("  \\newcommand*{\\mdmheadsix}[1]{\\par\\addvspace{3.25ex\\@plus 1ex\\@minus .2ex}" ..
-      "{\\noindent\\color{mdmink}\\bfseries" .. LEAD .. "\\fontsize{" .. HEAD[6][1] ..
+      "{\\noindent\\raggedright\\color{mdmink}\\bfseries" .. LEAD .. "\\fontsize{" .. HEAD[6][1] ..
       "\\mdmem}{" .. HEAD[6][2] .. "\\mdmem}\\selectfont #1\\par}" ..
       "\\nobreak\\vskip 1.5ex\\@plus .2ex\\relax\\@afterheading}%")
   -- The rule goes under h1 and h2, whichever commands draw them, at the

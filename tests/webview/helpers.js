@@ -507,6 +507,7 @@ function settingsMessage(overrides) {
         multicursorMatch: "word",
         followPlayhead: "follow",
         textFont: "roman",
+        textAlign: "justify",
         hyphenation: "none",
       },
       overrides || {}

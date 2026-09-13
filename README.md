@@ -409,6 +409,16 @@ What it does:
   a page set at the sans's x-height; the engraving keeps its own pixels. An
   export carries the face to the page and to the paper, where the roman is
   what LaTeX is already set in.
+- **Justified prose**: paragraphs, list items and quotations are set to both
+  edges of the column, every row but the last, with the spaces widened as the
+  text is typed; a toolbar toggle (`mdm.textAlign`) sets them ragged right.
+  Headings and the source of a block stay ragged. Chromium justifies a row
+  after choosing where it breaks, so the words each row ends on are the same
+  either way, and the exported page ends them there too. On paper TeX
+  justifies the whole paragraph at once and may take a word more into a row,
+  which it does on two rows of `example.mdm`. The score alignment toggle beside
+  it draws a quarter note between two lines of text, so the two alignments of
+  the bar do not look alike.
 
 - **Scores**: no background by default, so a score reads as part of the
   document the way an equation does (`mdm.scoreFill`: `none`, `paper`,

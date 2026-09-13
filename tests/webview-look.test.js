@@ -1131,6 +1131,80 @@ test("the alignment button moves narrow scores to the margin", { skip }, async (
   await h.close();
 });
 
+// Two toggles align something, the prose and the scores, and they sit on one
+// bar: the text one draws the justify glyph and the score one a quarter note
+// between two lines of text, at the left or in the middle, which is the
+// owner's pick in design-text-align-icon.html. It used to draw the bars of a
+// text-alignment glyph. So no two buttons of the bar may draw the same
+// glyph, and the note keeps the two corrections the owner asked for: its
+// stem on the head's rightmost point and down to the head's centre, where a
+// stem stood off the head and stopped short left a notch that read as a gap,
+// the stem and the lines of text sharing one weight, a small step heavier than
+// the playhead toggle's rules.
+test("every button draws a glyph of its own, and the score toggle draws a note", { skip }, async () => {
+  const h = await open({ scores: 0 });
+  const glyphs = await h.page.$$eval("#app .mdm-toolbar > .mdm-toolbar__item > button", (els) =>
+    els.map((b) => ({ name: b.getAttribute("data-type"), svg: b.innerHTML.replace(/\s+/g, " ") }))
+  );
+  const seen = new Map();
+  for (const g of glyphs) {
+    assert.ok(!seen.has(g.svg), g.name + " draws the glyph of " + seen.get(g.svg));
+    seen.set(g.svg, g.name);
+  }
+  assert.ok(glyphs.length > 15 && seen.has(glyphs.find((g) => g.name === "mdm-text-align").svg),
+    "the bar was not read: " + glyphs.map((g) => g.name));
+
+  const note = () =>
+    h.page.$eval('#app button[data-type="mdm-score-align"] svg', (svg) => {
+      const e = svg.querySelector("ellipse");
+      const stems = [...svg.querySelectorAll("rect")].filter((r) => +r.getAttribute("height") > +r.getAttribute("width"));
+      if (!e || stems.length !== 1) return null;
+      const n = (el, a) => +el.getAttribute(a);
+      const tilt = /rotate\((-?[\d.]+)/.exec(e.getAttribute("transform"));
+      const t = ((tilt ? +tilt[1] : 0) * Math.PI) / 180;
+      const rx = n(e, "rx"), ry = n(e, "ry");
+      const reach = Math.sqrt(rx * rx * Math.cos(t) ** 2 + ry * ry * Math.sin(t) ** 2);
+      const s = stems[0];
+      const rules = [...svg.querySelectorAll("rect")].filter((r) => r !== s);
+      return {
+        rules: rules.map((r) => n(r, "height")),
+        stem: n(s, "width"),
+        cx: n(e, "cx"),
+        edge: +(n(e, "cx") + reach).toFixed(2),
+        stemRight: +(n(s, "x") + n(s, "width")).toFixed(2),
+        stemFoot: n(s, "y") + n(s, "height"),
+        cy: n(e, "cy"),
+      };
+    });
+  const centred = await note();
+  assert.ok(centred, "the score toggle does not draw a note with one stem");
+  assert.ok(Math.abs(centred.stemRight - centred.edge) <= 0.02, "the stem is off the head's edge: " + JSON.stringify(centred));
+  assert.ok(centred.stemFoot >= centred.cy, "the stem stops short of the head's centre: " + JSON.stringify(centred));
+  // The stem and the two lines share one weight, one small step heavier than
+  // the playhead toggle's rules. At 0.95 the glyph was lighter than the bar;
+  // at 1.3 throughout it still wanted a little more presence.
+  const follow = await h.page.$$eval('#app button[data-type="mdm-follow"] svg rect', (rs) =>
+    rs.filter((r) => +r.getAttribute("width") > +r.getAttribute("height")).map((r) => +r.getAttribute("height"))
+  );
+  assert.equal(centred.rules.length, 2, "the note is not between two lines: " + JSON.stringify(centred));
+  assert.ok(follow.length > 0, "the playhead toggle has no rules to weigh against");
+  assert.deepEqual(centred.rules.concat(centred.stem),
+    [follow[0] + 0.2, follow[0] + 0.2, follow[0] + 0.2],
+    "the lines and stem are not a shade heavier than the playhead toggle's rules: " + JSON.stringify([centred, follow]));
+  // Scores centred by default, so the glyph shows where the click puts them.
+  await postSettings(h.page, { scoreAlign: "left" });
+  await h.page.waitForFunction(() => document.getElementById("app").classList.contains("mdm-score--left"));
+  const middle = await note();
+  assert.ok(middle && Math.abs(middle.stemRight - middle.edge) <= 0.02 && middle.stemFoot >= middle.cy,
+    "the other state's note is not joined: " + JSON.stringify(middle));
+  assert.deepEqual(middle.rules.concat(middle.stem), centred.rules.concat(centred.stem),
+    "the other state's note changes weight: " + JSON.stringify([centred, middle]));
+  assert.ok(Math.abs(middle.cx - 8) < 0.5 && centred.cx < 4, "the notes do not stand in the middle and at the left: " +
+    JSON.stringify([centred, middle]));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- The face of the text ----------
 
 // Everything the face decides, in one round trip: what the document is set in,
@@ -1297,6 +1371,178 @@ test("an editor left in the sans comes back in the sans", { skip }, async () => 
   assert.deepEqual(await setSettingPosts(h.page), [
     { type: "setSetting", key: "textFont", value: "roman" },
   ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// ---------- Justified text ----------
+
+// Each kind of line that wraps, written long enough to take several rows of a
+// 500 px column: the three kinds of prose, which justify, and the three that
+// do not, a heading, the source of a table with a caret in it and a comment.
+const JUSTIFY_DOC = [
+  "# A heading written long enough to wrap over two rows of the narrow column, which is the point",
+  "",
+  "A paragraph of prose written long enough to run over several rows of the column, so that the spaces between its words have to be widened on every row but the last one for its lines to reach the right edge of the text.",
+  "",
+  "- A list item written long enough to run over several rows of the column, so that its rows are set to both edges of the text as a paragraph is.",
+  "",
+  "> A quotation written long enough to run over several rows of the column, so that its rows are set to both edges of the text as a paragraph is.",
+  "",
+  "| A table cell written long enough to wrap its source line over two rows of the column | and a second |",
+  "| --- | --- |",
+  "| one | two |",
+  "",
+  "<!-- A comment written long enough to wrap its source line over two rows of the column, which is what this one is written to do -->",
+  "",
+].join("\n");
+
+// The rows of every wrapping line, each as the gap it leaves before the right
+// edge of the line's content box and the word it ends on, keyed by how the
+// line opens. The last row of a line is left out: justification leaves it
+// alone. A row counts as new half a line below the one before, and a space is
+// not ink, so a row's right edge is its last visible character's.
+function rowsOf(page) {
+  return page.evaluate(() => {
+    const out = {};
+    document.querySelectorAll("#app .cm-line").forEach((el) => {
+      const cs = getComputedStyle(el);
+      const right = el.getBoundingClientRect().right - parseFloat(cs.paddingRight);
+      const half = parseFloat(cs.lineHeight) / 2;
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const rows = [];
+      let n;
+      while ((n = walk.nextNode())) {
+        for (let i = 0; i < n.data.length; i++) {
+          const rg = document.createRange();
+          rg.setStart(n, i);
+          rg.setEnd(n, i + 1);
+          const r = rg.getClientRects()[0];
+          if (!r || !r.width) continue;
+          let row = rows[rows.length - 1];
+          if (!row || r.top > row.top + half) {
+            row = { top: r.top, right: -Infinity, text: "" };
+            rows.push(row);
+          }
+          row.text += n.data[i];
+          if (/\S/.test(n.data[i])) row.right = Math.max(row.right, r.right);
+        }
+      }
+      if (rows.length < 2) return;
+      out[el.textContent.replace(/^[#>|•\s-]+/, "").slice(0, 12)] = rows.slice(0, -1).map((row) => ({
+        gap: +(right - row.right).toFixed(1),
+        end: row.text.trim().split(/\s+/).pop(),
+      }));
+    });
+    return out;
+  });
+}
+
+const PROSE_KEYS = ["A paragraph ", "A list item ", "A quotation "];
+
+test("the prose is justified to both edges, and the button sets it ragged on the same breaks", { skip }, async () => {
+  const h = await open({ text: JUSTIFY_DOC, scores: 0, height: 900 });
+  await h.page.setViewport({ width: 600, height: 900 });
+  // The table's source, which is only there with a caret in the table.
+  await setSelection(h.page, JUSTIFY_DOC.indexOf("| one"));
+  await sleep(300);
+
+  const btn = '#app button[data-type="mdm-text-align"]';
+  // The button works as the score alignment toggle does: never lit, and its
+  // glyph and tip name what the click leads to, the ragged glyph (four rows
+  // flush left, of four lengths) while the text is justified and the justify
+  // glyph (three rows to both edges and a short last one) while it is ragged.
+  const state = () =>
+    h.page.$eval(btn, (b) => {
+      const widths = Array.from(b.querySelectorAll("svg rect")).map((r) => +r.getAttribute("width"));
+      return {
+        justify: document.getElementById("app").classList.contains("mdm-text--justify"),
+        lit: b.classList.contains("mdm-btn--on"),
+        tip: b.getAttribute("aria-label"),
+        glyph: widths.slice(0, 3).every((w) => w === 14) ? "justify" : "ragged",
+      };
+    });
+
+  // Nothing was clicked: justified is what mdm.textAlign is worth on a fresh
+  // editor.
+  assert.deepEqual(await state(), { justify: true, lit: false, tip: "Align text left", glyph: "ragged" });
+  const justified = await rowsOf(h.page);
+  for (const key of PROSE_KEYS) {
+    assert.ok(justified[key] && justified[key].length >= 2, key + "did not wrap: " + JSON.stringify(justified));
+    for (const row of justified[key]) {
+      assert.ok(Math.abs(row.gap) < 1, key + "has a row " + row.gap + "px short of the edge: " + JSON.stringify(justified[key]));
+    }
+  }
+  // A heading, the source of a table and a comment are set as typed.
+  for (const key of ["A heading wr", "A table cell", "<!-- A comme"]) {
+    assert.ok(justified[key], key + " did not wrap: " + JSON.stringify(Object.keys(justified)));
+    assert.ok(justified[key][0].gap > 5, key + " was justified: " + JSON.stringify(justified[key]));
+  }
+
+  // A caret on the first row of the paragraph, well inside it, where the
+  // spaces before it are widened: the drawn caret has to follow its letter
+  // when they close up again.
+  const at = JUSTIFY_DOC.indexOf("reach the right") - 60;
+  await setSelection(h.page, at);
+  await sleep(300);
+  const caret = () =>
+    h.page.evaluate((pos) => {
+      const drawn = document.querySelector("#app .cm-cursor-primary, #app .cm-cursor");
+      return {
+        drawn: drawn ? +drawn.getBoundingClientRect().left.toFixed(1) : null,
+        letter: +window.__mdm.view.coordsAtPos(pos).left.toFixed(1),
+      };
+    }, at);
+  const before = await caret();
+  assert.ok(before.drawn !== null && Math.abs(before.drawn - before.letter) < 1.5, "the caret is off its letter: " + JSON.stringify(before));
+
+  await h.page.click(btn);
+  await sleep(200);
+  assert.deepEqual((await setSettingPosts(h.page)).pop(), { type: "setSetting", key: "textAlign", value: "left" });
+  // The webview never repaints itself: the value comes back from the host.
+  assert.equal((await state()).justify, true, "the text moved before the host answered");
+
+  await postSettings(h.page, { textAlign: "left" });
+  await h.page.waitForFunction(() => !document.getElementById("app").classList.contains("mdm-text--justify"));
+  await sleep(100);
+  assert.deepEqual(await state(), { justify: false, lit: false, tip: "Justify text", glyph: "justify" });
+  const ragged = await rowsOf(h.page);
+  for (const key of PROSE_KEYS) {
+    assert.ok(ragged[key].some((row) => row.gap > 3), key + "stayed justified: " + JSON.stringify(ragged[key]));
+    // The same breaks: justification widens the spaces of the rows a line
+    // already has and never moves a word from one row to another.
+    assert.deepEqual(
+      ragged[key].map((row) => row.end),
+      justified[key].map((row) => row.end),
+      key + "breaks on different words ragged and justified"
+    );
+  }
+  const after = await caret();
+  assert.ok(Math.abs(after.letter - before.letter) > 3, "the letter under the caret did not move; nothing was tested: " + JSON.stringify([before, after]));
+  assert.ok(Math.abs(after.drawn - after.letter) < 1.5, "the caret stayed where the justified letter was: " + JSON.stringify(after));
+
+  // And back, a click on the button that now draws the justify glyph.
+  await h.page.click(btn);
+  await sleep(200);
+  assert.deepEqual((await setSettingPosts(h.page)).pop(), { type: "setSetting", key: "textAlign", value: "justify" });
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The memory of the button: an editor opened on a ragged `mdm.textAlign`
+// comes up ragged, the way a document reopens as it was left.
+test("an editor left ragged comes back ragged", { skip }, async () => {
+  const h = await open({ text: JUSTIFY_DOC, scores: 0, height: 900, seed: { settings: { textAlign: "left" } } });
+  await h.page.setViewport({ width: 600, height: 900 });
+  await sleep(300);
+  assert.equal(
+    await h.page.evaluate(() => document.getElementById("app").classList.contains("mdm-text--justify")),
+    false,
+    "the seeded ragged right did not survive the opening"
+  );
+  const rows = await rowsOf(h.page);
+  assert.ok(rows["A paragraph "].some((row) => row.gap > 3), "the paragraph came up justified");
+  assert.equal(await h.page.$eval('#app button[data-type="mdm-text-align"]', (b) => b.getAttribute("aria-label")), "Justify text");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -2064,6 +2310,9 @@ test("a score is cleared by default and the menu fills it", { skip }, async () =
     ).map((b) => b.textContent.trim())
   );
   assert.deepEqual(entries, ["None✓", "Paper", "Slate", "Brass"]);
+  const lamp = () =>
+    h.page.$eval('#app button[data-type="mdm-score-fill"]', (b) => b.classList.contains("mdm-btn--on"));
+  assert.equal(await lamp(), false, "the fill menu is lit with no fill on");
 
   await h.page.click('#app button[data-type="mdm-score-brass"]');
   await sleep(200);
@@ -2079,6 +2328,10 @@ test("a score is cleared by default and the menu fills it", { skip }, async () =
   assert.equal(after.background, "rgb(247, 237, 216)");
   // A card with a colour of its own settles the brass wash back onto that fill.
   assert.equal(after.pulse, "mdm-copy-pulse-filled");
+  assert.equal(await lamp(), true, "the fill menu is dark with a fill on");
+  await postSettings(h.page, { scoreFill: "none" });
+  await sleep(300);
+  assert.equal(await lamp(), false, "the fill menu stayed lit after None");
   await h.close();
 });
 
@@ -3471,14 +3724,17 @@ test("a heading's line keeps its height, with the caret away and in it", { skip 
 // One rule for the whole bar: a lamp marks the setting that was asked for, and
 // stays dark on the one the editor does before anybody asks for anything. Two
 // buttons used to light on their own default, which said nothing at all, and
-// this is what keeps the next one from doing the same. The menus that hold a
-// choice (theme, score fill) light on nothing and tick an entry instead; the
-// hyphenation menu ticks its entry and lights while a language is dividing
-// the prose (webview-hyphenation.test.js).
+// this is what keeps the next one from doing the same. The theme menu
+// lights on nothing and ticks an entry instead; the hyphenation menu ticks its
+// entry and lights while a language is dividing the prose
+// (webview-hyphenation.test.js), and the score fill menu ticks its entry and
+// lights while a fill is on. The two alignment toggles, of the text and of
+// the scores, never light: their glyph changes instead.
 const TOGGLES = [
   { name: "mdm-staff-lines", key: "staffLines", asked: "ink" },
   { name: "mdm-match-substring", key: "multicursorMatch", asked: "substring" },
   { name: "mdm-text-font", key: "textFont", asked: "sans" },
+  { name: "mdm-score-fill", key: "scoreFill", asked: "paper" },
   { name: "mdm-follow", key: "followPlayhead", asked: "still" },
   { name: "mdm-front-matter", key: "frontMatter", asked: "shown" },
 ];
@@ -3578,9 +3834,16 @@ test("a narrow pane narrows the column, and a wide equation scrolls in its own b
 // The labels are still laid out at their full width, which is what the
 // toolbar's own overflow says here: the fix is a clip on #app, not a shorter
 // label.
+//
+// Which widths leave a label hanging depends on which button ends a row of
+// the bar, so it moves whenever a button is added: with the justify toggle
+// (2026-09-12) nothing hung at 700 or 560 any more, and 29 px did at 720 and
+// 24 at 580 (measured). Every width is held to the rule, and the test asks
+// only that a label hung past the bar at one of them at least.
 test("the page never scrolls sideways, whatever the toolbar hangs over the edge", { skip }, async () => {
   const h = await open({ scores: 3 });
-  for (const width of [700, 560, 480, 420]) {
+  const hung = [];
+  for (const width of [720, 700, 580, 560, 480, 420]) {
     await h.page.setViewport({ width: width, height: 1600 });
     await settle(h.page);
     const m = await h.page.evaluate(() => {
@@ -3612,8 +3875,9 @@ test("the page never scrolls sideways, whatever the toolbar hangs over the edge"
       0,
       "the editor held something back sideways" + where + m.documentHeld
     );
-    assert.ok(m.tips > 0, "no tooltip hangs past the bar, so nothing was tested" + where);
+    if (m.tips > 0) hung.push(width);
   }
+  assert.ok(hung.length > 0, "no tooltip hangs past the bar at any of the widths, so nothing was tested");
   assert.deepEqual(h.errors, []);
   await h.close();
 });

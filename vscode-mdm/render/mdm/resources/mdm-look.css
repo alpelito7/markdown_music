@@ -74,6 +74,9 @@
      keeps --mdm-sans whichever face the words are in, as the toolbar of the
      editor does. */
   --mdm-text: var(--mdm-sans);
+  /* How the prose meets the right edge: ragged, as a page has always been set,
+     unless the editor was justifying and said so (mdm-text-align). */
+  --mdm-text-align: left;
   --mdm-mono: var(--quarto-font-monospace, ui-monospace, SFMono-Regular, Menlo,
     Consolas, "Liberation Mono", monospace);
 }
@@ -254,6 +257,18 @@ body main.content > section:first-child > :is(h1, h2, h3, h4, h5, h6):first-chil
    between them. */
 body p {
   margin: 0 0 1em;
+}
+/* Justified prose, when the editor justifies it (mdm.textAlign, and the rule
+   beside `.cm-lineWrapping` in style.css): the paragraphs and the list items,
+   which are what the editor's prose lines become, quotations and callouts
+   holding theirs as paragraphs. Headings and table cells are neither, and
+   stay ragged on both surfaces. Chromium chooses where a line breaks before
+   it justifies it, so the words each line ends on are the editor's either way
+   (html.test.js, line by line). Classes of Quarto's own that align a
+   paragraph, a centred figure's for one, outrank this and keep their say. */
+body main.content p,
+body main.content li {
+  text-align: var(--mdm-text-align);
 }
 body .mdm-hyphen::after {
   content: "\00ad";

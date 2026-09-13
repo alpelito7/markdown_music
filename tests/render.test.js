@@ -475,6 +475,9 @@ test("the look rides on every HTML render, music or no music", () => {
   assert.equal(look["--mdm-play-accent-ink"], "#8a5f00");
   assert.ok(!("--mdm-syn-string" in look), "a palette came from nowhere");
   assert.ok(!("--mdm-score-fill" in look), "a score fill came from nowhere");
+  // The ragged right a page has always had: justified is the editor's to ask
+  // for, and a render from the command line asks for nothing.
+  assert.equal(look["--mdm-text-align"], "left", "a page with no look came out justified");
 });
 
 test("the look metadata is read, and only what is on the list gets through", () => {
@@ -487,6 +490,7 @@ test("the look metadata is read, and only what is on the list gets through", () 
       "-M", "mdm-score-fill:brass",
       "-M", "mdm-score-align:left",
       "-M", "mdm-staff-lines:ink",
+      "-M", "mdm-text-align:justify",
       "-M", "mdm-syn-string:e6db74",
       // What must not get through: these values go into a <style> block, and
       // metadata is whatever the command line carried.
@@ -516,6 +520,7 @@ test("the look metadata is read, and only what is on the list gets through", () 
   assert.equal(look["--mdm-score-fill"], "#332c1c", "brass, on its dark value");
   assert.equal(look["--mdm-score-margin"], "0");
   assert.equal(look["--mdm-staff-fill"], "currentColor");
+  assert.equal(look["--mdm-text-align"], "justify");
   // On the dark side the accent already reads as a glyph, so the two forms
   // are one value.
   assert.equal(look["--mdm-play-accent"], "#d9a94f");
@@ -689,7 +694,7 @@ test("the look rides on every PDF render, and reads the same metadata", () => {
       const font = "\\fontsize{" + size + "\\mdmem}{" + lead + "\\mdmem}";
       assert.ok(
         tex.includes(
-          "\\titleformat{\\" + commands[i] + "}[hang]{\\color{mdmink}\\bfseries\\linespread{1}" +
+          "\\titleformat{\\" + commands[i] + "}[hang]{\\filright\\color{mdmink}\\bfseries\\linespread{1}" +
             font + "\\selectfont}"
         ),
         "titlesec does not set \\" + commands[i] + " at " + size + " ems"
@@ -848,6 +853,147 @@ test("with word division off, a paragraph keeps the editor's whole-word breaks",
   const first = lines.find((l) => l.startsWith("This document"));
   assert.ok(first, "the paragraph is not in the PDF");
   assert.ok(first.endsWith("source"), "the line ends: " + JSON.stringify(first.slice(-24)));
+});
+
+// Justified prose on paper, which is what the editor sets by default and
+// names on every export: the rows of a paragraph, a list item and a quotation
+// out to the edge of their own measure, the last row of each left alone, and
+// a heading that wraps left ragged, as the editor leaves it. Ragged, the
+// paper is what it always was. And a column too narrow for the words to fill
+// its rows widens their spaces instead of letting a line run past the margin,
+// as a browser does: that is the template's \emergencystretch, which look_tex
+// leaves alone, and set to 0pt the narrow document below ran two lines 11 and
+// 28 pt past its 200 pt column (measured with the roman). A line may still
+// stand up to 2.4 bp out of it, which is microtype hanging a comma or a full
+// stop into the margin and not a line too long: the tolerance is 3 bp.
+const JUSTIFIED_DOC = `---
+title: "Justified"
+format:
+  pdf:
+    documentclass: article
+indent: true
+filters:
+  - mdm
+---
+
+## A heading written long enough to wrap over two lines of the column, which is what this one is written to do on paper as well
+
+A first paragraph under the heading, which LaTeX never indents.
+
+That is what the score below draws, one note per mode: each partial is a note, the name acoustics gives to a single component of a complex sound. The upper system is the first eight partials of a low C, the lower one pairs each partial with the next and names the ratio underneath; the seventh is the odd one out, thirty one cents flat of the tempered minor seventh, hence the mark over the B flat.
+
+- A list item written long enough to run over several lines of the column, so that its lines are set to both edges of the text as the lines of a paragraph are, save the last.
+
+> A quotation written long enough to run over several lines of the column, so that its lines are set to both edges of the text as the lines of a paragraph are, save the last.
+
+###### A sixth heading written long enough to wrap over two lines of the column, which is what this one is written to do as well
+
+The last line.
+`;
+
+const NARROW_DOC = `---
+format:
+  pdf:
+    documentclass: article
+geometry: textwidth=200pt
+filters:
+  - mdm
+---
+
+This document is ordinary Markdown, rendered and editable at once: text, emphasis, LaTeX equations, source code and, on top of that, music blocks that render as a score and play, with multicursor, an outline, a look set from the toolbar and export options.
+
+That is what the score below draws, one note per mode: each partial is a note, the name acoustics gives to a single component of a complex sound. The upper system is the first eight partials of a low C, the lower one pairs each partial with the next and names the ratio underneath; the seventh is the odd one out, thirty one cents flat of the tempered minor seventh, hence the mark over the B flat.
+
+Two cadences fall out unasked: the fourth and the fifth partials of each chord land a major third apart, and the ear takes them for a resolution whether or not anybody wrote one.
+`;
+
+// The first page's blocks of text as pdftotext lays them out, each a list of
+// its lines with where they start and end.
+function pdfBlocks(pdf) {
+  const t = spawnSync("pdftotext", ["-bbox-layout", "-f", "1", "-l", "1", pdf, "-"], { encoding: "utf8" });
+  assert.equal(t.status, 0, t.stderr);
+  return [...t.stdout.matchAll(/<block [^>]*>([\s\S]*?)<\/block>/g)].map((b) =>
+    [...b[1].matchAll(/<line xMin="([\d.]+)" yMin="[\d.]+" xMax="([\d.]+)"[^>]*>([\s\S]*?)<\/line>/g)].map((l) => ({
+      x0: Number(l[1]),
+      x1: Number(l[2]),
+      text: [...l[3].matchAll(/>([^<]*)<\/word>/g)].map((w) => w[1]).join(" "),
+    }))
+  );
+}
+
+test("justified prose travels to the paper, and a heading stays ragged", {
+  skip: spawnSync("pdftotext", ["-v"]).status !== 0 && "needs pdftotext",
+}, () => {
+  const rows = {};
+  for (const align of ["justify", "left"]) {
+    const dir = freshDir("justified-" + align);
+    fs.writeFileSync(path.join(dir, "doc.mdm"), JUSTIFIED_DOC);
+    const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true",
+      "-M", "mdm-text-font:roman", "-M", "mdm-text-align:" + align], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const tex = texOf(dir);
+    if (align === "justify") {
+      assert.ok(!tex.includes("\\AtBeginDocument{\\raggedright"), "the justified paper is still ragged");
+    } else {
+      assert.ok(tex.includes("\\AtBeginDocument{\\raggedright}"), "the ragged paper came out justified");
+    }
+    const blocks = pdfBlocks(path.join(dir, "doc.pdf"));
+    // From the line a piece of text opens on to the end of its block:
+    // pdftotext puts two paragraphs in one block when nothing parts them.
+    const find = (start) => {
+      const opens = (l) => l.text.replace(/^• /, "").startsWith(start);
+      const found = blocks.find((b) => b.some(opens));
+      const block = found && found.slice(found.findIndex(opens));
+      assert.ok(block && block.length >= 2, align + ": \"" + start + "\" did not wrap: " + JSON.stringify(blocks.map((b) => b.map((l) => l.text))));
+      return block;
+    };
+    rows[align] = {
+      heading: find("A heading written"),
+      // The sixth level, which an article has no command for and the preamble
+      // draws itself (\mdmheadsix).
+      sixth: find("A sixth heading"),
+      prose: ["That is what", "A list item", "A quotation"].map(find),
+    };
+  }
+  // No paragraph indent, which the editor never draws, even under a document
+  // that asks the template for one (`indent: true` above): the ragged right
+  // used to zero it on the way, and justified text keeps it zero by saying
+  // so. Read on the second paragraph under the heading, since LaTeX indents
+  // none that follows a heading and a list item's first line starts at its
+  // bullet; a capital T hangs 0.44 bp into the margin.
+  const para = rows.justify.prose[0];
+  assert.ok(Math.abs(para[0].x0 - para[1].x0) < 1, "a justified paragraph is indented: " + JSON.stringify(para.slice(0, 2)));
+  for (const block of rows.justify.prose) {
+    const edge = Math.max(...block.map((l) => l.x1));
+    block.slice(0, -1).forEach((l) => {
+      assert.ok(edge - l.x1 < 0.6, "a justified line stops " + (edge - l.x1).toFixed(2) + " bp short: " + l.text);
+    });
+  }
+  assert.ok(
+    rows.left.prose.some((block) => block.slice(0, -1).some((l) => Math.max(...block.map((m) => m.x1)) - l.x1 > 2)),
+    "the ragged paper came out justified"
+  );
+  // The column's edge, read off the justified paragraph, and a heading with a
+  // line that stops short of it before its last (a justified one set both of
+  // them at the edge, 561.3 bp, measured).
+  const edge = Math.max(...rows.justify.prose[0].map((l) => l.x1));
+  for (const heading of [rows.justify.heading, rows.justify.sixth]) {
+    assert.ok(
+      heading.slice(0, -1).some((l) => edge - l.x1 > 2),
+      "the heading was justified: " + JSON.stringify(heading)
+    );
+  }
+
+  const dir = freshDir("justified-narrow");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), NARROW_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:roman",
+    "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const lines = pdfBlocks(path.join(dir, "doc.pdf")).flat().filter((l) => l.text.length > 1);
+  const left = Math.min(...lines.map((l) => l.x0));
+  const over = lines.filter((l) => l.x1 > left + 200 + 3);
+  assert.deepEqual(over.map((l) => l.text + " (" + (l.x1 - left - 200).toFixed(1) + " bp over)"), [],
+    "lines stand past the margin of a narrow justified column");
 });
 
 test("a document that names its own maths font keeps it", () => {
@@ -1144,6 +1290,7 @@ test("a word the filter does not know falls back to the plain look", () => {
       "-M", "mdm-score-fill:</style>",
       "-M", "mdm-staff-lines:none",
       "-M", "mdm-score-align:middle",
+      "-M", "mdm-text-align:center",
     ],
     dir
   );
@@ -1154,6 +1301,7 @@ test("a word the filter does not know falls back to the plain look", () => {
   assert.equal(look["--mdm-staff-fill"], "#a3a3a3");
   assert.ok(!("--mdm-score-margin" in look), "an unknown alignment was honoured");
   assert.ok(!("--mdm-text" in look), "an unknown face was honoured");
+  assert.equal(look["--mdm-text-align"], "left", "an unknown alignment of the text was honoured");
 });
 
 // ---------- The face of the text ----------
@@ -1355,7 +1503,7 @@ test("the roman travels to the paper, and takes the sans preamble with it", () =
       const font = "\\fontsize{" + size + "\\mdmem}{" + lead + "\\mdmem}";
       assert.ok(
         tex.includes(
-          "\\titleformat{\\" + commands[i] + "}[hang]{\\color{mdmink}\\bfseries\\linespread{1}" +
+          "\\titleformat{\\" + commands[i] + "}[hang]{\\filright\\color{mdmink}\\bfseries\\linespread{1}" +
             font + "\\selectfont}"
         ),
         "titlesec does not set the roman's \\" + commands[i] + " at " + size + " ems"

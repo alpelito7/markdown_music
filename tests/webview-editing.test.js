@@ -726,6 +726,67 @@ test(
   }
 );
 
+test("ArrowDown crosses every wrapped row before opening an adjacent score", { skip }, async () => {
+  const paragraph =
+    "That is what the score below draws, one note per mode: each n is a partial, the name acoustics gives to a single component of a complex sound. The upper system is the first eight partials of a low C, the lower one pairs each partial with the next and names the ratio underneath; the seventh is the odd one out, 31 cents flat of the tempered minor seventh, hence the mark over the B flat.";
+  const text = paragraph + "\n```abc\nX:1\nK:C\nCDEF|\n```\n";
+  const h = await open({ text: text, scores: 1 });
+  await h.page.setViewport({ width: 480, height: 900 });
+  await sleep(150);
+
+  // Pick one position near the left edge of every visual row. There is no
+  // blank document line between this paragraph and the hidden ABC source:
+  // that is the case in which the block handler used to mistake every row
+  // for the last one and jump straight to the score.
+  const rows = await h.page.evaluate(() => {
+    const { view } = window.__mdm;
+    const line = view.state.doc.line(1);
+    const byTop = [];
+    for (let pos = line.from; pos <= line.to; pos++) {
+      const c = view.coordsAtPos(pos, 1);
+      if (!c) continue;
+      const top = Math.round(c.top);
+      let row = byTop.find((r) => Math.abs(r.top - top) <= 1);
+      if (!row) {
+        row = { top: top, pos: pos, left: c.left };
+        byTop.push(row);
+      } else if (c.left < row.left) {
+        row.pos = pos;
+        row.left = c.left;
+      }
+    }
+    return byTop.sort((a, b) => a.top - b.top);
+  });
+  assert.ok(rows.length >= 3, "the paragraph did not wrap: " + JSON.stringify(rows));
+
+  for (let i = 0; i < rows.length - 1; i++) {
+    await setSelection(h.page, rows[i].pos);
+    await h.page.keyboard.press("ArrowDown");
+    const landed = await h.page.evaluate(() => {
+      const { view } = window.__mdm;
+      const head = view.state.selection.main.head;
+      const c = view.coordsAtPos(head);
+      return { line: view.state.doc.lineAt(head).number, top: Math.round(c.top) };
+    });
+    assert.equal(landed.line, 1, "row " + (i + 1) + " jumped into the score");
+    assert.ok(landed.top > rows[i].top, "ArrowDown did not leave visual row " + (i + 1));
+  }
+
+  await setSelection(h.page, rows[rows.length - 1].pos);
+  await h.page.keyboard.press("ArrowDown");
+  assert.equal(
+    await h.page.evaluate(() => {
+      const { view } = window.__mdm;
+      return view.state.doc.lineAt(view.state.selection.main.head).number;
+    }),
+    2,
+    "the last visual row did not open the adjacent score"
+  );
+  assert.ok((await count(h.page, ".cm-line.mdm-abc-line")) > 0);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a click on a rendered equation or score opens it at the start of its source", { skip }, async () => {
   const h = await open({});
   const math = await h.page.evaluate(() => {
@@ -1755,6 +1816,7 @@ const BAR = [
   "|",
   "mdm-theme",
   "mdm-text-font",
+  "mdm-text-align",
   "mdm-hyphenation",
   "mdm-front-matter",
   "|",

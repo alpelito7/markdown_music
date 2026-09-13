@@ -261,6 +261,23 @@ body {
 #app .cm-lineWrapping {
   white-space: pre-wrap;
 }
+/* Justified prose, mdm.textAlign (applyTextAlign in main.js). On the lines
+   and not on .cm-content: a score, an equation or a table drawn in place of
+   its source is a block of its own beside the lines, and would inherit it
+   from the column. The lines left out are the ones that are not prose: a
+   heading, which a printed page and the export's paper both leave ragged, and
+   every line of source, which is set as typed: code, the header and a block
+   of HTML or a comment by their own classes, and maths and a table being
+   edited by the mdm-src-line their lines carry besides.
+   Chromium keeps the breaks it chose ragged and widens the spaces of each row
+   but the last, and it does so under pre-wrap: measured on example.mdm at
+   1200 px, every row but a paragraph's last ends at the column's edge to the
+   pixel and every row ends on the same word as before (html.test.js holds the
+   page to that, line by line). mdm-look.css carries the rule to the page, and
+   look_tex in mdm.lua to the paper. */
+#app.mdm-text--justify .cm-line:not(.mdm-h, .mdm-src-line, .mdm-code-line, .mdm-fm-line, .mdm-html-line, .mdm-mark-line) {
+  text-align: justify;
+}
 /* The column follows the pane, whatever it holds. .cm-content is a flex item
    of the scroller, and a flex item is never narrower than its min-content by
    default: the widest thing in the document that cannot wrap set the column.

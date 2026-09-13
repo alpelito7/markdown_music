@@ -1850,6 +1850,97 @@ asked to. So there is nothing to mirror in `mdm-look.css` this time.
 Not seen in a real VS Code window yet: both of these are chrome, so the rule
 of the project is that they are not finished until they have been.
 
+### Justified text, and a note for the scores' alignment (2026-09-12)
+
+`mdm.textAlign`, justified by default: the prose lines of the editor (a
+paragraph, a list item, a quotation, a callout) out to both edges, a heading
+and every line of source ragged; the page and the paper following. And the
+score alignment toggle redrawn as a quarter note between two lines of text,
+the owner's pick of `design-text-align-icon.html`, with their corrections
+pinned: the stem on the head's rightmost point and down to its centre, and both
+the stem and the lines a shade heavier than the playhead toggle's rules.
+
+What was measured before a test was written, and what the tests read:
+
+- Chromium justifies after it chooses the breaks, under CodeMirror's
+  `pre-wrap` too: `example.mdm` at 1200 px, every row of a paragraph but the
+  last at the column's edge to the pixel, and every row ending on the same
+  word ragged and justified. So `LINE_ENDS` in html.test.js holds for the
+  justified page, and the new `ROW_GAPS` compares which rows reach the edge.
+- The carets are drawn by CodeMirror from its last measure, and justifying
+  changes no height and no width it looks at: without re-dispatching the
+  selection the caret stood 34 px off its letter after the toggle.
+- On paper TeX weighs the whole paragraph and may shrink spaces: two rows of
+  `example.mdm` take one word more justified than the editor (`integer` for
+  `an`, `the` for `over`), and they are the only rows where the justified and
+  the ragged paper differ. Taking the shrink out made it worse. Open, and
+  written where the code is (look_tex).
+- A wrapped heading under titlesec came out justified with the prose (both
+  lines at 561.3 bp), hence `\filright` in every format and `\raggedright` in
+  `\mdmheadsix`.
+- A narrow justified column stays inside its margin on the template's own
+  `\emergencystretch{3em}`; set to 0pt, the 200 pt fixture ran two lines 11
+  and 28 pt over. A stretch of a whole column, tried first, set "This document
+  is ordinary" as a line of badness 10000 and was taken out. Lines ending in a
+  comma or a full stop stand up to 2.4 bp out of the column, which is
+  microtype's protrusion, so the tolerance there is 3 bp.
+
+Mutations, each by exact string, restored and checked by hash in the same
+command:
+
+- **J1** `text-align: justify` → `start` in style.css → *A paragraph has a row
+  37.4px short of the edge*.
+- **J2** `.mdm-h` out of the rule's `:not()` → *A heading wr was justified*.
+- **J3** `.mdm-src-line` out of it → *A table cell was justified*. The first
+  version of J3 took `.mdm-table-line` out and was not caught, because a
+  table's source lines carry `mdm-src-line` besides, as maths does: the two
+  names were dropped from the selector as dead weight.
+- **J21** `.mdm-html-line` out of it → *<!-- A comme was justified*.
+- **J4** the re-dispatch of the selection deleted from applyTextAlign → *the
+  caret stayed where the justified letter was: drawn 161.9, letter 159*.
+- **J5** the lamp lit on `justify` → *mdm-text-align is lit on its own
+  default* (and the twin in "every toggle lights").
+- **J6** `textAlign` not read from the settings message → the class never
+  leaves (*Waiting failed: 30000ms exceeded*).
+- **J7** the two tips swapped → both justification tests.
+- **J8** the export sends `mdm-text-align:justify` whatever the setting → *the
+  export carries the look the editor is showing*.
+- **J9** `["left", "justify"]` in SETTINGS → *hostile setting values never
+  reach the webview HTML*.
+- **J10** the `text-align: var(--mdm-text-align)` rule deleted from
+  mdm-look.css → *the rows of "This document is ordinary Mark..." reach the edge
+  differently: editor [0,0], page [13.7,15.8]*.
+- **J11** `put("text-align", ...)` deleted from look_css → *the look metadata
+  is read*.
+- **J12** the filter's fallback `left` → `justify` → *a page with no look came
+  out justified* (and the bogus-word test).
+- **J13** the justified branch of look_tex never taken → *the justified paper
+  is still ragged*.
+- **J14** `\filright` deleted → *the heading was justified* (both lines at
+  561.29 bp).
+- **J15** `\setlength{\parindent}{0pt}` deleted → *a justified paragraph is
+  indented* (65.65 against 50.71 bp, under `indent: true`). The first run of
+  J14 and J15 "failed" on a fixture of mine: pdftotext set two paragraphs in
+  one block and the test could not find the second. The test now reads from
+  the line a text opens on, and the first paragraph under the heading is
+  there because LaTeX indents none after a heading, which had let J15 pass
+  the indent assertion and fail on something else.
+- **J16** `\raggedright` deleted from the article's `\mdmheadsix` → *the heading
+  was justified* (the sixth level at 561.29).
+- **J17** the stem moved off the head's edge → *the other state's note is not
+  joined*.
+- **J18** one line of text or the stem put back at 1.3 → *the lines and stem are
+  not a shade heavier than the playhead toggle's rules*.
+- **J19** the justify toggle drawn with the staff glyph → *mdm-staff-lines
+  draws the glyph of mdm-text-align*.
+- **J20** `overflow-x: clip` deleted from `#app` → *the page held something back
+  sideways at a pane of 720: 29*. The test itself was changed in this round:
+  with one button more, no label hung past the bar at 700 or 560 and its
+  guard failed with nothing broken; every width is held to the rule now and
+  one of them has to have a label hanging.
+
+Not seen in a real VS Code window yet.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
