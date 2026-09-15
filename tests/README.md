@@ -2282,6 +2282,70 @@ Known and not changed here: a PDF that fails beside a document leaves an empty
 (a both keeps the files folder because a page rendered without
 `embed-resources` needs its `libs`).
 
+### What a failed PDF leaves, and a list under a line of text (2026-09-14)
+
+**The folders a failed PDF leaves.** With no TeX, and after a LaTeX error alike,
+Quarto 1.9.37 leaves an empty `<name>_files/mediabag` and the filter's
+`mdm_cache` beside the document (a LaTeX error also leaves the `.tex`, `.aux`
+and `.log`, which say what went wrong and are left). `removeFailedFolders` in
+`extension.js` takes away the two folders when the failed step is the PDF, and
+only what that export made: a folder that was there before stays, the files
+folder of a page asked for beside the PDF keeps the page's own resources (only
+the mediabag goes, and the folder if nothing is left in it), and the cache stays
+while another document of the same folder is exporting. The Quarto stand-in now
+leaves both folders when its PDF fails, as the real one does, and can write a
+page's own `libs` (`pageLibs`) and hold one document's page back (`slowPage`).
+Tests: *a PDF that fails takes away the folders it made, whatever it failed on*
+(pdf and both, no TeX and a LaTeX error), *a PDF that fails leaves the folders
+the reader had, and a page's own resources*, and *a PDF that fails leaves the
+cache to another document of its folder still exporting*.
+
+- **K1** `removeFailedFolders` returning at once → all three fail.
+- **K2** the cache removed whether or not it was there before → the reader's
+  folders test fails (its earlier engraving is gone).
+- **K3** the cache removed with another export running beside it → *the cache
+  was taken from under an export still running beside it*.
+- **K4** the files folder removed whole when a page was asked for too → the
+  reader's folders test fails (the page's `libs` are gone).
+- **K5** no folders removed after a failure that is not a missing TeX → all
+  three fail, on the LaTeX error cases.
+
+**A list straight under a line of text.** example.mdm now opens with a line and
+three items under it, which the editor draws as a list and Pandoc's Markdown
+read as one paragraph with the dashes written into it (measured with the
+export's reader on Pandoc 3.8.3). CommonMark lets a list interrupt a paragraph
+and Pandoc does not. The copy is given a blank line where CommonMark starts a
+list, a bullet or an item numbered 1 with something after the marker, up to
+three spaces in, under text that is not in a list and is not a heading, and
+nowhere inside a fence or a `$$` block; `withBreaks` in `extension.js` and its
+awk twin `breaks()` in `bin/mdm`. Pandoc's `lists_without_preceding_blankline`
+was measured and not taken: it lets any ordered item interrupt, so a wrapped
+line starting "2026. Then" became a list numbered from 2026 where CommonMark
+keeps the paragraph. Checked against Pandoc's own CommonMark reader on the
+cases below, the block structure is the same in every one of them; two older
+differences that are not about a blank line are left as they were (`* * *`
+under a paragraph, and two lists with different bullets one under the other).
+The awk agreed with the JavaScript on 31 cases under mawk 1.3.4 and on a subset
+under busybox awk.
+
+Tests: *a list straight under a line of text gets the blank line the copy
+needs* (the case table `COPY_BREAKS`), *the command line's copy is given the
+same blank lines as the export's*, which reads `breaks()` out of `bin/mdm` and
+runs every case through it (skipped on Windows), and in `render.test.js` *a list
+straight under a line of text reaches the page as a list*.
+
+- **L1** `interruptsText` returning false → the case table and the parity test
+  fail on the example's opening.
+- **L2** the awk's `interrupts` returning 0 → the parity test and the rendered
+  page fail.
+- **L3** any ordered number allowed to interrupt → *for "The year was\n2026.
+  Then\n"*.
+- **L4** the `$$` block not stepped over → *for "$$\na\n- b\n$$\n"*.
+- **L5** the awk's list-item look-back taken out → the parity test fails.
+
+The example's title and subtitle were swapped by the owner at the same time,
+and `html.test.js` reads them in that order now.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

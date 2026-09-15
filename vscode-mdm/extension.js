@@ -1245,6 +1245,17 @@ function withPageTitle(text, name) {
 // simple table, which the copy has no business taking apart.
 const DASH_BREAK = /^ {0,3}-{3,}[ \t]*$/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+// The first item of a list that CommonMark lets interrupt a paragraph: a
+// bullet, or an ordered item numbered 1, with something after its marker.
+const LIST_START = /^ {0,3}(?:[-*+]|1[.)])[ \t]+\S/;
+// Any item of a list, at any depth, which is what says a line is in one.
+const LIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+// A thematic break drawn with spaces, `* * *` or `- - -`, which is not a list.
+const SPACED_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+// The line a `$$` block opens on, as the editor's grammar reads it
+// (vendor-src/src/markdown/math.js, isBlockMathStart).
+const MATH_OPEN = /^ {0,3}\$\$/;
+const HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
 
 // A thematic break with a line of text straight under it. In the CommonMark
 // the editor reads, a line of dashes is a rule and nothing else (the
@@ -1269,6 +1280,23 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 // already taken the paragraph above it and a blank line under it changes
 // nothing. Inside a fence the dashes are code, and a blank line in an ABC
 // block would end the tune, so a fence is stepped over whole.
+//
+// A list straight under a line of text is the other place the two dialects
+// part. CommonMark lets a list interrupt a paragraph and Pandoc's Markdown
+// does not: example.mdm's opening line with its three items under it was a
+// list in the editor and one paragraph with the dashes written into it on the
+// page, "rendered and editable at once: - text, emphasis, ..." (measured on
+// Pandoc 3.8.3, 2026-09-14). The blank line goes in only where CommonMark
+// would start the list: a bullet, or an ordered item numbered 1, with
+// something after the marker, up to three spaces in, under a line of text
+// (or of a quotation) that is not itself in a list. Everywhere else the two
+// already agree and nothing is added: an item under an item, a sublist, a
+// list under a heading. Pandoc's own `lists_without_preceding_blankline` was
+// measured and not taken, since it lets any ordered item interrupt: a line of
+// prose wrapped at "The year was / 2026. Then" came out a list numbered from
+// 2026, where CommonMark keeps the paragraph. Inside a `$$` block a line is
+// LaTeX and a blank line would end the formula, so the block is stepped over
+// whole as a fence is.
 function withBreaks(text) {
   const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
   const head = header ? text.slice(0, header[0].length) : "";
@@ -1277,10 +1305,12 @@ function withBreaks(text) {
   const eol = /\r\n/.test(text) ? "\r\n" : "\n";
   const out = [];
   let open = null; // the run of ` or ~ the fence now standing was opened with
+  let math = false; // inside a `$$` block
   for (let i = 0; i < lines.length; i++) {
-    out.push(lines[i]);
-    const fence = FENCE.exec(lines[i]);
+    const line = lines[i];
+    const fence = FENCE.exec(line);
     if (open) {
+      out.push(line);
       // A closing fence: the same character, no shorter, and nothing after it.
       const closes =
         fence &&
@@ -1290,16 +1320,45 @@ function withBreaks(text) {
       if (closes) open = null;
       continue;
     }
+    if (math) {
+      out.push(line);
+      // The first `$$` closes it, and a blank line ends it unclosed.
+      if (line.includes("$$") || !line.trim()) math = false;
+      continue;
+    }
+    // Unless a blank line is there already, the one the rule above put in.
+    if (interruptsText(lines, i) && out[out.length - 1].trim()) out.push("");
+    out.push(line);
     if (fence) {
       open = fence[1];
       continue;
     }
-    if (!DASH_BREAK.test(lines[i])) continue;
+    if (MATH_OPEN.test(line)) {
+      // Closed on its own line when a second `$$` follows the first.
+      math = !line.trim().slice(2).includes("$$");
+      continue;
+    }
+    if (!DASH_BREAK.test(line)) continue;
     const below = i + 1 < lines.length ? lines[i + 1] : "";
     if (!below.trim()) continue; // the blank line is already there
     out.push("");
   }
   return head + out.join(eol);
+}
+
+// Whether lines[i] opens a list that CommonMark starts there and Pandoc reads
+// as more of the text above it. Not when the text above is in a list already
+// (an item, a sublist, a line carried on under one: read back to the blank
+// line over it), and not under a heading, which is a block of its own that
+// Pandoc starts a list under with no blank line, as CommonMark does.
+function interruptsText(lines, i) {
+  if (!LIST_START.test(lines[i]) || SPACED_BREAK.test(lines[i])) return false;
+  if (i === 0 || !lines[i - 1].trim() || HEADING.test(lines[i - 1])) return false;
+  for (let j = i - 1; j >= 0 && lines[j].trim(); j--) {
+    if (LIST_ITEM.test(lines[j])) return false;
+    if (HEADING.test(lines[j]) || FENCE.test(lines[j])) break;
+  }
+  return true;
 }
 
 // The path without its extension, which is what the copy and everything the

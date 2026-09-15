@@ -56,11 +56,57 @@ names_reader() {
 # line inside an ABC block would end the tune. The line above is not consulted,
 # since a line of dashes under a paragraph is a setext underline to both
 # dialects and a blank line under it changes nothing (measured).
+#
+# And the blank line a list needs over it. CommonMark lets a list interrupt a
+# paragraph and Pandoc does not, so example.mdm's opening line with its items
+# under it came out one paragraph with the dashes written into it. It goes in
+# where CommonMark starts the list: a bullet, or an item numbered 1, with
+# something after the marker, up to three spaces in, under a line of text that
+# is not in a list already and is not a heading. Not Pandoc's own
+# `lists_without_preceding_blankline`, which lets "2026. Then" at the start of
+# a wrapped line open a list. A `$$` block is stepped over as a fence is: a
+# blank line in it would end the formula. The rule and its cases are
+# withBreaks in extension.js.
 breaks() {
   awk '
     function bare(s,   t) { t = s; sub(/^[[:blank:]]*/, "", t); return t }
     function indent(s) { return length(s) - length(bare(s)) }
     function runlen(s, c,   n) { n = 0; while (substr(s, n + 1, 1) == c) n++; return n }
+    function blank(s) { return s ~ /^[[:space:]]*$/ }
+    # Up to three spaces in, and spaces only: a tab is four columns.
+    function shallow(s) { return indent(s) <= 3 && substr(s, 1, indent(s)) !~ /\t/ }
+    function fenceline(s,   t, c) {
+      t = bare(s); c = substr(t, 1, 1)
+      return shallow(s) && (c == "`" || c == "~") && runlen(t, c) >= 3
+    }
+    function heading(s,   t) {
+      t = bare(s)
+      return shallow(s) && t ~ /^#+([ \t]|$)/ && runlen(t, "#") <= 6
+    }
+    # `* * *` and `- - -`: a thematic break, and not a list.
+    function spacedbreak(s,   t, c) {
+      t = bare(s); c = substr(t, 1, 1)
+      if (!shallow(s) || (c != "-" && c != "*" && c != "_")) return 0
+      gsub(/[ \t]/, "", t)
+      return length(t) >= 3 && runlen(t, c) == length(t)
+    }
+    # The first item of a list that CommonMark lets interrupt a paragraph.
+    function liststart(s,   t) {
+      t = bare(s)
+      if (!shallow(s) || spacedbreak(s)) return 0
+      return t ~ /^[-*+][ \t]+[^ \t]/ || t ~ /^1[.)][ \t]+[^ \t]/
+    }
+    function listitem(s) { return bare(s) ~ /^([-*+]|[0-9]+[.)])([ \t]|$)/ }
+    function interrupts(i,   j) {
+      if (!liststart(line[i]) || i - 1 <= head) return 0
+      if (blank(line[i - 1]) || heading(line[i - 1])) return 0
+      for (j = i - 1; j > head && !blank(line[j]); j--) {
+        if (listitem(line[j])) return 0
+        if (heading(line[j]) || fenceline(line[j])) break
+      }
+      return 1
+    }
+    function out(s) { print s; lastblank = blank(s) }
     { line[NR] = $0 }
     END {
       # The YAML header, printed as it came: only the body has rules in it.
@@ -69,23 +115,36 @@ breaks() {
         for (i = 2; i <= NR; i++) if (line[i] ~ /^---[[:blank:]]*$/) { head = i; break }
       }
       open = ""   # the run of ` or ~ the fence now standing was opened with
+      math = 0    # inside a `$$` block
       for (i = 1; i <= NR; i++) {
-        print line[i]
-        if (i <= head) continue
+        if (i <= head) { out(line[i]); continue }
         t = bare(line[i]); c = substr(t, 1, 1)
-        fence = (indent(line[i]) <= 3 && (c == "`" || c == "~") && runlen(t, c) >= 3)
+        fence = fenceline(line[i])
         if (open != "") {
+          out(line[i])
           # A closing fence: the same character, no shorter, nothing after it.
           if (fence && c == substr(open, 1, 1) && runlen(t, c) >= length(open) &&
               bare(substr(t, runlen(t, c) + 1)) == "") open = ""
           continue
         }
+        if (math) {
+          out(line[i])
+          # The first `$$` closes it, and a blank line ends it unclosed.
+          if (index(line[i], "$$") > 0 || blank(line[i])) math = 0
+          continue
+        }
+        if (interrupts(i) && !lastblank) out("")
+        out(line[i])
         if (fence) { open = substr(t, 1, runlen(t, c)); continue }
+        if (shallow(line[i]) && substr(t, 1, 2) == "$$") {
+          math = (index(substr(t, 3), "$$") == 0)
+          continue
+        }
         if (indent(line[i]) > 3 || runlen(t, "-") < 3) continue
         if (bare(substr(t, runlen(t, "-") + 1)) != "") continue
         below = (i < NR) ? line[i + 1] : ""
-        if (below ~ /^[[:space:]]*$/) continue   # the blank line is already there
-        print ""
+        if (blank(below)) continue   # the blank line is already there
+        out("")
       }
     }
   '

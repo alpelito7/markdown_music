@@ -1236,6 +1236,76 @@ test("a rule with a line straight under it gets the blank line the copy needs", 
   );
 });
 
+// The blank lines the copy is given, as input and what Quarto is handed. Read
+// by withBreaks here and by the awk of bin/mdm below, so the export and the
+// command line render the same document.
+const COPY_BREAKS = [
+  // A list straight under a line of text: a list to CommonMark, which the
+  // editor reads, and one paragraph with the dashes in it to Pandoc. The
+  // opening of example.mdm, as it was seen on the page (2026-09-14).
+  ["Intro at once: \n- a\n- b\n", "Intro at once: \n\n- a\n- b\n"],
+  ["Intro\n1. a\n2. b\n", "Intro\n\n1. a\n2. b\n"],
+  ["Intro\n1) a\n", "Intro\n\n1) a\n"],
+  ["**Bold:**\n+ x\n", "**Bold:**\n\n+ x\n"],
+  ["> quote\n- item\n", "> quote\n\n- item\n"],
+  ["# H\ntext\n- item\n", "# H\ntext\n\n- item\n"],
+  ["$$\na\n$$\n- item\n", "$$\na\n$$\n\n- item\n"],
+  ["~~~\n- x\n~~~\n- y\n", "~~~\n- x\n~~~\n\n- y\n"],
+  ["---\ntitle: T\n---\ntext\n- item\n", "---\ntitle: T\n---\ntext\n\n- item\n"],
+  // Where CommonMark does not start a list either, or the two already agree,
+  // nothing goes in. An ordered item numbered other than 1 does not interrupt
+  // a paragraph, which is why Pandoc's lists_without_preceding_blankline was
+  // not taken: it made this line of wrapped prose a list numbered from 2026.
+  ["The year was\n2026. Then\n", "The year was\n2026. Then\n"],
+  ["Intro\n2. a\n", "Intro\n2. a\n"],
+  ["- a\n- b\n", "- a\n- b\n"],
+  ["- a\n  cont\n  - sub\n", "- a\n  cont\n  - sub\n"],
+  ["- a\ncont lazy\n- b\n", "- a\ncont lazy\n- b\n"],
+  ["1. a\n2. b\ntext\n- c\n", "1. a\n2. b\ntext\n- c\n"],
+  ["# H\n- item\n", "# H\n- item\n"],
+  ["text\n-\n", "text\n-\n"],
+  ["text\n- \n", "text\n- \n"],
+  ["text\n    - item\n", "text\n    - item\n"],
+  ["text\n\t- item\n", "text\n\t- item\n"],
+  ["a\n* * *\n", "a\n* * *\n"],
+  ["---\ntitle: T\n---\n- item\n", "---\ntitle: T\n---\n- item\n"],
+  // A line that looks like an item inside a fence is code, and inside a `$$`
+  // block it is LaTeX, where a blank line would end the formula.
+  ["```\ntext\n- x\n```\n", "```\ntext\n- x\n```\n"],
+  ["$$\na\n- b\n$$\n", "$$\na\n- b\n$$\n"],
+  ["$$\na\n\n- b\n", "$$\na\n\n- b\n"],
+  // And the rule, which came first: a line of dashes with text under it.
+  ["Intro\n\n---\n```abc\nX:1\n```\n", "Intro\n\n---\n\n```abc\nX:1\n```\n"],
+  ["a\n---\n- item\n", "a\n---\n\n- item\n"],
+  ["a\n\n---\n---\nb\n", "a\n\n---\n\n---\n\nb\n"],
+];
+
+test("a list straight under a line of text gets the blank line the copy needs", () => {
+  for (const [input, copy] of COPY_BREAKS) {
+    assert.equal(ext.withBreaks(input), copy, "for " + JSON.stringify(input));
+  }
+  // A CRLF document comes back CRLF, blank line included.
+  assert.equal(ext.withBreaks("a\r\n- b\r\n"), "a\r\n\r\n- b\r\n");
+});
+
+// bin/mdm cannot run the extension's JavaScript, so it draws the same blank
+// lines in awk, and a rule added to one of them and not the other is a
+// document that renders one way from the editor and another from a terminal.
+// Its breaks() is read out of the script and run on every case above.
+test("the command line's copy is given the same blank lines as the export's", {
+  skip: process.platform === "win32" && "bin/mdm is a bash script",
+}, () => {
+  const { execFileSync } = require("node:child_process");
+  const script = fs.readFileSync(path.join(__dirname, "..", "bin", "mdm"), "utf8");
+  const fn = /^breaks\(\) \{[\s\S]*?^\}$/m.exec(script);
+  assert.ok(fn, "no breaks() in bin/mdm");
+  for (const [input, copy] of COPY_BREAKS) {
+    const out = execFileSync("bash", ["-c", fn[0] + "\nbreaks"], { input, encoding: "utf8" });
+    assert.equal(out, copy, "bin/mdm, for " + JSON.stringify(input));
+    assert.equal(out, ext.withBreaks(input), "the two copies part, for " + JSON.stringify(input));
+  }
+});
+
 test("the blank line a rule needs goes into the copy and not into the document", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const restore = usePath(fakeBin(tmp));

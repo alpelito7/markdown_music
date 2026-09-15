@@ -421,6 +421,49 @@ test("a rule written straight above a score does not swallow it", () => {
   assert.match(html, /Last paragraph\./);
 });
 
+// A list straight under a line of text, which is how example.mdm opens. The
+// editor draws a list there and Pandoc read one paragraph with the dashes
+// written into it, "rendered and editable at once: - text, emphasis, ...". The
+// blank line goes into the copy (breaks() in bin/mdm, withBreaks in the
+// export, held to the same cases in the host suite) where CommonMark starts a
+// list, and nowhere else: a wrapped line opening with "2026." stays prose.
+const LIST_DOC = `---
+title: "Lists"
+format:
+  html: {}
+filters:
+  - mdm
+---
+
+Three items under a line:
+- one
+- two
+- three
+
+The year was
+2026. Then the prose went on.
+
+Counted from one:
+1. first
+2. second
+`;
+
+test("a list straight under a line of text reaches the page as a list", () => {
+  const dir = freshDir("lists");
+  const doc = path.join(dir, "doc.mdm");
+  fs.writeFileSync(doc, LIST_DOC);
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.readFileSync(doc, "utf8"), LIST_DOC, "the document itself was rewritten");
+
+  const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+  const main = html.slice(html.indexOf("<main"));
+  assert.match(main, /<p>Three items under a line:<\/p>\s*<ul>\s*<li>one<\/li>\s*<li>two<\/li>\s*<li>three<\/li>\s*<\/ul>/);
+  assert.match(main, /<p>Counted from one:<\/p>\s*<ol[^>]*>\s*<li>first<\/li>\s*<li>second<\/li>\s*<\/ol>/);
+  assert.match(main, /<p>The year was 2026\. Then the prose went on\.<\/p>/, "a line opening with a number was taken for a list");
+  assert.ok(!/<p>[^<]*- one/.test(main), "the dashes of the list were written into a paragraph");
+});
+
 // ---------- The look of the editor ----------
 
 // The block of custom properties the filter writes for the look in force, as
