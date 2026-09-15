@@ -968,10 +968,11 @@
 
   // ---------- Copy ----------
 
-  // The copy button in the corner of a code block or a score (widget chrome,
-  // see handleChromeClick): the source goes to the clipboard through the
-  // clipboard API, nothing is selected, and the block that was copied gives a
-  // brief pulse of its own background as the feedback.
+  // The copy button of a code block, a display equation or a score, in the
+  // rail beside the block (widget chrome, see handleChromeClick and
+  // `#app .mdm-chrome` in style.css): the source goes to the clipboard
+  // through the clipboard API, nothing is selected, and the block that was
+  // copied gives a brief pulse of its own background as the feedback.
   //
   // A score also loses its layout directives (%%staffwidth and friends) on
   // the way out: they size the block for this document and mean nothing
@@ -1024,7 +1025,7 @@
 
   // ---------- Audio ----------
 
-  // Each score gets a small button beside the copy button that opens a player
+  // Each score gets a small button over its copy button that opens a player
   // bar in the toolbar, as a row of its own (see openPlayer for why it is not
   // under the score); play sounds the tune. The synthesizer is the abcjs
   // 6.7.0 vendored in media/vendor/abcjs (the same engine the Quarto HTML
@@ -1679,8 +1680,8 @@
   }
 
   // The player is shut from the bar as well as from the score. The headphones
-  // in the corner of a block are the only other way, and a block can be a
-  // page long or scrolled clean off the screen, so closing what you are
+  // in the rail of a score are the only other way, and a score can be a page
+  // long or scrolled clean off the screen, so closing what you are
   // listening to meant going to find the score again. This is the same
   // drawing, lit the way that one is lit while its player is open, and it
   // does the same thing.
@@ -2287,9 +2288,9 @@
   // worth scrubbing, and it takes the width it is given rather than the width
   // of whichever score happens to be playing.
   //
-  // What is left behind on the block is the only thing that says which score
-  // is sounding: data-mdm-audio, which lights the disc under its headphones
-  // (style.css) and keeps the chrome showing without a hover.
+  // What is left behind on the block is data-mdm-audio, which lights the disc
+  // under its headphones (style.css), so the lit headphones beside the score
+  // say which score the bar belongs to and close it from there.
   function openPlayer(block) {
     closePlayer();
     const code = block.querySelector("code.language-abc");
@@ -2389,7 +2390,7 @@
     // abcjs places in pixels).
     const toolbar = document.querySelector("#app .mdm-toolbar");
     if (toolbar) toolbar.appendChild(bar);
-    block.setAttribute("data-mdm-audio", "1"); // keeps the toggle shown
+    block.setAttribute("data-mdm-audio", "1"); // lights the disc of its headphones
     player = {
       pos: blockPos(block),
       block: block,
@@ -2547,8 +2548,9 @@
   // with it; the player reopens on the block in the same position, with the
   // current source, stopped. A tune edited under a sounding player should not
   // keep playing the old notes. A caret going in and out of the block does
-  // not rebuild the widget (ScoreWidget compares by source), so a player
-  // plays on while its source is open beside it.
+  // not rebuild the widget (ScoreWidget keeps its element through updateDOM
+  // while the source is the same), so a player plays on while its source is
+  // open beside it.
   function syncPlayer() {
     if (player) {
       const block = playerBlock();
@@ -2977,6 +2979,17 @@
     return false;
   }
 
+  // Whether a block holds the head of the main selection, which is what puts
+  // its rail of buttons up (ScoreWidget below). A point and not the range, so
+  // a selection shift-arrowed or dragged over several blocks, or the whole
+  // document under Ctrl+A, still stands one rail, where its head is; and two
+  // blocks never share a position, one ending at the end of a line and the
+  // next starting at the start of a later one.
+  function holdsMainHead(state, from, to) {
+    const head = state.selection.main.head;
+    return head >= from && head <= to;
+  }
+
   // Whether anybody is in the document. What a caret reveals (the marks of a
   // heading, the source under a rendered block) hangs on the selection, and a
   // selection outlives the focus: a click on the bare part of the toolbar took
@@ -3130,8 +3143,11 @@
   // A rendered equation. Inline ones replace their source; a display one is a
   // block widget that sits under the source lines, which are hidden while no
   // caret is in them (the live preview of the block that is being edited).
+  // A display one carries a copy button in a rail beside it, shown while its
+  // source is open (`open`) and marked while the main caret is in it
+  // (`active`), the same readings as a score's: ScoreWidget below.
   class MathWidget extends WidgetType {
-    constructor(tex, display, block, preview) {
+    constructor(tex, display, block, preview, active, open) {
       super();
       this.tex = tex;
       this.display = display;
@@ -3139,13 +3155,17 @@
       // The live render an inline equation shows beside its source while it is
       // being edited: not a replacement, an extra drawing after the closing $.
       this.preview = !!preview;
+      this.active = !!active;
+      this.open = !!open;
     }
     eq(other) {
       return (
         other.tex === this.tex &&
         other.display === this.display &&
         other.block === this.block &&
-        other.preview === this.preview
+        other.preview === this.preview &&
+        other.active === this.active &&
+        other.open === this.open
       );
     }
     className() {
@@ -3165,6 +3185,15 @@
         el.className += " mdm-math--error";
         el.textContent = out.error;
       }
+      // After the drawing, which the lines above write over whole. What the
+      // button copies is the formula as written between the $$.
+      if (this.block && !this.preview) {
+        el.setAttribute("data-mdm-source", this.tex);
+        const chrome = document.createElement("div");
+        chrome.className = chromeClass("mdm-chrome", this);
+        chrome.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
+        el.appendChild(chrome);
+      }
     }
     toDOM() {
       const el = document.createElement(this.block ? "div" : "span");
@@ -3176,10 +3205,24 @@
     // animation plays once when it appears, not on every character typed. The
     // class is set from scratch each time because CodeMirror may hand this the
     // element of the plain (non-preview) widget it is replacing.
-    updateDOM(dom) {
-      if (!this.preview) return false;
-      this.paint(dom);
-      return true;
+    //
+    // A display equation whose caret came or went is the same drawing, and
+    // only its rail is switched.
+    updateDOM(dom, view, from) {
+      if (this.preview) {
+        this.paint(dom);
+        return true;
+      }
+      if (
+        this.block && from && from.block && !from.preview &&
+        from.tex === this.tex && from.display === this.display
+      ) {
+        const chrome = dom.querySelector(":scope > .mdm-chrome");
+        if (!chrome) return false;
+        switchChrome(chrome, this);
+        return true;
+      }
+      return false;
     }
     // A click on the drawing puts the caret at its source, which is what
     // opens it; the editor's own click handler does that (revealBlock), so
@@ -3195,23 +3238,48 @@
   // The engraving of a ```abc block, with its chrome: the copy button, the
   // player toggle and, while the player is open on it, the player bar. A
   // block widget after the source lines, which are hidden while no caret is
-  // in them. It compares equal while the source is the same, so CodeMirror
-  // keeps its DOM across carets going in and out of the block, and with it
-  // the player that may be sounding.
+  // in them. It keeps its DOM across carets going in and out of the block,
+  // and with it the player that may be sounding: a widget of the same source
+  // is the same drawing, and what the caret changes is one class, switched in
+  // place by updateDOM (CodeMirror reuses the element when that answers true
+  // and destroys nothing).
+  //
+  // The buttons are a rail in the margin right of the column, out of the flow,
+  // and they are shown while the reader is at the block: under the pointer
+  // (.mdm-chrome--hover, chromeUnder below) or with its source open, which is
+  // `open`, read off the same carets that open it (activeRanges, so nobody's
+  // document has any). `active` is the score the head of the main selection
+  // is in, and it is what lifts the rail over the others where the rail of a
+  // short block hangs past it beside the next one's: the main head alone, and
+  // not every caret or every block a selection covers, so that one block at a
+  // time is the caret's (holdsMainHead; style.css, `#app .mdm-chrome`).
   class ScoreWidget extends WidgetType {
-    constructor(source) {
+    constructor(source, active, open) {
       super();
       this.source = source;
+      this.active = !!active;
+      this.open = !!open;
     }
     eq(other) {
-      return other.source === this.source;
+      return other.source === this.source && other.active === this.active && other.open === this.open;
+    }
+    updateDOM(dom, view, from) {
+      if (!from || from.source !== this.source) return false;
+      const chrome = dom.querySelector(":scope > .mdm-chrome");
+      if (!chrome) return false;
+      switchChrome(chrome, this);
+      return true;
     }
     toDOM() {
       const block = document.createElement("div");
       block.className = "mdm-score";
       block.setAttribute("data-mdm-source", this.source);
+      // The copy over the headphones, the owner's order: the copy stands at
+      // the top of every rail, a score's, an equation's and a card's, and a
+      // score's own button comes under it. A button added to the rail goes
+      // in here, and the rail grows down by it (flex, no height).
       const chrome = document.createElement("div");
-      chrome.className = "mdm-chrome";
+      chrome.className = chromeClass("mdm-chrome", this);
       chrome.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
       chrome.appendChild(chromeButton("mdm-audio-toggle", "Show player", HEADPHONES_ICON, "w"));
       block.appendChild(chrome);
@@ -3234,23 +3302,47 @@
     }
   }
 
-  // The corner of a code block: the language, and the copy button. An inline
-  // widget of no size at the start of the first line of code, whose buttons
-  // are positioned against that line, so they overlay the card's top right
-  // corner.
+  // The copy button of a code block, in the same rail beside the column as a
+  // score's and an equation's. An inline widget of no size at the start of
+  // the top line of the card, the fence while the block is open and the
+  // first line of code while it is not, and placed from there against the
+  // column (style.css, `.mdm-chrome--code`). Shown and marked as the others:
+  // open while the fences show, active while the main caret is in the block.
   class CodeChromeWidget extends WidgetType {
-    eq() {
-      return true; // one of these is like another: a copy button and nothing else
+    constructor(active, open) {
+      super();
+      this.active = !!active;
+      this.open = !!open;
+    }
+    eq(other) {
+      // One of these is like another: a copy button and nothing else.
+      return other.active === this.active && other.open === this.open;
+    }
+    updateDOM(dom) {
+      switchChrome(dom, this);
+      return true;
     }
     toDOM() {
       const el = document.createElement("span");
-      el.className = "mdm-chrome mdm-chrome--code";
+      el.className = chromeClass("mdm-chrome mdm-chrome--code", this);
       el.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
       return el;
     }
     ignoreEvent() {
       return true;
     }
+  }
+
+  // The two readings a rail of buttons carries from its widget: shown while its
+  // block's source is open, lifted over the others while the main caret is in
+  // the block.
+  function chromeClass(base, widget) {
+    return base + (widget.open ? " mdm-chrome--open" : "") + (widget.active ? " mdm-chrome--active" : "");
+  }
+
+  function switchChrome(chrome, widget) {
+    chrome.classList.toggle("mdm-chrome--open", widget.open);
+    chrome.classList.toggle("mdm-chrome--active", widget.active);
   }
 
   function chromeButton(cls, label, icon, tipSide) {
@@ -3801,11 +3893,12 @@
           const blockFrom = openLine.from;
           const blockTo = closeLine ? closeLine.to : doc.lineAt(n.to).to;
           const open = touched(blockFrom, blockTo);
+          const active = open && holdsMainHead(state, blockFrom, blockTo);
           if (open) delim(node, "CodeMark");
           if (isAbcInfo(infoText)) {
             decos.push(
               Decoration.widget({
-                widget: new ScoreWidget(source),
+                widget: new ScoreWidget(source, active, open),
                 block: true,
                 side: 1,
               }).range(blockTo)
@@ -3832,14 +3925,19 @@
             }
             return false;
           }
-          // The chrome rides the first line of the code as an inline widget of
-          // no size (a block widget at the fence would go with the fence when
-          // that line is hidden).
+          // The chrome rides the top line of the card as an inline widget of
+          // no size: the fence while it shows, the first line of code while
+          // it is hidden (a block widget at the fence would go with the fence
+          // when that line is hidden). The top line so that the rail stands
+          // level with the top of the card either way. At the fence's own
+          // backticks and not the start of its line, which in a list or a
+          // quote is not inside the block, and chromeSource finds the block
+          // from where the chrome stands.
           decos.push(
             Decoration.widget({
-              widget: new CodeChromeWidget(),
+              widget: new CodeChromeWidget(active, open),
               side: -1,
-            }).range(body ? body.from : openLine.to)
+            }).range(open ? n.from : body ? body.from : openLine.to)
           );
           lines.add(blockFrom, blockTo, "mdm-code-line");
           lines.card(blockFrom, blockTo);
@@ -3882,10 +3980,11 @@
           const blockTo = doc.lineAt(n.to).to;
           const out = renderTex(tex, true);
           const open = touched(blockFrom, blockTo);
+          const active = open && holdsMainHead(state, blockFrom, blockTo);
           if (open || out.html) {
             decos.push(
               Decoration.widget({
-                widget: new MathWidget(tex, true, true),
+                widget: new MathWidget(tex, true, true, false, active, open),
                 block: true,
                 side: 1,
               }).range(blockTo)
@@ -5294,6 +5393,13 @@
       }
       return;
     }
+    // The rail of a score between and around its buttons: still inside the
+    // widget, and so a click on the drawing to the code below, which would
+    // throw a caret that is editing the tune back to the head of its source.
+    if (e.target.closest(".mdm-chrome")) {
+      e.preventDefault();
+      return;
+    }
     const drawing = e.target.closest(".mdm-score, .mdm-math, .mdm-table");
     if (drawing) {
       e.preventDefault();
@@ -5370,43 +5476,15 @@
     view.focus();
   }
 
-  // The copy button of a code block shows while the pointer is on the block:
-  // the chrome is a zero-height row before the first line, so the hover is
-  // read off the lines and written onto the chrome as a class.
-  let shownChrome = null;
-  function handleMouseOver(e) {
-    const line = e.target.closest && e.target.closest(".cm-line");
-    let chrome = null;
-    if (line && line.classList.contains("mdm-code-line")) {
-      // Back over the lines of this block (and the hidden fence between
-      // them, a div with no class) to the one the chrome rides.
-      let el = line;
-      while (el) {
-        if (el.classList && el.classList.contains("cm-line")) {
-          if (!el.classList.contains("mdm-code-line")) break;
-          const c = el.querySelector(".mdm-chrome--code");
-          if (c) {
-            chrome = c;
-            break;
-          }
-        }
-        el = el.previousSibling;
-      }
-    } else if (e.target.closest && e.target.closest(".mdm-chrome--code")) {
-      chrome = e.target.closest(".mdm-chrome--code");
-    }
-    if (chrome === shownChrome) return;
-    if (shownChrome) shownChrome.classList.remove("mdm-chrome--show");
-    shownChrome = chrome;
-    if (chrome) chrome.classList.add("mdm-chrome--show");
-  }
-
-  // The source of the block a piece of chrome belongs to: a score carries it
-  // on its widget; a code block's chrome sits right before its first line,
-  // and the text is read back from the editor at that position.
+  // The source of the block a piece of chrome belongs to: a score and a
+  // display equation carry it on their widget; a code block's chrome sits at
+  // the start of the top line of its card, and the text is read back from the
+  // editor at that position.
   function chromeSource(el) {
     const score = el.closest(".mdm-score");
     if (score) return { source: score.getAttribute("data-mdm-source") || "", score: score };
+    const math = el.closest(".mdm-math--block");
+    if (math) return { source: math.getAttribute("data-mdm-source") || "", math: math };
     const chrome = el.closest(".mdm-chrome--code");
     if (!chrome || !view) return null;
     const pos = view.posAtDOM(chrome);
@@ -5429,6 +5507,129 @@
     return { source: body ? view.state.sliceDoc(body.from, body.to) : "", lines: lines };
   }
 
+  // ---- The rail under the pointer ----
+  //
+  // A rail of buttons is shown while the pointer is on its block
+  // (.mdm-chrome--hover), as it is while the block's source is open
+  // (.mdm-chrome--open, from the widgets): a score, a display equation or a
+  // block of code, its source lines included while they show, or the rail
+  // itself (style.css, `#app .mdm-chrome`). Where the rail of a short block
+  // hangs past it beside the next one's, the rail under the pointer is also
+  // drawn over the others, as the caret's is over the rest
+  // (.mdm-chrome--active).
+  //
+  // Which rail is read off the element under the pointer. A score and an
+  // equation are one element each with their rail inside; the source lines
+  // of either run straight into that element; a block of code is lines, and
+  // its chrome rides the top one of them.
+  function chromeUnder(target) {
+    if (!view || !target || !target.closest) return null;
+    const rail = target.closest(".mdm-chrome");
+    if (rail) return rail;
+    const drawing = target.closest(".mdm-score, .mdm-math--block");
+    if (drawing) return drawing.querySelector(":scope > .mdm-chrome");
+    const line = target.closest(".cm-line");
+    if (!line || !view.contentDOM.contains(line)) return null;
+    if (line.classList.contains("mdm-abc-line")) return railAfter(line, "mdm-abc-line", "mdm-score");
+    if (line.classList.contains("mdm-math-line")) return railAfter(line, "mdm-math-line", "mdm-math--block");
+    if (!line.classList.contains("mdm-code-line")) return null;
+    // Back up the lines of the block to the one the chrome rides. What stands
+    // between two of them with no class is a hidden fence; anything else with
+    // a class (a drawing, the cover of a block) is the end of the block.
+    for (let el = line; el; el = el.previousElementSibling) {
+      if (el.classList.contains("cm-line")) {
+        if (!el.classList.contains("mdm-code-line") || el.classList.contains("mdm-abc-line")) return null;
+        const chrome = el.querySelector(".mdm-chrome--code");
+        if (chrome) return chrome;
+      } else if (el.className) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function railAfter(line, lineClass, drawingClass) {
+    let el = line;
+    while (el && el.classList.contains(lineClass)) el = el.nextElementSibling;
+    return el && el.classList.contains(drawingClass) ? el.querySelector(":scope > .mdm-chrome") : null;
+  }
+
+  let hoveredRail = null;
+  let pointerAt = null;
+  function hoverRail(rail) {
+    if (rail === hoveredRail) return;
+    if (hoveredRail) hoveredRail.classList.remove("mdm-chrome--hover");
+    hoveredRail = rail;
+    if (rail) rail.classList.add("mdm-chrome--hover");
+  }
+
+  function handleRailPointer(e) {
+    pointerAt = { x: e.clientX, y: e.clientY };
+    hoverRail(chromeUnder(e.target));
+  }
+
+  function leaveRailPointer() {
+    pointerAt = null;
+    hoverRail(null);
+  }
+
+  // After CodeMirror redraws, the element under a pointer that has not moved
+  // may be a new one (a block opened by the click that just landed, its chrome
+  // moved from the first line of code to the fence), or a rail's element may
+  // have been handed to another block: read the pointer's place again.
+  let railRefresh = 0;
+  function refreshRailPointer() {
+    if (!pointerAt || railRefresh) return;
+    railRefresh = requestAnimationFrame(function () {
+      railRefresh = 0;
+      if (!pointerAt) return;
+      hoverRail(chromeUnder(document.elementFromPoint(pointerAt.x, pointerAt.y)));
+    });
+  }
+
+  // ---- The rail of an open block stays where it stood ----
+  //
+  // A score and a display equation are block widgets under their source, and
+  // the rail rides the widget: when a caret opened the source, the lines of
+  // it came in above the drawing and the rail went down with the drawing, a
+  // tune's height of source away from where the reader had just pressed its
+  // copy. The rail of an open one is stood on the first line of its source
+  // instead, which is where the top of the block was while it was shut, and
+  // where a block of code keeps its own rail either way (on its fence). The
+  // lift is read off the lines as they are laid out, since the source can be
+  // any number of rows and grows as it is typed, and it is read after every
+  // redraw of the view (CodeMirror's measure cycle, so before the frame is
+  // painted and the rail is never seen in the old place).
+  function placeOpenRails() {
+    if (!view) return;
+    view.requestMeasure({
+      key: "mdm-open-rails",
+      read: function () {
+        const moves = [];
+        view.contentDOM.querySelectorAll(":scope > .mdm-score, :scope > .mdm-math--block").forEach(function (block) {
+          const rail = block.querySelector(":scope > .mdm-chrome");
+          if (!rail) return;
+          const lineClass = block.classList.contains("mdm-score") ? "mdm-abc-line" : "mdm-math-line";
+          let first = null;
+          for (let el = block.previousElementSibling; el && el.classList.contains(lineClass); el = el.previousElementSibling) {
+            first = el;
+          }
+          const lift = first
+            ? (block.getBoundingClientRect().top - first.getBoundingClientRect().top) / (view.scaleY || 1)
+            : 0;
+          moves.push([rail, lift]);
+        });
+        return moves;
+      },
+      write: function (moves) {
+        moves.forEach(function (move) {
+          const top = move[1] > 0.5 ? -move[1] + "px" : "";
+          if (move[0].style.top !== top) move[0].style.top = top;
+        });
+      },
+    });
+  }
+
   const COPIED_MS = 1500;
 
   function copyBlock(button) {
@@ -5437,7 +5638,7 @@
     copyPlain(found.score ? stripLayoutDirectives(found.source) : found.source);
     // The answer is the tooltip itself, so it stays up for a beat and then
     // goes, rather than sitting there under a pointer that has not moved
-    // until the block loses the hover. A second and a half is long enough to
+    // until the pointer leaves the button. A second and a half is long enough to
     // be read without becoming a label of its own; it is what the copy
     // buttons of GitHub and the like hold theirs for.
     button.setAttribute("aria-label", "Copied");
@@ -5447,6 +5648,8 @@
     }, COPIED_MS);
     if (found.score) {
       pulseBlock(found.score);
+    } else if (found.math) {
+      pulseBlock(found.math);
     } else if (found.lines) {
       found.lines.forEach(pulseBlock);
     }
@@ -5583,6 +5786,8 @@
             // the hyphenation button at once, as it moves the cuts.
             updateHyphenationButton();
           }
+          refreshRailPointer();
+          placeOpenRails();
           if (update.docChanged || update.selectionSet) {
             updateUndoButtons();
             // The outline follows the document and the caret while it is open.
@@ -5631,7 +5836,10 @@
     });
     view.contentDOM.addEventListener("mousedown", handleMouseDown, true);
     view.contentDOM.addEventListener("click", handleChromeClick, true);
-    view.contentDOM.addEventListener("mouseover", handleMouseOver);
+    // On the scroller and not the text, so that the pointer going out into the
+    // margin lets a rail down as well as the pointer going onto another block.
+    view.scrollDOM.addEventListener("mousemove", handleRailPointer);
+    view.scrollDOM.addEventListener("mouseleave", leaveRailPointer);
     // Above the scroller, so the margins are dead before CodeMirror hears them.
     view.dom.addEventListener("mousedown", deadMargin, true);
     document.addEventListener("mousedown", dismissFromOutside, true);

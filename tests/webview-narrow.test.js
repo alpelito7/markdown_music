@@ -257,16 +257,18 @@ test("a line of source keeps its line, and its card scrolls to the end of it", {
   );
   // A card with nothing long in it holds nothing and draws no bar.
   assert.equal(narrow.code.tinyHeld, 0, "a card with room in it scrolls: " + narrow.code.tinyHeld);
-  // The copy button stays at the column's right edge and 4 px under the top
-  // of the card, and does not ride off to the end of the longest line.
+  // The copy button stands in the rail 10 px right of the column (the 50 px
+  // of the scroller's margin less the rail's 10 and the button's 24 leave
+  // 16 to the edge of the pane), level with the top of the card, and does not
+  // ride off to the end of the longest line.
   [wide, narrow].forEach(function (out) {
     assert.ok(
-      Math.abs(out.code.copyRight - (out.code.paneRight - 58)) <= 1,
-      "the copy button is not 8 px inside the column at " + out.pane + ": " + out.code.copyRight
+      Math.abs(out.code.copyRight - (out.code.paneRight - 16)) <= 1,
+      "the copy button is not in the rail beside the column at " + out.pane + ": " + out.code.copyRight
     );
     assert.ok(
-      Math.abs(out.code.copyTop - 4) <= 1,
-      "the copy button is not 4 px under the top of the card: " + out.code.copyTop
+      Math.abs(out.code.copyTop) <= 1,
+      "the copy button is not level with the top of the card: " + out.code.copyTop
     );
   });
   await h.close();

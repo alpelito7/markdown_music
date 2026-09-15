@@ -1147,6 +1147,8 @@ body {
   margin: 0;
   padding: 0.2em 0;
   cursor: pointer;
+  /* What the rail of its copy button is placed against (.mdm-chrome). */
+  position: relative;
 }
 /* A wide equation scrolls sideways inside its own box. Only sideways: with
    `overflow-x: auto` alone the vertical axis computes to auto as well, and
@@ -1195,50 +1197,149 @@ body {
   color: #c94f4f;
   padding: 0.2em 0.9em 0.6em;
 }
-/* The language tag and the copy button in the corner of a code block. The
-   chrome is a zero-height row before the first line; its buttons overlay the
-   card and show on hover (main.js marks the chrome while the pointer is on
-   the block). */
+/* The chrome of a block, its buttons: a rail in the margin right of the
+   column, the twin of the numbers in the margin left of it, on a score (the
+   copy over the headphones), a display equation and a block of code (the
+   copy alone). Nothing of it is the document's: it takes no height over,
+   under or inside its block and no width from the column, so a block stands
+   where the exported page stands it.
+
+   A score's buttons were a strip of 28px over the engraving, in the flow,
+   which the drawing started under. The strip was put there when a score was
+   scaled to the pane and its top row of ink climbed under buttons riding its
+   corner (e20d2c8); out in the margin the buttons are beside the ink at any
+   width instead, and the strip had become 28px of air between a paragraph
+   and its tune that no page has. A code block's copy rode the top right
+   corner of its card, over the end of a long first line, and an equation had
+   none.
+
+   Absolute, and still a DOM child of its block and of .cm-content: the
+   mousedown that keeps the caret where it is, the click that answers a button
+   and the two listeners that treat a press outside the text as leaving it all
+   key on that. The 10px off the column put the glyphs about 14px from it,
+   where the numbers stand on the other side; the rail's 24px then end 16px
+   inside the scroller's 50px of padding, which is the least margin at any
+   width, so it never reaches past the pane (a box past that padding is
+   scrollable overflow, and the document would scroll sideways by it).
+
+   A rail is shown while the reader is at its block, at the owner's request
+   (2026-09-14), and put away otherwise: under the pointer, on the drawing,
+   on its source lines or on the rail itself (.mdm-chrome--hover, main.js
+   chromeUnder); for as long as the block's source is open, whether or not
+   the pointer is there (.mdm-chrome--open, from the widgets); and a score's
+   headphones on their own for as long as its player is open, since they are
+   the lit sign of which tune the player is on, and would otherwise vanish as
+   the caret went back to the prose. It had been drawn on every block all the
+   time before this, which the owner found too much of the chrome at rest.
+   Put away is `visibility: hidden` and no pointer, so a press where a hidden
+   button stands goes to what is under it, and a pointer passing through the
+   margin beside a block does not bring its rail up; shown fades in and put
+   away does not fade, so nothing is seen leaving after the pointer has gone.
+
+   Where the rail of a short block hangs past it beside the next block's
+   rail, the two are stacked by where the reader is: the rail of the block the
+   main caret is in (.mdm-chrome--active, from the widgets in main.js) over
+   the others, and the rail under the pointer over that, since it is the one
+   the pointer is about to use. Above the selection and the caret layers (1
+   and 2, earlier in this file), so that a rail hanging over another block's
+   margin is never under a mark of the text; nothing that takes the pointer
+   reaches the margin today (both layers are cut to the column and to a
+   card's window), so no test sees the z-index either way (tests/README.md,
+   "The rail of buttons beside a block"). */
 #app .mdm-chrome {
-  position: relative;
-  height: 0;
-  z-index: 1;
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 3;
+  cursor: default;
+  pointer-events: none;
 }
-/* The code chrome is an inline widget inside the first line of the block, and
-   its buttons are placed against that line, which is relative up in the
-   .cm-line rule. */
-#app .mdm-chrome--code {
-  position: static;
+#app .mdm-chrome.mdm-chrome--active {
+  z-index: 4;
 }
-#app .mdm-chrome--code {
+#app .mdm-chrome.mdm-chrome--hover {
+  z-index: 5;
+}
+#app .mdm-chrome.mdm-chrome--hover,
+#app .mdm-chrome.mdm-chrome--open {
+  pointer-events: auto;
+}
+/* The 10px between the column and a shown rail, which the pointer crosses on
+   its way from the block to a button: a box of the rail's own over them, so
+   the pointer is on the rail all the way and the rail stays up. It is only
+   there while the rail takes the pointer, so a hidden rail's gap is margin
+   like any other. The rail's own box keeps its place 10px off the column. */
+#app .mdm-chrome::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: 10px;
+}
+#app .mdm-chrome .mdm-copy,
+#app .mdm-chrome .mdm-audio-toggle {
+  visibility: hidden;
   opacity: 0;
-  transition: opacity 0.12s ease;
 }
-#app .mdm-chrome--code.mdm-chrome--show,
-#app .mdm-chrome--code:hover,
-#app .mdm-score:hover .mdm-chrome,
-#app .mdm-score[data-mdm-audio] .mdm-chrome {
+#app .mdm-chrome.mdm-chrome--hover .mdm-copy,
+#app .mdm-chrome.mdm-chrome--hover .mdm-audio-toggle,
+#app .mdm-chrome.mdm-chrome--open .mdm-copy,
+#app .mdm-chrome.mdm-chrome--open .mdm-audio-toggle,
+#app .mdm-score[data-mdm-audio] > .mdm-chrome .mdm-audio-toggle {
+  visibility: visible;
   opacity: 1;
-}
-/* On a score the chrome gets a strip of its own above the engraving, rather
-   than riding over its top right corner. A score is scaled to the width of the
-   pane, so the narrower the pane the higher its top row of ink climbs: past
-   about 500px the last chord symbol came up under the buttons and was covered
-   by them. The strip is the height of a button and its 4px of clearance, and
-   it is what the drawing starts under. */
-#app .mdm-score .mdm-chrome {
-  height: 28px;
-  opacity: 0;
   transition: opacity 0.12s ease;
+}
+/* The headphones of a playing score take the pointer with the rest of its
+   rail away. */
+#app .mdm-score[data-mdm-audio] > .mdm-chrome .mdm-audio-toggle {
+  pointer-events: auto;
+}
+/* A score and a display equation are block widgets, and the rail is placed
+   against the widget, level with the top of the drawing. While the source is
+   open the lines of it stand over the drawing, and the rail is lifted onto
+   the first of them by an inline `top` (placeOpenRails in main.js), so it
+   stays where the top of the block was when the caret came in. The 10px
+   between the column and the buttons are margin, where a press leaves the
+   document as it does anywhere else beside the text (deadMargin in main.js),
+   unless the rail is up and its bridge is over them. */
+#app .mdm-score > .mdm-chrome,
+#app .mdm-math--block > .mdm-chrome {
+  top: 0;
+  left: calc(100% + 10px);
+}
+/* A block of code is lines and not a box, and its chrome is an inline widget
+   of no size at the start of the top line of the card. A card line clips what
+   stands outside it and carries a scroll of its own, so the rail is placed
+   against the COLUMN, which is what the container query is for: .cm-content
+   is the container, so 100cqi is the column whatever the line under it
+   measures, and the 10px are the other rails' 10. Its top is where the chrome
+   stands in the line (`top: auto`, the static position, the top of the first
+   row of the card's text), with the card's own padding-top taken back off,
+   which lands it on the top of the card (measured 0px).
+   Inline-flex and not flex, for a fence in a list item or a quote: there the
+   widget comes after the indent or the `> ` on its line, and a block-level
+   box's static position is under that line box instead of at its top, which
+   stood the rail 21px below the card, one row of code (measured). An
+   absolute box is blockified all the same; the static position is taken from
+   the display it was given. */
+#app .mdm-chrome.mdm-chrome--code {
+  display: inline-flex;
+  top: auto;
+  left: calc(100cqi + 10px);
+  margin-top: -0.55em;
 }
 /* The chrome ink, the colour every button of the editor is drawn in
    (.mdm-btn above), and one declaration for both sides: the token carries a
    light and a dark form, which is what the pair of slate greys written here
-   used to do by hand. */
+   used to do by hand. Stacked by the rail and not placed by hand; relative
+   and not static, because a tooltip is placed against its button. */
 #app .mdm-chrome .mdm-copy,
 #app .mdm-chrome .mdm-audio-toggle {
-  position: absolute;
-  top: 4px;
+  position: relative;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1247,39 +1348,6 @@ body {
   border-radius: 50%;
   color: var(--mdm-chrome-ink);
   cursor: pointer;
-}
-#app .mdm-chrome .mdm-copy {
-  right: 8px;
-}
-#app .mdm-chrome .mdm-audio-toggle {
-  right: 34px;
-}
-/* The copy button of a code block is the one piece of furniture the card
-   cannot hold. The chrome is an inline widget inside the card's first line,
-   so the button was placed against that line, and a card clips what stands
-   outside it and carries a scroll of its own for the button to ride away
-   with. It is placed against the COLUMN instead, which is what the container
-   query is for: .cm-content is the container, so 100cqi is the column
-   whatever the line under it measures, and 32px is the button's 24 and the 8
-   it stands off the edge by. It reached for the same thing once before and
-   for a different reason, when a line of source was as wide as its own text
-   and the button sat at the end of the longest line, off the pane.
-
-   Its top is where the chrome stands in the line rather than where the line's
-   box starts, since the line is not the frame any more: `top: auto` is the
-   static position, the top of the first row of the card's text, and the
-   card's own padding-top comes back off it so the button keeps the 4px of
-   clearance it had. Measured from the card's top edge: 4px before, 4.96
-   after, the difference being the half-leading of the code line's inline box.
-
-   Both of them stand here, after the rules of the chrome they are an
-   exception to, for the plain reason that they have to win against them: the
-   selectors are the same weight and it is the later one that is drawn. */
-#app .mdm-chrome--code .mdm-copy {
-  right: auto;
-  left: calc(100cqi - 32px);
-  top: auto;
-  margin-top: calc(4px - 0.55em);
 }
 /* 17px against the headphones' 18: the two shapes carry different amounts of
    ink at the same box, the headphones a solid band and the copy two thin
@@ -1561,6 +1629,9 @@ body {
 #app .cm-line.mdm-code-line.mdm-copy-pulse {
   animation: mdm-copy-pulse-code 0.5s ease-out;
 }
+#app .mdm-math--block.mdm-copy-pulse {
+  animation: mdm-copy-pulse 0.5s ease-out;
+}
 
 /* ---------- Quarto callouts ----------
 
@@ -1792,7 +1863,7 @@ body {
   background-color: var(--mdm-audio-disc-on) !important;
 }
 /* The headphones that put the player away, the bar's copy of the toggle in
-   the corner of the score. It is the only button here that is lit at rest,
+   the rail of the score. It is the only button here that is lit at rest,
    and it has to be: the lit disc is what says the player is open, which is
    the same thing this drawing says on the block. So it wears the state
    weight of the ladder from the start, exactly as a pushed play or a running
@@ -1813,7 +1884,7 @@ body {
 #app .mdm-audio .abcjs-inline-audio .mdm-audio-close:active {
   background-color: color-mix(in srgb, var(--mdm-play-accent) 40%, transparent) !important;
 }
-/* Drawn at exactly the size the pair in the corner of a score is drawn at,
+/* Drawn at exactly the size the pair in the rail of a score is drawn at,
    which is what it is a copy of: the same shapes (HEADPHONES_SHAPES in
    main.js), the same 18px, on the same 24px disc. abcjs pads its own buttons
    by 5px, which would leave this one at 14 and reading thinner than the

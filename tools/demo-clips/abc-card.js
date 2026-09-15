@@ -73,7 +73,7 @@ async function main() {
       };
       const first = line(doc.indexOf("```abc")).getBoundingClientRect();
       const last = line(doc.lastIndexOf("```")).getBoundingClientRect();
-      // The tallest svg is the engraving; the first one is a 17 px icon.
+      // The tallest svg is the engraving; the first ones are the icons of its rail.
       const svg = [...document.querySelectorAll("#app .mdm-score svg")].sort(
         (a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height
       )[0];

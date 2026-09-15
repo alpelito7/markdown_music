@@ -812,35 +812,47 @@ test("a click on a rendered equation or score opens it at the start of its sourc
 
 // ---- Code chrome ----
 
-test("a code block carries a copy button, and nothing else, on hover", { skip }, async () => {
+test("a code block carries a copy button, and nothing else, beside it", { skip }, async () => {
   const h = await open({ text: CODE, scores: 0 });
   assert.equal(await count(h.page, ".cm-line.mdm-code-line"), 1);
   assert.equal(await count(h.page, ".cm-line.mdm-fence-line"), 0);
   // The corner used to name the language as well ("python", beside the
-  // button); the chrome is the button alone now.
-  const chrome = await h.page.evaluate(() => {
-    const c = document.querySelector("#app .cm-line.mdm-code-line span.mdm-chrome.mdm-chrome--code");
-    return c
-      ? {
-          text: c.textContent,
-          copy: !!c.querySelector(".mdm-copy"),
-          shown: c.classList.contains("mdm-chrome--show"),
-        }
-      : null;
-  });
-  assert.deepEqual(chrome, { text: "", copy: true, shown: false });
-  const over = await coordsAt(h.page, (await posOf(h.page, "x = 1")) + 2);
-  await h.page.mouse.move(over.x, over.y);
-  await sleep(100);
-  assert.equal(await count(h.page, ".mdm-chrome--code.mdm-chrome--show"), 1);
+  // button); the chrome is the button alone now, in the rail in the margin,
+  // put away at rest and up while the pointer is on the block or its source
+  // is open. What is put away is the button, and the rail keeps its box.
+  const chrome = () =>
+    h.page.evaluate(() => {
+      const all = document.querySelectorAll("#app .mdm-chrome.mdm-chrome--code");
+      const c = all[0];
+      return c
+        ? {
+            rails: all.length,
+            text: c.textContent,
+            buttons: Array.from(c.children).map((b) => b.classList[0]),
+            shown: Array.from(c.children).every((b) => getComputedStyle(b).visibility === "visible"),
+          }
+        : null;
+    });
   const away = await coordsAt(h.page, 2);
   await h.page.mouse.move(away.x, away.y);
   await sleep(100);
-  assert.equal(await count(h.page, ".mdm-chrome--code.mdm-chrome--show"), 0);
+  assert.deepEqual(await chrome(), { rails: 1, text: "", buttons: ["mdm-copy"], shown: false });
+  const over = await coordsAt(h.page, (await posOf(h.page, "x = 1")) + 2);
+  await h.page.mouse.move(over.x, over.y);
+  await sleep(200);
+  assert.equal((await chrome()).shown, true, "the copy did not come up with the pointer on the block");
+  await h.page.mouse.move(away.x, away.y);
+  await sleep(100);
+  assert.equal((await chrome()).shown, false, "the copy stayed up with the pointer off the block");
   // A caret in the block shows the fences.
   await setSelection(h.page, await posOf(h.page, "x = 1"));
   assert.equal(await count(h.page, ".cm-line.mdm-fence-line"), 2);
   assert.equal(await count(h.page, ".cm-line.mdm-code-line"), 3);
+  // And takes the rail, still one for the block, to the top of the card, up
+  // with the pointer still off the block.
+  await sleep(200);
+  assert.deepEqual(await chrome(), { rails: 1, text: "", buttons: ["mdm-copy"], shown: true });
+  assert.equal(await count(h.page, ".cm-line.mdm-fence-line .mdm-chrome--code"), 1);
   assert.deepEqual(h.errors, []);
   await h.close();
 });

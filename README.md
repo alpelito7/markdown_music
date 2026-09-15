@@ -332,14 +332,16 @@ What it does:
   in the notification, with the whole story (the command, Quarto's own
   output) in the MDM output channel, one "Show log" away. A PDF asks for an
   engraver only when the document actually holds a score.
-- **Playback**: beside the copy button of every score (both appear on hover)
-  a pair of headphones opens a player in the toolbar, as a row of its own
-  under the buttons, with play/pause, stop, repeat, a draggable progress bar,
+- **Playback**: under the copy button of a score (the two stand in the margin
+  right of the text, beside the top of the score, while the pointer is on it
+  or its source is open) a pair of headphones
+  opens a player in the toolbar, as a row of its own under the buttons, with
+  play/pause, stop, repeat, a draggable progress bar,
   volume and mute. It sits there rather than under the score because a score
   can be a page long: the controls stay in view whatever part of the music
   the reader is looking at, and the progress runs the width of the pane. The
-  headphones of the score being played stay lit while it does, which is what
-  says which one it is. A real piano sounds
+  headphones of the score being played stay up and lit while its player is
+  open, which is what says which one it is. A real piano sounds
   without touching the network: the 88 notes of the Musyng Kite soundfont
   (CC BY-SA 3.0) are vendored, and the synthesis is the vendored abcjs. One
   player at a time. While a tune plays the notes light up on the engraving,
@@ -449,9 +451,12 @@ What it does:
   as a block of its own; the range carries an accent bar and a tint by type
   (note/tip/warning/important/caution), and the `:::` lines are drawn small
   and faint until the caret is on them. An unclosed `:::` stays plain text.
-- **Copying a block flashes the block, not the page**: the copy button in the
-  corner of any code block or score puts the source on the clipboard through
-  the API, with nothing selected and the caret left where it was. A score is
+- **Copying a block flashes the block, not the page**: the copy button of a
+  code block, a display equation or a score, in the margin right of the text
+  beside the block the pointer is on or whose source is open, puts the source
+  on the clipboard through
+  the API, with nothing selected and the caret left where it was (the formula
+  of an equation as written between its `$$`). A score is
   copied without its layout directives (`%%staffwidth` and the like), which
   size it for this document and mean nothing pasted elsewhere.
 - **The buttons remember what they were left on.** Every toolbar button that

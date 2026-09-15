@@ -24,6 +24,8 @@ const {
   docText,
   posOf,
   setSelection,
+  caretInBlock,
+  caretInScore,
   selectionRanges,
   lineAt,
   settingsMessage,
@@ -605,6 +607,13 @@ const PYTHON_SOURCE = (() => {
   return EXAMPLE.slice(start, EXAMPLE.indexOf("\n```", start));
 })();
 
+// The formula of the first display equation of the example, as written
+// between its $$ lines, which is what its copy button must hand over.
+const EQUATION_SOURCE = (() => {
+  const start = EXAMPLE.indexOf("\n$$\n") + "\n$$\n".length;
+  return EXAMPLE.slice(start, EXAMPLE.indexOf("\n$$\n", start));
+})();
+
 // Observed: a click on a copy button copies and labels, but its mousedown
 // also moves the caret into the block (score and code alike: the block opens
 // under the click). The score's pulse survives that, since its widget DOM is
@@ -618,23 +627,23 @@ test(
     const h = await open({
       clipboard: true,
     });
-    // Score: the chrome of the widget, shown while the pointer is on the score.
-    // Code: the chrome rides the first line of the block and shows while the
-    // pointer is on any of its lines. The score goes first so that the code
-    // pulse, the part that fails today, is the last thing checked.
-    for (const [kind, hoverSel, buttonSel] of [
-      ["score", "#app .mdm-score", "#app .mdm-score .mdm-chrome .mdm-copy"],
-      ["code", "#app .cm-line.mdm-code-line:has(.mdm-chrome--code)", "#app .mdm-chrome--code .mdm-copy"],
+    // Score, display equation and code: each carries its copy in a rail in the
+    // margin, up on the block the caret is in, so the caret goes into each in
+    // turn. The code goes last so that its pulse, the part that failed once,
+    // is the last thing checked.
+    for (const [kind, blockSel, buttonSel] of [
+      ["score", "#app .mdm-score", "#app .mdm-score .mdm-chrome--active .mdm-copy"],
+      ["equation", "#app .mdm-math--block", "#app .mdm-math--block .mdm-chrome--active .mdm-copy"],
+      ["code", "#app .cm-line.mdm-code-line:has(.mdm-chrome--code)", "#app .mdm-chrome--code.mdm-chrome--active .mdm-copy"],
     ]) {
-      // The button only exists visible while the pointer is over the block.
-      const hover = await h.page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        el.scrollIntoView({ block: "center" });
-        const r = el.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + Math.min(30, r.height / 2) };
-      }, hoverSel);
-      await h.page.mouse.move(hover.x, hover.y);
-      await sleep(300);
+      const caret = await caretInBlock(h.page, blockSel, 0);
+      // The caret was put there with a scroll into view, and CodeMirror
+      // redraws the lines of the view once that scroll lands, which resets the
+      // class list of every line of a card and takes a pulse with it (the
+      // note above). A press made in that window lost the pulse of a code
+      // block one run in ten; a reader's press comes after the page has
+      // stopped moving.
+      await sleep(500);
       const button = await h.page.evaluate((sel) => {
         const btn = document.querySelector(sel);
         const r = btn.getBoundingClientRect();
@@ -646,9 +655,14 @@ test(
         };
       }, buttonSel);
       assert.ok(button.w > 0, kind + ": no copy button to click");
-      assert.equal(button.opacity, "1", kind + ": the copy button is not shown on hover");
+      assert.equal(button.opacity, "1", kind + ": the copy button is not shown");
       await h.page.mouse.click(button.x, button.y);
       await sleep(200);
+      assert.deepEqual(
+        await h.page.evaluate(() => window.__mdm.view.state.selection.ranges.map((r) => [r.from, r.to])),
+        [[caret, caret]],
+        kind + ": the press on the copy button moved the caret"
+      );
       const out = await h.page.evaluate((sel, kind) => {
         const names = (els) =>
           Array.from(new Set(Array.from(els).map((el) => getComputedStyle(el).animationName)));
@@ -656,7 +670,7 @@ test(
         // card; the python block is the only code block of the example, its
         // fences carry no pulse, and the source lines of an opened score are
         // code lines too), and on the score that was copied, not its
-        // neighbours.
+        // neighbours, and on the box of the equation that was copied.
         const animations =
           kind === "code"
             ? names(
@@ -664,6 +678,8 @@ test(
                   "#app .cm-line.mdm-code-line:not(.mdm-fence-line):not(.mdm-src-line)"
                 )
               )
+            : kind === "equation"
+            ? names([document.querySelector(sel).closest(".mdm-math--block")])
             : names(
                 document.querySelector(sel).closest(".mdm-score").querySelectorAll("code.language-abc")
               );
@@ -680,6 +696,10 @@ test(
       if (kind === "code") {
         assert.equal(out.copied, PYTHON_SOURCE);
         assert.deepEqual(out.animations, ["mdm-copy-pulse-code"]);
+      } else if (kind === "equation") {
+        assert.ok(/\\sum/.test(EQUATION_SOURCE), "the fixture's first equation moved");
+        assert.equal(out.copied, EQUATION_SOURCE);
+        assert.deepEqual(out.animations, ["mdm-copy-pulse"]);
       } else {
         // A score drops the directives that size it for this document.
         assert.ok(!/%%staffwidth/.test(out.copied));
@@ -700,16 +720,9 @@ test(
 test("the copied sign is shown for a beat and then goes", { skip }, async () => {
   const h = await open({ clipboard: true });
   const SEL = "#app .mdm-score .mdm-chrome .mdm-copy";
-  // The chrome is drawn at opacity 0 and shown while the pointer is on the
-  // block, so the button has to be hovered before it can be clicked.
-  const where = await h.page.evaluate(() => {
-    const score = document.querySelector("#app .mdm-score");
-    score.scrollIntoView({ block: "center" });
-    const r = score.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + Math.min(30, r.height / 2) };
-  });
-  await h.page.mouse.move(where.x, where.y);
-  await sleep(300);
+  // The chrome of a score is up on the score the caret is in, so the caret
+  // goes there before the button can be clicked.
+  await caretInScore(h.page, 0);
   const button = await h.page.evaluate((sel) => {
     const r = document.querySelector(sel).getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -746,6 +759,546 @@ test("the copied sign is shown for a beat and then goes", { skip }, async () => 
     { label: "Copy", drawn: true, hovered: true },
     "the tooltip never came back"
   );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Every block that has buttons carries them in a rail in the margin right of
+// the column, the twin of the numbers in the margin left of it: a score (the
+// copy over the headphones), a display equation and a block of code (the copy
+// alone). The rail stands 10px off the column, level with the top of what it
+// belongs to (the drawing of a score or of an equation, the top of a card of
+// code, whether its fences show or not), inside the pane. It is up, drawn and
+// taking the pointer, while the pointer is on its block or the block's source
+// is open, and put away otherwise, at the owner's request (2026-09-14; it had
+// been drawn on every block all the time). The caret walks from one kind to
+// the next and out into the prose, and at every step the rail of the block
+// the caret opened is the one up, and carries the mark that lifts it over the
+// others; the pointer, on each kind of block with the caret out in the
+// prose, brings that block's rail up and no other.
+async function railsAt(page) {
+  return page.evaluate(() => {
+    const column = document.querySelector("#app .cm-content").getBoundingClientRect();
+    const scroller = document.querySelector("#app .cm-scroller");
+    const pane = scroller.getBoundingClientRect().left + scroller.clientWidth;
+    return Array.from(document.querySelectorAll("#app .mdm-chrome")).map((rail) => {
+      const r = rail.getBoundingClientRect();
+      const st = getComputedStyle(rail);
+      const score = rail.closest(".mdm-score");
+      const math = rail.closest(".mdm-math--block");
+      const card = rail.closest(".cm-line.mdm-code-line");
+      const top = (score || math || card).getBoundingClientRect().top;
+      return {
+        kind: score ? "score" : math ? "equation" : card ? "code" : "?",
+        buttons: Array.from(rail.children).map((b) => b.classList[0]),
+        drawn:
+          st.pointerEvents !== "none" &&
+          Array.from(rail.children).every((b) => getComputedStyle(b).visibility === "visible"),
+        active: rail.classList.contains("mdm-chrome--active"),
+        off: Math.round((r.left - column.right) * 100) / 100,
+        level: Math.abs(r.top - top) <= 0.5,
+        cardTop: card ? card.classList.contains("mdm-code-first") : null,
+        inPane: r.right <= pane + 0.5,
+        hit: Array.from(rail.children).every((b) => {
+          const q = b.getBoundingClientRect();
+          const el = document.elementFromPoint(q.x + q.width / 2, q.y + q.height / 2);
+          return !!el && b.contains(el);
+        }),
+      };
+    });
+  });
+}
+
+test("every block's buttons stand beside it in the margin, up while the reader is at the block", { skip }, async () => {
+  const h = await open({});
+  const score = ["mdm-copy", "mdm-audio-toggle"];
+  const rail = (kind, buttons, active, cardTop, up) => ({
+    kind,
+    buttons,
+    drawn: !!up,
+    active: !!active,
+    off: 10,
+    level: true,
+    cardTop: kind === "code" ? cardTop : null,
+    inPane: true,
+    hit: !!up,
+  });
+  // The equation, the first score, the python card and the two scores after
+  // it, in the order example.mdm writes them. `activeKind` is the block the
+  // caret opened, `upAt` the index of a rail brought up by the pointer.
+  const expect = (activeKind, cardTop, upAt) => [
+    rail("equation", ["mdm-copy"], activeKind === "equation", undefined, activeKind === "equation" || upAt === 0),
+    rail("score", score, activeKind === "score", undefined, activeKind === "score" || upAt === 1),
+    rail("code", ["mdm-copy"], activeKind === "code", cardTop, activeKind === "code" || upAt === 2),
+    rail("score", score, false, undefined, upAt === 3),
+    rail("score", score, false, undefined, upAt === 4),
+  ];
+  // Each rail is read with its block in view, since a hit test off the pane
+  // meets nothing.
+  const readAll = async () => {
+    const out = [];
+    const n = await h.page.evaluate(() => document.querySelectorAll("#app .mdm-chrome").length);
+    for (let i = 0; i < n; i++) {
+      await h.page.evaluate((i) => document.querySelectorAll("#app .mdm-chrome")[i].scrollIntoView({ block: "center" }), i);
+      await sleep(50);
+      out.push((await railsAt(h.page))[i]);
+    }
+    return out;
+  };
+  assert.deepEqual(await readAll(), expect(null, true), "the rails of a document nobody is in");
+  // The drawings are tagged before the caret goes anywhere: the mark going on
+  // or off switches a class on the rail and does not draw the score or the
+  // equation again (the widget's updateDOM).
+  await h.page.evaluate(() => {
+    const score = document.querySelector("#app .mdm-score");
+    const math = document.querySelector("#app .mdm-math--block");
+    score.__tag = "score";
+    score.querySelector("svg").__tag = "engraving";
+    math.__tag = "math";
+    math.querySelector(".katex-display").__tag = "katex";
+  });
+  const kept = () =>
+    h.page.evaluate(() => {
+      const score = document.querySelector("#app .mdm-score");
+      const math = document.querySelector("#app .mdm-math--block");
+      return [score.__tag, score.querySelector("svg").__tag, math.__tag, math.querySelector(".katex-display").__tag];
+    });
+  const tags = ["score", "engraving", "math", "katex"];
+  const marked = () => h.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-chrome")).map((r) => r.classList.contains("mdm-chrome--active")));
+  await caretInBlock(h.page, "#app .mdm-score", 0);
+  assert.deepEqual(await marked(), [false, true, false, false, false], "in a score");
+  assert.deepEqual(await kept(), tags, "a caret going into a score drew a drawing again");
+  await caretInBlock(h.page, "#app .mdm-math--block", 0);
+  assert.deepEqual(await marked(), [true, false, false, false, false], "in an equation");
+  assert.deepEqual(await kept(), tags, "a caret going from a score into an equation drew a drawing again");
+  await caretInBlock(h.page, "#app .cm-line.mdm-code-line:has(.mdm-chrome--code)", 0);
+  assert.deepEqual(await readAll(), expect("code", true), "in a block of code, its fences showing");
+  assert.deepEqual(await kept(), tags, "a caret leaving an equation drew a drawing again");
+  // Out into the prose. The top of a card whose fences are hidden is its
+  // first line of code, and the rail of a shut card stands there.
+  await setSelection(h.page, 3);
+  await sleep(300);
+  assert.deepEqual(await readAll(), expect(null, true), "back in the prose");
+  const shut = await h.page.evaluate(() => {
+    const rail = document.querySelector("#app .mdm-chrome--code");
+    const line = rail.closest(".cm-line");
+    return line.classList.contains("mdm-code-first") && !line.classList.contains("mdm-fence-line");
+  });
+  assert.equal(shut, true, "the rail of a shut card is not on its first line of code");
+  // The pointer on each block in turn, the caret out in the prose: a line of
+  // the card below the first for the code, the drawing for the others.
+  const spots = ["#app .mdm-math--block", "#app .mdm-score", "#app .cm-line.mdm-code-line:has(.mdm-chrome--code)", "#app .mdm-score", "#app .mdm-score"];
+  const scoreIndex = [null, 0, null, 1, 2];
+  for (let i = 0; i < spots.length; i++) {
+    const at = await h.page.evaluate(
+      (sel, n, code) => {
+        const el = document.querySelectorAll(sel)[n];
+        el.scrollIntoView({ block: "center" });
+        const r = el.getBoundingClientRect();
+        return code ? { x: r.left + 60, y: r.bottom + 30 } : { x: r.left + 40, y: r.top + 12 };
+      },
+      spots[i],
+      scoreIndex[i] || 0,
+      i === 2
+    );
+    await h.page.mouse.move(at.x, at.y);
+    await sleep(250);
+    const all = await railsAt(h.page);
+    assert.deepEqual(
+      all.map((r) => r.drawn),
+      expect(null, true, i).map((r) => r.drawn),
+      "the pointer on the " + all[i].kind + " at " + i
+    );
+  }
+  await h.page.mouse.move(5, 5);
+  await sleep(250);
+  assert.deepEqual((await railsAt(h.page)).map((r) => r.drawn), [false, false, false, false, false], "a rail stayed up after the pointer left");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The rail of a block stays where it stood when the block's source opens: at
+// the top of the block, which is the first line of the source once it shows.
+// A score and an equation are drawn under their source, and their rail rode
+// the drawing down by the height of the source the moment a click opened it,
+// away from under the pointer that had just brought it up (seen by the owner,
+// 2026-09-14). Read in the document's own coordinates, since opening a block
+// near the foot of the pane scrolls the view to show the caret, which moves
+// the text and the rail alike. Then a row typed into the source: the rail
+// stays on the first line. A card of code keeps its rail on its top line
+// either way, the fence or the first line of code.
+test("a block's buttons stay where they stood when its source opens", { skip }, async () => {
+  const h = await open({});
+  const read = (sel, i) =>
+    h.page.evaluate(
+      (sel, i) => {
+        const el = document.querySelectorAll(sel)[i];
+        const rail = el.matches(".cm-line") ? el.querySelector(".mdm-chrome--code") : el.querySelector(":scope > .mdm-chrome");
+        const scroller = document.querySelector("#app .cm-scroller");
+        let first = null;
+        if (!el.matches(".cm-line")) {
+          const cls = el.matches(".mdm-score") ? "mdm-abc-line" : "mdm-math-line";
+          for (let l = el.previousElementSibling; l && l.classList.contains(cls); l = l.previousElementSibling) first = l;
+        }
+        return {
+          doc: rail.getBoundingClientRect().top + scroller.scrollTop,
+          onFirst: first ? Math.round((rail.getBoundingClientRect().top - first.getBoundingClientRect().top) * 100) / 100 : null,
+        };
+      },
+      sel,
+      i
+    );
+  for (const [sel, i, kind] of [["#app .mdm-score", 1, "score"], ["#app .mdm-math--block", 0, "equation"]]) {
+    await setSelection(h.page, 3);
+    await sleep(250);
+    const at = await h.page.evaluate(
+      (sel, i) => {
+        const el = document.querySelectorAll(sel)[i];
+        el.scrollIntoView({ block: "center" });
+        const r = el.getBoundingClientRect();
+        return { x: r.left + 40, y: r.top + 12 };
+      },
+      sel,
+      i
+    );
+    await h.page.mouse.move(at.x, at.y);
+    await sleep(250);
+    const shut = await read(sel, i);
+    assert.equal(shut.onFirst, null, "the " + kind + " is open before the click");
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(500);
+    const opened = await read(sel, i);
+    assert.ok(opened.onFirst !== null, "the click did not open the " + kind);
+    assert.ok(
+      Math.abs(opened.doc - shut.doc) <= 0.5,
+      "the " + kind + "'s rail moved " + (opened.doc - shut.doc).toFixed(1) + "px as its source opened"
+    );
+    assert.equal(opened.onFirst, 0, "the " + kind + "'s rail is not on the first line of its source");
+    // A row typed under the first line of the source.
+    const firstRowEnd = await h.page.evaluate(
+      (sel, i) => {
+        const view = window.__mdm.view;
+        const el = document.querySelectorAll(sel)[i];
+        let first = null;
+        const cls = el.matches(".mdm-score") ? "mdm-abc-line" : "mdm-math-line";
+        for (let l = el.previousElementSibling; l && l.classList.contains(cls); l = l.previousElementSibling) first = l;
+        return view.state.doc.lineAt(view.posAtDOM(first)).to;
+      },
+      sel,
+      i
+    );
+    await setSelection(h.page, firstRowEnd);
+    await sleep(200);
+    await h.page.keyboard.press("Enter");
+    await h.page.keyboard.type(kind === "score" ? "%typed" : "% typed");
+    await sleep(400);
+    const typed = await read(sel, i);
+    assert.equal(typed.onFirst, 0, "a row typed into the " + kind + "'s source moved its rail off the first line");
+    assert.ok(Math.abs(typed.doc - shut.doc) <= 0.5, "a row typed into the " + kind + "'s source moved its rail");
+    await h.page.keyboard.down("Control");
+    await h.page.keyboard.press("z");
+    await h.page.keyboard.up("Control");
+    await sleep(300);
+  }
+  // The card of code: its rail from the first line of code to the fence.
+  await setSelection(h.page, 3);
+  await sleep(250);
+  const code = "#app .cm-line.mdm-code-line:has(.mdm-chrome--code)";
+  await h.page.evaluate((sel) => document.querySelector(sel).scrollIntoView({ block: "center" }), code);
+  await sleep(200);
+  const shutCode = await read(code, 0);
+  await caretInBlock(h.page, code, 0);
+  await sleep(300);
+  const openCode = await read(code, 0);
+  assert.ok(Math.abs(openCode.doc - shutCode.doc) <= 0.5, "the card's rail moved " + (openCode.doc - shutCode.doc).toFixed(1) + "px as its fences showed");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A rail that is put away is not there for the pointer: brought straight to
+// where a score's copy stands, without crossing the score, the pointer finds
+// the margin, the rail stays down and a press there copies nothing.
+test("a put-away rail brings nothing up and takes no press", { skip }, async () => {
+  const h = await open({ clipboard: true });
+  const at = await h.page.evaluate(() => {
+    const score = document.querySelector("#app .mdm-score");
+    score.scrollIntoView({ block: "center" });
+    const r = score.querySelector(".mdm-copy").getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await h.page.mouse.move(at.x + 300, at.y);
+  await sleep(200);
+  await h.page.mouse.move(at.x, at.y);
+  await sleep(300);
+  const seen = await h.page.evaluate(() => {
+    const score = document.querySelector("#app .mdm-score");
+    const copy = score.querySelector(".mdm-copy");
+    const r = copy.getBoundingClientRect();
+    const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return {
+      visible: getComputedStyle(copy).visibility === "visible",
+      hovered: score.querySelector(".mdm-chrome").classList.contains("mdm-chrome--hover"),
+      reached: !!el && !!el.closest(".mdm-chrome"),
+    };
+  });
+  assert.deepEqual(seen, { visible: false, hovered: false, reached: false }, "the pointer in the margin met a put-away rail");
+  await h.page.mouse.click(at.x, at.y);
+  await sleep(500);
+  assert.deepEqual(await h.page.evaluate(() => window.__copied || []), [], "a press in the margin copied a score");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Where the rail of a short block hangs beside the next block's rail, which of
+// the two is on top follows the reader: the rail of the block under the
+// pointer (a score, a line of code below the first, an equation, or the rail
+// itself) over every other, then the rail of the block the caret is in, then
+// the rest. The pointer in the margin under a rail is on no block.
+test("the rail of the block under the pointer is drawn over the rest", { skip }, async () => {
+  const h = await open({});
+  const layers = () =>
+    h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-chrome")).map((r) => [
+        r.closest(".mdm-score") ? "score" : r.closest(".mdm-math--block") ? "equation" : "code",
+        Number(getComputedStyle(r).zIndex),
+      ])
+    );
+  const top = async () => (await layers()).filter((l) => l[1] === 5).map((l) => l[0]);
+  const box = (sel, i) =>
+    h.page.evaluate(
+      (sel, i) => {
+        const el = document.querySelectorAll(sel)[i || 0];
+        el.scrollIntoView({ block: "center" });
+        const r = el.getBoundingClientRect();
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+      },
+      sel,
+      i
+    );
+
+  assert.deepEqual((await layers()).map((l) => l[1]), [3, 3, 3, 3, 3], "a rail is lifted with nobody in the document");
+  const score = await box("#app .mdm-score");
+  await h.page.mouse.move(score.left + 200, score.top + 12);
+  await sleep(250);
+  assert.deepEqual(await top(), ["score"], "pointing at a score");
+  const button = await h.page.evaluate(() => {
+    const b = document.querySelector("#app .mdm-score .mdm-chrome .mdm-copy").getBoundingClientRect();
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  });
+  await h.page.mouse.move(button.x, button.y);
+  await sleep(250);
+  assert.deepEqual(await top(), ["score"], "pointing at the score's own copy");
+  await h.page.mouse.move(button.x, score.top + 90);
+  await sleep(250);
+  assert.deepEqual(await top(), [], "a rail stayed on top with the pointer in the margin under it");
+
+  const code = await box("#app .cm-line.mdm-code-line:has(.mdm-chrome--code)");
+  await h.page.mouse.move(code.left + 60, code.bottom + 30);
+  await sleep(250);
+  assert.deepEqual(await top(), ["code"], "pointing at a line of code below the first");
+  const equation = await box("#app .mdm-math--block");
+  await h.page.mouse.move(equation.left + 40, equation.top + 10);
+  await sleep(250);
+  assert.deepEqual(await top(), ["equation"], "pointing at an equation");
+
+  // The caret in the score, the pointer on the equation.
+  const again = await box("#app .mdm-score");
+  await h.page.mouse.click(again.left + 200, again.top + 30);
+  await sleep(400);
+  const eq2 = await box("#app .mdm-math--block");
+  await h.page.mouse.move(eq2.left + 40, eq2.top + 10);
+  await sleep(250);
+  assert.deepEqual(
+    await layers(),
+    [["equation", 5], ["score", 4], ["code", 3], ["score", 3], ["score", 3]],
+    "the pointer's rail over the caret's, and the caret's over the rest"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A selection that runs over several blocks marks one rail, where its head is,
+// and none when its head is out in the prose: Shift+Arrow from inside a score
+// down into the code under it, and Ctrl+A over the whole document. A fence
+// written inside a list item or a quote carries its rail like any other, 10px
+// off the column and level with the top of its card: the widget comes after
+// the indent or the `> ` there, and a rail laid out as a block used to stand
+// one row of code lower.
+const NESTED = [
+  "A score with code right under it.",
+  "",
+  "```abc",
+  "X:1",
+  "L:1/4",
+  "K:C",
+  "C|",
+  "```",
+  "```python",
+  "x = 1",
+  "```",
+  "",
+  "- An item holding code:",
+  "",
+  "  ```python",
+  "  inlist = 1",
+  "  more = 2",
+  "  ```",
+  "",
+  "> ```sh",
+  "> inquote",
+  "> ```",
+  "",
+  "The end.",
+  "",
+].join("\n");
+
+test("a selection over several blocks marks one rail, and a nested fence carries its own", { skip }, async () => {
+  const h = await open({ text: NESTED, scores: 1 });
+  const marked = () =>
+    h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-chrome.mdm-chrome--active")).map((r) =>
+        r.closest(".mdm-score") ? "score" : r.closest(".cm-line").textContent.trim()
+      )
+    );
+  const score = await caretInBlock(h.page, "#app .mdm-score", 0);
+  // From the C of the tune, down through its fence into the python under it.
+  await setSelection(h.page, score - "```".length - 2);
+  await sleep(200);
+  for (let i = 0; i < 3; i++) {
+    await h.page.keyboard.down("Shift");
+    await h.page.keyboard.press("ArrowDown");
+    await h.page.keyboard.up("Shift");
+    await sleep(150);
+  }
+  const span = await h.page.evaluate(() => {
+    const sel = window.__mdm.view.state.selection.main;
+    const doc = window.__mdm.view.state.doc.toString();
+    const fence = doc.indexOf("```python");
+    return { from: sel.from, head: sel.head, fence, end: doc.indexOf("```", fence + 3) + 3 };
+  });
+  assert.ok(span.from < span.fence && span.head >= span.fence && span.head <= span.end, "the selection does not run from the tune into the code: " + JSON.stringify(span));
+  assert.equal((await marked()).length, 1, "a selection over two blocks marked " + JSON.stringify(await marked()));
+  assert.ok(!(await marked()).includes("score"), "the mark stayed on the block the selection started in");
+  await h.page.keyboard.down("Control");
+  await h.page.keyboard.press("a");
+  await h.page.keyboard.up("Control");
+  await sleep(300);
+  assert.deepEqual(await marked(), [], "Ctrl+A marked the rails of the blocks it covers");
+
+  for (const [needle, kind] of [["inlist = 1", "list"], ["inquote", "quote"]]) {
+    await setSelection(h.page, await posOf(h.page, needle));
+    await sleep(300);
+    const seen = await h.page.evaluate(() => {
+      const up = Array.from(document.querySelectorAll("#app .mdm-chrome.mdm-chrome--active"));
+      if (up.length !== 1) return { count: up.length };
+      const rail = up[0];
+      const column = document.querySelector("#app .cm-content").getBoundingClientRect();
+      const r = rail.getBoundingClientRect();
+      // The top of the card: the fence line the rail rides while the block
+      // is open.
+      const line = rail.closest(".cm-line");
+      return {
+        count: 1,
+        fence: line.classList.contains("mdm-fence-line"),
+        off: Math.round((r.left - column.right) * 100) / 100,
+        level: Math.round((r.top - line.getBoundingClientRect().top) * 100) / 100,
+      };
+    });
+    assert.deepEqual(seen, { count: 1, fence: true, off: 10, level: 0 }, "the rail of the code in the " + kind);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The buttons are the editor's and not the document's, so they take nothing
+// from it: no strip over a score (there was one, 28px, which put air between
+// a paragraph and its tune that the exported page does not have), no height
+// under a block or inside it, and no width from the column. Read twice: a
+// score as the caret leaves it, the drawing's box being the widget's box; and
+// every box of the document with every rail of every kind forced up against
+// every rail put away, which is the whole of the claim.
+test("a block's rail takes no room in the document, shown or hidden", { skip }, async () => {
+  const h = await open({});
+  const edges = () =>
+    h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-score")).map((b) => {
+        const s = b.getBoundingClientRect();
+        const c = b.querySelector("code.language-abc").getBoundingClientRect();
+        return {
+          top: Math.abs(c.top - s.top) <= 0.5,
+          bottom: Math.abs(c.bottom - s.bottom) <= 0.5,
+          width: Math.abs(c.width - s.width) <= 0.5,
+        };
+      })
+    );
+  const whole = { top: true, bottom: true, width: true };
+  assert.deepEqual(await edges(), [whole, whole, whole], "a score's box is more than its drawing");
+  await caretInScore(h.page, 1);
+  assert.deepEqual(await edges(), [whole, whole, whole], "the rail of the caret's score takes room");
+
+  const layout = await h.page.evaluate(() => {
+    const scroller = document.querySelector("#app .cm-scroller");
+    const content = document.querySelector("#app .cm-content");
+    const read = () =>
+      JSON.stringify({
+        content: [content.getBoundingClientRect().width, content.scrollHeight],
+        sideways: scroller.scrollWidth - scroller.clientWidth,
+        boxes: Array.from(
+          content.querySelectorAll(".cm-line, .mdm-score, .mdm-score code.language-abc, .mdm-math--block, .katex-display")
+        ).map((el) => {
+          const r = el.getBoundingClientRect();
+          return [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 100) / 100);
+        }),
+        // And where the words of a card and the maths of an equation start,
+        // which a rail standing inline beside them would push along without
+        // moving a single box.
+        // The first run of text of each, read off the text node and not the
+        // element, whose range would take in the rail riding the line.
+        ink: Array.from(content.querySelectorAll(".cm-line.mdm-code-line, .katex-display .katex")).map((el) => {
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+            acceptNode: (t) =>
+              t.textContent.trim() && !t.parentElement.closest(".mdm-chrome")
+                ? NodeFilter.FILTER_ACCEPT
+                : NodeFilter.FILTER_SKIP,
+          });
+          const text = walk.nextNode();
+          if (!text) return null;
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          const r = range.getBoundingClientRect();
+          return [r.left, r.top].map((v) => Math.round(v * 100) / 100);
+        }),
+      });
+    const rails = Array.from(document.querySelectorAll("#app .mdm-chrome"));
+    const kinds = {
+      score: rails.filter((r) => r.closest(".mdm-score")).length,
+      equation: rails.filter((r) => r.closest(".mdm-math--block")).length,
+      code: rails.filter((r) => r.classList.contains("mdm-chrome--code")).length,
+    };
+    const was = rails.map((r) => r.classList.contains("mdm-chrome--active"));
+    rails.forEach((r) => r.classList.add("mdm-chrome--active"));
+    const up = read();
+    rails.forEach((r) => r.classList.remove("mdm-chrome--active"));
+    const down = read();
+    // And against no rail at all: a hidden rail keeps its box, so the two
+    // readings above would agree about a rail that stood in the flow either
+    // way.
+    rails.forEach((r) => (r.style.display = "none"));
+    const gone = read();
+    rails.forEach((r) => r.style.removeProperty("display"));
+    rails.forEach((r, i) => r.classList.toggle("mdm-chrome--active", was[i]));
+    return { up, down, gone, same: up === down && down === gone, sideways: JSON.parse(up).sideways, kinds };
+  });
+  assert.ok(
+    layout.kinds.score > 0 && layout.kinds.equation > 0 && layout.kinds.code > 0,
+    "the fixture lacks a kind of rail: " + JSON.stringify(layout.kinds)
+  );
+  assert.equal(
+    layout.same,
+    true,
+    "the document moves with the rails:\n" + layout.up + "\n" + layout.down + "\n" + layout.gone
+  );
+  assert.equal(layout.sideways, 0, "the rails scroll the document sideways");
   assert.deepEqual(h.errors, []);
   await h.close();
 });

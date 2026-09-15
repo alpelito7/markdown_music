@@ -31,6 +31,7 @@ const {
   docText,
   posOf,
   setSelection,
+  caretInScore,
   settingsMessage,
   postSettings,
   setSettingPosts,
@@ -215,7 +216,7 @@ async function noteGrid(page) {
   });
 }
 
-test("every score gets a player toggle beside the copy button; other code does not", { skip }, async () => {
+test("every score gets a player toggle under the copy button; other code does not", { skip }, async () => {
   const h = await open({});
   const counts = await h.page.evaluate(() => {
     const scores = Array.from(document.querySelectorAll("#app .mdm-score"));
@@ -235,44 +236,357 @@ test("every score gets a player toggle beside the copy button; other code does n
   assert.ok(counts.others >= 1, "the fixture keeps a non-score code block");
   assert.equal(counts.othersWithToggle, 0);
 
-  // Hidden until the block is hovered, like the copy button, and then sitting
-  // on its left at the same height. The chrome fades in (opacity), so that is
-  // what is read.
+  // Put away with nobody in the document; shown on the score under the
+  // pointer and on the score whose source the caret opened, and on no other.
+  const shown = () =>
+    h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-score")).map((b) =>
+        Array.from(b.querySelectorAll(".mdm-chrome > *")).every((btn) => getComputedStyle(btn).visibility === "visible")
+      )
+    );
+  assert.deepEqual(await shown(), [false, false, false], "a score's rail is up on a document nobody is in");
   const spot = await h.page.evaluate(() => {
     const block = document.querySelector("#app .mdm-score");
     block.scrollIntoView({ block: "center" });
     const r = block.querySelector("code.language-abc").getBoundingClientRect();
-    const chrome = block.querySelector(".mdm-chrome");
-    return {
-      x: r.x + r.width / 2,
-      y: r.y + 8,
-      hiddenBefore: getComputedStyle(chrome).opacity === "0",
-    };
+    return { x: r.x + r.width / 2, y: r.y + 8 };
   });
-  assert.equal(spot.hiddenBefore, true, "toggle visible without hover");
   await h.page.mouse.move(spot.x, spot.y);
-  await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(await shown(), [true, false, false], "the pointer on the first score");
+  await h.page.mouse.move(5, 5);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(await shown(), [false, false, false], "a rail stayed up after the pointer left");
+
+  await caretInScore(h.page, 0);
+  assert.deepEqual(await shown(), [true, false, false], "the caret in the first score");
+  // Stacked in the margin right of the column: the copy over the headphones,
+  // on one axis, the whole rail past the column's edge and inside the pane,
+  // level with the top of the block, which with its source open is the
+  // score's opening fence.
   const boxes = await h.page.evaluate(() => {
     const block = document.querySelector("#app .mdm-score");
-    const toggle = block.querySelector(".mdm-audio-toggle");
-    const copy = block.querySelector(".mdm-copy");
-    const t = toggle.getBoundingClientRect();
-    const c = copy.getBoundingClientRect();
+    const column = document.querySelector("#app .cm-content").getBoundingClientRect();
+    const scroller = document.querySelector("#app .cm-scroller");
+    const pane = scroller.getBoundingClientRect().left + scroller.clientWidth;
+    const rail = block.querySelector(".mdm-chrome");
+    const t = block.querySelector(".mdm-audio-toggle").getBoundingClientRect();
+    const c = block.querySelector(".mdm-copy").getBoundingClientRect();
     return {
-      visible:
-        getComputedStyle(block.querySelector(".mdm-chrome")).opacity === "1" &&
-        t.width > 0,
-      tx: t.x,
-      cx: c.x,
-      // Centres, not top edges: the headphones are drawn a size larger than
-      // the copy button, so their boxes no longer start at the same y.
-      tMid: t.y + t.height / 2,
-      cMid: c.y + c.height / 2,
+      order: Array.from(rail.children).map((b) => b.classList[0]),
+      tTop: t.top,
+      cBottom: c.bottom,
+      // Centres, not left edges, for the same reason as below: the two are
+      // one box apiece and the glyphs are drawn at two sizes inside them.
+      axis: Math.abs(t.x + t.width / 2 - (c.x + c.width / 2)),
+      railLeft: rail.getBoundingClientRect().left - column.right,
+      railRight: pane - rail.getBoundingClientRect().right,
+      railTop: rail.getBoundingClientRect().top - fenceTop(block),
+    };
+    function fenceTop(score) {
+      let first = null;
+      for (let el = score.previousElementSibling; el && el.classList.contains("mdm-abc-line"); el = el.previousElementSibling) first = el;
+      return first.getBoundingClientRect().top;
+    }
+  });
+  assert.deepEqual(boxes.order, ["mdm-copy", "mdm-audio-toggle"]);
+  assert.ok(boxes.cBottom <= boxes.tTop, "the copy is not over the headphones");
+  assert.ok(boxes.axis <= 0.5, "the two buttons are off one axis by " + boxes.axis + "px");
+  assert.ok(boxes.railLeft >= 0, "the rail stands " + -boxes.railLeft + "px inside the column");
+  assert.ok(boxes.railRight >= 0, "the rail hangs " + -boxes.railRight + "px past the pane");
+  assert.ok(Math.abs(boxes.railTop) <= 0.5, "the rail is not level with the fence of its open score: " + boxes.railTop);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Two scores one straight under the other, the case where the rail of the
+// first can hang beside the rail of the second. A rail is up and answers a
+// press on the score whose source a caret opened, and on the score the
+// pointer is brought to, nobody being in the document; the caret going from
+// the first to the second takes with it the mark that puts its score's rail
+// on top, at once, and two carets, one in each, bring both rails up and give
+// the mark to the main caret's.
+const BACK_TO_BACK = [
+  "A paragraph over two scores.",
+  "",
+  "```abc",
+  "X:1",
+  "L:1/4",
+  "K:C",
+  "C|",
+  "```",
+  "```abc",
+  "X:2",
+  "L:1/4",
+  "K:C",
+  "G|",
+  "```",
+  "",
+  "A paragraph under them.",
+  "",
+].join("\n");
+
+async function railsUp(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-score")).map((b) => {
+      const rail = b.querySelector(".mdm-chrome");
+      // What a pointer meets at the middle of each button of the rail.
+      const hit = Array.from(rail.children).map((btn) => {
+        const r = btn.getBoundingClientRect();
+        const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return !!el && btn.contains(el);
+      });
+      return {
+        active: rail.classList.contains("mdm-chrome--active"),
+        drawn: Array.from(rail.children).every((btn) => getComputedStyle(btn).visibility === "visible"),
+        hit,
+      };
+    })
+  );
+}
+
+test("the caret's mark goes with it from one score to the next, and every rail takes a press", { skip }, async () => {
+  const h = await open({ text: BACK_TO_BACK, scores: 2, clipboard: true });
+  const rest = { active: false, drawn: false, hit: [false, false] };
+  const open_ = { active: false, drawn: true, hit: [true, true] };
+  const caret = { active: true, drawn: true, hit: [true, true] };
+  assert.deepEqual(await railsUp(h.page), [rest, rest], "the rails of a document nobody is in");
+
+  // A real press on the copy of each score, nobody in the document, the
+  // pointer brought onto the score and across the margin to its copy the way
+  // a hand brings it: each copies its own tune, and no caret goes into either.
+  for (let i = 0; i < 2; i++) {
+    const at = await h.page.evaluate((i) => {
+      const score = document.querySelectorAll("#app .mdm-score")[i];
+      const s = score.querySelector("code.language-abc").getBoundingClientRect();
+      const r = score.querySelector(".mdm-copy").getBoundingClientRect();
+      return { sx: s.x + 20, sy: r.y + r.height / 2, right: score.getBoundingClientRect().right, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, i);
+    for (const x of [at.sx, at.right - 2, at.right + 5, at.x]) {
+      await h.page.mouse.move(x, at.y);
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    await h.page.mouse.click(at.x, at.y);
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  await h.page.mouse.move(5, 5);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(
+    await h.page.evaluate(() => ({
+      copied: window.__copied,
+      open: document.querySelectorAll("#app .cm-line.mdm-abc-line").length,
+    })),
+    { copied: ["X:1\nL:1/4\nK:C\nC|", "X:2\nL:1/4\nK:C\nG|"], open: 0 },
+    "a press on a rail with nobody in the document"
+  );
+
+  await caretInScore(h.page, 0);
+  assert.deepEqual(await railsUp(h.page), [caret, rest], "the first score's caret");
+  // The caret moved and the marks read in the same task.
+  const swap = await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    const at = view.posAtDOM(document.querySelectorAll("#app .mdm-score")[1]);
+    view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+    const scores = document.querySelectorAll("#app .mdm-score");
+    return {
+      at,
+      marks: Array.from(scores).map((b) => b.querySelector(".mdm-chrome").classList.contains("mdm-chrome--active")),
     };
   });
-  assert.equal(boxes.visible, true);
-  assert.ok(boxes.tx < boxes.cx, "toggle left of copy");
-  assert.ok(Math.abs(boxes.tMid - boxes.cMid) <= 1.5, "same height");
+  assert.deepEqual(swap.marks, [false, true], "the mark did not go with the caret in the same task");
+  const second = swap.at;
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(await railsUp(h.page), [rest, caret], "the second score's caret");
+  await caretInScore(h.page, 0);
+  assert.deepEqual(await railsUp(h.page), [caret, rest], "back in the first");
+
+  // Both scores open at once, the main caret in the second.
+  const first = await h.page.evaluate(() =>
+    window.__mdm.view.posAtDOM(document.querySelectorAll("#app .mdm-score")[0])
+  );
+  await setSelection(h.page, [{ anchor: first }, { anchor: second }]);
+  await h.page.evaluate(() => {
+    const { EditorSelection } = window.__mdm.CM;
+    const view = window.__mdm.view;
+    view.dispatch({ selection: EditorSelection.create(view.state.selection.ranges, 1) });
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  const both = await h.page.evaluate(() => ({
+    open: document.querySelectorAll("#app .cm-line.mdm-abc-line.mdm-fence-line").length,
+    main: window.__mdm.view.state.selection.mainIndex,
+  }));
+  assert.deepEqual(both, { open: 4, main: 1 }, "the two carets did not open both scores");
+  assert.deepEqual(await railsUp(h.page), [open_, caret], "two carets marked two rails, or put one away");
+
+  // Out into the prose: no score is being worked on.
+  await setSelection(h.page, 3);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(await railsUp(h.page), [rest, rest], "the mark stayed behind the caret");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A score shorter than its rail: the rail hangs past the bottom of the score,
+// over the margin of the next one, and neither score grows or moves to hold
+// it. The rail is a column of buttons with no height of its own, so a button
+// added to it goes under the others; more are put in here by hand, the way a
+// new one would be, copies of the copy button so that a press on them does
+// something to read, as many as it takes to reach past a one-bar tune whose
+// source is open over it (the rail of an open score stands on its fence). Beside the next score, over its own rail, the hanging
+// rail of the score the caret is in is the one on top and the one that
+// answers: a real press there copies the first score and not the second. The
+// buttons of the rail still do their work where they are: the copy copies,
+// the headphones open the player, and a press on the rail between two
+// buttons leaves the caret where it was.
+test("a rail longer than its score hangs past it, adds nothing, and answers there", { skip }, async () => {
+  const h = await open({ text: BACK_TO_BACK, scores: 2, clipboard: true });
+  const at = await caretInScore(h.page, 0);
+  // Mid-tune, where somebody editing it would be: between the C and the bar
+  // of `C|`, the closing fence being the last three characters before `at`.
+  const inside = at - "```".length - 2;
+  assert.equal(await h.page.evaluate((i) => window.__mdm.view.state.sliceDoc(i - 1, i + 1), inside), "C|");
+  await setSelection(h.page, inside);
+  await new Promise((r) => setTimeout(r, 300));
+  const measure = () =>
+    h.page.evaluate(() => {
+      const [a, b] = Array.from(document.querySelectorAll("#app .mdm-score"));
+      const rail = a.querySelector(".mdm-chrome");
+      const buttons = Array.from(rail.children).map((x) => x.getBoundingClientRect());
+      return {
+        a: [a.getBoundingClientRect().top, a.getBoundingClientRect().height],
+        b: [b.getBoundingClientRect().top, b.getBoundingClientRect().height],
+        rail: rail.getBoundingClientRect().height,
+        bottoms: buttons.map((r) => r.bottom),
+        tops: buttons.map((r) => r.top),
+        heights: buttons.map((r) => r.height),
+      };
+    });
+  const before = await measure();
+  const added = await h.page.evaluate(() => {
+    const [a, b] = Array.from(document.querySelectorAll("#app .mdm-score"));
+    const rail = a.querySelector(".mdm-chrome.mdm-chrome--active");
+    const own = b.querySelector(".mdm-chrome").getBoundingClientRect();
+    let n = 0;
+    // Until the last button's middle is beside the next score's own rail.
+    for (; n < 40; n++) {
+      const buttons = rail.children;
+      const last = buttons[buttons.length - 1].getBoundingClientRect();
+      if (last.y + last.height / 2 > own.top + 4) break;
+      const extra = rail.querySelector(".mdm-copy").cloneNode(true);
+      extra.classList.add("mdm-extra");
+      rail.appendChild(extra);
+    }
+    return n;
+  });
+  assert.ok(added >= 1, "the fixture's rail reached the next score with no button added");
+  const after = await measure();
+  assert.deepEqual(after.a, before.a, "the score grew or moved for the added buttons");
+  assert.deepEqual(after.b, before.b, "the score under it moved");
+  assert.equal(after.tops.length, 2 + added);
+  assert.deepEqual(after.heights, after.tops.map(() => 24), "the added buttons are not buttons");
+  for (let i = 1; i < after.tops.length; i++) {
+    assert.ok(after.tops[i] >= after.bottoms[i - 1], "button " + i + " is not under the one before it");
+  }
+  assert.ok(after.rail > before.rail, "the rail did not grow with its added buttons");
+  const bottomOfA = after.a[0] + after.a[1];
+  // The last button is beside the second score, inside the box its own rail
+  // takes, and the pointer meets the hanging one; a real press on it copies
+  // the first score's tune with the caret still in the middle of it.
+  const last = await h.page.evaluate(() => {
+    const [a, b] = Array.from(document.querySelectorAll("#app .mdm-score"));
+    const extra = Array.from(a.querySelectorAll(".mdm-extra")).pop().getBoundingClientRect();
+    const own = b.querySelector(".mdm-chrome").getBoundingClientRect();
+    const x = extra.x + extra.width / 2;
+    const y = extra.y + extra.height / 2;
+    const el = document.elementFromPoint(x, y);
+    return {
+      x,
+      y,
+      besideB: y > b.getBoundingClientRect().top && y > own.top && y < own.bottom && x > own.left && x < own.right,
+      hit: !!el && !!el.closest(".mdm-extra") && a.contains(el),
+    };
+  });
+  assert.ok(last.y > bottomOfA, "the fixture no longer hangs a rail past its score");
+  assert.deepEqual(
+    { besideB: last.besideB, hit: last.hit },
+    { besideB: true, hit: true },
+    "the hanging button is not the one a pointer meets beside the next score"
+  );
+  await h.page.mouse.click(last.x, last.y);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(
+    await h.page.evaluate(() => window.__copied),
+    ["X:1\nL:1/4\nK:C\nC|"],
+    "a press on the hanging button did not copy its own score"
+  );
+  assert.deepEqual(
+    await h.page.evaluate(() => window.__mdm.view.state.selection.ranges.map((r) => [r.from, r.to])),
+    [[inside, inside]],
+    "a press on the hanging button moved the caret"
+  );
+  await new Promise((r) => setTimeout(r, 700));
+
+  const selection = () =>
+    h.page.evaluate(() => window.__mdm.view.state.selection.ranges.map((r) => [r.from, r.to]));
+  const spot = (sel) =>
+    h.page.evaluate((sel) => {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, bottom: r.bottom };
+    }, sel);
+  // Between the copy and the headphones.
+  const phones = await spot("#app .mdm-chrome--active .mdm-audio-toggle");
+  const over = await spot("#app .mdm-chrome--active .mdm-copy");
+  await h.page.mouse.click(over.x, over.bottom + 1);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(await selection(), [[inside, inside]], "a press on the rail moved the caret");
+
+  const copy = await spot("#app .mdm-chrome--active .mdm-copy");
+  await h.page.mouse.click(copy.x, copy.y);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(
+    await h.page.evaluate(() => window.__copied),
+    ["X:1\nL:1/4\nK:C\nC|", "X:1\nL:1/4\nK:C\nC|"],
+    "the copy in the rail copied nothing"
+  );
+  assert.deepEqual(await selection(), [[inside, inside]], "the copy moved the caret");
+
+  await new Promise((r) => setTimeout(r, 700));
+  await h.page.mouse.click(phones.x, phones.y);
+  await h.page.waitForFunction(() => !!document.querySelector(".mdm-audio"), { timeout: 15000 });
+  await new Promise((r) => setTimeout(r, 300));
+  const rails = await railsUp(h.page);
+  assert.deepEqual(
+    rails.map((r) => [r.active, r.drawn]),
+    [[true, true], [false, false]],
+    "a rail went away under the headphones' press, or the next score's came up"
+  );
+  assert.equal(
+    await h.page.evaluate(() => document.querySelectorAll("#app .mdm-score")[0].hasAttribute("data-mdm-audio")),
+    true,
+    "the headphones in the rail opened no player on their score"
+  );
+  // The lit headphones stay in view with the caret and the pointer gone,
+  // which is what says which score the player belongs to.
+  await setSelection(h.page, await posOf(h.page, "under them"));
+  await h.page.mouse.move(5, 5);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.deepEqual(
+    await h.page.evaluate(() => {
+      const toggle = document.querySelectorAll("#app .mdm-score")[0].querySelector(".mdm-audio-toggle");
+      const r = toggle.getBoundingClientRect();
+      const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return {
+        lit: toggle.closest("[data-mdm-audio]") !== null,
+        visible: getComputedStyle(toggle).visibility === "visible",
+        reachable: !!el && toggle.contains(el),
+        // The rest of the rail goes, the copy with it: only the headphones
+        // are the sign of the player.
+        copy: getComputedStyle(toggle.parentElement.querySelector(".mdm-copy")).visibility === "visible",
+      };
+    }),
+    { lit: true, visible: true, reachable: true, copy: false },
+    "the lit headphones of the open player went out of view, or took the copy with them"
+  );
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1432,13 +1746,16 @@ test("the player keeps the document somebody's, and lets it be put away", { skip
 // after the click, which is the state this test is about.
 test("a click on the headphones puts its tooltip away until the pointer leaves", { skip }, async () => {
   const h = await open({});
+  // The rail of a score is up only on the score the caret is in, so the caret
+  // goes into the second one first; the player opened on the first from
+  // script keeps a document that is somebody's as it was, source and rail.
+  await caretInScore(h.page, 1);
   await clickToggle(h.page, 0); // from script: no pointer, nothing to put away
   await h.page.waitForFunction(
     () => document.querySelector(".mdm-audio .abcjs-inline-audio"),
     { timeout: 15000 }
   );
   await new Promise((r) => setTimeout(r, 200));
-  // The chrome of a score is drawn at opacity 0 and shown on hover.
   const spot = await h.page.evaluate(() => {
     const score = document.querySelectorAll("#app .mdm-score")[1];
     score.scrollIntoView({ block: "center" });
@@ -3440,82 +3757,89 @@ test("the cursor is told where it is many times a beat", { skip }, async () => {
   await h.close();
 });
 
-// The buttons in the corner of a score keep clear of its engraving. A score is
-// scaled to the width of the pane, so the narrower the pane the higher its top
-// row of ink climbs: past about 500px the last chord symbol came up under the
-// buttons and was covered by them. They have a strip of their own above the
-// drawing now, so no width brings the two together.
+// The buttons of a score keep clear of its engraving, and of everything the
+// score's box carries. They used to ride its top right corner, where the top
+// row of ink came up under them as a scaled score climbed on a narrow pane
+// (past about 500px the last chord symbol was covered); then they had a strip
+// over the drawing. In the margin they are beside the whole box at any width:
+// clear of the ink, of the scrollbar a score too wide for the column carries
+// at the foot of its box (drawn here, `bars`), and of the edge of the pane,
+// with the document never scrolled sideways by them.
 test("the buttons of a score keep clear of the engraving at any width", { skip }, async () => {
-  const h = await open({});
-  // The player open on the last score, so its buttons stay up without a hover.
-  await h.page.evaluate(() => {
-    const blocks = document.querySelectorAll("#app .mdm-score");
-    blocks[blocks.length - 1].querySelector(".mdm-audio-toggle").click();
-  });
-  await h.page.waitForFunction(
-    () => document.querySelector(".mdm-audio .abcjs-midi-start"),
-    { timeout: 15000 }
-  );
-  for (const width of [1200, 800, 620, 500]) {
+  const h = await open({ bars: true });
+  await caretInScore(h.page, 2);
+  let scrolled = 0;
+  for (const width of [1200, 800, 620, 500, 420]) {
     await h.page.setViewport({ width, height: 1000 });
     await new Promise((r) => setTimeout(r, 400));
     const seen = await h.page.evaluate(() => {
       const blocks = document.querySelectorAll("#app .mdm-score");
       const block = blocks[blocks.length - 1];
       block.scrollIntoView({ block: "center" });
-      const svg = block.querySelector("code.language-abc svg");
+      const code = block.querySelector("code.language-abc");
+      const svg = code.querySelector("svg");
       const marks = Array.from(svg.querySelectorAll("path,text,rect,tspan"));
+      const scroller = document.querySelector("#app .cm-scroller");
+      const pane = scroller.getBoundingClientRect().left + scroller.clientWidth;
+      const box = code.getBoundingClientRect();
+      const meets = (b, r) =>
+        r.width > 0 && r.height > 0 &&
+        r.left < b.right && r.right > b.left &&
+        r.top < b.bottom && r.bottom > b.top;
       const covers = (btn) => {
         const b = btn.getBoundingClientRect();
-        return marks.some((el) => {
-          const r = el.getBoundingClientRect();
-          return (
-            r.width > 0 && r.height > 0 &&
-            r.left < b.right && r.right > b.left &&
-            r.top < b.bottom && r.bottom > b.top
-          );
-        });
+        return marks.some((el) => meets(b, el.getBoundingClientRect()));
       };
+      const rail = block.querySelector(".mdm-chrome").getBoundingClientRect();
       return {
         onCopy: covers(block.querySelector(".mdm-copy")),
         onToggle: covers(block.querySelector(".mdm-audio-toggle")),
+        onBox: meets(rail, box),
+        inPane: rail.right <= pane + 0.5,
+        shown: getComputedStyle(block.querySelector(".mdm-chrome")).visibility === "visible",
+        scrolls: code.scrollWidth > code.clientWidth,
+        sideways: scroller.scrollWidth - scroller.clientWidth,
         drawn: marks.length,
       };
     });
     assert.ok(seen.drawn > 20, "the score is not engraved at " + width + "px");
+    assert.equal(seen.shown, true, "the rail is not up at " + width + "px");
     assert.equal(seen.onCopy, false, "the copy button sits on the ink at " + width + "px");
     assert.equal(seen.onToggle, false, "the player button sits on the ink at " + width + "px");
+    assert.equal(seen.onBox, false, "the rail sits on the score's box at " + width + "px");
+    assert.equal(seen.inPane, true, "the rail hangs past the pane at " + width + "px");
+    assert.equal(seen.sideways, 0, "the document scrolls sideways at " + width + "px");
+    if (seen.scrolls) scrolled++;
   }
+  // The claim about the scrollbar is only a claim if some width put one there.
+  assert.ok(scrolled > 0, "no width gave the score a scroll of its own");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
 
 test("the two little buttons of a score are sized to be read", { skip }, async () => {
   const h = await open({});
-  const spot = await h.page.evaluate(() => {
-    const block = document.querySelector("#app .mdm-score");
-    block.scrollIntoView({ block: "center" });
-    const r = block.querySelector("code.language-abc").getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + 8 };
-  });
-  await h.page.mouse.move(spot.x, spot.y);
-  await new Promise((r) => setTimeout(r, 200));
+  await caretInScore(h.page, 0);
   const sizes = await h.page.evaluate(() => {
     const block = document.querySelector("#app .mdm-score");
     const toggle = block.querySelector(".mdm-audio-toggle svg").getBoundingClientRect();
     const copy = block.querySelector(".mdm-copy svg").getBoundingClientRect();
+    const box = block.querySelector(".mdm-copy").getBoundingClientRect();
     return {
       toggle: Math.round(toggle.height),
       copy: Math.round(copy.height),
-      sameLine:
+      // What a pointer has to land in, whatever the glyph measures.
+      target: [Math.round(box.width), Math.round(box.height)],
+      oneAxis:
         Math.abs(
-          toggle.y + toggle.height / 2 - (copy.y + copy.height / 2)
+          toggle.x + toggle.width / 2 - (copy.x + copy.width / 2)
         ) <= 1.5,
     };
   });
   assert.equal(sizes.toggle, 18);
   assert.ok(sizes.toggle > sizes.copy, "the toggle is not the larger of the two");
-  assert.equal(sizes.sameLine, true, "the two buttons are off each other's line");
+  assert.deepEqual(sizes.target, [24, 24], "the button a pointer lands in is not 24px");
+  assert.equal(sizes.oneAxis, true, "the two buttons are off each other's axis");
 
   await clickToggle(h.page, 0);
   await h.page.waitForFunction(

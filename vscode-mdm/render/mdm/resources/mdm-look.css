@@ -205,12 +205,20 @@ body h6 {
    the editor draws without one (a `## Title` straight under a paragraph, or a
    paragraph straight under it): Pandoc keeps no trace of a blank line, so the
    page puts one in either way, 16px more than the editor on each side that
-   lacks it. Nor a score: the editor keeps a strip of 28px over every score for
-   its buttons (`#app .mdm-score .mdm-chrome`), which a page, whose player
-   hangs under the score, has never drawn, so a score stands 18.5px closer to
-   what is over it than in the editor and 9.5px further from what is under it
-   (mdm.css's 1.5rem), beside a heading as beside a paragraph (measured).
-   Both open. */
+   lacks it. Nor a score: the editor draws the blank line on either side of
+   it, 16px, and nothing more, its buttons standing in the margin out of the
+   flow (`#app .mdm-chrome`), where the page gives the figure mdm.css's
+   1.5rem, 25.5px on a root of 17. So a score stands 9.5px further than in the
+   editor from a paragraph or a heading over it and from a paragraph under it,
+   in either face and with or without a fill; a heading under it takes the
+   figure's margin into its own larger one and stands where the editor stands
+   it (30.4px); and a score written straight under a paragraph, with no blank
+   line between, is flush with the paragraph in the editor and 25.5px under it
+   on the page, the heading's case again (measured 2026-09-14, at 1200px, two
+   of the three scores of example.mdm being written that way). Until that day
+   the editor kept a strip of 28px over every score for the buttons, and the
+   page stood a score 18.5px closer to what was over it and 9.5px further from
+   what was under it. All open. */
 body {
   --mdm-blank: 16px;
 }

@@ -460,6 +460,34 @@ function setSelection(page, ranges) {
   }, list);
 }
 
+// Puts the caret in the nth block matched by `selector` (0-based, in document
+// order), which opens its source and makes it the block that wears the rail
+// of buttons: at the element's own position, which for a score or a display
+// equation is the end of its closing fence and for a line of code the start
+// of the line, both of them inside the block. Waits for exactly one rail to
+// have faded in, so a box read afterwards is the one a pointer meets.
+async function caretInBlock(page, selector, index) {
+  const at = await page.evaluate(
+    (sel, i) => window.__mdm.view.posAtDOM(document.querySelectorAll(sel)[i]),
+    selector,
+    index
+  );
+  await setSelection(page, at);
+  await page.waitForFunction(
+    () => {
+      const up = document.querySelectorAll("#app .mdm-chrome.mdm-chrome--active");
+      return up.length === 1 && getComputedStyle(up[0]).opacity === "1";
+    },
+    { timeout: 5000 }
+  );
+  return at;
+}
+
+// The same for the nth score.
+function caretInScore(page, index) {
+  return caretInBlock(page, "#app .mdm-score", index);
+}
+
 // The selection ranges, as [from, to] pairs.
 function selectionRanges(page) {
   return page.evaluate(() =>
@@ -545,6 +573,8 @@ module.exports = {
   docText,
   posOf,
   setSelection,
+  caretInBlock,
+  caretInScore,
   selectionRanges,
   coordsAt,
   lineAt,

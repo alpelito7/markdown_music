@@ -2,9 +2,10 @@
 //
 // launch.sh starts a VS Code with --remote-debugging-port, and this drives it
 // over the Chrome DevTools Protocol. The pointer is dispatched as real Input
-// events, so hover states fire (the headphones on a score appear only under a
-// pointer), and a pointer is drawn in the workbench document, in the shape the
-// editor's own cursor has at that point, so the reader can see where it is. The frames are taken with Page.startScreencast off
+// events, so hover states fire (the buttons of a score come up only under a
+// pointer, as a tooltip does), and a pointer is drawn in the workbench
+// document, in the shape the editor's own cursor has at that point, so the
+// reader can see where it is. The frames are taken with Page.startScreencast off
 // the workbench renderer, which composites the webview and the arrow into one
 // picture.
 //
@@ -479,8 +480,8 @@ class Rig {
   }
 
   // An eased travel, one Input event per step, with the drawn pointer kept in
-  // step. The event goes first, so a hover it sets off (the headphones on a
-  // score) is there when the shape is picked.
+  // step. The event goes first, so a hover it sets off (the buttons of a score,
+  // a tooltip, the wash under a button) is there when the shape is picked.
   async moveTo(target, ms, opts) {
     const o = opts || {};
     const dur = ms === undefined ? 620 : ms;
