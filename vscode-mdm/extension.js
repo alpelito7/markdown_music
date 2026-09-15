@@ -303,6 +303,19 @@ const EXPORT_TARGETS = {
   both: { steps: ["html", "pdf"], outputs: [".html", ".pdf"] },
 };
 
+// A target the webview named, or null. The lookup goes through
+// hasOwnProperty because `to` is a wire value: `{type:"export",
+// to:"constructor"}` picked Object off the prototype and the export went on
+// with a function in place of its target, reaching `.outputs.indexOf` on
+// undefined and ending in "MDM: export failed (...)" instead of being dropped
+// the way every other name nobody offers is.
+function exportTarget(to) {
+  if (typeof to !== "string") return null;
+  return Object.prototype.hasOwnProperty.call(EXPORT_TARGETS, to)
+    ? EXPORT_TARGETS[to]
+    : null;
+}
+
 // ---------- The look the export is dressed in ----------
 //
 // What comes out reads as the editor does, on the page and on paper alike (the
@@ -1441,7 +1454,7 @@ async function exportDocument(document, to) {
 // missing.
 
 async function runExport(document, to) {
-  const target = EXPORT_TARGETS[to];
+  const target = exportTarget(to);
   if (!target) return;
   const wantsPdf = target.outputs.indexOf(".pdf") !== -1;
   const wantsHtml = target.outputs.indexOf(".html") !== -1;

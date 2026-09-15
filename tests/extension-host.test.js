@@ -2814,3 +2814,27 @@ test("an edit in flight and a language chosen beside it both land", async () => 
     vscode.workspace.applyEdit = apply;
   }
 });
+
+test("the export's format cannot be picked off Object.prototype either", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+
+  // EXPORT_TARGETS[to] answered "constructor" with the Object function, and
+  // the export went on with it: it reached .outputs.indexOf on undefined and
+  // told the reader "MDM: export failed (...)" about a format nobody offers,
+  // where every other made-up name is dropped in silence.
+  for (const to of ["constructor", "__proto__", "toString", "valueOf"]) {
+    await h.receive({ type: "export", to: to });
+  }
+  await settle();
+  restore();
+
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.infoMessages, []);
+  assert.equal(vscode._state.progressTitles.length, 0);
+  assert.ok(!fs.existsSync(path.join(tmp, "args.txt")), "a made-up format reached Quarto");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
