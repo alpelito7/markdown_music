@@ -1,6 +1,6 @@
 ---
-title: "Markdown and scores in one file"
-subtitle: "A Markdown Music prototype"
+title: "A Markdown Music prototype"
+subtitle: "Markdown and scores in one file"
 author: alpelito7
 lang: en
 format:
@@ -12,7 +12,10 @@ filters:
   - mdm
 ---
 
-This document is ordinary Markdown, rendered and editable at once: text, **emphasis**, LaTeX equations, source code and, on top of that, music blocks that render as a score and play, with multicursor, an outline, a look set from the toolbar and export options.
+This document is ordinary Markdown, rendered and editable at once: 
+- text, **emphasis**, LaTeX equations, source code and, on top of that,
+- music blocks that render as a score and play,
+- with multicursor, an outline, a look set from the toolbar and export options.
 
 ## From equations to score
 
@@ -27,6 +30,7 @@ $$
 Because $f_n = n f_1$, every mode is a note, and the ratio between two neighbours, $(n+1)/n$, is the musical interval between them: $2{:}1$ the octave, $3{:}2$ the fifth, $4{:}3$ the fourth, $5{:}4$ the major third.
 
 That is what the score below draws, one note per mode: each $n$ is a partial, the name acoustics gives to a single component of a complex sound. The upper system is the first eight partials of a low C, the lower one pairs each partial with the next and names the ratio underneath; the seventh is the odd one out, $31$ cents flat of the tempered minor seventh, hence the mark over the B flat.
+
 ```abc
 %%stretchlast 1
 X:1
@@ -90,6 +94,7 @@ K:C
 ## From score to sound
 
 In the editor the headphone on the block plays it, and each note lights up on the score as it sounds; in HTML the `.play` class puts a player bar under the score, and the PDF keeps the engraving alone.
+
 ```{.abc .play}
 X:1
 M:3/4

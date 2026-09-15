@@ -1827,9 +1827,9 @@ test("the page opens with the block the YAML asks for, in either face", { skip }
     assert.ok(!t.header.hidden, "the " + face + " page hides its title block");
     // The three things the block holds, each of them drawn and not merely
     // present: a heading with no ink is a heading a stylesheet took away.
-    assert.equal(t.title.text, "Markdown and scores in one file", face);
+    assert.equal(t.title.text, "A Markdown Music prototype", face);
     assert.ok(t.title.w > 100, "the " + face + " title covers " + t.title.w + "px");
-    assert.equal(t.subtitle.text, "A Markdown Music prototype", face);
+    assert.equal(t.subtitle.text, "Markdown and scores in one file", face);
     assert.ok(t.subtitle.w > 100, "the " + face + " subtitle covers " + t.subtitle.w + "px");
     assert.equal(t.author.text, "alpelito7", face);
     assert.ok(t.author.w > 20, "the " + face + " author covers " + t.author.w + "px");

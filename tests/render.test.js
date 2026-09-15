@@ -820,9 +820,10 @@ test("the page is set to the measure of the editor", () => {
 // The measure is only half of where a line ends: the editor sets its text
 // ragged right and squeezes no glyph, and LaTeX, left to itself, justifies and
 // lets microtype expand the font, which took one word more per line at the very
-// same width. This is the opening paragraph of example.mdm, and the break is
-// the one the editor draws (measured in the harness: `... equations, source` /
-// `code and, on top of that, ...`).
+// same width. This was the opening paragraph of example.mdm until the example
+// set most of it out as a list (2026-09-14), kept here as it was, and the break
+// is the one the editor draws (measured in the harness: `... equations,
+// source` / `code and, on top of that, ...`).
 const PARAGRAPH_DOC = `---
 title: "Breaks"
 format:
