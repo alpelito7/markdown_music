@@ -1648,7 +1648,24 @@ test("a PDF Quarto finds no TeX for names TeX and offers the page for the system
 // invocation for a score.
 const FINISHED_PAGE = "<!doctype html><title>printed</title><p>hi</p>";
 const UNFINISHED_PAGE = "<!doctype html><title>left by a failed render</title>";
+// By absolute path, as the stand-ins' PATH holds no mkdir and no sleep.
+const MKDIR = ["/bin/mkdir", "/usr/bin/mkdir"].find((p) => fs.existsSync(p)) || "mkdir";
+const SLEEP = ["/bin/sleep", "/usr/bin/sleep"].find((p) => fs.existsSync(p)) || "sleep";
 
+// What a PDF that fails leaves of its own besides the .tex, as a real Quarto
+// 1.9.37 leaves it with no TeX and after a LaTeX error alike (measured
+// 2026-09-14): an empty mediabag under the files folder, and the filter's
+// cache of engravings.
+function failedPdfFolders() {
+  return (
+    "    " + MKDIR + ' -p "${base}_files/mediabag" mdm_cache\n' +
+    "    printf 'engraved\\n' > mdm_cache/cached.pdf\n"
+  );
+}
+
+// `pageLibs` has the page's render write resources of its own into the files
+// folder, which is a page whose header does not embed them. `slowPage` holds
+// the page of the document of that stem back for as many seconds.
 function fakeQuartoTexFallback(tmp, opts) {
   const options = opts || {};
   const bin = path.join(tmp, "bin");
@@ -1671,14 +1688,23 @@ function fakeQuartoTexFallback(tmp, opts) {
       'case " $* " in\n' +
       '  *" --to pdf "*)\n' +
       "    printf 'quarto wrote this\\n' > \"$base.tex\"\n" +
+      failedPdfFolders() +
       '    echo "' + noTex + '" >&2\n' +
       "    exit 1 ;;\n" +
       '  *" --to html,pdf "*)\n' +
       "    printf '" + UNFINISHED_PAGE + "' > \"$base.html\"\n" +
       "    printf 'quarto wrote this\\n' > \"$base.tex\"\n" +
+      failedPdfFolders() +
       '    echo "' + noTex + '" >&2\n' +
       "    exit 1 ;;\n" +
       '  *" --to html "*)\n' +
+      (options.slowPage
+        ? '    [ "$base" = "' + options.slowPage.stem + '" ] && ' + SLEEP + " " + options.slowPage.seconds + "\n"
+        : "") +
+      (options.pageLibs
+        ? "    " + MKDIR + ' -p "${base}_files/libs"\n' +
+          "    printf 'body{}\\n' > \"${base}_files/libs/page.css\"\n"
+        : "") +
       "    printf '" + FINISHED_PAGE + "' > \"$base.html\"\n" +
       "    exit 0 ;;\n" +
       "esac\n" +
@@ -2169,6 +2195,106 @@ test("when both were asked and LaTeX failed, the page left is a finished one", a
     FINISHED_PAGE,
     "the page left beside the document is one Quarto had not finished"
   );
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// The folders a failed PDF leaves are taken away with it, and only the ones
+// it made (removeFailedFolders in extension.js). A reader with no TeX found
+// an empty doc_files/mediabag and an mdm_cache beside the document after
+// every export, and a LaTeX error leaves the same two.
+test("a PDF that fails takes away the folders it made, whatever it failed on", async () => {
+  const cases = [
+    { to: "pdf", opts: {}, chrome: true },
+    { to: "both", opts: {}, chrome: true },
+    { to: "pdf", opts: { latexError: true }, chrome: false },
+    { to: "both", opts: { latexError: true }, chrome: false },
+  ];
+  for (const c of cases) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+    const bin = fakeQuartoTexFallback(tmp, c.opts);
+    if (c.chrome) fakeChromePrint(bin);
+    const restorePath = usePath(bin);
+    const doc = path.join(tmp, "doc.mdm");
+    fs.writeFileSync(doc, SOURCE);
+    const h = boot("Body\n", {}, null, "file://" + doc);
+    vscode._state.workspaceFolder = tmp;
+
+    await h.receive({ type: "export", to: c.to });
+    await settle();
+    restorePath();
+
+    const label = c.to + (c.opts.latexError ? " after a LaTeX error" : " with no TeX");
+    assert.ok(!fs.existsSync(path.join(tmp, "doc_files")), label + ": the files folder was left behind");
+    assert.ok(!fs.existsSync(path.join(tmp, "mdm_cache")), label + ": the cache was left behind");
+    // What each asked for and did land is still there.
+    if (c.chrome) assert.ok(fs.existsSync(path.join(tmp, "doc.pdf")), label + ": the printed PDF went with them");
+    if (c.to === "both") assert.equal(fs.readFileSync(path.join(tmp, "doc.html"), "utf8"), FINISHED_PAGE, label + ": the page went with them");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("a PDF that fails leaves the folders the reader had, and a page's own resources", async () => {
+  // The reader's: a cache and a mediabag that were there before the export.
+  let tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  let bin = fakeQuartoTexFallback(tmp, { latexError: true });
+  let restorePath = usePath(bin);
+  let doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  fs.mkdirSync(path.join(tmp, "mdm_cache"));
+  fs.writeFileSync(path.join(tmp, "mdm_cache", "earlier.pdf"), "an earlier engraving\n");
+  fs.mkdirSync(path.join(tmp, "doc_files", "mediabag"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "doc_files", "mediabag", "figure.png"), "the reader's\n");
+  let h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  await h.receive({ type: "export", to: "pdf" });
+  await settle();
+  restorePath();
+  assert.equal(fs.readFileSync(path.join(tmp, "mdm_cache", "earlier.pdf"), "utf8"), "an earlier engraving\n");
+  assert.equal(fs.readFileSync(path.join(tmp, "doc_files", "mediabag", "figure.png"), "utf8"), "the reader's\n");
+  fs.rmSync(tmp, { recursive: true, force: true });
+
+  // A page that keeps its resources beside it: the mediabag goes and they stay.
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  bin = fakeQuartoTexFallback(tmp, { latexError: true, pageLibs: true });
+  restorePath = usePath(bin);
+  doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  await h.receive({ type: "export", to: "both" });
+  await settle();
+  restorePath();
+  assert.equal(fs.readFileSync(path.join(tmp, "doc_files", "libs", "page.css"), "utf8"), "body{}\n", "the page lost its own resources");
+  assert.ok(!fs.existsSync(path.join(tmp, "doc_files", "mediabag")), "the mediabag the PDF made was left behind");
+  assert.ok(!fs.existsSync(path.join(tmp, "mdm_cache")), "the cache the PDF made was left behind");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// The cache is every document's of the folder, so a failed PDF leaves it to a
+// document beside it that is still exporting and may be writing into it.
+test("a PDF that fails leaves the cache to another document of its folder still exporting", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp, { latexError: true, slowPage: { stem: "slow", seconds: 2 } });
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  const slow = path.join(tmp, "slow.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  fs.writeFileSync(slow, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  const other = openPanel(h.provider, "Body\n", "file://" + slow);
+
+  const slowExport = other.receive({ type: "export", to: "html" });
+  // Let the slow export reach its render before this one fails.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await h.receive({ type: "export", to: "pdf" });
+  const kept = fs.existsSync(path.join(tmp, "mdm_cache"));
+  await slowExport;
+  await settle();
+  restorePath();
+
+  assert.ok(kept, "the cache was taken from under an export still running beside it");
+  assert.ok(!fs.existsSync(path.join(tmp, "doc_files")), "the files folder of the failed PDF was left behind");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

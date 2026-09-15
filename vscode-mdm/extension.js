@@ -1339,7 +1339,19 @@ function renderArgs(text, copy, extra) {
 // the export itself had written and was about to take away (seen on
 // 2026-09-13 by sending two export messages in a row). The one that is turned
 // away says so, rather than going quiet on a reader who pressed a button.
-const exporting = new Set();
+// Each running export is kept by its document's URI, with the path the
+// document is at, which exportingBeside reads.
+const exporting = new Map();
+
+// Whether a document other than this one, in the same folder, is being
+// exported right now.
+function exportingBeside(document, dir) {
+  const own = document.uri.toString();
+  for (const [key, file] of exporting) {
+    if (key !== own && path.dirname(file) === dir) return true;
+  }
+  return false;
+}
 
 async function exportDocument(document, to) {
   const key = document.uri.toString();
@@ -1350,7 +1362,7 @@ async function exportDocument(document, to) {
     );
     return;
   }
-  exporting.add(key);
+  exporting.set(key, document.uri.fsPath);
   try {
     await runExport(document, to);
   } finally {
@@ -1427,6 +1439,12 @@ async function runExport(document, to) {
   const filesPath = base + "_files";
   const hadTex = fs.existsSync(texPath);
   const hadFiles = fs.existsSync(filesPath);
+  const mediabagPath = path.join(filesPath, "mediabag");
+  const hadMediabag = fs.existsSync(mediabagPath);
+  // The filter's cache of engravings, CACHE_DIR in mdm.lua, which it writes
+  // in the folder Quarto runs in (runQuartoStep: the document's).
+  const cachePath = path.join(dir, "mdm_cache");
+  const hadCache = fs.existsSync(cachePath);
   // The export opens its own entry in the log here, above anything the guard
   // below or the render itself has to say, so no line of theirs lands under
   // the previous export's header.
@@ -1595,8 +1613,8 @@ async function runExport(document, to) {
 
   // A failed LaTeX render leaves these beside the document (measured on
   // Quarto 1.9.37). Remove only artifacts this run created, and never an
-  // existing .tex or resource folder belonging to the reader. HTML requested
-  // as one half of "both" keeps its resources.
+  // existing .tex or resource folder belonging to the reader. With no TeX the
+  // .tex says nothing, since no LaTeX ever read it.
   function cleanFailedLatex() {
     if (!hadTex) {
       try {
@@ -1605,13 +1623,40 @@ async function runExport(document, to) {
         // none was left, or it is already gone
       }
     }
-    if (!wantsHtml && !hadFiles) {
+    removeFailedFolders();
+  }
+
+  // And the folders a failed PDF leaves, whatever it failed on: an empty
+  // `<name>_files/mediabag` and the filter's cache, which a reader with no TeX
+  // found beside the document after every export, and which a LaTeX error
+  // leaves as well, beside the .tex, .aux and .log that say what went wrong
+  // and stay (measured on Quarto 1.9.37, 2026-09-14). Only what this run
+  // created goes: a folder that was there before is the reader's, or another
+  // export's. The files folder of a page asked for beside the PDF can hold
+  // that page's resources (a page not self-contained keeps its libs there),
+  // so there the mediabag goes, and the folder with it only if nothing else
+  // is left in it. The cache is shared by every document of the folder, so it
+  // stays while another of them is exporting and may be writing into it.
+  function removeFailedFolders() {
+    const rm = function (p) {
       try {
-        fs.rmSync(filesPath, { recursive: true, force: true });
+        fs.rmSync(p, { recursive: true, force: true });
       } catch (e) {
         // none was left, or it is already gone
       }
+    };
+    if (!hadFiles && !wantsHtml) rm(filesPath);
+    else if (!hadMediabag) {
+      rm(mediabagPath);
+      if (!hadFiles) {
+        try {
+          fs.rmdirSync(filesPath);
+        } catch (e) {
+          // not there, or holding the page's own resources
+        }
+      }
     }
+    if (!hadCache && !exportingBeside(document, dir)) rm(cachePath);
   }
 
   let outcome;
@@ -1667,6 +1712,7 @@ async function runExport(document, to) {
           if (print.ok) return { code: 0, printed: true };
           return { code: primary.code, noTex: true };
         }
+        if (failed === "pdf") removeFailedFolders();
         return { code: primary.code };
       }
     );
