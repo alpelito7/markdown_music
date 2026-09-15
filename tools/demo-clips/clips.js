@@ -8,7 +8,9 @@
 // eye to arrive before the change does, and long enough for the editor to
 // draw its own tooltip (style.css waits 200 ms and fades it in over 100),
 // which names a button without a caption having to. The multicursor button
-// waits 1500 ms, because its tooltip has to be read and not only seen.
+// waits 1500 ms, because its tooltip has to be read and not only seen. The
+// tour carries no caption at all: the one it had under Ctrl+D pulled the eye
+// off the four notes changing (owner, 2026-09-14).
 //
 // frame() puts the document where the take needs it and is never recorded;
 // beats() is the take. alt is what ships with the clip: on the Marketplace an
@@ -195,8 +197,14 @@ async function atBareNote(rig, letter) {
 // (closePlayer in main.js destroys the player's controller).
 async function warmPiano(rig) {
   await rig.frameAt("#app .mdm-score", 120);
-  const hp = await rig.at("#app .mdm-score .mdm-audio-toggle");
-  await rig.warp(hp.x, hp.y);
+  // A score's buttons are put away until the pointer is on it or its source
+  // is open, and a pointer warped straight to where the headphones stand
+  // meets the margin: it is put on the drawing and brought across to them.
+  const on = await rig.at("#app .mdm-score", { fy: 0.5 });
+  await rig.warp(on.x, on.y);
+  await sleep(200);
+  await rig.moveTo(await rig.at("#app .mdm-score .mdm-audio-toggle"), 300);
+  await sleep(200);
   await rig.click();
   await rig.waitFor(() => !!document.querySelector("#app .abcjs-midi-start"), { timeout: 20000 });
   const start = await rig.at("#app .abcjs-midi-start");
@@ -207,6 +215,16 @@ async function warmPiano(rig) {
   await rig.warp(back.x, back.y);
   await rig.click();
   await sleep(800);
+}
+
+// The score's top below the top of the pane, in CSS px.
+async function scoreTop(rig) {
+  return rig.evalFrame(() =>
+    Math.round(
+      document.querySelector("#app .mdm-score").getBoundingClientRect().top -
+        document.querySelector("#app .cm-scroller").getBoundingClientRect().top
+    )
+  );
 }
 
 // ---------------------------------------------------------------- the clips
@@ -221,11 +239,15 @@ async function warmPiano(rig) {
 // all of that back on camera would add seconds that show nothing new, so the
 // take is put back off camera (after) and its last stretch dissolves into its
 // first frame (dissolve, rig.js dissolveHome), which is what closes its loop.
+// Where the page stands when the score opens, measured off camera by frame()
+// and scrolled to on camera by beats().
+const scoreView = { scrollTop: 0, top: 0 };
+
 const tour = {
   id: "tour",
   title: "The editor in one take",
   alt:
-    "The document opens in MDM Dark. The theme menu switches it to MDM Light, one toolbar button draws the staff lines in ink and another turns on multicursor matches inside words. A click on the engraved score opens its ABC above the drawing. A click on a bare E, then Ctrl+D four times, selects the four E's of the tune, two of them inside chords; typing e moves all four up an octave, and a flat typed in front of them makes them E flats, each step showing at once in the drawing underneath. The headphones open the player, and play moves a brass playhead across the edited staff, each note turning brass as it sounds.",
+    "The document opens at its top in MDM Dark. The theme menu switches it to MDM Light, one toolbar button draws the staff lines in ink and another turns on multicursor matches inside words. The page scrolls to the score, and a click on the engraved score opens its ABC above the drawing. A click on a bare E, then Ctrl+D four times, selects the four E's of the tune, two of them inside chords; typing e moves all four up an octave, and a flat typed in front of them makes them E flats, each step showing at once in the drawing underneath. The headphones open the player, and play moves a brass playhead across the edited staff, each note turning brass as it sounds.",
   frameRate: 16,
   needsPiano: true,
   settings: { "mdm.theme": "dark" },
@@ -237,6 +259,11 @@ const tour = {
   // 1, 3 and 5. Spread out, they read as four notes changing at once; an
   // earlier tune put three of them in one bar, which read as a bar darkening.
   edit: { target: "E", typed: "_e" },
+  // It opens on the top of the document, heading and all: framed on the score,
+  // the first frame began on a row cut halfway through a paragraph, which read
+  // as a crop (owner, 2026-09-14). The frame for the score is still measured
+  // here, where it can settle and take the cut row off the top, and beats()
+  // scrolls to that offset on camera once the toolbar has been used.
   async frame(rig) {
     // High enough that the open source, the drawing under it and the
     // player's row all fit. Framed at 170, the row pushed the drawing's foot
@@ -245,6 +272,9 @@ const tour = {
     // taken the cut row off the top) the open source leaves the drawing's
     // foot at 443 of the pane's 504, 478 with the row (2026-09-11).
     await rig.frameAt("#app .mdm-score", 100);
+    scoreView.scrollTop = await rig.atScrollTop();
+    scoreView.top = await scoreTop(rig);
+    await rig.scrollTop(0);
   },
   async beats(rig) {
     const edit = tour.edit;
@@ -275,6 +305,16 @@ const tour = {
     await rig.click();
     await sleep(900);
 
+    // Down to the score, to the offset frame() measured. The theme and the ink
+    // are set by now; if either had moved the score, the page would open it
+    // somewhere the heights above were not measured for, so that stops the take.
+    await rig.smoothScrollTo(scoreView.scrollTop, 700);
+    await sleep(400);
+    const landed = await scoreTop(rig);
+    if (Math.abs(landed - scoreView.top) > 3) {
+      throw new Error(`the score stands at ${landed} and not at ${scoreView.top} after the scroll`);
+    }
+
     // The score opens its ABC above the drawing.
     await rig.moveTo(await rig.at("#app .mdm-score", { fy: 0.62 }), 620);
     await sleep(360);
@@ -292,9 +332,7 @@ const tour = {
     // I-beam, centred on its point, and left where the click was it stood on
     // the first E through all four selections and hid it.
     await rig.moveTo({ x: rig.x + 12, y: rig.y + 30 }, 240);
-    await sleep(150);
-    await rig.caption("[[Ctrl]][[D]] adds the next one, inside words too");
-    await sleep(450);
+    await sleep(600);
     for (let i = 0; i < 4; i++) {
       await rig.press("Control+d");
       await sleep(i ? 480 : 620);
@@ -313,10 +351,11 @@ const tour = {
     await sleep(260);
     await rig.type(sign, 120);
     await sleep(1300);
-    await rig.caption(null);
 
-    // The player, and the playhead across the edited tune. The headphones show
-    // only under a pointer, so the pointer crosses the drawing on its way.
+    // The player, and the playhead across the edited tune. The headphones
+    // stand in the margin beside the first line of the open source, up while
+    // the source is open, and the pointer crosses the drawing on its way to
+    // them.
     await rig.moveTo(await rig.at("#app .mdm-score", { fy: 0.55 }), 520);
     await sleep(260);
     await rig.moveTo(await rig.at("#app .mdm-score .mdm-audio-toggle"), 380);
