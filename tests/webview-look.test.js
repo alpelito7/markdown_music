@@ -765,17 +765,18 @@ test("the copied sign is shown for a beat and then goes", { skip }, async () => 
 
 // Every block that has buttons carries them in a rail in the margin right of
 // the column, the twin of the numbers in the margin left of it: a score (the
-// copy over the headphones), a display equation and a block of code (the copy
-// alone). The rail stands 10px off the column, level with the top of what it
-// belongs to (the drawing of a score or of an equation, the top of a card of
-// code, whether its fences show or not), inside the pane. It is up, drawn and
-// taking the pointer, while the pointer is on its block or the block's source
-// is open, and put away otherwise, at the owner's request (2026-09-14; it had
-// been drawn on every block all the time). The caret walks from one kind to
-// the next and out into the prose, and at every step the rail of the block
-// the caret opened is the one up, and carries the mark that lifts it over the
-// others; the pointer, on each kind of block with the caret out in the
-// prose, brings that block's rail up and no other.
+// copy over the headphones over the export of its audio), a display equation
+// and a block of code (the copy alone). The rail stands 10px off the column,
+// level with the top of what it belongs to (the drawing of a score or of an
+// equation, the top of a card of code, whether its fences show or not),
+// inside the pane. It is up, drawn and taking the pointer, while the pointer
+// is on its block or the block's source is open, and put away otherwise, at
+// the owner's request (2026-09-14; it had been drawn on every block all the
+// time). The caret walks from one kind to the next and out into the prose,
+// and at every step the rail of the block the caret opened is the one up, and
+// carries the mark that lifts it over the others; the pointer, on each kind
+// of block with the caret out in the prose, brings that block's rail up and
+// no other.
 async function railsAt(page) {
   return page.evaluate(() => {
     const column = document.querySelector("#app .cm-content").getBoundingClientRect();
@@ -811,7 +812,7 @@ async function railsAt(page) {
 
 test("every block's buttons stand beside it in the margin, up while the reader is at the block", { skip }, async () => {
   const h = await open({});
-  const score = ["mdm-copy", "mdm-audio-toggle"];
+  const score = ["mdm-copy", "mdm-audio-toggle", "mdm-audio-export"];
   const rail = (kind, buttons, active, cardTop, up) => ({
     kind,
     buttons,
@@ -1088,9 +1089,19 @@ test("the rail of the block under the pointer is drawn over the rest", { skip },
   await h.page.mouse.move(button.x, button.y);
   await sleep(250);
   assert.deepEqual(await top(), ["score"], "pointing at the score's own copy");
-  await h.page.mouse.move(button.x, score.top + 90);
+  // Under the rail, in the margin it hangs in. Measured from the rail's own
+  // bottom and not from the top of the score: the rail is as tall as the
+  // buttons it carries (a score's three make 76px, 24 apiece with 2px
+  // between), and the 90px this used to drop left 14px of margin under a
+  // three-button rail, so the next button added would have put the probe on
+  // the rail itself.
+  const under = await h.page.evaluate(() => {
+    const r = document.querySelector("#app .mdm-score .mdm-chrome").getBoundingClientRect();
+    return { y: r.bottom + 14, rail: Math.round(r.height * 100) / 100 };
+  });
+  await h.page.mouse.move(button.x, under.y);
   await sleep(250);
-  assert.deepEqual(await top(), [], "a rail stayed on top with the pointer in the margin under it");
+  assert.deepEqual(await top(), [], "a rail stayed on top with the pointer in the margin under it, " + under.rail + "px of rail above it");
 
   const code = await box("#app .cm-line.mdm-code-line:has(.mdm-chrome--code)");
   await h.page.mouse.move(code.left + 60, code.bottom + 30);
@@ -3941,6 +3952,7 @@ async function chromeColours(page) {
         toolbar: colour("#app .mdm-toolbar .mdm-btn"),
         copy: colour("#app .mdm-chrome .mdm-copy"),
         headphones: colour("#app .mdm-chrome .mdm-audio-toggle"),
+        exportAudio: colour("#app .mdm-chrome .mdm-audio-export"),
         play: fill(".mdm-audio .abcjs-midi-start g"),
         hoveredPlay: fill(".mdm-audio .abcjs-midi-start:hover g"),
         repeat: fill(".mdm-audio .abcjs-midi-loop g"),

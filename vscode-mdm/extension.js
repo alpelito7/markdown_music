@@ -316,6 +316,24 @@ function exportTarget(to) {
     : null;
 }
 
+// The two shapes a score's audio comes out in, and what a file of each may
+// weigh. Built on a null prototype, and read with hasOwnProperty as well, for
+// the reason above: `format` comes from the webview, and a literal would
+// answer "toString" and "__proto__" with something truthy that has no `ext` on
+// it. The caps are a guard and not a limit anybody should reach: the MIDI of a
+// long tune is a few kilobytes, and a WAV is 172 kB a second of it, so an hour
+// of music is about 600 MB.
+const AUDIO_FORMATS = Object.create(null);
+AUDIO_FORMATS.midi = { ext: ".mid", label: "MIDI", max: 16 * 1024 * 1024 };
+AUDIO_FORMATS.wav = { ext: ".wav", label: "WAV", max: 1024 * 1024 * 1024 };
+
+function audioFormat(format) {
+  if (typeof format !== "string") return null;
+  return Object.prototype.hasOwnProperty.call(AUDIO_FORMATS, format)
+    ? AUDIO_FORMATS[format]
+    : null;
+}
+
 // ---------- The look the export is dressed in ----------
 //
 // What comes out reads as the editor does, on the page and on paper alike (the
@@ -1384,6 +1402,98 @@ function withoutExtension(file) {
   return ext ? file.slice(0, file.length - ext.length) : file;
 }
 
+// ---------- The name a score's audio is written under ----------
+
+// At most this many code points of the title, and at most this many bytes of
+// name. 255 bytes is the bound every filesystem the editor meets keeps for one
+// name: ext4 counts bytes, APFS and NTFS count units of their own, but 255 of
+// those is never fewer bytes than 255. The title is cut long before that so
+// that a file manager can show the whole name.
+const AUDIO_TITLE_MAX = 80;
+// 255 bytes is what a name may weigh on ext4, APFS and NTFS alike, and the
+// file is written under its own name plus ".part" before it is moved into
+// place (writeAudioFile), so the name itself is held five bytes short of it.
+// At the bound exactly, the part file was the one thing too long to write.
+const AUDIO_PART_SUFFIX = ".part";
+const AUDIO_NAME_MAX = 255 - AUDIO_PART_SUFFIX.length;
+
+// The title of a score, fit to be part of a file name and to be read out in a
+// notification. It is the score's T: line, which is the reader's own text and
+// reaches this side exactly as it was typed, so everything a filesystem, a
+// file manager or a notification would read as something other than letters
+// comes out of it here.
+function cleanAudioTitle(raw) {
+  const title = String(raw)
+    // Composed first, so that what is counted and cut below is what is drawn:
+    // a decomposed "e" plus an accent is two code points and one letter.
+    .normalize("NFC")
+    // C0, C1 and DEL. A newline in a file name is legal on Linux and
+    // unreadable everywhere.
+    .replace(/[\x00-\x1F\x7F-\x9F]/g, " ")
+    // A surrogate with no partner. vscode.Uri.toString() runs
+    // encodeURIComponent, which throws URIError on a lone surrogate, and the
+    // oldest Node the extension runs on has no String.prototype.toWellFormed
+    // to repair one with.
+    .replace(/\p{Cs}/gu, "")
+    // The bidi controls, which reorder what a file manager draws: a name can
+    // be made to read as ending in ".mid" on screen and in something else on
+    // disk. U+200C and U+200D stay: they are letters' business (Persian, the
+    // Indic scripts) and they hold emoji sequences together.
+    .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "")
+    // What Windows forbids in a name, and the separators of both systems. The
+    // colon is what also keeps a title out of VS Code's hands: a notification
+    // renders [text](command:...) as a link it will run, and with no colon in
+    // the title no such link can be spelt.
+    .replace(/[<>:"/\\|?*]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return trimDotsAndSpaces(Array.from(title).slice(0, AUDIO_TITLE_MAX).join(""));
+}
+
+// Leading and trailing runs of spaces and dots. Windows drops a trailing dot
+// or space from a name without saying so, which would make "Reel..." and
+// "Reel" the same file, and a title of nothing but dots would name the folder
+// above.
+function trimDotsAndSpaces(title) {
+  return title.replace(/^[\s.]+/, "").replace(/[\s.]+$/, "");
+}
+
+// The name a score's audio is written under, beside the document and after it:
+// "tunes 3 - The Kesh.mid" for the third score of tunes.mdm. The number comes
+// first because it is the one part that is always there and always different,
+// and it is the score's place in the document, so a score keeps its own name
+// whichever button asked for it. It is not padded: past nine scores a file
+// manager does not sort by it, which nobody has asked it to. A reserved Windows name (CON, PRN, LPT1) cannot come out of
+// this, since the name always begins with the document's own stem and a
+// number.
+//
+// Null when the format is not one of the two, when the number is not one a
+// document could have, or when the document's own name leaves no room for a
+// file beside it.
+function audioFileName(stem, number, title, format) {
+  const spec = audioFormat(format);
+  if (!spec) return null;
+  if (!Number.isSafeInteger(number) || number < 1 || number > 9999) return null;
+  const build = function (part) {
+    return stem + " " + number + (part ? " - " + part : "") + spec.ext;
+  };
+  let clean =
+    title === null || title === undefined ? "" : cleanAudioTitle(title);
+  let name = build(clean);
+  // Over the bound, the title gives way a code point at a time, never half a
+  // surrogate pair. When it has given everything and the name is still too
+  // long, it is the document's own name that does not fit and no file can be
+  // written beside it: the caller says so rather than writing a name it made
+  // up. The guard on the empty title is not tidiness. Without it a 251-byte
+  // stem spun this loop for ever, having nothing left to take away.
+  while (Buffer.byteLength(name, "utf8") > AUDIO_NAME_MAX) {
+    if (!clean) return null;
+    clean = trimDotsAndSpaces(Array.from(clean).slice(0, -1).join(""));
+    name = build(clean);
+  }
+  return name;
+}
+
 // The render itself, which is what bin/mdm does from a terminal: copy the
 // .mdm to a .qmd beside it, point the copy at the filter, call Quarto, and
 // take the copy away again. Done here rather than shelled out to that script
@@ -1854,6 +1964,657 @@ async function runExport(document, to) {
     });
 }
 
+
+// ---------- The audio of a score, as files beside the document ----------
+//
+// The bytes are made in the webview (media/mdm-audio.js and the export in
+// media/main.js): only a browser can sound a tune, since abcjs renders its
+// samples through Web Audio. What is left for this side is everything that
+// touches the disk, and it is written as though the webview were a stranger,
+// because what drives it is a document somebody else may have written: a
+// score's T: line reaches here exactly as it was typed, and every name, count
+// and payload below is checked before anything is written or shown.
+//
+// One run is a conversation and not a call. The webview sends `start`, then
+// one `file` or `skip` per score, waiting each time for this side to answer,
+// and `done` at the end. The waiting is what keeps the memory flat: a WAV is
+// 172 kB a second of music and the editor holds one at a time.
+//
+// Nothing here saves the document first, and that is deliberate. The audio is
+// rendered from the text on screen, which is ahead of the file on disk by
+// whatever has not been saved, so saving would change nothing about the files
+// that come out and would run format-on-save as a side effect of pressing a
+// play-and-export button. The document export saves because Quarto reads the
+// file from disk (runExport above); this one reads nothing from disk at all.
+
+// Every run of the audio export, by the URI of its document. Its own map and
+// not `exporting` above: the audio writes no .qmd, no mdm_cache and no _files,
+// so a document can be rendered to PDF and sounded to WAV at the same time
+// without either run touching what the other left. One run per document all
+// the same, since two would write the same names.
+const exportingAudio = new Map();
+
+// The General MIDI programs by the names abcjs knows them under
+// (instrumentIndexToName in the vendored bundle, 129 entries: the 128 of the
+// standard, and "percussion" at 128 for channel 10). Kept here because a score
+// that was skipped has to say which instrument it asked for, and this side has
+// no abcjs to ask: the webview sends the number, and the reader reads "violin".
+const GM_INSTRUMENTS = (
+  "acoustic_grand_piano bright_acoustic_piano electric_grand_piano " +
+  "honkytonk_piano electric_piano_1 electric_piano_2 harpsichord " +
+  "clavinet celesta glockenspiel music_box vibraphone marimba xylophone " +
+  "tubular_bells dulcimer drawbar_organ percussive_organ rock_organ " +
+  "church_organ reed_organ accordion harmonica tango_accordion " +
+  "acoustic_guitar_nylon acoustic_guitar_steel electric_guitar_jazz " +
+  "electric_guitar_clean electric_guitar_muted overdriven_guitar " +
+  "distortion_guitar guitar_harmonics acoustic_bass " +
+  "electric_bass_finger electric_bass_pick fretless_bass slap_bass_1 " +
+  "slap_bass_2 synth_bass_1 synth_bass_2 violin viola cello contrabass " +
+  "tremolo_strings pizzicato_strings orchestral_harp timpani " +
+  "string_ensemble_1 string_ensemble_2 synth_strings_1 synth_strings_2 " +
+  "choir_aahs voice_oohs synth_choir orchestra_hit trumpet trombone " +
+  "tuba muted_trumpet french_horn brass_section synth_brass_1 " +
+  "synth_brass_2 soprano_sax alto_sax tenor_sax baritone_sax oboe " +
+  "english_horn bassoon clarinet piccolo flute recorder pan_flute " +
+  "blown_bottle shakuhachi whistle ocarina lead_1_square " +
+  "lead_2_sawtooth lead_3_calliope lead_4_chiff lead_5_charang " +
+  "lead_6_voice lead_7_fifths lead_8_bass_lead pad_1_new_age pad_2_warm " +
+  "pad_3_polysynth pad_4_choir pad_5_bowed pad_6_metallic pad_7_halo " +
+  "pad_8_sweep fx_1_rain fx_2_soundtrack fx_3_crystal fx_4_atmosphere " +
+  "fx_5_brightness fx_6_goblins fx_7_echoes fx_8_scifi sitar banjo " +
+  "shamisen koto kalimba bagpipe fiddle shanai tinkle_bell agogo " +
+  "steel_drums woodblock taiko_drum melodic_tom synth_drum " +
+  "reverse_cymbal guitar_fret_noise breath_noise seashore bird_tweet " +
+  "telephone_ring helicopter applause gunshot percussion"
+).split(" ");
+
+function instrumentName(program) {
+  if (!Number.isSafeInteger(program)) return null;
+  if (program < 0 || program >= GM_INSTRUMENTS.length) return null;
+  return GM_INSTRUMENTS[program].replace(/_/g, " ");
+}
+
+// The reasons a score can come back unsounded. Anything else the webview says
+// is read as "failed", which is the one of these that sends the reader to the
+// log: an unknown word must never be repeated into a notification.
+const AUDIO_SKIPS = ["empty", "instrument", "range", "unsupported", "failed"];
+
+// Everything the audio export says to the reader, in one place. The wording is
+// the owner's and is being settled on a design sheet, so a line that changes
+// changes here and not in five branches of the run below. exportFailed and
+// exportNeeds put "MDM: " in front of what they are given, and the two that go
+// straight to a notification carry it themselves.
+const AUDIO_SAYS = {
+  progress: function (pretty) {
+    return "MDM: exporting the audio of " + pretty + "\u2026";
+  },
+  one: function (name) {
+    return "MDM: exported " + name;
+  },
+  many: function (n, label, pretty) {
+    return "MDM: exported " + n + " " + label + " files beside " + pretty;
+  },
+  busy: function (pretty) {
+    return (
+      "MDM: the audio of " + pretty + " is already being exported. " +
+      "Wait for that one to finish."
+    );
+  },
+  unsaved: function (pretty) {
+    return (
+      "MDM: save " + pretty + " first. The audio files are written in the " +
+      "folder the document is saved in."
+    );
+  },
+  // The editor counts the scores off the syntax tree, and a document long
+  // enough that the parser has not reached the end of it yet has no count to
+  // give. Saying "no score" there would be a lie, and writing what has been
+  // read so far would be half a document.
+  unread: function (pretty) {
+    return (
+      "MDM: " + pretty + " is still being read. Try the export again in a " +
+      "moment."
+    );
+  },
+  // The document has scores and the run has no file to write: the score the
+  // button belonged to was not where the editor last saw it, which is what an
+  // edit from another window, or a source still settling, leaves behind.
+  gone: function (pretty) {
+    return (
+      "MDM: that score is not where it was in " + pretty + ". Press its " +
+      "button again."
+    );
+  },
+  noScore: function (pretty) {
+    return (
+      "MDM: " + pretty + " has no score to export as audio. A score is a " +
+      "block fenced as ```abc."
+    );
+  },
+  // After the sentences about what was skipped, so that the reader is told
+  // first what needs doing and then what is already there.
+  rest: function (n, label, pretty) {
+    return (
+      " The other " + (n === 1 ? "score was" : n + " scores were") +
+      " written as " + label + " beside " + pretty + "."
+    );
+  },
+  failed: function (pretty, help) {
+    return "the audio of " + pretty + " could not be written. " + help;
+  },
+  // For what only the log can explain: bytes that were not a file of the
+  // format asked for, and a code the system gave that has no advice of its
+  // own. The notice carries a "Show log" button either way.
+  look: "The log says what went wrong.",
+};
+
+// What a score that was not written says, and what the reader can do about it.
+// One sentence per score, named by its place in the document and by its title,
+// which is how the reader finds it again.
+function audioSkipLine(skip) {
+  const at = "score " + skip.number + (skip.title ? " (" + skip.title + ")" : "");
+  if (skip.reason === "instrument") {
+    const name = instrumentName(skip.program);
+    return (
+      at + " asks for an instrument the editor does not have" +
+      (name ? " (" + name + ")" : "") +
+      ". Only the piano comes with it: export that score as MIDI, or take " +
+      "its %%MIDI program line out."
+    );
+  }
+  if (skip.reason === "range") {
+    return (
+      at + " has a note above C8, the top key of the piano the editor " +
+      "carries. Move it down an octave, or export that score as MIDI."
+    );
+  }
+  if (skip.reason === "empty") return at + " has no notes to play.";
+  if (skip.reason === "unsupported") {
+    return (
+      at + " could not be sounded: this window has no audio. Run " +
+      "Developer: Reload Window and export again."
+    );
+  }
+  return at + " could not be rendered. " + AUDIO_SAYS.look;
+}
+
+// What a failed write tells the reader to do, by the code the system gave
+// back. It names the file and the folder rather than the call that failed: the
+// thing to do about EBUSY is to close whatever is holding the file, and a
+// musician has no use for the name of a system call.
+function audioWriteHelp(code, name, dir) {
+  if (code === "EBUSY" || code === "EPERM") {
+    return "Close " + name + " in the program that has it open, and export again.";
+  }
+  if (code === "EACCES" || code === "EROFS") {
+    return (
+      "The folder " + dir + " cannot be written to. Save the document in a " +
+      "folder this computer can write to, and export again."
+    );
+  }
+  if (code === "ENOSPC") return "The disk is full.";
+  if (code === "ENAMETOOLONG") {
+    return (
+      "The name of the document is too long for a file to be written beside " +
+      "it. Rename it shorter and export again."
+    );
+  }
+  // The guard below the name, which no title can trip: what reaches it is a
+  // document whose own name is not a plain name on one of the two systems.
+  // "a:b.mdm" is the case that exists, legal on Linux and read by the Windows
+  // rules as the drive a: and a file b on it.
+  if (code === "EINVAL") {
+    return (
+      "The name of the document cannot be made part of a file name beside " +
+      "it. Rename it and export again."
+    );
+  }
+  return AUDIO_SAYS.look;
+}
+
+// "MThd" and a header six bytes long, which is how every standard MIDI file
+// begins and what media/mdm-audio.js writes (midiBytes).
+function midiLooksRight(bytes) {
+  return (
+    bytes.length >= 14 &&
+    bytes.toString("latin1", 0, 4) === "MThd" &&
+    bytes.readUInt32BE(4) === 6
+  );
+}
+
+// A RIFF/WAVE header whose size field agrees with the length of what arrived,
+// 16-bit PCM as mdm-audio.js writes it (wavBytes). The size is what a player
+// reads to know where the file ends, so a payload that was cut in flight is
+// caught here rather than written as a file that opens and plays silence.
+function wavLooksRight(bytes) {
+  return (
+    bytes.length >= 44 &&
+    bytes.toString("latin1", 0, 4) === "RIFF" &&
+    bytes.toString("latin1", 8, 12) === "WAVE" &&
+    bytes.readUInt32LE(4) === bytes.length - 8 &&
+    bytes.readUInt16LE(20) === 1 &&
+    bytes.readUInt16LE(34) === 16
+  );
+}
+
+// The bytes of one file, or null. Only a real Uint8Array or ArrayBuffer is
+// taken: Buffer.from is glad to make something out of a plain array, an object
+// with number keys, a string (read as latin1) and anything carrying a
+// byteLength, and this is the one door into the extension that a document
+// could shape what comes through. The magic is checked too, so that a run that
+// asked for WAV cannot write MIDI into a .wav no player will open.
+function audioBytes(value, format) {
+  const spec = audioFormat(format);
+  if (!spec) return null;
+  let bytes = null;
+  if (value instanceof Uint8Array) {
+    // The view and not the buffer under it: what the webview sends can be a
+    // window into a larger buffer, and Buffer.from(value.buffer) alone would
+    // write the whole of it.
+    bytes = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  } else if (value instanceof ArrayBuffer) {
+    bytes = Buffer.from(value, 0, value.byteLength);
+  }
+  if (!bytes || bytes.length > spec.max) return null;
+  if (format === "midi") return midiLooksRight(bytes) ? bytes : null;
+  return wavLooksRight(bytes) ? bytes : null;
+}
+
+// A title on the wire: null, undefined or a string, and nothing else. Cut
+// before it is cleaned, so that a megabyte of T: line is not normalised and
+// scanned five times over on its way to being thrown away.
+const AUDIO_TITLE_WIRE = 1000;
+
+function audioTitleOf(raw) {
+  if (raw === null || raw === undefined) return "";
+  if (typeof raw !== "string") return null;
+  return cleanAudioTitle(raw.slice(0, AUDIO_TITLE_WIRE));
+}
+
+// One line of the run's own entry in the log, under the header start wrote.
+function audioLog(line) {
+  channel().appendLine("  " + line);
+}
+
+// One report per score, written or skipped, on the notification the run put
+// up. Nothing else moves it: the webview sends one message per score and the
+// count on screen is the count of scores dealt with.
+function audioProgress(run) {
+  if (!run.progress) return;
+  run.progress.report({
+    message: run.written.length + run.skipped.length + " of " + run.total,
+  });
+}
+
+// The end of a run, however it comes: `done` from the webview, the reader
+// pressing cancel, the webview reloading, the panel closing, or something
+// throwing in the middle. The lock and the notification are released here and
+// nowhere else, and only a run that reached `done` reports what it did: a
+// reader who cancelled or closed the editor has said what they think of the
+// run and does not need a toast about it, and the log keeps the count either
+// way.
+function endAudioRun(key, why) {
+  const run = exportingAudio.get(key);
+  if (!run) return null;
+  exportingAudio.delete(key);
+  run.live = false;
+  if (run.close) run.close();
+  audioLog(
+    why + ": " + run.written.length + " written, " + run.skipped.length +
+      " skipped, of " + run.total + "."
+  );
+  if (why === "done") audioRunReport(run);
+  return run;
+}
+
+// What the reader is told when a run has finished: one notification, whichever
+// it is. A run with something skipped says so through exportNeeds, which is
+// the warning that names what is missing and offers the way to it, because a
+// score that was not written is exactly that; the file that was written all
+// the same is offered beside it.
+function audioRunReport(run) {
+  const label = run.spec.label;
+  const wrote = run.written.length;
+  if (run.skipped.length) {
+    const files = {};
+    if (wrote) files["Open folder"] = run.dir;
+    exportNeeds(
+      run.skipped.map(audioSkipLine).join(" ") +
+        (wrote ? AUDIO_SAYS.rest(wrote, label, run.pretty) : ""),
+      run.skipped.length + " of " + run.total + " scores were not written.",
+      {},
+      files
+    );
+    return;
+  }
+  if (wrote === 1) {
+    const button = "Open " + label;
+    const at = path.join(run.dir, run.written[0].name);
+    vscode.window
+      .showInformationMessage(AUDIO_SAYS.one(run.written[0].name), button)
+      .then(function (choice) {
+        if (choice === button) vscode.env.openExternal(vscode.Uri.file(at));
+      });
+    return;
+  }
+  if (wrote > 1) {
+    vscode.window
+      .showInformationMessage(
+        AUDIO_SAYS.many(wrote, label, run.pretty),
+        "Open folder"
+      )
+      .then(function (choice) {
+        if (choice === "Open folder") {
+          vscode.env.openExternal(vscode.Uri.file(run.dir));
+        }
+      });
+  }
+  // Nothing written and nothing skipped: the webview found nothing to send
+  // after all, and the log above is the whole of it.
+}
+
+// A run that cannot go on: the file in hand could not be written, or what
+// arrived for it was not a file of the format asked for. The webview is told
+// so that it stops rendering the scores after this one, since the next would
+// fail the same way, and the reader gets the error with the log behind it.
+function stopAudioRun(run, webview, number, help, detail) {
+  webview.postMessage({
+    type: "exportAudio",
+    id: run.id,
+    number: number,
+    ok: false,
+    error: help,
+  });
+  endAudioRun(run.key, "stopped");
+  exportFailed(AUDIO_SAYS.failed(run.pretty, help), detail);
+}
+
+// Written under a name of its own and moved into place, so that a reader
+// watching the folder never sees a half-written .wav and a run that dies in
+// the middle leaves nothing that looks playable. Returns the error, or null.
+// An existing file of the same name is written over without asking, which is
+// what the HTML and PDF export does with its own two names.
+function writeAudioFile(dir, name, bytes) {
+  const full = path.join(dir, name);
+  const part = full + AUDIO_PART_SUFFIX;
+  try {
+    fs.writeFileSync(part, bytes);
+    fs.renameSync(part, full);
+    return null;
+  } catch (e) {
+    try {
+      fs.rmSync(part, { force: true });
+    } catch (e2) {
+      // never written, or already renamed away
+    }
+    return e;
+  }
+}
+
+// A message of a run, from the webview. onDidReceiveMessage does not serialise
+// its calls (see `exporting` above, and applyingFromWebview below), so `start`
+// registers the run before anything that could yield, or a `file` arriving in
+// the same tick would find no run to belong to. Keeping the whole step
+// synchronous is the simplest way to hold that true: the bytes go out through
+// the synchronous fs calls, and the notification is started and left running.
+function exportAudioStep(document, webview, msg) {
+  const key = document.uri.toString();
+  try {
+    const id = msg.id;
+    // The id is the webview's own and is only ever compared, but its shape is
+    // checked all the same, so that a message of a run that is over cannot be
+    // taken for one of the run that is open.
+    if (typeof id !== "string" || !/^[a-z0-9-]{1,40}$/.test(id)) return;
+    if (msg.step === "start") {
+      audioRunStart(document, webview, key, id, msg);
+      return;
+    }
+    const run = exportingAudio.get(key);
+    if (!run || !run.live || run.id !== id) return;
+    if (msg.step === "file") audioRunFile(run, webview, msg);
+    else if (msg.step === "skip") audioRunSkip(run, webview, msg);
+    else if (msg.step === "done") endAudioRun(key, "done");
+  } catch (e) {
+    // Whatever threw in there, and a field of the message that is a getter is
+    // enough, the lock must not be left held and the notification must not be
+    // left turning for ever.
+    const detail = "The audio export stopped: " + String((e && e.stack) || e);
+    const run = endAudioRun(key, "stopped");
+    if (!run) {
+      channel().appendLine(detail);
+      return;
+    }
+    webview.postMessage({
+      type: "exportAudio",
+      id: run.id,
+      ok: false,
+      error: AUDIO_SAYS.look,
+    });
+    exportFailed(AUDIO_SAYS.failed(run.pretty, AUDIO_SAYS.look), detail);
+  }
+}
+
+// `start`: the first message of a run, and the only one that can refuse it.
+function audioRunStart(document, webview, key, id, msg) {
+  const spec = audioFormat(msg.format);
+  const count = msg.count;
+  const total = msg.total;
+  const answer = function (ok) {
+    webview.postMessage({ type: "exportAudio", id: id, ok: ok });
+  };
+  // The shape of the message first, and in silence: this is the extension's
+  // own protocol and not anything the reader did, so a message that does not
+  // keep it is dropped the way runExport drops a format nobody offers.
+  if (!spec) return;
+  if (!Number.isSafeInteger(count) || !Number.isSafeInteger(total)) return;
+  if (count < 0 || count > 9999 || total < 0 || total > count) return;
+  const pretty =
+    document.uri.scheme === "file"
+      ? path.basename(document.uri.fsPath)
+      : path.basename(document.uri.path) || "this document";
+  // The files go in the folder the document is saved in, so a document that is
+  // not saved has nowhere to put them. An untitled document is the case that
+  // reaches this.
+  if (document.uri.scheme !== "file") {
+    answer(false);
+    vscode.window.showInformationMessage(AUDIO_SAYS.unsaved(pretty));
+    return;
+  }
+  if (exportingAudio.has(key)) {
+    answer(false);
+    vscode.window.showInformationMessage(AUDIO_SAYS.busy(pretty));
+    return;
+  }
+  // Nothing to do, and a notification that came up and went again would be the
+  // only sign of a button that did nothing. The reader is told what a score is
+  // instead, which is what somebody pressing this on a document without one
+  // needs to know.
+  if (total === 0) {
+    answer(false);
+    vscode.window.showInformationMessage(
+      msg.unread === true
+        ? AUDIO_SAYS.unread(pretty)
+        : count > 0
+        ? AUDIO_SAYS.gone(pretty)
+        : AUDIO_SAYS.noScore(pretty)
+    );
+    return;
+  }
+  const file = document.uri.fsPath;
+  const run = {
+    id: id,
+    key: key,
+    format: msg.format,
+    spec: spec,
+    count: count,
+    total: total,
+    dir: path.dirname(file),
+    stem: withoutExtension(path.basename(file)),
+    pretty: pretty,
+    seen: new Set(),
+    written: [],
+    skipped: [],
+    live: true,
+    progress: null,
+    close: null,
+  };
+  // In the map before the answer goes out and before the notification is asked
+  // for: the webview sends its first `file` as soon as it has one, and nothing
+  // between here and there may leave the run unfindable.
+  exportingAudio.set(key, run);
+  answer(true);
+  channel().appendLine(
+    "[" + new Date().toISOString() + "] " + pretty + " \u2192 " + spec.label +
+      " audio (" + total + " of " + count + (count === 1 ? " score)" : " scores)")
+  );
+  vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: AUDIO_SAYS.progress(pretty),
+      cancellable: true,
+    },
+    function (progress, token) {
+      run.progress = progress;
+      if (token && token.onCancellationRequested) {
+        token.onCancellationRequested(function () {
+          if (!run.live) return;
+          webview.postMessage({ type: "exportAudio", id: run.id, cancel: true });
+          endAudioRun(run.key, "cancelled");
+        });
+      }
+      // Not awaited anywhere: a run is a conversation, so the notification is
+      // held open by hand and taken down by endAudioRun when the last message
+      // arrives. The guard is for a VS Code that calls this back later than it
+      // is asked to, which would otherwise leave a notification nobody can
+      // resolve.
+      return new Promise(function (resolve) {
+        if (!run.live) resolve();
+        else run.close = resolve;
+      });
+    }
+  );
+}
+
+// `file`: the bytes of one score. Everything that could be wrong with it is
+// wrong with the message and not with the music, so it ends the run rather
+// than being counted as a score that could not be sounded.
+function audioRunFile(run, webview, msg) {
+  const number = msg.number;
+  if (!Number.isSafeInteger(number) || number < 1 || number > run.count) return;
+  if (run.seen.has(number)) return;
+  const title = audioTitleOf(msg.title);
+  if (title === null) {
+    stopAudioRun(
+      run,
+      webview,
+      number,
+      AUDIO_SAYS.look,
+      "Score " + number + " came with a title that is not text; nothing was written."
+    );
+    return;
+  }
+  const bytes = audioBytes(msg.bytes, run.format);
+  if (!bytes) {
+    stopAudioRun(
+      run,
+      webview,
+      number,
+      AUDIO_SAYS.look,
+      "What arrived for score " + number + " is not a " + run.spec.label +
+        " file; nothing was written."
+    );
+    return;
+  }
+  const name = audioFileName(run.stem, number, title, run.format);
+  // No name means the document's own name fills the whole of what a file name
+  // may be (audioFileName), which is what the system would answer with
+  // ENAMETOOLONG. A name that is not a plain name on both systems is the other
+  // thing that can be wrong with the document's own name, and it is not the
+  // same thing, so it does not send the reader to shorten a name that is
+  // already short.
+  const plain =
+    !!name &&
+    path.posix.basename(name) === name &&
+    path.win32.basename(name) === name &&
+    path.dirname(path.join(run.dir, name)) === run.dir;
+  if (!plain) {
+    const help = audioWriteHelp(name ? "EINVAL" : "ENAMETOOLONG", "", run.dir);
+    stopAudioRun(
+      run,
+      webview,
+      number,
+      help,
+      "No file name could be made for score " + number + " beside " +
+        run.pretty + "."
+    );
+    return;
+  }
+  const failure = writeAudioFile(run.dir, name, bytes);
+  if (failure) {
+    const help = audioWriteHelp(failure.code, name, run.dir);
+    stopAudioRun(
+      run,
+      webview,
+      number,
+      help,
+      "Writing " + path.join(run.dir, name) + " failed: " +
+        String(failure.message || failure)
+    );
+    return;
+  }
+  run.seen.add(number);
+  run.written.push({ number: number, name: name, size: bytes.length });
+  audioLog("wrote " + name + " (" + bytes.length + " bytes)");
+  audioProgress(run);
+  webview.postMessage({
+    type: "exportAudio",
+    id: run.id,
+    number: number,
+    ok: true,
+  });
+}
+
+// `skip`: a score the webview could not sound, which is not a failure of the
+// run. It is counted, logged with whatever detail came with it, and named to
+// the reader at the end.
+function audioRunSkip(run, webview, msg) {
+  const number = msg.number;
+  if (!Number.isSafeInteger(number) || number < 1 || number > run.count) return;
+  if (run.seen.has(number)) return;
+  const title = audioTitleOf(msg.title);
+  const reason =
+    AUDIO_SKIPS.indexOf(msg.reason) === -1 ? "failed" : msg.reason;
+  const program = Number.isSafeInteger(msg.program) &&
+    msg.program >= 0 &&
+    msg.program <= 128
+      ? msg.program
+      : null;
+  // The detail is the webview's own account of what went wrong, and it goes to
+  // the log and never to a notification: it is the one string here that
+  // nothing shortens into a sentence a reader can act on.
+  const detail =
+    typeof msg.detail === "string"
+      ? msg.detail.slice(0, 2000).replace(/\s+/g, " ").trim()
+      : "";
+  run.seen.add(number);
+  run.skipped.push({
+    number: number,
+    title: title === null ? "" : title,
+    reason: reason,
+    program: program,
+  });
+  audioLog(
+    "score " + number + " skipped (" + reason + ")" + (detail ? ": " + detail : "")
+  );
+  audioProgress(run);
+  webview.postMessage({
+    type: "exportAudio",
+    id: run.id,
+    number: number,
+    ok: true,
+  });
+}
+
 class MdmEditorProvider {
   constructor(context) {
     this.context = context;
@@ -1975,6 +2736,13 @@ class MdmEditorProvider {
       changeSub.dispose();
       configSub.dispose();
       themeSub.dispose();
+      // The page that was rendering the audio has gone with the panel and
+      // nothing will answer, so the lock and the notification are let go here.
+      // Added to this block rather than registered as a second onDidDispose:
+      // the panel the tests drive keeps only the last handler it was given
+      // (openPanel in tests/extension-host.test.js), so another one would
+      // quietly take the place of the three lines above.
+      endAudioRun(document.uri.toString(), "the editor was closed");
     });
 
     // What this side writes into the document, one write at a time: an edit
@@ -2024,6 +2792,10 @@ class MdmEditorProvider {
 
     webview.onDidReceiveMessage(async (msg) => {
       if (msg.type === "ready") {
+        // The webview has been built again, and whatever it was doing it is
+        // not doing now: an audio run of this document belonged to a page
+        // that no longer exists and will never answer.
+        endAudioRun(document.uri.toString(), "the editor reloaded");
         webview.postMessage(updateMsg());
       } else if (msg.type === "setSetting") {
         let own = false;
@@ -2044,6 +2816,8 @@ class MdmEditorProvider {
         } catch (e) {
           vscode.window.showErrorMessage("MDM: export failed (" + e.message + ")");
         }
+      } else if (msg.type === "exportAudio") {
+        exportAudioStep(document, webview, msg);
       } else if (msg.type === "edit") {
         await inTurn(async () => {
           const newText = fromEditor(
@@ -2120,6 +2894,7 @@ window.MDM_PALETTE = ${inlineJson(readPalette())};
 <script src="${mediaUri}/vendor/abcjs/abcjs-basic-min.js"></script>
 <script src="${mediaUri}/hyphenation-patterns.js"></script>
 <script src="${mediaUri}/mdm-hyphenation.js"></script>
+<script src="${mediaUri}/mdm-audio.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -2138,8 +2913,12 @@ function deactivate() {}
 // and where its reader is sent on each system; chromeInstalls does the same
 // for Chrome, and a test can only run on one system. The key and the bound of
 // the divisions kept go out for the tests as
-// well, which seed and read VS Code's globalState through them.
+// well, which seed and read VS Code's globalState through them. audioFileName
+// is pure in the same way and is the half of the audio export that decides
+// what lands on the disk: what a score's title may put in a file name, and
+// what a document whose own name is too long gets instead.
 module.exports = {
+  audioFileName,
   activate,
   deactivate,
   withFilter,

@@ -2570,6 +2570,194 @@ nothing up and takes no press*.
 - **R6** a put-away rail taking the pointer → the put-away test.
 - **R7** a card of code not told it is open → the rail test in `webview-look`.
 
+### The audio of a score, and of every score (2026-09-15)
+
+The owner asked for a button under the headphones of every score that writes
+its audio, drawn with the export glyph of the toolbar, and for the toolbar's
+export to grow a second branch that writes every score of the document. MIDI
+and WAV are what the editor can write on its own; MP3 is put off (no browser
+encodes it) and the reason is beside `AUDIO_FORMATS` in `main.js`. The files go
+beside the document, one per score, named by the score's place in the document
+and its `T:`, overwritten without asking, as the HTML and the PDF are.
+
+Three of abcjs's own MIDI defects are corrected in `media/mdm-audio.js`, all
+three measured against the events its synth sounds: the tempo of every meter
+whose denominator is not 4 or 8 (the file came out at twice the length in 2/2
+and 3/2, three times in 6/4 with a `Q:`, a quarter in 3/16, and a hundred
+combinations of meter and tempo now agree with the player to within a
+thousandth); the gap of a staccato or a slur, which the writer subtracted with
+no cap while the synth caps it at two thirds of the note, so that above about
+95 beats a minute the note-off landed before the note-on and the eight notes of
+the bench came out as sixteen unpaired events; and the channel of a program
+change, which the renderer always wrote as `%00%C0`, leaving both voices of a
+duet naming channel 0. A title or voice name over 127 characters, or with a
+character over U+00FF in it, is cut and folded: abcjs writes the length in one
+byte and one byte per character, and a title of exactly 128 wrote a length no
+reader can read.
+
+A run is a conversation between the page and the host, one score at a time:
+`start` says how many files to expect and is answered before a note is
+rendered, each `file` or `skip` is acknowledged before the next score is begun,
+and `done` always follows, from the last link of
+the chain, which runs whatever happened before it. Nothing is rendered for a host that
+has said no, the peak in the page is one file, and a throw cannot leave the
+host's progress notification up and its lock held.
+
+Tests, in four files. `audio-export.test.js` (Node, in `test:fast`): *a WAV is
+16-bit PCM at the rate it was rendered at, interleaved and clamped*, *the MIDI
+of a score plays at the tempo the editor plays it at* (20 meters x 5 tempos),
+*a staccato or a slurred note lasts in the MIDI what it lasts in the player*,
+*a MIDI carries the written notes, on the channel its voice is on*, *a title or
+a voice name too long for MIDI is cut, not written broken*, *a score the piano
+cannot sound is named before a note is fetched*.
+`webview-audio-export.test.js` (Chrome): the rail's menu and what closes it,
+the glyph, the numbering of scores on screen and off, a document too long to
+have been read yet, the bytes as a typed array, *a WAV is the tune the player
+plays, sample for sample* (the file against the buffer the player primed:
+57,600 frames and 48kHz both ways, the RMS apart by the 16 bits it was written
+in), a MIDI export opening no output at all, the output going back to sleep, a
+score the piano cannot sound, a document with no score, a run the host turns
+away, a file the host could not write, a run that needs no animation frame, and
+*a score's own button writes its file beside the document, end to end* (the
+real `extension.js` on the other end of the wire, the file read back off the
+disk). `extension-host.test.js` gained 20 tests for the host's half, and
+`webview-player.test.js` and `webview-look.test.js` were brought up to the
+third button.
+
+Four rounds of mutations. The module, against `audio-export.test.js`:
+
+- **AU1** the byte rate without the channel count, **AU2** the channels written
+  one after the other instead of interleaved, **AU3** the clamp removed, **AU4**
+  a `DataView` returned instead of a `Uint8Array` -> the WAV test.
+- **AU5** `withTempo` never applied and **AU6** the meter dropped out of
+  `microsPerQuarter` -> the tempo test (6/4 at three times the length).
+- **AU7** the gap left uncapped and **AU8** the same-pitch clamp removed -> the
+  staccato test.
+- **AU9** `withChannels` never applied and **AU10** `chordsOff` turned off ->
+  the notes test.
+- **AU11** the 127-character cut removed and **AU12** the fold of characters
+  over U+00FF removed -> the meta test, which walks every event of the file.
+- **AU13** only `%%MIDI program` read as an instrument (percussion and the
+  bagpipe key let through) and **AU14** the pitch check removed -> the piano
+  test.
+
+The page, against `webview-audio-export.test.js`:
+
+- **AX1** the `closeLine` the decorations read deleted -> every test in the
+  file (this was a real fault, found by the agent updating the other suites:
+  the fixtures here had no ordinary code fence, and one was added for it).
+- **AX2** `syntaxTree` in place of `ensureSyntaxTree` -> SURVIVED on a document
+  of 30 scores, which the parser reads in one go. **AX2b**, the same mutation
+  against the new test that dispatches 2,000 scores (200KB, of which the parser
+  had read 1,489 when the export asked) -> CAUGHT.
+- **AX3** the scores counted off the widgets on screen -> the numbering test.
+- **AX4** `millisecondsPerMeasure` not passed to the synth and **AX5** the
+  player's own options replaced -> the sample-for-sample test.
+- **AX6** the loop yielding with `requestAnimationFrame` -> the test that runs
+  with none.
+- **AX7** the instrument check removed -> the piano test (a violin was
+  fetched).
+- **AX8** the audio graph opened for a MIDI -> the silent-export test.
+- **AX9** the host's refusal ignored -> the turned-away test.
+- **AX10** the output never put back to sleep -> the sleep test.
+- **AX11** the rail not held up while its menu is open, **AX13** the menu under
+  the button instead of beside it, **AX14** the font reset removed (the prose's
+  size adjustment reaching the rows), **AX12** `closeMenus` removed from the
+  copy -> the menu test.
+- **AX15** the copy glyph drawn in the export button -> the glyph test.
+- **AX17** the rail asking for score 0, which means the whole document -> the
+  end-to-end test.
+
+The rail, against the two suites that were brought up to date: **R1** the
+export out of the put-away list (the toggle test reads 1 of 3 buttons drawn
+with nobody in the document), **R2** the export kept up with the lit headphones
+(the hanging rail test), **R3** the export out of the 24px box list (the sizes
+test reads 24 by 17, the flex column stretching what the rule no longer sizes,
+and both chrome ink tests), **R4** `exportButton()` never appended (five
+tests), **R5** a rail that never lets the pointer go (the layers test, whose
+probe now measures from the rail's own bottom: a 76px rail had left it 14px of
+clearance).
+
+The host, against `extension-host.test.js`, 25 mutations and no survivors:
+the name builder's separator, the characters a title is stripped of, the guard
+that stops the byte cap spinning on a document whose own name is 251 bytes, the
+allowlists for the format and the number, `EXPORT_TARGETS` read off
+`Object.prototype`, saving the document first, the buttons the two notices
+carry, the magic bytes of each format, the bounds on a file's number, the lock
+and its separateness from the document export's, the scheme guard, the raw
+title reaching a notification, the zero-score branch, the four endings of a run
+(done, cancel, reload, dispose) and the throw inside a step, the `.part` left
+behind, the three write-error branches, the script tag, and the last
+`basename`/`dirname` guard. Three things that round found: `node:test`'s
+timeout cannot interrupt a synchronous spin (the name test now runs in a child
+process, so a regression comes back as a killed child instead of a hung run);
+the untitled test was asserting against the wrong name, since the mock's
+`fsPath` for a non-`file:` URI is the whole URI; and a document called `a:b.mdm`
+is read by the Windows rules as a drive letter, which was answered with the
+wording for a name that is too long.
+
+A round of adversarial review over the finished change, four lenses with two
+skeptics on every finding, brought back six faults worth the name. Each one is
+now a test of its own, and each of those tests was seen to fail:
+
+- **AX19** the minute after a player closes is a single timer, and an export
+  still running when it fired swallowed it: the run held the output, the timer
+  was gone, and the pilot tone went on sounding into an editor nobody was
+  playing anything in. The timer now starts its minute again while a run holds
+  the output, and the end of a run hands the output back to the same rules
+  (asleep if nothing holds it, the minute again if the editor was inside one,
+  and asleep at once if the panel went out of sight meanwhile) -> *an export
+  that crosses the idle minute does not spend it*.
+- **AX20** a cancel from the host set the run's flag without answering the
+  reply it was standing on, so a cancelled run sat out the whole minute of
+  AUDIO_ACK_MS holding the output -> *a cancelled run stops at once instead of
+  waiting out its answer*.
+- **AX21** everything before the synth is synchronous, so a tune abcjs could
+  not read threw out of the run and took the scores after it with it. One
+  score that throws is one score skipped -> *a score that cannot be read is
+  skipped, and the scores after it are written*.
+- **AX22** the host writes `<name>.part` and moves it into place, so a name at
+  the 255-byte bound exactly was the one file that could not be written. The
+  name is held five bytes short of the bound -> the hostile-title test, on a
+  document name long enough to reach it.
+- **AX23** the rows are spans in the rail and buttons in the toolbar, and a
+  span inside the text takes the content-box the document's own boxes are
+  drawn with: each row stood 17px past the panel's rounded edge (measured).
+  **AX24b** the panel inherited `max-height: 60vh` and an auto overflow from
+  the toolbar's tall menus, which kept 12px of empty panel for a scrollbar two
+  rows never need -> both in *a score's export offers MIDI and WAV in a menu
+  that behaves like the toolbar's*.
+- **AX25** a run with no file to write was read as a document with no score,
+  so a rail press on a score that had moved answered "no score to export" on a
+  document with thirty -> *a score that is no longer where it was is not read
+  as a document without scores*.
+
+The toolbar's own branch was written once the owner had picked a variant off
+`design-export-menu.html` (A′ for the panel, R2 for the rail's, and greyed
+rows for a document with no score). Three tests cover it, and each of the eight
+mutations below was seen to be caught:
+
+- **AX27** the headers dropped from the panel, **AX28** the line under the
+  Audio header dropped, **AX34** a header built as a row (a header is a div and
+  takes no pointer; a row is a button), **AX29** the toolbar's MIDI row asking
+  for score 1 instead of the whole document -> *the export panel names its two
+  branches, and audio is one file per score*.
+- **AX30** a row's `off` never read, **AX32** it read only when the panel is
+  filled and not when it opens (so a document that gained a score kept its rows
+  grey), **AX33** the greying split into a rule of its own instead of the one
+  the bar's own buttons are greyed by -> *with no score to write, the audio
+  rows grey out and the document's do not*.
+- **AX31** an unread document read as a document with no score, which would
+  grey the rows of a document nobody has counted yet -> *a document too long to
+  read in the time the panel has keeps its rows live*.
+
+Three claims that overstated what the code does were corrected rather than
+tested: the README said the files sort as the document reads (the number is
+not padded, so they do not past nine), that a score the piano cannot sound is
+written as MIDI (it is left out of a WAV run, and exports as MIDI if that is
+what is asked for), and this file said `done` follows from a `finally` (it
+follows from the last link of the chain).
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -2588,7 +2776,17 @@ nothing up and takes no press*.
 5. The three webview files share `webview/helpers.js`; a cold-start flake
    was seen once (the first `open()` of a run timing out on its three SVGs)
    and not reproduced.
-6. Player seek: measured in the harness (a scratch run under `tests/tmp/`),
+6. The audio export: the toolbar's Audio branch is not written yet, since the
+   owner is choosing the shape of the two-branch menu on a design sheet, so
+   nothing tests it. MP3 is put off, with the reason beside `AUDIO_FORMATS` in
+   `main.js`. The host's table of 129 General MIDI instrument names was read
+   off the vendored abcjs and is not pinned by a test (parsing the minified
+   bundle for it would break on the next bump); only `program 40 -> violin` is
+   held, by the message a skipped score gives. EBUSY is injected in the host
+   tests, since Linux will not produce it on a rename over an open file, so the
+   Windows behaviour behind that message is reasoned and not measured. And
+   nothing of this has been seen in a real VS Code window yet.
+7. Player seek: measured in the harness (a scratch run under `tests/tmp/`),
    the audio lands on a single source with no overlap, but the head is drawn
    1 to 5 per cent ahead of where abcjs seeks the sound (larger on a short
    tune), because the head uses the buffer duration, release tail included,

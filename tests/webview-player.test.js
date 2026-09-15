@@ -238,13 +238,21 @@ test("every score gets a player toggle under the copy button; other code does no
 
   // Put away with nobody in the document; shown on the score under the
   // pointer and on the score whose source the caret opened, and on no other.
+  // How many of each rail's buttons are drawn, and not whether all of them
+  // are: under an `every` a rail that let one button through at rest still
+  // read as put away, so a button left out of the rule that puts the rail
+  // away passed unseen (measured 2026-09-15, when the export was added and
+  // the three buttons were counted for the first time).
   const shown = () =>
     h.page.evaluate(() =>
-      Array.from(document.querySelectorAll("#app .mdm-score")).map((b) =>
-        Array.from(b.querySelectorAll(".mdm-chrome > *")).every((btn) => getComputedStyle(btn).visibility === "visible")
+      Array.from(document.querySelectorAll("#app .mdm-score")).map(
+        (b) =>
+          Array.from(b.querySelectorAll(".mdm-chrome > *")).filter(
+            (btn) => getComputedStyle(btn).visibility === "visible"
+          ).length
       )
     );
-  assert.deepEqual(await shown(), [false, false, false], "a score's rail is up on a document nobody is in");
+  assert.deepEqual(await shown(), [0, 0, 0], "a score's rail is up on a document nobody is in");
   const spot = await h.page.evaluate(() => {
     const block = document.querySelector("#app .mdm-score");
     block.scrollIntoView({ block: "center" });
@@ -253,17 +261,17 @@ test("every score gets a player toggle under the copy button; other code does no
   });
   await h.page.mouse.move(spot.x, spot.y);
   await new Promise((r) => setTimeout(r, 300));
-  assert.deepEqual(await shown(), [true, false, false], "the pointer on the first score");
+  assert.deepEqual(await shown(), [3, 0, 0], "the pointer on the first score");
   await h.page.mouse.move(5, 5);
   await new Promise((r) => setTimeout(r, 300));
-  assert.deepEqual(await shown(), [false, false, false], "a rail stayed up after the pointer left");
+  assert.deepEqual(await shown(), [0, 0, 0], "a rail stayed up after the pointer left");
 
   await caretInScore(h.page, 0);
-  assert.deepEqual(await shown(), [true, false, false], "the caret in the first score");
-  // Stacked in the margin right of the column: the copy over the headphones,
-  // on one axis, the whole rail past the column's edge and inside the pane,
-  // level with the top of the block, which with its source open is the
-  // score's opening fence.
+  assert.deepEqual(await shown(), [3, 0, 0], "the caret in the first score");
+  // Stacked in the margin right of the column: the copy over the headphones
+  // over the export of the score's audio, on one axis, the whole rail past
+  // the column's edge and inside the pane, level with the top of the block,
+  // which with its source open is the score's opening fence.
   const boxes = await h.page.evaluate(() => {
     const block = document.querySelector("#app .mdm-score");
     const column = document.querySelector("#app .cm-content").getBoundingClientRect();
@@ -272,13 +280,17 @@ test("every score gets a player toggle under the copy button; other code does no
     const rail = block.querySelector(".mdm-chrome");
     const t = block.querySelector(".mdm-audio-toggle").getBoundingClientRect();
     const c = block.querySelector(".mdm-copy").getBoundingClientRect();
+    const e = block.querySelector(".mdm-audio-export").getBoundingClientRect();
     return {
       order: Array.from(rail.children).map((b) => b.classList[0]),
       tTop: t.top,
       cBottom: c.bottom,
-      // Centres, not left edges, for the same reason as below: the two are
+      eTop: e.top,
+      tBottom: t.bottom,
+      // Centres, not left edges, for the same reason as below: the three are
       // one box apiece and the glyphs are drawn at two sizes inside them.
       axis: Math.abs(t.x + t.width / 2 - (c.x + c.width / 2)),
+      axisExport: Math.abs(e.x + e.width / 2 - (c.x + c.width / 2)),
       railLeft: rail.getBoundingClientRect().left - column.right,
       railRight: pane - rail.getBoundingClientRect().right,
       railTop: rail.getBoundingClientRect().top - fenceTop(block),
@@ -289,9 +301,11 @@ test("every score gets a player toggle under the copy button; other code does no
       return first.getBoundingClientRect().top;
     }
   });
-  assert.deepEqual(boxes.order, ["mdm-copy", "mdm-audio-toggle"]);
+  assert.deepEqual(boxes.order, ["mdm-copy", "mdm-audio-toggle", "mdm-audio-export"]);
   assert.ok(boxes.cBottom <= boxes.tTop, "the copy is not over the headphones");
-  assert.ok(boxes.axis <= 0.5, "the two buttons are off one axis by " + boxes.axis + "px");
+  assert.ok(boxes.tBottom <= boxes.eTop, "the headphones are not over the export");
+  assert.ok(boxes.axis <= 0.5, "the copy and the headphones are off one axis by " + boxes.axis + "px");
+  assert.ok(boxes.axisExport <= 0.5, "the export is off that axis by " + boxes.axisExport + "px");
   assert.ok(boxes.railLeft >= 0, "the rail stands " + -boxes.railLeft + "px inside the column");
   assert.ok(boxes.railRight >= 0, "the rail hangs " + -boxes.railRight + "px past the pane");
   assert.ok(Math.abs(boxes.railTop) <= 0.5, "the rail is not level with the fence of its open score: " + boxes.railTop);
@@ -347,9 +361,11 @@ async function railsUp(page) {
 
 test("the caret's mark goes with it from one score to the next, and every rail takes a press", { skip }, async () => {
   const h = await open({ text: BACK_TO_BACK, scores: 2, clipboard: true });
-  const rest = { active: false, drawn: false, hit: [false, false] };
-  const open_ = { active: false, drawn: true, hit: [true, true] };
-  const caret = { active: true, drawn: true, hit: [true, true] };
+  // `hit` is one reading per button of the rail, in the order a score's are
+  // built: the copy, the headphones and the export of its audio.
+  const rest = { active: false, drawn: false, hit: [false, false, false] };
+  const open_ = { active: false, drawn: true, hit: [true, true, true] };
+  const caret = { active: true, drawn: true, hit: [true, true, true] };
   assert.deepEqual(await railsUp(h.page), [rest, rest], "the rails of a document nobody is in");
 
   // A real press on the copy of each score, nobody in the document, the
@@ -482,7 +498,7 @@ test("a rail longer than its score hangs past it, adds nothing, and answers ther
   const after = await measure();
   assert.deepEqual(after.a, before.a, "the score grew or moved for the added buttons");
   assert.deepEqual(after.b, before.b, "the score under it moved");
-  assert.equal(after.tops.length, 2 + added);
+  assert.equal(after.tops.length, before.tops.length + added, "the rail lost or gained a button of its own");
   assert.deepEqual(after.heights, after.tops.map(() => 24), "the added buttons are not buttons");
   for (let i = 1; i < after.tops.length; i++) {
     assert.ok(after.tops[i] >= after.bottoms[i - 1], "button " + i + " is not under the one before it");
@@ -575,17 +591,29 @@ test("a rail longer than its score hangs past it, adds nothing, and answers ther
       const toggle = document.querySelectorAll("#app .mdm-score")[0].querySelector(".mdm-audio-toggle");
       const r = toggle.getBoundingClientRect();
       const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      // A button gone from the rail is the thing this is watching for, so it
+      // is named here rather than left to throw inside getComputedStyle.
+      const drawn = (sel) => {
+        const btn = toggle.parentElement.querySelector(sel);
+        if (!btn) throw new Error("the rail has no " + sel);
+        return getComputedStyle(btn).visibility === "visible";
+      };
       return {
         lit: toggle.closest("[data-mdm-audio]") !== null,
         visible: getComputedStyle(toggle).visibility === "visible",
         reachable: !!el && toggle.contains(el),
-        // The rest of the rail goes, the copy with it: only the headphones
-        // are the sign of the player.
-        copy: getComputedStyle(toggle.parentElement.querySelector(".mdm-copy")).visibility === "visible",
+        // The rest of the rail goes, the copy and the export of the audio
+        // with it: only the headphones are the sign of the player. The export
+        // was deliberately left out of the rule that keeps the headphones up
+        // (style.css, `.mdm-score[data-mdm-audio] > .mdm-chrome`), so that a
+        // player open on a score the reader has left shows one lit button and
+        // not a rail.
+        copy: drawn(".mdm-copy"),
+        exported: drawn(".mdm-audio-export"),
       };
     }),
-    { lit: true, visible: true, reachable: true, copy: false },
-    "the lit headphones of the open player went out of view, or took the copy with them"
+    { lit: true, visible: true, reachable: true, copy: false, exported: false },
+    "the lit headphones of the open player went out of view, or took the rest of the rail with them"
   );
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -3786,14 +3814,22 @@ test("the buttons of a score keep clear of the engraving at any width", { skip }
         r.width > 0 && r.height > 0 &&
         r.left < b.right && r.right > b.left &&
         r.top < b.bottom && r.bottom > b.top;
+      // Named here too: a rail that lost a button would otherwise fail this
+      // as a null inside getBoundingClientRect.
+      const button = (sel) => {
+        const btn = block.querySelector(sel);
+        if (!btn) throw new Error("the rail has no " + sel);
+        return btn;
+      };
       const covers = (btn) => {
         const b = btn.getBoundingClientRect();
         return marks.some((el) => meets(b, el.getBoundingClientRect()));
       };
       const rail = block.querySelector(".mdm-chrome").getBoundingClientRect();
       return {
-        onCopy: covers(block.querySelector(".mdm-copy")),
-        onToggle: covers(block.querySelector(".mdm-audio-toggle")),
+        onCopy: covers(button(".mdm-copy")),
+        onToggle: covers(button(".mdm-audio-toggle")),
+        onExport: covers(button(".mdm-audio-export")),
         onBox: meets(rail, box),
         inPane: rail.right <= pane + 0.5,
         shown: getComputedStyle(block.querySelector(".mdm-chrome")).visibility === "visible",
@@ -3806,6 +3842,7 @@ test("the buttons of a score keep clear of the engraving at any width", { skip }
     assert.equal(seen.shown, true, "the rail is not up at " + width + "px");
     assert.equal(seen.onCopy, false, "the copy button sits on the ink at " + width + "px");
     assert.equal(seen.onToggle, false, "the player button sits on the ink at " + width + "px");
+    assert.equal(seen.onExport, false, "the export button sits on the ink at " + width + "px");
     assert.equal(seen.onBox, false, "the rail sits on the score's box at " + width + "px");
     assert.equal(seen.inPane, true, "the rail hangs past the pane at " + width + "px");
     assert.equal(seen.sideways, 0, "the document scrolls sideways at " + width + "px");
@@ -3817,7 +3854,7 @@ test("the buttons of a score keep clear of the engraving at any width", { skip }
   await h.close();
 });
 
-test("the two little buttons of a score are sized to be read", { skip }, async () => {
+test("the three little buttons of a score are sized to be read", { skip }, async () => {
   const h = await open({});
   await caretInScore(h.page, 0);
   const sizes = await h.page.evaluate(() => {
@@ -3825,21 +3862,31 @@ test("the two little buttons of a score are sized to be read", { skip }, async (
     const toggle = block.querySelector(".mdm-audio-toggle svg").getBoundingClientRect();
     const copy = block.querySelector(".mdm-copy svg").getBoundingClientRect();
     const box = block.querySelector(".mdm-copy").getBoundingClientRect();
+    const sent = block.querySelector(".mdm-audio-export svg").getBoundingClientRect();
+    const sentBox = block.querySelector(".mdm-audio-export").getBoundingClientRect();
     return {
       toggle: Math.round(toggle.height),
       copy: Math.round(copy.height),
+      export: Math.round(sent.height),
       // What a pointer has to land in, whatever the glyph measures.
       target: [Math.round(box.width), Math.round(box.height)],
+      exportTarget: [Math.round(sentBox.width), Math.round(sentBox.height)],
       oneAxis:
         Math.abs(
           toggle.x + toggle.width / 2 - (copy.x + copy.width / 2)
-        ) <= 1.5,
+        ) <= 1.5 &&
+        Math.abs(sent.x + sent.width / 2 - (copy.x + copy.width / 2)) <= 1.5,
     };
   });
   assert.equal(sizes.toggle, 18);
-  assert.ok(sizes.toggle > sizes.copy, "the toggle is not the larger of the two");
+  assert.ok(sizes.toggle > sizes.copy, "the toggle is not the largest of the three");
+  // The copy and the export are the rail's usual 17px, which is what the
+  // headphones' 18 is measured against (style.css: the same box carries
+  // different amounts of ink in each shape).
+  assert.deepEqual([sizes.copy, sizes.export], [17, 17], "the copy and the export are not drawn at 17px");
   assert.deepEqual(sizes.target, [24, 24], "the button a pointer lands in is not 24px");
-  assert.equal(sizes.oneAxis, true, "the two buttons are off each other's axis");
+  assert.deepEqual(sizes.exportTarget, [24, 24], "the export button a pointer lands in is not 24px");
+  assert.equal(sizes.oneAxis, true, "the three buttons are off each other's axis");
 
   await clickToggle(h.page, 0);
   await h.page.waitForFunction(
@@ -4148,7 +4195,7 @@ test("the file actions lead the toolbar, and undo/redo wear the rotate arrows", 
       '#app .mdm-toolbar button[data-type="redo"] svg path'
     );
     return {
-      first: types.slice(0, 7),
+      first: types.slice(0, 9),
       // The rotate arrows: an open ring whose arc starts at these exact
       // coordinates.
       undoPath: undo ? undo.getAttribute("d").slice(0, 5) : null,
@@ -4159,14 +4206,17 @@ test("the file actions lead the toolbar, and undo/redo wear the rotate arrows", 
         .classList.contains("mdm-btn--off"),
     };
   });
-  // Outline leads (its panel opens down the left edge), then export with its
-  // menu entries, then undo/redo.
+  // Outline leads (its panel opens down the left edge), then export with the
+  // rows of its two branches, the document's and the audio of its scores,
+  // then undo/redo. The headers over them are not buttons and are not here.
   assert.deepEqual(bar.first, [
     "outline",
     "mdm-export",
     "mdm-export-html",
     "mdm-export-pdf",
     "mdm-export-both",
+    "mdm-export-midi",
+    "mdm-export-wav",
     "undo",
     "redo",
   ]);

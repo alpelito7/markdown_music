@@ -318,13 +318,18 @@ What it does:
   lists. The bar leads with export, then undo and redo, and ends with the
   editor's own buttons: theme, score fill, staff lines, score alignment and
   the YAML header.
-- **Export from the toolbar**: HTML / PDF / HTML + PDF. Each entry saves the
-  document first, so what reaches the output is always what is on screen, and
-  renders it with the Lua filter the extension carries, which is what lets a
-  document export from wherever it lives with no clone of this repository
-  anywhere. The look of the editor goes with the call (see [The output looks
-  like the editor](#the-output-looks-like-the-editor)). `Ctrl+S` still saves
-  as in any VS Code editor.
+- **Export from the toolbar**: one button with two branches, named in the
+  panel. *Document* is HTML / PDF / HTML + PDF: each entry saves the document
+  first, so what reaches the output is always what is on screen, and renders
+  it with the Lua filter the extension carries, which is what lets a document
+  export from wherever it lives with no clone of this repository anywhere. The
+  look of the editor goes with the call (see [The output looks like the
+  editor](#the-output-looks-like-the-editor)). *Audio* is MIDI / WAV, one file
+  per score: it writes every score of the document at once, beside it, which
+  is what a score's own button does for the one score it stands by (below). It
+  saves nothing first, because what it writes is the music on screen, and in a
+  document with no score its two rows are greyed out and take no press.
+  `Ctrl+S` still saves as in any VS Code editor.
 - **Nothing but the export needs anything installed.** The editor carries
   everything it draws and plays, so it opens and works on a machine with no
   Quarto, no TeX, no Chrome and no abcm2ps. Those are looked for the moment
@@ -361,6 +366,30 @@ What it does:
   is written is what sounds and nothing else: chord symbols in quotes
   (`"Dm7"`) are drawn but not synthesized. Only the piano is vendored, so a
   different `%%MIDI program` will not find its notes.
+- **Export of a score's audio**: under the headphones, a third button in the
+  same rail, drawn with the toolbar's export glyph, writes that score as MIDI
+  or as WAV beside the document, named after it: the third score of
+  `tunes.mdm` with `T:The Kesh` is written as `tunes 3 - The Kesh.mid`, and
+  one with no title as `tunes 3.mid`. The number is the score's place among
+  every score of the document, drawn on screen or not, so a score keeps its
+  own number whichever button asked for the file. It is not padded, so past
+  nine scores a file manager does not sort by it. Nothing is asked before an existing file of that name is
+  written over, as with the HTML and the PDF, and the audio is made from what
+  is on screen, unsaved edits and all, so the document is not saved first.
+  Neither format needs anything installed.
+  The WAV is the piano of the player, rendered from the same samples at the
+  rate the machine's output runs at, which is about 30MB for three minutes.
+  The MIDI is the written notes, at the tempo the editor plays them at: abcjs
+  writes the tempo of a meter whose denominator is not 4 or 8 wrongly (2/2 and
+  3/2 at half speed, 6/4 and 9/4 at a half or a third, 3/16 four times too
+  fast), leaves a staccato note hanging above about 95 beats a minute, and
+  puts the program change of every voice on channel 0; the editor corrects all
+  three, so its MIDI is not byte for byte what abcjs would write. A score the
+  vendored piano cannot sound, because it asks for another `%%MIDI program`,
+  for the drums or for a note above C8, is left out of a WAV run and named in
+  the notification, with what to do about it: that same score exports as MIDI,
+  which carries the program number and asks for no samples at all. MP3 is not offered: no browser can encode it.
+  The exported page has no rail of buttons, so it has no audio export either.
 - **Theme menu**: a toolbar button opens, in this order, *Follow VS Code*
   (the default), *MDM Light*, *MDM Dark*, *MDM White* and every colour theme
   installed in VS Code. The first three are the editor's own looks, which is

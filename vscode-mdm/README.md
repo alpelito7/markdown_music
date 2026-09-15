@@ -11,7 +11,7 @@ With a caret inside a score's block, the editor shows its ABC in the extension's
 
 <img src="https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/abc-card.png" alt="A score block as the editor shows it with a caret inside, its ABC coloured and the score engraved under it. X:1 % reference number, the first line of a tune / T:Four bars % title / M:4/4 % metre / L:1/8 % unit note length: a plain letter is an eighth / Q:1/4=100 % tempo, in quarter notes a minute / K:C % key, the last line of the header / % C is middle C and c the octave above; a 2 after a note doubles its length / % ^ sharp, _ flat, = natural, z a rest, [CEG] a chord, |] the end / CDEF GABc | c2 B2 A2 G2 | ^F2 _B2 =B2 z2 | [CEG]8 |]">
 
-Repeats, ties, lyrics, several voices and the rest of the notation are in the [ABC standard](https://abcnotation.com/wiki/abc:standard:v2.1). The headphones on a score open a player, whose piano comes with the extension and is the only instrument it has. A block fenced as ```` ```{.abc .play} ```` also gets a player on the exported page.
+Repeats, ties, lyrics, several voices and the rest of the notation are in the [ABC standard](https://abcnotation.com/wiki/abc:standard:v2.1). The headphones on a score open a player, whose piano comes with the extension and is the only instrument it has. Under them, a third button writes that score's audio beside the document as MIDI or as WAV: the WAV is the piano you hear, the MIDI the notes at the tempo the editor plays them at, and neither needs anything installed. A block fenced as ```` ```{.abc .play} ```` also gets a player on the exported page.
 
 ## The toolbar
 
@@ -37,7 +37,7 @@ While a tune plays, a brass playhead walks the staff and the page scrolls to kee
 
 ### Export
 
-The export button writes the document as HTML or PDF, with the font, the justification and the hyphenation the editor is using. It needs [Quarto](https://quarto.org) 1.4 or later. With Chrome or Chromium it can print a PDF from the HTML page without TeX, including scores and equations; installing TeX adds its typeset line breaking and page layout. The first kind of PDF says which road it took. Its **Don't show again** button hides that notice, and `mdm.showPdfFallbackNotice` in Settings turns it back on. The editor itself needs none of them.
+The export button has two branches. **Document** writes the document as HTML or PDF, with the font, the justification and the hyphenation the editor is using, and needs [Quarto](https://quarto.org) 1.4 or later. With Chrome or Chromium it can print a PDF from the HTML page without TeX, including scores and equations; installing TeX adds its typeset line breaking and page layout. The first kind of PDF says which road it took. Its **Don't show again** button hides that notice, and `mdm.showPdfFallbackNotice` in Settings turns it back on. The editor itself needs none of them. **Audio** writes every score of the document as MIDI or as WAV beside it, one file per score, which is what a score's own button above does for the one score it stands by; it needs nothing installed at all, and in a document with no score its rows are greyed out.
 
 ## Documentation and licence
 
