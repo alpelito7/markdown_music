@@ -1147,8 +1147,15 @@ test("exporting both formats asks for both and offers both files", async () => {
   restore();
 
   assert.deepEqual(vscode._state.savedUris, []); // a clean document skips the save
-  const args = fs.readFileSync(path.join(tmp, "args.txt"), "utf8").trim().split("\n")[0];
-  assert.ok(args.includes("--to html,pdf"), "both formats were left to the document");
+  // Both formats named, and each in a render of its own, the page first: one
+  // render of the two leaves the page unfinished when the PDF fails (see
+  // EXPORT_TARGETS and fakeQuartoTexFallback below).
+  const renders = exportLog().lines.filter((l) => /\brender\b.* --to /.test(l));
+  assert.deepEqual(
+    renders.map((l) => / --to (\S+)/.exec(l)[1]),
+    ["html", "pdf"],
+    "both was not the page and then the PDF"
+  );
   assert.deepEqual(vscode._state.infoMessages[0].buttons, ["Open HTML", "Open PDF"]);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -1627,15 +1634,29 @@ test("a PDF Quarto finds no TeX for names TeX and offers the page for the system
 //
 // A quarto stand-in whose behaviour depends on --to, matching a real 1.9.37
 // measured on 2026-09-12: it fails on a lone --to pdf with Quarto's own
-// words and writes nothing; --to html,pdf writes the .html and fails the
-// same way; --to html alone writes the .html and succeeds. And a chrome
-// stand-in that writes real bytes to whatever --print-to-pdf names, standing
-// in for the filter's own Chrome invocation for a score.
-function fakeQuartoTexFallback(tmp) {
+// words and writes nothing; --to html alone writes the .html and succeeds.
+// --to html,pdf fails the same way as a lone pdf and leaves an .html behind,
+// and that page is not the one --to html writes: Quarto gives up at the
+// failing format before the page's resources are put in, 49,682 bytes with
+// no KaTeX and no look against 1,876,897 for the same copy rendered alone
+// (measured 2026-09-14). This stand-in used to write the finished page there,
+// and the export printed Quarto's unfinished one into the PDF with the suite
+// green. `latexError` fails the PDF with LaTeX's words instead of Quarto's
+// for a missing TeX, which leaves the same unfinished page (17,103 bytes
+// against 1,843,445). And a chrome stand-in that writes real bytes to
+// whatever --print-to-pdf names, standing in for the filter's own Chrome
+// invocation for a score.
+const FINISHED_PAGE = "<!doctype html><title>printed</title><p>hi</p>";
+const UNFINISHED_PAGE = "<!doctype html><title>left by a failed render</title>";
+
+function fakeQuartoTexFallback(tmp, opts) {
+  const options = opts || {};
   const bin = path.join(tmp, "bin");
   fs.mkdirSync(bin, { recursive: true });
   const quarto = path.join(bin, "quarto");
-  const noTex = "No TeX installation was detected. Please run quarto install tinytex.";
+  const noTex = options.latexError
+    ? "ERROR: compilation failed- error. Undefined control sequence."
+    : "No TeX installation was detected. Please run quarto install tinytex.";
   fs.writeFileSync(
     quarto,
     "#!/bin/sh\n" +
@@ -1653,12 +1674,12 @@ function fakeQuartoTexFallback(tmp) {
       '    echo "' + noTex + '" >&2\n' +
       "    exit 1 ;;\n" +
       '  *" --to html,pdf "*)\n' +
-      "    printf '<!doctype html><title>printed</title><p>hi</p>' > \"$base.html\"\n" +
+      "    printf '" + UNFINISHED_PAGE + "' > \"$base.html\"\n" +
       "    printf 'quarto wrote this\\n' > \"$base.tex\"\n" +
       '    echo "' + noTex + '" >&2\n' +
       "    exit 1 ;;\n" +
       '  *" --to html "*)\n' +
-      "    printf '<!doctype html><title>printed</title><p>hi</p>' > \"$base.html\"\n" +
+      "    printf '" + FINISHED_PAGE + "' > \"$base.html\"\n" +
       "    exit 0 ;;\n" +
       "esac\n" +
       "exit 0\n"
@@ -1681,6 +1702,12 @@ function fakeChromePrint(bin, opts) {
       "esac; done\n" +
       '[ -n "$profile" ] && [ -d "$profile" ] || exit 22\n' +
       'printf "%s\\n" "$profile" > "' + path.dirname(bin) + '/chrome-profile.txt"\n' +
+      // The page it was handed, which is the last argument, kept so a test can
+      // say which page went into the PDF. Builtins only, for the PATH above.
+      'page=""; for a in "$@"; do page="$a"; done\n' +
+      ': > "' + path.dirname(bin) + '/chrome-page.txt"\n' +
+      'while IFS= read -r l || [ -n "$l" ]; do printf "%s" "$l" >> "' +
+      path.dirname(bin) + '/chrome-page.txt"; done < "$page"\n' +
       (options.hang
         ? // By absolute path: the PATH a test runs under holds the stand-ins
           // and nothing else, so a bare `sleep` is not found and the
@@ -1716,6 +1743,14 @@ function chromeCalls(tmp) {
     return fs.readFileSync(path.join(tmp, "chrome-calls.txt"), "utf8").trim().split("\n");
   } catch (e) {
     return [];
+  }
+}
+
+function chromePage(tmp) {
+  try {
+    return fs.readFileSync(path.join(tmp, "chrome-page.txt"), "utf8");
+  } catch (e) {
+    return "";
   }
 }
 
@@ -1873,8 +1908,18 @@ test("with Chrome but no TeX, both formats print the PDF from the HTML already m
   assert.ok(fs.existsSync(path.join(tmp, "doc.html")), "both asked for the HTML and it was thrown away");
   assert.ok(fs.existsSync(path.join(tmp, "doc.pdf")));
   assert.ok(!fs.existsSync(path.join(tmp, "doc.tex")), "the stray .tex was left behind");
+  // The page went into the PDF and stayed as the HTML finished, which is what
+  // Quarto's render of the two formats at once does not leave behind: seen on
+  // 2026-09-14 as a PDF in Liberation Serif with every equation in its LaTeX
+  // source, printed from that page.
+  assert.equal(chromePage(tmp), FINISHED_PAGE, "the PDF was printed from a page Quarto had not finished");
+  assert.equal(fs.readFileSync(path.join(tmp, "doc.html"), "utf8"), FINISHED_PAGE, "the HTML kept is a page Quarto had not finished");
   const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n");
-  assert.equal(calls.length, 1, "both already made the HTML the PDF was printed from; no second call was needed");
+  assert.deepEqual(
+    calls.map((c) => / --to (\S+)/.exec(c)[1]),
+    ["html", "pdf"],
+    "both renders its page and then its PDF, and prints the page it made without rendering it again"
+  );
   assert.doesNotMatch(chromeCalls(tmp)[0], /--no-sandbox/, "a non-root call carried the flag anyway");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -2089,6 +2134,40 @@ test("when both were asked and only the page landed, the notice offers the page"
     vscode._state.openedExternal,
     ["file://" + path.join(tmp, "doc.html")],
     "Open HTML did not open the page that landed"
+  );
+  assert.equal(
+    fs.readFileSync(path.join(tmp, "doc.html"), "utf8"),
+    FINISHED_PAGE,
+    "the page offered is one Quarto had not finished"
+  );
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// A PDF that fails for a reason other than a missing TeX, a LaTeX error in
+// the document, with TeX installed. It was an export failure before and it
+// still is one; what changes is the page it leaves, which was the unfinished
+// one of a render of both formats, written over the reader's earlier export.
+test("when both were asked and LaTeX failed, the page left is a finished one", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoTexFallback(tmp, { latexError: true });
+  fakeChromePrint(bin);
+  const restorePath = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+
+  await h.receive({ type: "export", to: "both" });
+  await settle();
+  restorePath();
+
+  assert.equal(vscode._state.errorMessages.length, 1, "a LaTeX failure was not reported as a failed export");
+  assert.match(vscode._state.errorMessages[0].message, /^MDM: the export of doc\.mdm failed\./);
+  assert.deepEqual(chromeCalls(tmp), [], "a LaTeX error was taken for a missing TeX and printed");
+  assert.equal(
+    fs.readFileSync(path.join(tmp, "doc.html"), "utf8"),
+    FINISHED_PAGE,
+    "the page left beside the document is one Quarto had not finished"
   );
   fs.rmSync(tmp, { recursive: true, force: true });
 });

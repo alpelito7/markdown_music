@@ -2218,6 +2218,70 @@ One mutation, applied, run and reverted in one command:
 - **M13** the heading's link back in the flow → *the link is in the flow at
   1400*.
 
+### Both formats, and a card of code across a sheet (2026-09-14)
+
+Two things seen in the PDF printed without TeX, from the separate window
+`~/mdm-check/sin-tex.sh` opens (TeX taken off the PATH), on the example with its
+scores taken out and its prose three times over:
+
+- **Exported as HTML + PDF, the PDF came out in Liberation Serif with every
+  equation in its LaTeX source**, and exported as PDF alone it was right. The
+  cause is Quarto and not the print: a render of two formats is given up at
+  the first format that fails, and the page it had begun is left as it stood,
+  before its resources are put in. From the same copy on Quarto 1.9.37, with
+  no TeX, `--to html,pdf` left a page of 49,682 bytes with no KaTeX and no look
+  in it, and `--to html` wrote 1,876,897; with TeX and a LaTeX error in the
+  document, 17,103 against 1,843,445. The export printed that page and kept it
+  as the HTML, and the second case is older than the print: a PDF that failed
+  for any reason left the unfinished page in place of the reader's. Both is now
+  the page rendered on its own and then the PDF (`EXPORT_TARGETS` in
+  `extension.js`), which costs a second start of Quarto (7.75 and 7.80 s against
+  7.42 and 7.35 for `example.mdm` with TeX and a warm cache) and loses nothing
+  of the page to the PDF's render, measured with its resources left beside it.
+  The suite had stayed green because `fakeQuartoTexFallback` wrote the finished
+  page for `--to html,pdf`; it writes an unfinished one now, as Quarto does, and
+  the Chrome stand-in keeps a copy of the page it was handed
+  (`chromePage`).
+- **A card of code that went on past the foot of a sheet opened the next one
+  with its first line against the card's edge**: 1.0 pt from it, where the card
+  opens 7.2 pt under its top. Chrome gives a box broken across sheets its
+  padding once, over the first piece and under the last. The rule is `clone` on
+  the card and the two boxes inside it, in the paper block of `mdm-look.css`;
+  the code inside the pre carries 1.83px of padding of its own, so `clone` on
+  the pre alone left 5.5 pt.
+
+Tests, in `extension-host.test.js`: *exporting both formats asks for both and
+offers both files* reads the two renders off the log in order; *with Chrome but
+no TeX, both formats print the PDF from the HTML already made and keep it* holds
+the printed page and the kept one to the finished page and the calls to
+`html` then `pdf` (it used to hold them to one call); *when both were asked and
+only the page landed, the notice offers the page* holds the page offered to the
+finished one; and a new one, *when both were asked and LaTeX failed, the page
+left is a finished one*. In `html.test.js`, *on paper a card of code that goes
+on past the foot of a sheet opens the next sheet as it opens anywhere* prints a
+card of 150 lines with the extension's own Chrome flags and reads the paper: the
+card painted magenta by a sheet that changes colours only, the sheets rasterized
+at 144 dpi with `pdftoppm`, and the first line's box from `pdftotext -bbox`; it
+skips without poppler. Every piece has to open within 0.6 pt of the card's own
+opening, and there have to be three pieces for it to read anything.
+
+Each was broken, run, and the file restored and compared, in one command:
+
+- **M1** `both: { args: ["--to", "html,pdf"] }` back in `extension.js` → the
+  four both tests fail, each on its own message: *both was not the page and then
+  the PDF*, *the PDF was printed from a page Quarto had not finished*, *the page
+  offered is one Quarto had not finished*, *the page left beside the document
+  is one Quarto had not finished*.
+- **M2** the `clone` rule taken out of `_extensions/mdm/resources/mdm-look.css`
+  → *on sheet 2 the card's first line stands 1.0 pt under its top edge, where
+  the card opens with it 7.2 pt under*.
+- **M3** `clone` on the pre alone → the same, at 5.5 pt.
+
+Known and not changed here: a PDF that fails beside a document leaves an empty
+`<name>_files/mediabag` and the filter's `mdm_cache/` there, as it did before
+(a both keeps the files folder because a page rendered without
+`embed-resources` needs its `libs`).
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

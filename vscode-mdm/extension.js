@@ -283,10 +283,24 @@ async function writeSetting(document, key, value) {
 // HTML + PDF and one file came out. Naming them takes nothing away from a
 // document that does declare both, since `--to` picks the formats and the
 // options written under each one still apply.
+//
+// Both is the two exports one after the other, and not one render of two
+// formats. Quarto 1.9.37 gives up a render of several formats at the first
+// one that fails and leaves the page it had begun as it stood, before its
+// resources are put in: with no TeX, `--to html,pdf` left a page of 49,682
+// bytes with no KaTeX and no look in it, where `--to html` alone wrote
+// 1,876,897 of the finished page from the same copy; and with TeX and a LaTeX
+// error it left 17,103 bytes against 1,843,445 (both measured 2026-09-14).
+// That page was printed into the PDF with no TeX, and kept as the HTML either
+// way. Rendered in a step of its own, the page is finished before the PDF is
+// tried, whatever becomes of the PDF. The cost is a second start of Quarto:
+// 7.75 and 7.80 s against 7.42 and 7.35 for example.mdm with TeX and a warm
+// cache. The PDF's render takes nothing of the page's with it, measured with
+// the resources left beside the page rather than embedded.
 const EXPORT_TARGETS = {
   html: { args: ["--to", "html"], outputs: [".html"] },
   pdf: { args: ["--to", "pdf"], outputs: [".pdf"] },
-  both: { args: ["--to", "html,pdf"], outputs: [".html", ".pdf"] },
+  both: { steps: ["html", "pdf"], outputs: [".html", ".pdf"] },
 };
 
 // ---------- The look the export is dressed in ----------
@@ -1463,17 +1477,16 @@ async function runExport(document, to) {
       );
     }
   }
-  const args = renderArgs(
-    text,
-    copy,
-    target.args.concat(exportLook(document, text))
-  );
+  const look = exportLook(document, text);
+  const steps = (target.steps || [to]).map(function (name) {
+    return { name: name, args: renderArgs(text, copy, EXPORT_TARGETS[name].args.concat(look)) };
+  });
 
   // Every Quarto call, announced and logged as it happens: normally the one
-  // render asked for; an HTML-only call instead when the score preflight has
-  // already found that LaTeX's road is incomplete; and a second HTML call
-  // after a PDF-only render reports that no TeX exists. A .qmd that fails to
-  // write never spawns.
+  // render asked for, or for both the page and then the PDF; an HTML-only call
+  // instead when the score preflight has already found that LaTeX's road is
+  // incomplete; and a second HTML call after a PDF-only render reports that no
+  // TeX exists. A .qmd that fails to write never spawns.
   function runQuartoStep(stepArgs) {
     channel().appendLine("  " + quarto + " " + stepArgs.join(" ") + "  (in " + dir + ")");
     return new Promise(function (resolve) {
@@ -1542,8 +1555,8 @@ async function runExport(document, to) {
         if (step.code !== 0) return { ok: false, why: "render", code: step.code };
         if (!isFile(htmlPath)) return { ok: false, why: "nohtml" };
       } else if (!isFile(htmlPath)) {
-        // "both" writes its HTML before reporting that its PDF had no TeX
-        // (measured on Quarto 1.9.37); nothing can be printed without it.
+        // Both renders its page in a step of its own before the PDF is tried
+        // (EXPORT_TARGETS); nothing can be printed without it.
         return { ok: false, why: "nohtml" };
       }
       if (!(await printHtmlToPdf(chrome, htmlPath, stagedPdf))) {
@@ -1638,9 +1651,17 @@ async function runExport(document, to) {
           }
           return { code: -1, scoresLack: printLack, printTried: true };
         }
-        const primary = await runQuartoStep(args);
+        let primary;
+        let failed = null;
+        for (const step of steps) {
+          primary = await runQuartoStep(step.args);
+          if (primary.code !== 0) {
+            failed = step.name;
+            break;
+          }
+        }
         if (primary.code === 0) return { code: 0 };
-        if (wantsPdf && NO_TEX.test(primary.log)) {
+        if (failed === "pdf" && NO_TEX.test(primary.log)) {
           const print = await printInstead(wantsHtml);
           cleanFailedLatex();
           if (print.ok) return { code: 0, printed: true };
