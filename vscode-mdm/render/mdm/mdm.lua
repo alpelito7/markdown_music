@@ -1274,16 +1274,41 @@ end
 -- (mdm-engraver: abcm2ps), keeps the abcm2ps engraving: the render degrades
 -- rather than dying, and says so in the log.
 
--- Chrome by any of its common names, or wherever the document points
--- (mdm.chrome in the YAML header). macOS keeps its browser out of the PATH.
+-- Chrome by any of its common names, where its installer puts it, or wherever
+-- the document points (mdm.chrome in the YAML header). macOS and Windows keep
+-- a normal installation out of the PATH.
 local CHROME_NAMES = {
   "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+  "chrome",
 }
-local MAC_CHROME =
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+local CHROME_INSTALLS = {
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+}
+local home = os.getenv("HOME")
+if home then
+  table.insert(CHROME_INSTALLS,
+    home .. "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+end
+if package.config:sub(1, 1) == "\\" then
+  CHROME_INSTALLS = {}
+  local seen = {}
+  local function add_windows_chrome(root)
+    if root and not seen[root] then
+      seen[root] = true
+      table.insert(CHROME_INSTALLS,
+        root .. "\\Google\\Chrome\\Application\\chrome.exe")
+    end
+  end
+  add_windows_chrome(os.getenv("LOCALAPPDATA"))
+  add_windows_chrome(os.getenv("ProgramFiles") or "C:\\Program Files")
+  add_windows_chrome(os.getenv("ProgramFiles(x86)"))
+end
 
 local function command_exists(name)
-  local p = io.popen("command -v " .. name .. " 2>/dev/null")
+  local command = package.config:sub(1, 1) == "\\"
+    and ("where " .. name .. " 2>NUL")
+    or ("command -v " .. name .. " 2>/dev/null")
+  local p = io.popen(command)
   if not p then return false end
   local out = p:read("*a") or ""
   p:close()
@@ -1299,7 +1324,9 @@ local function find_chrome(meta_path)
   for _, name in ipairs(CHROME_NAMES) do
     if command_exists(name) then return name end
   end
-  if file_exists(MAC_CHROME) then return MAC_CHROME end
+  for _, install in ipairs(CHROME_INSTALLS) do
+    if file_exists(install) then return install end
+  end
   return nil
 end
 

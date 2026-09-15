@@ -866,8 +866,8 @@ test("the webview HTML wires the synth engine, the soundfont and the widget styl
 // A fake Quarto on the PATH. The extension looks the real one up there first
 // (findQuarto), so a directory holding this one, and a PATH holding only that
 // directory, is the whole of the substitution and leaves nothing of the real
-// machine in the way; the folders Quarto's installers write are looked in
-// only after it, and a test about them says which machine it runs on
+// machine in the way; the folders Quarto and Chrome's installers write are
+// controlled as well, and a test about them says which machine it runs on
 // (useMachine). Shell builtins only, for the same reason: under that PATH
 // there is no cat and no cp. It writes down its arguments and its working
 // directory, and keeps a copy of the file it was handed, which is the one
@@ -910,9 +910,22 @@ function fakeBin(tmp, opts) {
 // The PATH the export searches, put back when the test is done with it.
 function usePath(dir) {
   const before = process.env.PATH;
+  const chromeEnv = ["LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"];
+  const chromeBefore = {};
   process.env.PATH = dir;
+  // A controlled PATH must not accidentally find Chrome in the installation
+  // folders of the machine running the tests. Point those roots into the same
+  // temporary tree, where a test can deliberately put one if it needs it.
+  chromeEnv.forEach((key) => {
+    chromeBefore[key] = process.env[key];
+    process.env[key] = dir;
+  });
   return function () {
     process.env.PATH = before;
+    chromeEnv.forEach((key) => {
+      if (chromeBefore[key] === undefined) delete process.env[key];
+      else process.env[key] = chromeBefore[key];
+    });
   };
 }
 
@@ -1365,7 +1378,7 @@ test("a Quarto installed while the editor was open is found where its installer 
 // Quarto's own VS Code extension scans (context.ts in quarto-dev/quarto)
 // less the RStudio bundles, and the macOS and Windows paths are the install
 // locations of Quarto's .pkg (installer.ts) and .msi (quarto.wxs).
-test("Quarto is looked for in the folders its installers write, on each system", () => {
+test("Quarto and Chrome are looked for in their installer folders", () => {
   assert.deepEqual(ext.quartoInstalls("darwin", { HOME: "/Users/u" }), [
     "/Applications/quarto/bin/quarto",
     "/Users/u/Applications/quarto/bin/quarto",
@@ -1390,6 +1403,27 @@ test("Quarto is looked for in the folders its installers write, on each system",
   ]);
   // A system Quarto ships no installer for has nowhere to look but the PATH.
   assert.deepEqual(ext.quartoInstalls("freebsd", { HOME: "/home/u" }), []);
+
+  assert.deepEqual(ext.chromeInstalls("darwin", { HOME: "/Users/u" }), [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Users/u/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  ]);
+  assert.deepEqual(
+    ext.chromeInstalls("win32", {
+      LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local",
+      ProgramFiles: "D:\\Programs",
+      "ProgramFiles(x86)": "E:\\Programs (x86)",
+    }),
+    [
+      "C:\\Users\\u\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
+      "D:\\Programs\\Google\\Chrome\\Application\\chrome.exe",
+      "E:\\Programs (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    ]
+  );
+  assert.deepEqual(ext.chromeInstalls("win32", {}), [
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  ]);
+  assert.deepEqual(ext.chromeInstalls("linux", { HOME: "/home/u" }), []);
 });
 
 // What the filter needs to draw the scores of a PDF, and what the notice asks

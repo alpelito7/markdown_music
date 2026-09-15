@@ -531,23 +531,49 @@ const FILTER = path.join(__dirname, "render", "mdm", "mdm.lua");
 // a Chrome or an abcm2ps and nothing else, which a machine with Chrome and a
 // TeX without pdfcrop passes on its way to exactly that (read off the filter,
 // not seen happen; TinyTeX's package lists hold no pdfcrop).
+// Where Chrome's own installers put it. Chrome does not normally add itself
+// to PATH on Windows, so looking only for the command there reports a normal
+// per-user installation as missing. macOS likewise keeps the application out
+// of PATH; include both its system-wide and per-user Applications folders.
+function chromeInstalls(platform, env) {
+  if (platform === "darwin") {
+    const out = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"];
+    if (env.HOME) {
+      out.push(
+        path.posix.join(
+          env.HOME,
+          "Applications",
+          "Google Chrome.app",
+          "Contents",
+          "MacOS",
+          "Google Chrome"
+        )
+      );
+    }
+    return out;
+  }
+  if (platform === "win32") {
+    const roots = [
+      env.LOCALAPPDATA,
+      env.ProgramFiles || "C:\\Program Files",
+      env["ProgramFiles(x86)"],
+    ].filter(Boolean);
+    return Array.from(new Set(roots)).map(function (root) {
+      return path.win32.join(root, "Google", "Chrome", "Application", "chrome.exe");
+    });
+  }
+  return [];
+}
+
 function findChrome() {
   const names = [
-    "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+    "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome",
   ];
   for (const name of names) {
     const hit = onPath(name);
     if (hit) return hit;
   }
-  if (process.platform === "darwin") {
-    const app = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-    try {
-      if (fs.existsSync(app)) return app;
-    } catch (e) {
-      // unreadable: then it is not the export's to spend
-    }
-  }
-  return null;
+  return chromeInstalls(process.platform, process.env).find(isFile) || null;
 }
 
 function findAbcm2ps(dir) {
@@ -736,6 +762,7 @@ function quartoMissing() {
 function scoresMissing(lack, dir, printed, page) {
   const app = appName();
   const platform = process.platform;
+  const installs = chromeInstalls(platform, process.env);
   const tex = lack.tex.length > 0;
   let summary;
   if (printed) {
@@ -793,9 +820,14 @@ function scoresMissing(lack, dir, printed, page) {
   }
   lines.push(
     "Looked for Chrome as google-chrome, google-chrome-stable, chromium and " +
-      "chromium-browser in every folder of the PATH" +
-      (platform === "darwin" ? ", and at /Applications/Google Chrome.app" : "") +
-      "; for abcm2ps at " + path.join(dir, "tools", "bin", "abcm2ps") +
+      "chromium-browser or chrome in every folder of the PATH" +
+      (installs.length ? ", and at:" : ".")
+  );
+  installs.forEach(function (p) {
+    lines.push("  " + p);
+  });
+  lines.push(
+    "Looked for abcm2ps at " + path.join(dir, "tools", "bin", "abcm2ps") +
       " and in the PATH; for pdfcrop, epstopdf and gs in the PATH.",
     "PATH: " + (process.env.PATH || "")
   );
@@ -1964,8 +1996,9 @@ function deactivate() {}
 // are exported for the tests: they decide what Quarto is handed, which is the
 // half of the export that can be checked without running anything. So are
 // quartoInstalls and texPage, which say where a missing tool is looked for
-// and where its reader is sent on each system, and a test can only run on
-// one. The key and the bound of the divisions kept go out for the tests as
+// and where its reader is sent on each system; chromeInstalls does the same
+// for Chrome, and a test can only run on one system. The key and the bound of
+// the divisions kept go out for the tests as
 // well, which seed and read VS Code's globalState through them.
 module.exports = {
   activate,
@@ -1977,6 +2010,7 @@ module.exports = {
   hasScores,
   renderArgs,
   quartoInstalls,
+  chromeInstalls,
   texPage,
   FILTER,
   READER,
