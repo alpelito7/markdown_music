@@ -1,5 +1,105 @@
 # Changelog
 
+## 0.6.0
+
+- The prose is justified, and a toggle in the toolbar sets it back to a ragged
+  right. Every line of a paragraph but its last reaches both edges, the way a
+  printed page is set; headings, code, equations, tables and scores are not
+  touched. It is the same line breaking either way, since the spaces are
+  widened after the line is filled and not before. `mdm.textAlign` holds it,
+  and an export carries it to the page and to the paper.
+- An export that cannot find what it needs now says what to install and
+  carries a button to the page it is installed from, instead of naming a
+  program and leaving the address in the log. There is one for Quarto, one for
+  TeX and one for the programs a PDF draws its scores with. Quarto is also
+  looked for in the folders its own installers write, so a Quarto installed
+  while the editor was open is found without restarting it.
+- A normal Chrome installation on Windows is found in the per-user and system
+  application folders. It used to be searched only by the command names used
+  on Linux, but Chrome's Windows installer does not put one of those on the
+  `PATH`, so PDF export incorrectly said that Chrome was not installed.
+- A PDF asked of a computer with no TeX is printed from the exported page
+  instead of refused. It is a real PDF with the document's own look, scores
+  and equations included, and the notice says it was printed rather than
+  typeset and how to get the typeset one. Nothing is installed for it: the
+  same headless Chrome the filter already engraves scores with does the
+  printing.
+- Printing a PDF through Chrome uses a fresh temporary browser profile, so it
+  still works while the reader's normal Chrome is open. On Windows the first
+  print could work and a later one exit with code 21 without writing a byte,
+  because the headless process tried to take over a profile another Chrome
+  already held. The private profile is removed after either success or failure.
+- The notice that explains a PDF was printed from HTML because TeX is missing
+  offers **Don't show again**. It disables `mdm.showPdfFallbackNotice`, a new
+  setting that can be turned back on at any time; only the notice is hidden,
+  while the PDF is still made and the route is still written to the MDM log.
+- A list written straight under a line of text is a list on the exported page
+  and in the PDF, as it is in the editor. Pandoc's Markdown wants a blank line
+  before a list and read the text and the items as one paragraph with the
+  dashes written into it; the export now gives the copy it renders that blank
+  line wherever the editor starts a list, and the document is not changed.
+- A PDF export that fails no longer leaves an empty `<name>_files` folder and
+  an `mdm_cache` folder beside the document. Only the folders that export made
+  are removed: one that was there before stays, and so do the LaTeX files that
+  say what went wrong.
+- Exporting HTML + PDF renders the page first and the PDF after it, each on
+  its own. Quarto gives up a render of the two formats at the first one that
+  fails and leaves the page it had begun without its equations set and without
+  the editor's look, and that page was printed into the PDF when there was no
+  TeX, and kept as the HTML whenever the PDF failed. The page is finished now
+  before the PDF is tried, whatever becomes of the PDF.
+- The exported page is set for paper when it is printed, which is a reader's
+  Ctrl+P as much as it is that PDF. The page is scaled onto the sheet rather
+  than re-flowed into it, so the prose, the engravings and the cards keep the
+  proportions they have on screen and the text block is the one TeX sets. A
+  score wider than the measure is fitted to it instead of being cut at the
+  edge of the paper, and the audio transport, the scrollbars and the copy
+  button are not drawn.
+- Consecutive sheets of a PDF printed through Chrome leave 2.5 cm above and
+  below their text. The padding formerly put on the document body reached the
+  first and last edges but Chrome dropped it at automatic page breaks, where
+  one line could end 15 pt from the foot and the next begin 13 pt from the
+  head. The margin now belongs to the physical page, which Chrome repeats.
+- A block of code that runs on past the foot of a printed sheet opens the next
+  sheet with the same room above its first line as where it begins. Chrome
+  gave a box broken across two sheets its padding only once, so the code went
+  on with its first line against the edge of its card: 1.0 pt from it, where
+  the card leaves 7.2 pt above its first line.
+- A PDF exported through Chrome, when TeX is unavailable, keeps Latin Modern
+  prose at the same reading size as an inline equation. Chrome kept the
+  adjustment in the HTML but discarded its inherited `font-size-adjust` while
+  writing the PDF, leaving words at 9.96 pt beside maths at 12.05 pt. The same
+  x-height adjustment now belongs to each embedded font face, which Chrome
+  preserves on paper: 12.20 pt beside 12.05 pt in the regression document.
+- A page carries the document's own name, in the browser's tab and in the
+  properties of a PDF printed from it. A document whose header the editor is
+  hiding used to lose its title there and come out named after a temporary
+  file of Quarto's.
+- The buttons of a block stand in the margin right of the text, beside every
+  score, display equation and block of code: the copy over the headphones on a
+  score, the copy alone on a block of code, and a copy button on a display
+  equation, which had none and copies the formula written between its `$$`.
+  They show while the pointer is on the block and while its source is open,
+  and a score's headphones stay up for as long as its player is open. A
+  block's buttons stay where they stood when its source opens, beside the top
+  of the block, instead of going down with the drawing under the source. A
+  score's two used to sit in a strip of 28 px over every score, which put air
+  between a paragraph and its tune that the exported page does not have, and
+  the copy of a code block rode the top corner of its card. Nothing of them is
+  part of the document now: a block is as tall as what it draws and the column
+  as wide. Where the buttons of a short block reach down beside the next
+  block's, the ones of the block under the pointer are drawn on top, then the
+  ones of the block the caret is in.
+- The toggle that sets the prose ragged works as the one that aligns the
+  scores: it is never lit, and its drawing names what a click does, rows flush
+  left while the text is justified and the justified rows while it is ragged.
+  The score fill menu is lit while a fill is on, as the hyphenation menu is
+  while a language divides the words.
+- The link on a heading of an exported page stands in the margin. In the flow
+  it was an invisible box 24 px wide at the end of the last line, enough to
+  send a heading that filled its line onto a second one where the editor keeps
+  it on one.
+
 ## 0.5.6
 
 - Prose words are kept whole at a line ending until a language is chosen from
