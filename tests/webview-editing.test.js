@@ -2220,6 +2220,22 @@ test("a drop-down of the toolbar opens over the search row, and the text scrolls
   await h.close();
 });
 
+// ---- What must open ----
+
+test("a paragraph of twelve thousand asterisks a side opens, as text", { skip }, async () => {
+  // Lezer writes the emphasis tree of a paragraph recursively, a frame per
+  // level, and a run this long nested some thousands deep: the editor never
+  // built its view and a paste of the run was dropped. A run of twenty or
+  // more delimiters is text now (vendor-src/src/markdown/runs.js).
+  const run = "*".repeat(12000);
+  const text = "Para\n\n" + run + "a" + run + "\n";
+  const h = await open({ text, scores: 0 });
+  assert.equal(await docText(h.page), text);
+  assert.ok((await count(h.page, ".cm-content .cm-line")) >= 3);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---- Reveal semantics ----
 
 test("a display equation is a widget over hidden source until a caret enters it", { skip }, async () => {

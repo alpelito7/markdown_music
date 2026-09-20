@@ -9,7 +9,8 @@ import {dirname, resolve} from "node:path"
 import {parser} from "@lezer/markdown"
 import {markdownLanguage} from "@codemirror/lang-markdown"
 import {TreeFragment} from "@lezer/common"
-import {mdmMath, mdmFrontMatter, mdmCallout, mdmMarkdownExtensions, calloutKind} from "../src/markdown/index.js"
+import {mdmMath, mdmFrontMatter, mdmCallout, mdmLinks, mdmTable, mdmMarkdownExtensions, calloutKind, closedOpeners, LONG_RUN, scanDefinitions, normalizeLabel} from "../src/markdown/index.js"
+import {GFM, Superscript} from "@lezer/markdown"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const EXAMPLE = resolve(here, "../../../example.mdm")
@@ -369,6 +370,52 @@ test("callout: unterminated gives no node, text stays plain", () => {
     "Document(Paragraph,Callout(CalloutMark,Paragraph,CalloutMark))")
 })
 
+test("callout: the closers are looked for once per parse, not once per opener (G038)", () => {
+  // The extensions read ahead through `input.read`, which the parser itself
+  // does not use, so what they read is what a look-ahead costs. 3000 unclosed
+  // openers used to read the rest of the input 3000 times.
+  const text = "::: {.callout-note}\n\ntext\n\n".repeat(3000)
+  let read = 0
+  const input = {
+    length: text.length,
+    lineChunks: false,
+    chunk(from) { return text.slice(from, from + 4096) },
+    read(from, to) { read += to - from; return text.slice(from, to) },
+  }
+  const tree = mdm.parse(input)
+  assert.equal(nodes(tree, /^Callout$/).length, 0)
+  assert.ok(read <= 4 * text.length, `read ${read} characters of a ${text.length}-character input`)
+  // And the same answers as the depth-counting look-ahead gave: a closer
+  // goes to the nearest opener waiting, an outer one may stay open.
+  assert.deepEqual([...closedOpeners("::: {.a}\n::: {.b}\nx\n:::\n")], [9])
+  assert.deepEqual([...closedOpeners("::: {.a}\n\n::: {.b}\nx\n:::\n\n:::\n")].sort((a, b) => a - b), [0, 10])
+  assert.deepEqual([...closedOpeners(":::\n::: {.a}\n")], [])
+  assert.deepEqual([...closedOpeners("> ::: {.a}\n> x\n> :::\n")], [0])
+})
+
+test("raw TeX: the end of an environment is looked for once per parse, not once per opener (G038)", () => {
+  const text = "\\begin{foo}\n\ntext\n\n".repeat(3000)
+  let read = 0
+  const input = {
+    length: text.length,
+    lineChunks: false,
+    chunk(from) { return text.slice(from, from + 4096) },
+    read(from, to) { read += to - from; return text.slice(from, to) },
+  }
+  const tree = mdm.parse(input)
+  assert.equal(nodes(tree, /^RawTeXBlock$/).length, 0)
+  assert.ok(read <= 4 * text.length, `read ${read} characters of a ${text.length}-character input`)
+  // The closer has to stand past the opener, and be of its name.
+  const closed = "\\begin{a}\nx\n\\end{a}\n\n\\begin{a}\ny\n"
+  assert.deepEqual(nodes(parse(closed), /^RawTeXBlock$/), ["RawTeXBlock@0-19"])
+  // The second opener has an `\\end{a}` above it and none below: it stays the
+  // paragraph it reads as, where a block would swallow the lines to the end.
+  assert.equal(parse(closed).toString(), "Document(RawTeXBlock,Paragraph(RawTeX))")
+  // Two of a name, each with its own end: it is the last end that is kept.
+  assert.equal(parse("\\begin{a}\nx\n\\end{a}\n\n\\begin{a}\ny\n\\end{a}\n").toString(), "Document(RawTeXBlock,RawTeXBlock)")
+  assert.deepEqual(nodes(parse("\\begin{a}\nx\n\\end{b}\n"), /^RawTeXBlock$/), [])
+})
+
 test("callout: nested callouts and blank lines inside", () => {
   const text = "::: {.callout-tip}\nouter\n\n::: {.callout-warning}\ninner\n:::\n\nback\n:::\n"
   const tree = parse(text)
@@ -438,6 +485,32 @@ test("each extension works on its own", () => {
   assert.equal(parser.configure([mdmMath]).parse("$x$").toString(), "Document(Paragraph(InlineMath(InlineMathMark,InlineMathContent,InlineMathMark)))")
   assert.equal(parser.configure([mdmFrontMatter]).parse("---\na: 1\n---\n").toString(), "Document(FrontMatter(FrontMatterMark,FrontMatterContent,FrontMatterMark))")
   assert.equal(parser.configure([mdmCallout]).parse("::: {.note}\nx\n:::").toString(), "Document(Callout(CalloutMark,Paragraph,CalloutMark))")
+})
+
+// ---------- long delimiter runs ----------
+
+test("a run of emphasis delimiters at the long-run length or more is text", () => {
+  for (const ch of ["*", "_"]) {
+    const text = ch.repeat(LONG_RUN) + "foo" + ch.repeat(LONG_RUN) + "\n"
+    assert.deepEqual(nodes(parse(text), /Emphasis/), [], ch + " run of " + LONG_RUN)
+    assert.deepEqual(nodes(parse(text), /^Paragraph$/), ["Paragraph@0-" + (text.length - 1)])
+  }
+})
+
+test("a run one short of the long-run length still nests as CommonMark reads it", () => {
+  const text = "*".repeat(LONG_RUN - 1) + "foo" + "*".repeat(LONG_RUN - 1) + "\n"
+  assert.ok(nodes(parse(text), /^(Emphasis|StrongEmphasis)$/).length > 0)
+  assert.deepEqual(nodes(parse("**foo**\n"), /^StrongEmphasis$/), ["StrongEmphasis@0-7"])
+  assert.deepEqual(nodes(parse("snake_case_name\n"), /Emphasis/), [])
+})
+
+test("a paragraph of 12,000 asterisks a side parses, and quickly", () => {
+  const text = "*".repeat(12000) + "a" + "*".repeat(12000) + "\n"
+  const t0 = Date.now()
+  const tree = parse(text)
+  assert.equal(tree.length, text.length)
+  assert.deepEqual(nodes(tree, /Emphasis/), [])
+  assert.ok(Date.now() - t0 < 2000, "took " + (Date.now() - t0) + " ms")
 })
 
 // ---------- links that know the definitions ----------

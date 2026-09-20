@@ -64,12 +64,51 @@ function parseRawTeX(cx, next, pos) {
 
 const BEGIN = /^\\begin\{([^}\s]+)\}/
 
+// Where the last `\end{env}` of each environment stands in the input, read
+// off the whole input once per parse (as links.js reads its definitions): a
+// closer follows an opener when the last one of its name stands past it. A
+// look-ahead from every opener read the rest of the input each time, so a
+// document of environments that never end cost the square of its length,
+// the fault the callouts had (G038).
+let current = {input: null, ends: new Map()}
+
+export function lastEnds(text) {
+  let ends = new Map(), re = /\\end\{([^}\s]+)\}/g, m
+  while ((m = re.exec(text))) ends.set(m[1], m.index)
+  return ends
+}
+
+function closesAfter(cx, name, pos) {
+  let input = cx.input
+  if (!input) return false
+  if (current.input !== input) current = {input, ends: lastEnds(input.read(0, input.length))}
+  return current.ends.has(name) && current.ends.get(name) >= pos
+}
+
 // `\begin{env}` at the head of a line, down to the line holding its
 // `\end{env}`. Committed only when that line exists: nextLine() cannot be
 // undone, and without the closer the lines are the paragraph they read as.
 // At the top level only: the look-ahead reads raw lines past the end of a
 // quote or an item, and a closer out there would take the container's
 // lines with it.
+function parseRawTeXBlock(cx, line) {
+  if (line.next != BACKSLASH || cx.depth != 1 || line.indent > 3) return false
+  let m = BEGIN.exec(line.text.slice(line.pos))
+  if (!m) return false
+  let closer = "\\end{" + m[1] + "}"
+  let start = cx.lineStart + line.pos
+  let onLine = line.text.indexOf(closer, line.pos + m[0].length) >= 0
+  if (!onLine && !closesAfter(cx, m[1], cx.lineStart + line.text.length)) return false
+  if (!onLine) {
+    do {
+      if (!cx.nextLine()) return true
+    } while (line.text.indexOf(closer) < 0)
+  }
+  let end = cx.lineStart + line.text.length
+  cx.nextLine()
+  cx.addElement(cx.elt("RawTeXBlock", start, end))
+  return true
+}
 
 // ---------- attributes ----------
 

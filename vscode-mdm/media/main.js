@@ -3621,15 +3621,26 @@
 
   // ---- KaTeX ----
 
-  // Rendered HTML per source, kept for the session: the same equation is
-  // asked for on every rebuild and the render is the costly step. `error` is
-  // the message KaTeX gave, when it refused the source.
+  // Rendered HTML per source: the same equation is asked for on every
+  // rebuild and the render is the costly step. `error` is the message KaTeX
+  // gave, when it refused the source. Kept to a bound and not for the
+  // session: every keystroke inside an equation is a source of its own, and
+  // an evening of writing maths grew the map without end. The bound is on
+  // the characters held, 16 million (some 32 MB), since a display equation
+  // renders to ten times what an inline letter does; the one asked for
+  // longest ago goes first, and one asked for again is the newest again. A
+  // table of sixteen thousand small formulas, the bench's worst, still fits.
   const KATEX_CACHE = new Map();
+  const katexHeld = { chars: 0, limit: 16e6 };
 
   function renderTex(tex, display) {
     const key = (display ? "D" : "I") + tex;
     let hit = KATEX_CACHE.get(key);
-    if (hit) return hit;
+    if (hit) {
+      KATEX_CACHE.delete(key);
+      KATEX_CACHE.set(key, hit);
+      return hit;
+    }
     try {
       hit = {
         html: CM.katex.renderToString(tex, {
@@ -3642,6 +3653,13 @@
       hit = { html: null, error: (e && e.message) || "KaTeX error" };
     }
     KATEX_CACHE.set(key, hit);
+    katexHeld.chars += key.length + (hit.html || hit.error).length;
+    while (katexHeld.chars > katexHeld.limit && KATEX_CACHE.size > 1) {
+      const oldest = KATEX_CACHE.keys().next().value;
+      const gone = KATEX_CACHE.get(oldest);
+      katexHeld.chars -= oldest.length + (gone.html || gone.error).length;
+      KATEX_CACHE.delete(oldest);
+    }
     return hit;
   }
 
@@ -4811,7 +4829,317 @@
     Superscript: ["SuperscriptMark"],
   };
 
-  function buildDecorations(state) {
+  // Pandoc's attribute block, `{#id .class key=val}` (G014): its items, the
+  // classes among them, the value of a key, and whether a text is one, by
+  // the parser's rule (vendor-src/src/markdown/pandoc.js, attributeEnd).
+  function attributeItems(s) {
+    const inner = s.replace(/^\{|\}$/g, "").trim();
+    return inner ? inner.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [] : [];
+  }
+  function attributeClasses(s) {
+    return attributeItems(s)
+      .filter(function (item) {
+        return item.charAt(0) === ".";
+      })
+      .map(function (item) {
+        return item.slice(1);
+      });
+  }
+  function attributeValue(s, key) {
+    const items = attributeItems(s);
+    for (let i = 0; i < items.length; i++) {
+      const m = /^([^=]+)=(.*)$/.exec(items[i]);
+      if (m && m[1] === key) return m[2].replace(/^["']|["']$/g, "");
+    }
+    return null;
+  }
+  const ATTR_ITEM = /^(?:#[^\s}#.]+|\.[^\s}#.]+|[^\s}=]+=(?:"[^"]*"|'[^']*'|[^\s}]+)|=[^\s}]+|-)$/;
+  function isAttribute(s) {
+    const items = attributeItems(s);
+    return /^\{[^{}\n]*\}$/.test(s) && items.length > 0 && items.every(function (item) {
+      return ATTR_ITEM.test(item);
+    });
+  }
+  // A width as Pandoc reads it into the page: a bare number is pixels, and
+  // a unit goes through as written (30%, 2in).
+  function cssLength(v) {
+    if (!v) return null;
+    return /^\d+(?:\.\d+)?$/.test(v) ? v + "px" : v;
+  }
+
+  // ---- Smart punctuation (G015) ----
+
+  // Pandoc's Markdown keeps its `smart` extension on, so the page prints
+  // curly double and single quotes, an apostrophe as a closing single quote,
+  // an en dash for `--`, an em dash for `---` and an ellipsis for `...`,
+  // where the editor drew the ASCII as typed. While a line is untouched its
+  // prose is drawn as the page prints it, the source left as written; the
+  // line under the caret shows the source. Code, maths, an address, a tag, a
+  // comment, an entity, an escape, raw TeX, an attribute, a citation, an
+  // image and a link's destination and title are left alone, as the page
+  // leaves them.
+  //
+  // The quotes follow Pandoc's reader (pandoc 3.8.3, read off its output on
+  // 2026-09-17): a quote opens when it does not follow a letter or a digit
+  // and is not followed by a space or the end of its line; a `"` that cannot
+  // open is a closing one, whether or not one is open; a `'` that cannot
+  // open is an apostrophe, and so is one that opens and never closes ('90s,
+  // 'tis), where a `"` that never closes stays an opening one. Inside an
+  // open pair the next `"` closes it, and a `'` closes only when no letter
+  // or digit follows ('quoted's'), and not when it stands right after its
+  // opener (''). The context runs over the whole block, past its line ends
+  // and its code spans, and a pair inside a pair nests. An emphasis, a
+  // link's text, a span and a note are each one inline to Pandoc, though:
+  // a pair opened outside one does not close inside it ('a *b' c* d has no
+  // pair), and one opened inside closes inside or not at all.
+  const SMART_LEAF = /^(InlineCode|InlineMath|InlineBlockMath|URL|Autolink|LinkTitle|LinkLabel|HTMLTag|Comment|ProcessingInstruction|Escape|Entity|RawTeX|Attribute|Citation|FootnoteRef|Image|HardBreak|Emoji|TaskMarker|LongDelimiterRun)$|Mark$/;
+  const SMART = /---|--|\.\.\.|["']/g;
+  const WORD_CHAR = /[\p{L}\p{N}]/u;
+  const SMART_NONE = 0;
+  const SMART_DOUBLE = 1;
+  const SMART_SINGLE = 2;
+
+  // The punctuation of one block up to `limit` (a heading's hidden
+  // attributes are past it): every mark goes into `all`, in order, and the
+  // quotes come back as Pandoc's inline parser meets them, the ones inside
+  // a nested inline as a group of their own. `blockEnd` is where the block
+  // ends, past which nothing follows a quote.
+  function smartItems(node, limit, text, blockEnd, all) {
+    const items = [];
+    const scan = function (from, to) {
+      if (to <= from) return;
+      const s = text(from, to);
+      SMART.lastIndex = 0;
+      let m;
+      while ((m = SMART.exec(s))) {
+        const t = { pos: from + m.index, len: m[0].length, ch: m[0], glyph: null };
+        all.push(t);
+        if (m[0] === "---") t.glyph = "\u2014";
+        else if (m[0] === "--") t.glyph = "\u2013";
+        else if (m[0] === "...") t.glyph = "\u2026";
+        else {
+          const before = t.pos > 0 ? text(t.pos - 1, t.pos) : "";
+          const after = t.pos + 1 < blockEnd ? text(t.pos + 1, t.pos + 2) : "";
+          t.opens = !WORD_CHAR.test(before) && !/^[ \t\r\n]?$/.test(after);
+          t.closesSingle = t.ch === "'" && !WORD_CHAR.test(after);
+          items.push(t);
+        }
+      }
+    };
+    let at = node.from;
+    for (let child = node.firstChild; child && child.from < limit; child = child.nextSibling) {
+      scan(at, child.from);
+      if (!SMART_LEAF.test(child.name)) {
+        items.push({ group: smartItems(child, Math.min(child.to, limit), text, blockEnd, all) });
+      }
+      at = child.to;
+    }
+    scan(at, limit);
+    return items;
+  }
+
+  // Which quote each `"` and `'` is, by the rules above. `ctx` is the pair
+  // the items stand in, which they can neither open again nor close.
+  function smartQuotes(items, ctx) {
+    const memo = new Map();
+    // The item that closes `c` when scanned from item i on (its opener is
+    // item i - 1), or -1 when the items end first. A pair opened on the way
+    // is stepped over whole; one that never closes is stepped into, as
+    // Pandoc's reader backtracks and reads its inside again.
+    function end(i, c) {
+      const key = i * 3 + c;
+      if (memo.has(key)) return memo.get(key);
+      let k = i;
+      let found = -1;
+      while (k < items.length) {
+        const t = items[k];
+        if (t.group) {
+          k++;
+          continue;
+        }
+        const closes = c === SMART_DOUBLE ? t.ch === '"' : t.closesSingle && !(k === i && t.pos === items[i - 1].pos + 1);
+        if (closes) {
+          found = k;
+          break;
+        }
+        const inner = t.ch === '"' ? SMART_DOUBLE : SMART_SINGLE;
+        if (t.opens && inner !== c) {
+          const j = end(k + 1, inner);
+          if (j >= 0) {
+            k = j + 1;
+            continue;
+          }
+        }
+        k++;
+      }
+      memo.set(key, found);
+      return found;
+    }
+    function walk(i, c, stop) {
+      let k = i;
+      while (k < stop) {
+        const t = items[k];
+        if (t.group) {
+          smartQuotes(t.group, c);
+          k++;
+          continue;
+        }
+        const inner = t.ch === '"' ? SMART_DOUBLE : SMART_SINGLE;
+        if (t.opens && inner !== c) {
+          const j = end(k + 1, inner);
+          if (j >= 0) {
+            t.glyph = inner === SMART_DOUBLE ? "\u201c" : "\u2018";
+            items[j].glyph = inner === SMART_DOUBLE ? "\u201d" : "\u2019";
+            walk(k + 1, inner, j);
+            k = j + 1;
+            continue;
+          }
+          t.glyph = inner === SMART_DOUBLE ? "\u201c" : "\u2019";
+        } else t.glyph = t.ch === '"' ? "\u201d" : "\u2019";
+        k++;
+      }
+    }
+    walk(0, ctx, items.length);
+  }
+
+  // The marks of one block with the glyph each is printed as, in order.
+  function smartMarks(node, limit, text) {
+    const all = [];
+    smartQuotes(smartItems(node, limit, text, limit, all), SMART_NONE);
+    return all;
+  }
+
+  // In the document the glyphs are widgets over the source, line by line.
+  function smartWidgets(node, limit, text, doc, touched, decos) {
+    smartMarks(node, limit, text).forEach(function (t) {
+      const line = doc.lineAt(t.pos);
+      if (!t.glyph || touched(line.from, line.to)) return;
+      decos.push(Decoration.replace({ widget: new TextWidget(t.glyph, "mdm-smart") }).range(t.pos, t.pos + t.len));
+    });
+  }
+
+  // What is drawn from a string and not from the document, a table's cell,
+  // an outline row, a figure's caption, the prose after an equation, takes
+  // the glyphs into the string: the text of [from, to) as the page prints it.
+  function smartSlice(text, from, to, marks) {
+    let out = "";
+    let at = from;
+    marks.forEach(function (t) {
+      if (!t.glyph || t.pos < at || t.pos + t.len > to) return;
+      out += text(at, t.pos) + t.glyph;
+      at = t.pos + t.len;
+    });
+    return out + text(at, to);
+  }
+
+  // Where the text of a heading ends: before Pandoc's header attributes,
+  // `{#id .class}` at the end of the line, which the page prints none of
+  // (G014). No node: an inline parser cannot tell a heading's line from a
+  // paragraph's.
+  function headingTextEnd(n, text) {
+    const attr = /[ \t]+(\{[^{}\n]*\})[ \t]*$/.exec(text(n.from, n.to));
+    return attr && isAttribute(attr[1]) ? n.from + attr.index : n.to;
+  }
+
+  const ENTITY_CACHE = new Map();
+
+  // The blocks of raw HTML, as Lezer names them: an element's (CommonMark's
+  // HTML blocks 1 and 4 to 7), a comment's (2) and a processing
+  // instruction's (3, `<?...?>`). One list for every place that names them:
+  // the third was in none, so it was drawn as prose in the text face, and
+  // the second was missing where a mark is kept off a line and where
+  // Ctrl+Enter leaves a block (G048).
+  const RAW_HTML = "HTMLBlock|CommentBlock|ProcessingInstructionBlock";
+  const RAW_HTML_BLOCK = new RegExp("^(?:" + RAW_HTML + ")$");
+
+  // The definitions of a document (`[label]: url "title"`, anywhere in it),
+  // read once per tree and not once per rebuild: a rebuild of a few blocks
+  // (below) would otherwise walk the whole tree for them every time. A label
+  // matches as CommonMark 4.7 matches it: trimmed, its whitespace collapsed,
+  // case folded.
+  const definitionsByTree = new WeakMap();
+  function refKey(label) {
+    return label.trim().replace(/[ \t\r\n]+/g, " ").toLowerCase();
+  }
+  // A destination written in angle brackets is the address inside them
+  // (G006).
+  function unbracket(dest) {
+    const m = /^<(.*)>$/.exec(dest);
+    return m ? m[1] : dest;
+  }
+  function definitionsOf(state, tree) {
+    let refs = definitionsByTree.get(tree);
+    if (refs) return refs;
+    refs = new Map();
+    const text = function (from, to) {
+      return state.doc.sliceString(from, to);
+    };
+    tree.iterate({
+      enter: function (n) {
+        if (n.name !== "LinkReference") return;
+        const node = n.node;
+        const label = node.getChild("LinkLabel");
+        const url = node.getChild("URL");
+        if (label && url) {
+          const key = refKey(text(label.from + 1, label.to - 1));
+          const title = node.getChild("LinkTitle");
+          // The first definition of a label is the one that counts (CM 4.7).
+          if (!refs.has(key)) {
+            refs.set(key, {
+              url: unbracket(text(url.from, url.to)),
+              title: title ? text(title.from + 1, title.to - 1) : "",
+            });
+          }
+        }
+        return false;
+      },
+    });
+    definitionsByTree.set(tree, refs);
+    return refs;
+  }
+
+  // Where a link or an image goes: the URL after its closing `]`, never one
+  // the GFM autolinker found inside the label (G005); or, by reference, the
+  // definition its label names, the label being the text in the second
+  // brackets when there is one and the link's own text when they are empty
+  // or absent. The prose and the inside of a table cell ask the same
+  // question, so they ask it here: the cells used to read the first URL they
+  // found and keep the label as their text (G002, G004, G006).
+  function linkTarget(node, text, refs) {
+    const marks = node.getChildren("LinkMark");
+    if (marks.length < 2) return null;
+    const close = marks[1];
+    const url = node.getChildren("URL").filter(function (u) {
+      return u.from >= close.to;
+    })[0];
+    if (url) {
+      const title = node.getChildren("LinkTitle").filter(function (t) {
+        return t.from >= close.to;
+      })[0];
+      return { url: unbracket(text(url.from, url.to)), title: title ? text(title.from + 1, title.to - 1) : "" };
+    }
+    const label = node.getChild("LinkLabel");
+    const inner = label && label.to - label.from > 2 ? text(label.from + 1, label.to - 1) : text(marks[0].to, close.from);
+    return (refs && refs.get(refKey(inner))) || null;
+  }
+
+  // The character an entity stands for, or the entity itself when it stands
+  // for nothing (`&bogus;`), decoded by the browser.
+  function decodeEntity(raw) {
+    let out = ENTITY_CACHE.get(raw);
+    if (out === undefined) {
+      const box = document.createElement("textarea");
+      box.innerHTML = raw;
+      out = box.value;
+      ENTITY_CACHE.set(raw, out);
+    }
+    return out;
+  }
+
+  // The decorations of the document, or, given a `region` of whole lines
+  // that holds whole top-level blocks, those of that stretch alone, as the
+  // ranges to put in place of the ones standing there (rebuilt, below).
+  function buildDecorations(state, region) {
     const doc = state.doc;
     const ranges = activeRanges(state);
     // What the host kept back, which every number counts from (hiddenLines).
@@ -4822,12 +5150,166 @@
     const touched = function (from, to) {
       return touchedBy(ranges, from, to);
     };
+    // ---- The frame a line stands in ----
+    //
+    // A line inside a quote or a callout is drawn inside it: a bar for every
+    // level, outermost first, the tint of the innermost callout, and the
+    // text set in past the bars. The levels are gathered here as the walk
+    // enters the container nodes (one level per node, so nesting is depth)
+    // and emitted at the end as the line's classes and a style holding the
+    // bars and the inset (style.css, .mdm-framed); a block drawn instead of
+    // its source takes the frame of its first line on a wrapper (framed).
+    // Until this a container was one class on the line whatever the depth,
+    // so three nested quotes drew as one bar, a quote in a callout showed
+    // the callout's bar alone, and a block in a quote stood outside it
+    // (G030, G032).
+    const frames = new Map(); // line number -> levels, outermost first
+    const frameLevel = function (from, to, level) {
+      const first = doc.lineAt(from).number;
+      const last = doc.lineAt(Math.max(from, to)).number;
+      for (let n = first; n <= last; n++) {
+        let levels = frames.get(n);
+        if (!levels) frames.set(n, (levels = []));
+        levels.push(level);
+      }
+    };
+    // The bars and the inset of a set of levels as CSS. A quote or a callout
+    // is a 3 px bar and 14 px of air, the 17 the quote has always drawn; a
+    // list item is 1.5em of hanging indent with no bar, the measure the
+    // page's lists take (mdm-look.css). Nested levels come out as nested
+    // bars and the inset is their sum, pixels and ems together. One
+    // gradient for all the bars, because a line is one element and a border
+    // draws one bar; the inset itself is a transparent border on the line,
+    // so the padding of a card or a heading inside a frame stays its own.
+    const FRAME_STEP = 17;
+    const FRAME_BAR = 3;
+    const LIST_STEP = 1.5;
+    const frameCache = new Map();
+    const at = function (px, em) {
+      if (!em) return px + "px";
+      return px ? "calc(" + px + "px + " + em + "em)" : em + "em";
+    };
+    const buildFrame = function (levels, key, n) {
+      const parts = [];
+      let px = 0;
+      let em = 0;
+      let endPx = 0;
+      let endEm = 0;
+      let quotes = 0;
+      let callout = null;
+      let item = false;
+      let marker = null;
+      levels.forEach(function (level) {
+        if (level.kind === "list") {
+          em += LIST_STEP;
+          item = true;
+          if (level.first === n) marker = level.marker;
+          return;
+        }
+        const color =
+          level.kind === "quote" ? "var(--mdm-quote-bar)" : "var(--mdm-co-" + level.name + ")";
+        if (px > endPx || em > endEm) parts.push("transparent " + at(endPx, endEm) + " " + at(px, em));
+        parts.push(color + " " + at(px, em) + " " + at(px + FRAME_BAR, em));
+        endPx = px + FRAME_BAR;
+        endEm = em;
+        px += FRAME_STEP;
+        if (level.kind === "quote") quotes++;
+        else callout = level.name;
+      });
+      parts.push("transparent " + at(endPx, endEm));
+      let cls = "mdm-framed";
+      if (quotes) cls += " mdm-quote mdm-quote-" + Math.min(quotes, 4);
+      if (callout) cls += " mdm-co-line mdm-co--" + callout;
+      if (item) cls += " mdm-li";
+      const bars = parts.length > 1 ? "linear-gradient(to right, " + parts.join(", ") + ")" : "none";
+      return {
+        key: key,
+        cls: cls,
+        marker: marker,
+        style: "--mdm-bars: " + bars + "; --mdm-inset: " + at(px, em),
+      };
+    };
+    // The prefix a line carries for the containers around it, level by
+    // level, outermost first: a quote takes its > and the space after it,
+    // an item its indentation up to the item's width (on the lines after
+    // the one its marker is on). `onIndent` is told each run of an item's
+    // indentation; the end of the whole prefix is returned.
+    const walkPrefix = function (n, line, onIndent) {
+      const levels = frames.get(n);
+      if (!levels) return 0;
+      let pos = 0;
+      levels.forEach(function (level) {
+        if (level.kind === "quote") {
+          const m = /^[ \t]*>[ \t]?/.exec(line.text.slice(pos));
+          if (m) pos += m[0].length;
+          return;
+        }
+        if (level.kind !== "list" || level.first === n) return;
+        let run = 0;
+        while (pos + run < line.length && /[ \t]/.test(line.text[pos + run])) run++;
+        const take = Math.min(run, level.width);
+        if (take > 0 && onIndent) onIndent(line.from + pos, line.from + pos + take);
+        pos += take;
+      });
+      return pos;
+    };
+    // The TeX of a display block, without the container it stands in: Lezer
+    // hangs the > of a quote inside the content and leaves an item's
+    // indentation on every line after the first, and KaTeX was handed both
+    // (G033). Each line of the content from past its prefix.
+    const blockTex = function (content) {
+      const first = doc.lineAt(content.from).number;
+      const last = doc.lineAt(content.to).number;
+      const out = [];
+      for (let n = first; n <= last; n++) {
+        const line = doc.line(n);
+        const from = Math.max(content.from, line.from + walkPrefix(n, line, null));
+        const to = Math.min(content.to, line.to);
+        out.push(from < to ? text(from, to) : "");
+      }
+      return out.join("\n");
+    };
+    const frameOf = function (n) {
+      const levels = frames.get(n);
+      if (!levels) return null;
+      const key = levels
+        .map(function (level) {
+          if (level.kind === "quote") return "q";
+          if (level.kind === "callout") return "c:" + level.name;
+          // The marker only on the item's first line, where a block that
+          // replaces the line takes it into its wrapper.
+          return level.first === n
+            ? "L:" + level.marker.kind + ":" + level.marker.text + (level.marker.checked ? "x" : "")
+            : "l";
+        })
+        .join("/");
+      let frame = frameCache.get(key);
+      if (!frame) frameCache.set(key, (frame = buildFrame(levels, key, n)));
+      return frame;
+    };
     const text = function (from, to) {
       return doc.sliceString(from, to);
+    };
+    // An unstyled mark over the text of a heading. CodeMirror takes its
+    // sample of what a line of text measures from the first line in view of
+    // twenty characters or fewer whose children are plain text
+    // (measureTextSize), and a short heading qualified: with a setext
+    // heading first in view the sample was 62 px tall, every line not yet
+    // measured was estimated at that, the view jumped when the map was put
+    // right and ArrowDown stepped over blank rows (G099). A mark makes the
+    // heading's text a child of another kind, and the sample is prose.
+    const sampleProof = function (from, to) {
+      if (to > from) decos.push(Decoration.mark({ class: "mdm-h-text" }).range(from, to));
     };
     const hide = function (from, to) {
       if (to > from) decos.push(Decoration.replace({}).range(from, to));
     };
+    // ---- Links and the definitions they may point to ----
+    //
+    // The definitions of the document, so a link or an image written by
+    // reference (`[text][label]`, `[label][]`, `[label]`) knows where it
+    // goes and what it shows (G004, G007).
+    const refs = definitionsOf(state, tree);
     // The delimiters of code and of maths, in the brass the line numbers are
     // drawn in: the backticks of a fence and of inline code, and the $ and $$
     // around an equation. They are the document's punctuation and not its
@@ -4904,6 +5386,8 @@
     const hiddenTails = new Set();
 
     tree.iterate({
+      from: region ? region.from : 0,
+      to: region ? region.to : doc.length,
       enter: function (n) {
         const name = n.name;
         const node = n.node;
@@ -5690,7 +6174,24 @@
     // end of the replaced range), so the numbers of a block appear the moment
     // a caret opens it and go again when it closes. The rule that decides
     // what a block shows is the one above; the numbering only follows it.
-    for (let n = 1; n <= doc.lines; n++) {
+    frames.forEach(function (levels, n) {
+      const frame = frameOf(n);
+      const line = doc.line(n);
+      lines.mark(line.from, line.from, frame.cls);
+      lines.style(n, frame.style);
+      // The indentation a line after the first carries inside an item, up
+      // to the item's content column, hidden while the line is untouched:
+      // the frame sets the text in, and the spaces would set it in twice.
+      // Read level by level, outermost first, since the > of a quote and
+      // the spaces of an item come in the order of the containers: a quote
+      // takes its mark (hidden by the QuoteMark branch), an item its spaces.
+      // A line that opens an item is that item's marker's (above).
+      if (touched(line.from, line.to)) return;
+      walkPrefix(n, line, hide);
+    });
+    const firstLine = region ? doc.lineAt(region.from).number : 1;
+    const lastLine = region ? doc.lineAt(region.to).number : doc.lines;
+    for (let n = firstLine; n <= lastLine; n++) {
       const line = doc.line(n);
       // Blank is spaces and tabs alone (CommonMark 2.1; a line of a no-break
       // space is a paragraph), and inside a quote the > marks on their own.
@@ -5710,24 +6211,260 @@
       decos.push(lineNumber(n + hidden).range(line.from));
     }
 
-    return Decoration.set(decos.concat(lines.decorations()), true);
+    const all = decos.concat(lines.decorations());
+    return region ? all : Decoration.set(all, true);
+  }
+
+  // ---- Rebuilding no more than what changed ----
+  //
+  // Every caret move, every keystroke and every piece of the tree that
+  // lands used to rebuild the decorations of the whole document: 95 ms on
+  // the bench's 22 805-line file (57 of the walk, 12 of the lines, 21 of
+  // sorting the set), which is what a keystroke and an arrow key cost there.
+  // The decorations of a top-level block depend on its own text and nodes,
+  // on the carets that touch it, on the lines the host keeps back and on the
+  // document's link definitions, and on nothing else; so the set that stands
+  // is kept, moved along with the changes, and only the blocks are rebuilt
+  // that a caret touched or touches now, that the change fell in, or that
+  // the two trees differ over. The whole document is rebuilt when the number
+  // of lines changes (a drawn rule, table or empty card carries its line's
+  // number, and every number below moves), when the host keeps another count
+  // of lines back, when a link definition is in what changed (a link
+  // anywhere may go somewhere else), or when the stretch to rebuild is most
+  // of the document anyway.
+
+  // What the set a field holds was built from, and how many sets were built
+  // whole and how many in part, which a test reads to know the second road
+  // was taken at all.
+  const builtFrom = new WeakMap();
+  const rebuilds = { whole: 0, part: 0 };
+  function remember(set, state) {
+    builtFrom.set(set, {
+      ranges: activeRanges(state).map(function (r) {
+        return { from: r.from, to: r.to };
+      }),
+      tree: CM.syntaxTree(state),
+      hidden: state.field(hiddenLinesField, false) || 0,
+      lines: state.doc.lines,
+    });
+    return set;
+  }
+
+  // The stretch from..to as whole lines, grown over the top-level blocks
+  // that stand on its first and last line (the prose after a `$$` closer is
+  // a block of its own on the closer's line).
+  function wholeBlocks(doc, tree, from, to) {
+    const top = tree.topNode;
+    let a = doc.lineAt(Math.max(0, Math.min(from, doc.length))).from;
+    let b = doc.lineAt(Math.max(0, Math.min(to, doc.length))).to;
+    for (let i = 0; i < 8; i++) {
+      let grew = false;
+      const first = top.childAfter(a);
+      if (first && first.from < a && first.to >= a) {
+        a = doc.lineAt(first.from).from;
+        grew = true;
+      }
+      const last = top.childBefore(b);
+      if (last && last.from <= b && last.to > b) {
+        b = doc.lineAt(Math.min(last.to, doc.length)).to;
+        grew = true;
+      }
+      if (!grew) break;
+    }
+    return [a, b];
+  }
+
+  // The stretch over which the top-level blocks of two trees differ, as the
+  // blocks of the old one and of the new one that match nothing, or null
+  // when the two are the same. The blocks before the first change keep their
+  // place and the ones after the last move by `delta`.
+  function blocksDiffer(before, after, delta) {
+    let a = before.topNode.firstChild;
+    let b = after.topNode.firstChild;
+    while (a && b && a.type.id === b.type.id && a.from === b.from && a.to === b.to) {
+      a = a.nextSibling;
+      b = b.nextSibling;
+    }
+    if (!a && !b) return null;
+    let x = a ? before.topNode.lastChild : null;
+    let y = b ? after.topNode.lastChild : null;
+    while (
+      x && y && x.from >= a.from && y.from >= b.from &&
+      x.type.id === y.type.id && x.from + delta === y.from && x.to + delta === y.to
+    ) {
+      x = x.prevSibling;
+      y = y.prevSibling;
+    }
+    return {
+      old: a && x && x.from >= a.from ? [a.from, x.to] : null,
+      now: b && y && y.from >= b.from ? [b.from, y.to] : null,
+    };
+  }
+
+  function holdsDefinition(tree, from, to) {
+    let found = false;
+    tree.iterate({
+      from: from,
+      to: to,
+      enter: function (n) {
+        if (n.name === "LinkReference") found = true;
+        return !found;
+      },
+    });
+    return found;
+  }
+
+  // The set for the state a transaction leaves, from the set that stood.
+  function rebuilt(value, tr) {
+    const state = tr.state;
+    const doc = state.doc;
+    const tree = CM.syntaxTree(state);
+    const built = builtFrom.get(value);
+    const hidden = state.field(hiddenLinesField, false) || 0;
+    // A reconfigured state is the language taken up again with another set
+    // of link definitions (links.js): what is a link changes inside blocks
+    // that keep their place and their size, which no comparison of blocks
+    // sees.
+    if (!built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines) {
+      rebuilds.whole++;
+      return remember(buildDecorations(state), state);
+    }
+    const spans = [];
+    let set = value;
+    let definitions = false;
+    if (tr.docChanged) {
+      set = set.map(tr.changes);
+      tr.changes.iterChangedRanges(function (fromA, toA, fromB, toB) {
+        spans.push([fromB, toB]);
+        const was = wholeBlocks(tr.startState.doc, built.tree, fromA, toA);
+        if (holdsDefinition(built.tree, was[0], was[1])) definitions = true;
+      });
+    }
+    if (tree !== built.tree) {
+      const differ = blocksDiffer(built.tree, tree, doc.length - tr.startState.doc.length);
+      if (differ && differ.now) spans.push(differ.now);
+      if (differ && differ.old) {
+        if (holdsDefinition(built.tree, differ.old[0], differ.old[1])) definitions = true;
+        spans.push([tr.changes.mapPos(differ.old[0], -1), tr.changes.mapPos(differ.old[1], 1)]);
+      }
+    }
+    built.ranges.forEach(function (r) {
+      spans.push([tr.changes.mapPos(r.from, -1), tr.changes.mapPos(r.to, 1)]);
+    });
+    activeRanges(state).forEach(function (r) {
+      spans.push([r.from, r.to]);
+    });
+    // Whole lines and whole blocks, in order, the ones that meet made one.
+    const regions = [];
+    spans
+      .map(function (s) {
+        return wholeBlocks(doc, tree, s[0], s[1]);
+      })
+      .sort(function (p, q) {
+        return p[0] - q[0];
+      })
+      .forEach(function (s) {
+        const last = regions[regions.length - 1];
+        if (last && s[0] <= last[1] + 1) last[1] = Math.max(last[1], s[1]);
+        else regions.push([s[0], s[1]]);
+      });
+    let size = 0;
+    regions.forEach(function (r) {
+      size += r[1] - r[0];
+      if (!definitions && holdsDefinition(tree, r[0], r[1])) definitions = tr.docChanged || tree !== built.tree;
+    });
+    if (definitions || size > doc.length / 2) {
+      rebuilds.whole++;
+      return remember(buildDecorations(state), state);
+    }
+    rebuilds.part++;
+    // The definitions are the ones the tree before had: nothing that holds
+    // one changed.
+    if (tree !== built.tree && definitionsByTree.has(built.tree) && !definitionsByTree.has(tree)) {
+      definitionsByTree.set(tree, definitionsByTree.get(built.tree));
+    }
+    regions.forEach(function (r) {
+      set = set.update({
+        filterFrom: r[0],
+        filterTo: r[1],
+        // By where it starts: a decoration is its block's, and a block's
+        // decorations start on the block's lines. Not by where it ends: the
+        // marker of an item whose text starts on the next line takes the
+        // line break too, and ends where the next region begins.
+        filter: function (from) {
+          return from < r[0] || from > r[1];
+        },
+        add: buildDecorations(state, { from: r[0], to: r[1] }),
+        sort: true,
+      });
+    });
+    return remember(set, state);
+  }
+
+  // The first place two sets of decorations part, for the tests: what the
+  // rebuild of a few blocks leaves has to be what a rebuild of the whole
+  // document gives.
+  function decorationsDiffer(one, other) {
+    const list = function (set) {
+      const out = [];
+      for (let c = set.iter(); c.value; c.next()) out.push({ from: c.from, to: c.to, value: c.value });
+      return out;
+    };
+    const a = list(one);
+    const b = list(other);
+    const describe = function (r) {
+      const spec = r.value.spec || {};
+      const widget = spec.widget ? spec.widget.constructor.name : "";
+      return r.from + "-" + r.to + " " + (spec.class || widget || (spec.attributes ? JSON.stringify(spec.attributes) : "replace"));
+    };
+    // The neighbours of a range in its list, so that a report says where.
+    const around = function (list, at) {
+      return " [" + list.slice(Math.max(0, at - 3), at + 4).map(describe).join(", ") + "]";
+    };
+    const used = new Set();
+    for (let i = 0; i < a.length; i++) {
+      let match = -1;
+      for (let j = Math.max(0, i - 40); j < Math.min(b.length, i + 40); j++) {
+        if (used.has(j) || b[j].from !== a[i].from || b[j].to !== a[i].to) continue;
+        if (b[j].value === a[i].value || b[j].value.eq(a[i].value)) {
+          match = j;
+          break;
+        }
+      }
+      if (match < 0) return "only in the first: " + describe(a[i]) + around(a, i) + " against" + around(b, i);
+      used.add(match);
+    }
+    for (let j = 0; j < b.length; j++) {
+      if (!used.has(j)) return "only in the second: " + describe(b[j]) + around(b, j) + " against" + around(a, j);
+    }
+    return null;
   }
 
   // The tree is built in the background for a long document; when a later
   // piece of it lands, the language plugin dispatches a transaction, and the
-  // field sees a different tree and rebuilds.
+  // field sees a different tree and rebuilds what that piece holds.
   const renderField = StateField.define({
-    create: buildDecorations,
+    create: function (state) {
+      return remember(buildDecorations(state), state);
+    },
     update: function (value, tr) {
-      if (
+      const released = tr.effects.some(function (e) {
+        return e.is(pointerReleased);
+      });
+      // A caret or the focus moving under a held button: the rebuild waits
+      // for the release (pointerHeld). The text changing, or the tree, or
+      // the count the host keeps back, is drawn at once whatever the button.
+      const byGesture =
+        tr.selection || tr.state.field(focusField) !== tr.startState.field(focusField);
+      const byContent =
         tr.docChanged ||
-        tr.selection ||
-        tr.state.field(focusField) !== tr.startState.field(focusField) ||
         tr.state.field(hiddenLinesField) !== tr.startState.field(hiddenLinesField) ||
-        CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState)
-      ) {
-        return buildDecorations(tr.state);
+        CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState);
+      if (byContent || released || (byGesture && !pointerHeld)) {
+        heldRebuild = false;
+        return rebuilt(value, tr);
       }
+      if (byGesture) heldRebuild = true;
       return value;
     },
     provide: function (f) {
@@ -9930,8 +10667,12 @@
           placeOpenRails();
           if (update.docChanged || update.selectionSet) {
             updateUndoButtons();
-            // The outline follows the document and the caret while it is open.
-            if (outlineOpen) refreshOutline();
+            // The outline follows the document and the caret while it is
+            // open; the parse it follows on its own (parseForOutline).
+            if (outlineOpen) {
+              if (update.docChanged) outlineAfterChange(update.changes);
+              else markCurrentOutline();
+            }
           }
         }),
       ],
@@ -9950,6 +10691,22 @@
     window.__mdm = {
       view: view,
       CM: CM,
+      exportAudio: exportAudio,
+      documentScores: function () {
+        return view ? documentScores(view.state) : null;
+      },
+      // Where the decorations on screen part from a rebuild of the whole
+      // document, or null: what a test of the partial rebuild reads.
+      rebuilds: rebuilds,
+      // The equations kept rendered, for the test of their bound.
+      katex: { cache: KATEX_CACHE, held: katexHeld, render: renderTex },
+      checkDecorations: function () {
+        if (!view) return null;
+        // With the definitions read again, so that a set kept from a tree
+        // whose definitions have moved on shows.
+        definitionsByTree.delete(CM.syntaxTree(view.state));
+        return decorationsDiffer(view.state.field(renderField), buildDecorations(view.state));
+      },
       get player() {
         return player;
       },
@@ -10281,11 +11038,53 @@
   // on a page. Near the foot of the document, where what is left below a
   // heading cannot fill the pane, the scroll clamps on its own: the heading
   // lands as high as it can and the document ends at the bottom edge.
-  function refreshOutline() {
+  // The rows on screen, as painted: where each heading stands and the row
+  // drawn for it. A caret that moves marks another row and paints nothing;
+  // the rows are painted again when the text changes, once the typing rests.
+  // Painted at every keystroke and every arrow key, a document of 2750
+  // headings walked the whole tree and built 2750 buttons each time.
+  let outlineHeads = [];
+  let outlineTimer = null;
+  const OUTLINE_REST = 120;
+
+  function markCurrentOutline() {
     const list = outlineList();
     if (!list || !outlineOpen || !view) return;
-    const heads = outlineHeadings(view.state);
     const caret = view.state.selection.main.head;
+    let current = -1;
+    outlineHeads.forEach(function (h, i) {
+      if (h.pos <= caret) current = i;
+    });
+    const marked = list.querySelector(".mdm-outline__row--current");
+    const row = current >= 0 ? list.children[current] : null;
+    if (marked === row) return;
+    if (marked) marked.classList.remove("mdm-outline__row--current");
+    if (row) row.classList.add("mdm-outline__row--current");
+  }
+
+  // After a change to the text: the headings on screen keep their places in
+  // the text meanwhile (a row clicked before the rows are painted again still
+  // jumps to its heading), and one painting follows a run of keystrokes.
+  function outlineAfterChange(changes) {
+    outlineHeads.forEach(function (h) {
+      h.pos = changes.mapPos(h.pos, 1);
+    });
+    if (outlineTimer) clearTimeout(outlineTimer);
+    outlineTimer = setTimeout(function () {
+      outlineTimer = null;
+      refreshOutline();
+    }, OUTLINE_REST);
+  }
+
+  function refreshOutline(parsed) {
+    const list = outlineList();
+    if (!list || !outlineOpen || !view) return;
+    // The state's own tree, or the one a slice parsed further for the panel.
+    const state = view.state;
+    const heads = outlineHeadings(state, parsed || null);
+    outlineHeads = heads;
+    const caret = state.selection.main.head;
+    parseForOutline();
     let current = -1;
     heads.forEach(function (h, i) {
       if (h.pos <= caret) current = i;

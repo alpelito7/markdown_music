@@ -25,8 +25,8 @@
 // the line is prose there (G053).
 //
 // Unterminated: a fence without a later closing line produces no node and
-// stays plain text. The check is a raw look-ahead over the document (see
-// lines.js), so the closer is found through container prefixes but not
+// stays plain text. The check reads the raw lines of the whole input (as
+// lines.js does), so the closer is found through container prefixes but not
 // bounded by the containing block: `> ::: {.note}` closed by a `:::` after
 // the blockquote ends yields a Callout that ends with the quote and has no
 // closing mark. A `:::` line inside a fenced code block closes the callout
@@ -34,7 +34,6 @@
 // inside a blockquote); Pandoc would keep it as code.
 
 import {tags} from "@lezer/highlight"
-import {forEachLineAfter} from "./lines.js"
 
 const COLON = 58
 
@@ -50,26 +49,49 @@ export function calloutKind(text) {
   if (!m) return null
   let attrs = m[1] != null ? m[1] : m[2]
   let kind = /(?:^|[\s.])callout-([a-z]+)/.exec(attrs)
-  return kind ? kind[1] : "note"
+  return kind ? kind[1] : null
 }
 
-// True when a matching closing fence follows the opener: openers nest, so
-// the scan counts depth and stops at the closer that brings it back to 0.
-function hasCloser(cx, line) {
-  let depth = 1
-  return forEachLineAfter(cx, line, text => {
-    let rest = text.slice(RAW_PREFIX.exec(text)[0].length)
-    if (rest.charCodeAt(0) != COLON) return undefined
-    if (CLOSE.test(rest)) return --depth == 0 ? true : undefined
-    if (OPEN.test(rest)) depth++
-    return undefined
-  }) === true
+// The openers a closing fence answers, by the position of their line.
+// Openers nest, so a closer answers the nearest opener still waiting above
+// it, and one that finds none waiting answers nothing: what a look-ahead
+// from each opener, counting depth down to 0, finds too.
+export function closedOpeners(text) {
+  let closed = new Set(), waiting = []
+  for (let pos = 0;;) {
+    let nl = text.indexOf("\n", pos)
+    let line = text.slice(pos, nl < 0 ? text.length : nl)
+    let rest = line.slice(RAW_PREFIX.exec(line)[0].length)
+    if (rest.charCodeAt(0) == COLON) {
+      if (CLOSE.test(rest)) { if (waiting.length) closed.add(waiting.pop()) }
+      else if (OPEN.test(rest)) waiting.push(pos)
+    }
+    if (nl < 0) break
+    pos = nl + 1
+  }
+  return closed
+}
+
+// Read off the whole input once per parse, as links.js reads its
+// definitions. The look-ahead used to run from every opener to the end of
+// the input, so a document of unclosed openers cost the square of its
+// length (2.9 s for 5000 of them, measured in Node), which is past the 3 s
+// CodeMirror gives a background parse: the tree was never committed and the
+// rest of the document stayed raw source (G038).
+let current = {input: null, closed: new Set()}
+
+// True when a matching closing fence follows the opener on the current line.
+function hasCloser(cx) {
+  let input = cx.input
+  if (!input) return false
+  if (current.input !== input) current = {input, closed: closedOpeners(input.read(0, input.length))}
+  return current.closed.has(cx.lineStart)
 }
 
 function parseCallout(cx, line) {
   if (line.next != COLON || line.indent - line.baseIndent >= 4) return false
   let text = line.text.slice(line.pos)
-  if (!OPEN.test(text) || !hasCloser(cx, line)) return false
+  if (!OPEN.test(text) || !hasCloser(cx)) return false
   // value = this block's index in the context stack, so the line handler
   // can tell the innermost Callout from an outer one (see skipCallout).
   cx.startComposite("Callout", line.pos, cx.depth)
