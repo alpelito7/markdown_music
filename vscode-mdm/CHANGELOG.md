@@ -1,5 +1,298 @@
 # Changelog
 
+## Unreleased
+
+- The editor reads Markdown the way the page prints it. Lists, quotes and
+  callouts are drawn as the page draws them: an item's text hangs under
+  itself with its marker in the gap and the number the list counts; a quote
+  in a quote and a callout in a quote wear one bar per level; a table, an
+  equation, a rule, a score or a code block inside any of them stands inside
+  the frame, its source read without the `>` and the indentation of the
+  container, so a score in a list is engraved whole. A block that stood for
+  nothing, an empty item or an empty quote line, is drawn where it is
+  instead of disappearing under the block above it.
+- Links and images written by reference (`[text][label]`, `[label]`) know
+  their definition, and a `[text]` with none is text, as Pandoc reads it; a
+  link whose text holds brackets is a link again. The tooltip is the
+  destination, `<...>` and `file:` addresses included. Entities are drawn as
+  their character, an escape without its backslash, sub and superscript
+  raised and lowered, a hard line break marked at the end of its row, and an
+  image alone in its paragraph is a figure with its caption.
+- Tables keep their empty cells, fit every row to the header's columns, read
+  `<br>` as a line break, and do not part a cell at a `|` inside maths or
+  code. A cell is read as the prose is read, down to a link by its
+  definition, an address in angle brackets, an entity, a footnote, a
+  citation and raw TeX; a figure's caption is read the same way, where it
+  drew its own marks and entities under the picture.
+- The keys of a Markdown editor. `Enter` ends a list at an empty item,
+  unnests an empty nested one, continues a task unchecked, opens a line above
+  a heading from the head of its text and keeps the `>` inside a fence in a
+  quote; `Backspace` after `## ` or a list marker takes the whole mark, and
+  beside a rendered block opens it; `Tab` and `Shift+Tab` nest and unnest an
+  item with its children. `Ctrl+B`, `Ctrl+I`, `Ctrl+E` and `Ctrl+K` read what
+  the caret is in: they take a mark off from inside it, wrap the word at a
+  bare caret, step out of a pair just typed and edit the link the caret is in.
+  The heading and list buttons convert instead of stacking marks, and leave
+  the caret in the block it was in. `Enter` is the editor's own key now, so a
+  no-break space beside the caret survives it, where the host's own handling
+  turned it into a plain space.
+- A click on a bullet or a number puts the caret after the marker, a task's
+  box is ticked wherever the task stands, and `Ctrl+click` follows a link
+  (`Alt+click` where `Ctrl+click` adds a caret): an address opens outside, a
+  relative path in VS Code, and `#heading` moves the caret to the heading. A
+  paste that carries no text leaves the selection alone, where it wiped it,
+  and a rule no longer shields the block drawn beside it from the pointer.
+- What Pandoc reads and CommonMark does not is drawn: footnotes, citations
+  and Quarto's cross-references, attributes (`{#id .class}`, an image's
+  `width` applied), bracketed spans, raw TeX as the source it is, and the
+  punctuation of `smart`, curly quotes, dashes and the ellipsis, by the rules
+  of Pandoc's own reader, in prose, headings, table cells, captions and the
+  outline, the source coming back under the caret. A maths block closes at
+  its own closer and not at the next one in the file, a fenced div with no
+  class is left bare instead of being drawn as a callout, and a heading
+  written with a tab after its hashes is a heading.
+- The export follows the editor in more places. The copy Quarto renders gets
+  a blank line before a table or a rule written straight under text and after
+  a line of dashes under an item, a heading or a setext underline set in a
+  space or three is brought to the margin, a heading's closing `#` with no
+  space before it is kept, a bare address is a link, and the YAML header is
+  read as Pandoc reads it (`...` closes it, and a `---` over a blank line is
+  a rule).
+- Whitespace a reader drops is no longer drawn: spaces before a paragraph or
+  a heading, the tab after a `>`, the columns of indented code, the indent a
+  fence shares with its body. A `<?...?>` block is raw HTML like the others.
+- Words beside a closed `---` are divided as the page divides them.
+- Characters that draw nothing (a bidi override, a zero-width space, a soft
+  hyphen) are named by a mark on the line the caret is on.
+- Long documents. A caret move or a keystroke rebuilds the drawing of the
+  blocks it reaches and keeps the rest: about 25 ms on a file of 22 800 lines
+  where it was over 100. A document of callouts that never close no longer
+  stalls the parse. The rendered equations kept in memory are bounded. A
+  paragraph of twenty-four thousand asterisks opens: a run of twenty or more
+  `*` or `_` is text, where the parser nested an emphasis per character and
+  ran out of stack.
+
+- A score's music can be handed over, as MIDI or as WAV, with nothing
+  installed. Under the headphones in a score's rail a button writes that one
+  score beside the document, named after the document, the score's place in
+  it and its `T:` (`example 1 - Cooley's Reel.wav`, `example 2.mid`); the
+  export button has grown two branches, Document for the HTML and the PDF
+  as before and Audio for every score of the file at once, one file each.
+  With the player open the rail keeps the headphones alone, and in a
+  document with no score the audio rows are dim.
+- The MIDI is the tune as the player sounds it. abcjs's own writer converts
+  a tempo into quarter notes only when the metre's denominator is 8, so the
+  file came out at twice the speed in 2/2 and 3/2, at four and six times in
+  6/2 and at a quarter in 3/16; it subtracts the gap a staccato or a slur
+  asks for without the cap the synth applies, so above about 95 beats to the
+  minute, and 180 is what a tune with no `Q:` is given, a note ended before
+  it began and hung for the rest of the file; and it sent every voice's
+  instrument to channel 0, so a piece for two voices came out in one colour.
+  All three are corrected here. The WAV is written from the same buffer the
+  player sounds, through the piano the extension ships, so a file plays back
+  as the editor plays it.
+
+- Three Markdown buttons the toolbar was missing: strikethrough (Pandoc's
+  `~~`, after italic), a task list and a quote (after the ordered list). The
+  task button boxes the items a line already is, numbered ones included, and
+  takes only the box off; the quote button quotes whole paragraphs, fences
+  and scores, never half of one, and takes one level off a quote.
+- Small caps, superscript and subscript buttons: `[word]{.smallcaps}`,
+  `x^2^` and `H~2~O`, the three annotations the editor drew and no button
+  wrote. Small caps works like the highlight, being the same bracketed span;
+  the pair work like bold and italic, on the selection or the word at the
+  caret and off again at a second press. They write what the readers read: a
+  space inside a superscript goes in escaped (`x^a\ b^`, which is a no-break
+  space on the page), because Pandoc raises nothing over a bare space, and so
+  does a bracket at the head of the content, since `x^[b]^` is a footnote
+  there. Two tildes are the strikethrough and one is the subscript, so the
+  subscript button never writes a pair: over part of a struck word it writes
+  its tilde, and over the whole of one, where Pandoc would keep the subscript
+  and drop the strikeout, it leaves the word as it stands. The button draws
+  what it does to the words: a lowercase a and the small cap it becomes.
+- A highlight button, Pandoc's bracketed span `[word]{.mark}`, which the page
+  writes as `<mark>`. It works on the selection or on the word at the caret,
+  writes an empty span to type into where there is no word, and takes its
+  class off again at a second press; where the words are in a span already
+  the class joins that span's attribute instead of wrapping a second one
+  round it, and the span goes with its last class. GitHub's `==word==` is a
+  different spelling that Pandoc does not read, so neither surface here does.
+- The word group is in the order the marks belong to: bold, italic,
+  strikethrough, then superscript and subscript, then small caps and the
+  highlight, so the pairs of punctuation stand together and the two
+  bracketed spans after them, and the link and the inline code close the
+  group as before.
+- The toolbar stands in two rows, and six buttons for the six things a
+  document holds that the bar had no button for: an equation, an equation
+  block, a table, a picture, a footnote and a horizontal rule. They close
+  the first row, after the quote, and the second row begins under the
+  outline button with everything that switches the document as a whole:
+  what a reader writes is above, what the document is set in is below. The
+  equation button wraps the selection in `$…$` and takes the dollars off
+  again at a second press; the equation block, the table and the rule are
+  written on lines of their own, where the code block button writes its
+  block: under the whole of the paragraph, score or table the caret is in
+  and never through it, on the caret's line when that line is blank, and
+  inside the quote or the list item around it, with the blank line the page
+  needs. The table comes as two columns and three rows with the caret in the
+  first cell, and the rule as `***`, the one form that may stand under a
+  line of text. The picture button is the link gesture with a `!` in front,
+  so a selected file name goes where the address goes and anything else
+  becomes the text under the figure. The footnote button writes the
+  reference after the words the caret is in, numbered with the lowest number
+  the document has not used, and opens its note at the end of the document
+  with the caret in it, since that is the only place Pandoc reads a note
+  from.
+- A code block button, and `Ctrl+Shift+C` (`⌥⌘C` on a Mac) for it. It stands
+  first of the block buttons, across the toolbar's separator from inline
+  code, so the two chevrons meet on the cut that separator makes: one marks
+  words inside a line and the other makes the line a block. On an empty line
+  it opens a block and leaves the caret after the opening backticks, where
+  the language is typed (`abc` for a score, `python`), and `Enter` goes on
+  into the block; with the caret in text the block opens under that
+  paragraph; lines selected go into the block, under a longer fence when a
+  fence is among them; from inside a block it takes the fences off. In a
+  quote or a list the block keeps the `>` or the indentation, and in a task
+  it stands at the item's column, where Pandoc reads it as the item's.
+  `Enter` in a fence inside a task stands there too, where it set the new
+  line four spaces past the box.
+- The heading button opens a menu of Paragraph and the six levels, the one
+  the caret's line is on ticked, and the ticked level picked again makes the
+  lines a paragraph, where it used to step each line one level up and back
+  to a paragraph after six. On an empty line it writes the hashes for the
+  caret to type after. Every row names its key.
+- A key for the block gestures that are worth one, all on one modifier:
+  `Ctrl+Shift+0` to `Ctrl+Shift+6` for a paragraph and the six heading
+  levels, the digit being the level, and `Ctrl+Shift+C` and `Ctrl+Shift+T`
+  for the code block and the task list. The level a line already is takes
+  its heading off, as its row does, and `Ctrl+Shift+0` makes a paragraph of
+  whatever the line was. On a Mac they are `Cmd+Option`, where the system
+  keeps `Cmd+Shift+3`, `4` and `5` for its screenshots. Each key is written
+  in its button's tip and beside its row in the heading menu, as the tips of
+  the bold, italic, inline code and link buttons name theirs. The bullets,
+  the numbers, the quote and strikethrough have none, and their buttons name
+  none: `- `, `1. ` and `> ` are so little to type at the head of a line
+  that a chord buys nothing, and on Linux `Ctrl+Shift+U` is spoken for
+  before any editor sees it, where the desktop's input method opens its `U+`
+  prompt on that key.
+- `Ctrl+B`, `Ctrl+I`, `Ctrl+E`, `Ctrl+K` and the block keys are the text's
+  while the caret is in it and no longer reach VS Code as well: `Ctrl+B`
+  set bold and hid the side bar at once. With the focus out of the text (a
+  click in the margin) they are VS Code's again, `Ctrl+Shift+T` reopening a
+  closed editor as it always did.
+- A press on a toolbar button no longer blinks the line the caret is on. The
+  source that line shows, the `##` of a heading or the stars of a bold word,
+  went away while the button was held down and came back when it was let go:
+  the button took the focus, and a document without the focus draws itself
+  with nobody in it. No button of the bar takes the focus now.
+- The list buttons do something on an empty line: they write the marker for
+  the caret to type after, as the two new ones do, and under a paragraph
+  they leave the blank line Pandoc needs before a list or a quote, where
+  the editor would have drawn a list the page runs into the paragraph.
+- The three list buttons are one drawing at last. The bulleted and the
+  numbered ones had three thin rows where the task one had two thick ones,
+  so at the size the toolbar draws they did not read as a family; all three
+  now carry the task glyph's two bars, with a bullet, a 1 and a 2, and a
+  box, in front of them. The two are called Unordered list and Ordered list,
+  the words the format uses, where they were Bulleted and Numbered. The
+  quote button joins them: two rows of text with the quote's rule down them,
+  where it had three rows and a taller rule.
+- The editor underlines what the page underlines. `[word]{.underline}` was
+  drawn as plain text here while the page wrote `<u>`, which is a difference
+  between the two surfaces and not a gap. There is no button for it: a
+  bracketed span shows its own class as text in a reader that is not Pandoc,
+  and an underline is the typewriter's italic, which this editor's Latin
+  Modern has no use for. What a document carries is read all the same.
+
+- `Ctrl+F` opens the search as a row under the toolbar, in the editor's type
+  and brass: a click in its field types there, it counts the matches ("3 of
+  12"), keeps case, whole word and regular expression as buttons, replaces
+  one or all, and closes with `Escape` or its button. The field typed into
+  nothing before, nothing closed it, and it did not open at all unless the
+  text had the focus. A drop-down of the toolbar opens over it.
+- The outline lists the whole of a long document, reads each heading as the
+  editor draws it (a closing sharp kept, attributes left out, maths set), and
+  is painted when the typing rests instead of at every key.
+
+- A highlight is the document's own colour now and not the browser's. It
+  was pure yellow with black letters, which is what `<mark>` is left to
+  itself, and on the dark theme that cut a hole in the page; it is a wash of
+  butter over whatever ground the document has, lighter on the dark side,
+  with the words in the ink the rest of the line is in. The editor, the
+  exported page and the PDF all mark a word the same colour.
+
+- With the LaTeX font on, every word a score carries is set in it too: the
+  title, the part labels, the composer, the tempo, the lyrics, the chord
+  symbols, the annotations, the bar numbers and the triplet figures come out
+  in Latin Modern, in the editor, on the exported page and on paper alike.
+  They keep the sizes abcjs gives them and the staff keeps the height it had,
+  so a score is the drawing it was in the face the document is read in; the
+  roman being the wider face, a title that hangs past its staff hangs a little
+  further. A document set in the usual Markdown font is unchanged.
+- The words a player reads off the staff (cresc., dolce, poco a poco) are
+  drawn a little larger than the point size abcjs gives them, which is what
+  keeps them the size they look now: they are the one thing on a staff abcjs
+  sets in a sans, and a serif put in its place at the same size reads a fifth
+  smaller because its lowercase is shorter. Chord symbols are read off their
+  capitals and keep the size they had.
+- On paper this settles which fonts a score's words are printed with. With
+  none named they were left to whatever the exporting machine had in place of
+  Times New Roman and Helvetica, so the same .mdm printed on two machines gave
+  two documents. What goes on the page now is the face this extension ships,
+  and nothing else.
+
+- A PDF printed without TeX has the page's ground to the edges of the sheet,
+  where the margins came out white, and a score breaks between two of its
+  staff systems where the sheet runs out, as the typeset PDF breaks it,
+  instead of going on to the next sheet whole and leaving the foot blank.
+- A typeset card of code leaves the page's air above its first line and
+  under its last, on every page it runs across, where the first line stood
+  against the card's edge.
+
+- Nothing typed is lost to the other side of the file. `Ctrl+Z` no longer
+  undoes what the host wrote (the header button's header, the language the
+  hyphenation menu writes); a change made by the text editor beside this one
+  while a keystroke was still held back is merged with it instead of being
+  written over, and lands where it was made, the carets staying on their
+  rows; `Ctrl+S` waits for the keystrokes not yet sent; a header typed into a
+  file that had none stays on screen with the headers hidden; and the file is
+  written over the stretch that changed instead of being rewritten whole. A
+  file that is nothing but a header keeps its own bytes, where opening it
+  rewrote it and left it dirty. `Ctrl+Z` after a line put in among blank
+  lines (`Enter` on an empty line, the code block button there) no longer
+  takes one line more with it, on screen and in the file: inside VS Code the
+  editor and the workbench both undo, and each put the change at its own end
+  of the run. `Ctrl+Y` no longer writes it twice.
+- With the YAML header hidden, blank lines typed at the top of the text
+  stay there: the header kept every blank line under it, so an `Enter`
+  there went into the file and never showed.
+- A click into a document that did not have the focus places a caret and
+  selects nothing, a small wobble of the hand between press and release
+  selects nothing either, and a double click selects the word: the drawing
+  no longer changes under a pressed button.
+
+- The numbers in the margin stay in one column beside a list, and no longer
+  move when the caret goes into an item. A rule's number stands beside its
+  stroke, which is drawn in the middle of its row as the page draws it,
+  where it fell onto the number of the line under the rule; a task's number
+  stands beside its words, where the row of a task grew and left the number
+  above them; and a rule or an empty block in a quote or a list keeps its
+  number in the column.
+- The caret on a blank line is the size of the prose's, where one above a
+  heading stood as tall as the heading.
+- A row of prose in the roman face keeps its height with a mark hidden in
+  it, where it stood a pixel taller and the text below moved as the caret
+  came and went.
+- The arrow keys step over a blank row instead of skipping it, and the view
+  no longer jumps when the caret passes a heading: the row heights the
+  editor works from are measured on the prose alone, where a heading in the
+  sample made every row read taller than it is.
+- A click lands on the line it was aimed at in a document with pictures,
+  where the rows above an image that had not loaded yet were measured short
+  and the click fell a line or two low. A line is measured again when its
+  picture arrives.
+- The description of `mdm.frontMatter` said the header was spliced back "on
+  every save"; it is on every edit.
 ## 0.6.0
 
 - The prose is justified, and a toggle in the toolbar sets it back to a ragged
