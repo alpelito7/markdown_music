@@ -4,7 +4,10 @@
 
    This sheet rides with the page only when the document is set in the roman
    (mdm-text-font: roman), so a page in the sans pays none of its 191 KB and a
-   self-contained one carries no face it does not draw with.
+   self-contained one carries no face it does not draw with. A self-contained
+   page in the roman pays it three times over, the engraving's two families
+   below naming the same four files and Quarto inlining each url() on its own.
+   A page that leaves its dependencies beside it pays once.
 
    The faces are Latin Modern Roman at the 10 pt optical size, the one the
    family means for running text, converted from the OpenType originals GUST
@@ -63,3 +66,145 @@
    KaTeX and the engraving name faces of their own, so neither inherits this
    scale. KaTeX's 1.21 is then right again, being the compensation Computer
    Modern needs beside words drawn at the sans's x-height. */
+
+/* ---------- The same roman, for the words on a staff ----------
+
+   The four files again, under a name of their own, because the family above
+   does not mean the same thing here as it does in the editor. Here each of its
+   faces carries `size-adjust`; there the face is drawn as it comes and the
+   compensation is a `font-size-adjust` on .cm-content. A score that named
+   `"Latin Modern Roman"` would therefore be engraved 22.5% larger on this page
+   than in the editor it was written in, which is the difference the export
+   rule exists to forbid. The editor's stylesheet declares this family on the
+   same terms, and so does the page mdm.lua prints the PDF from, so the three
+   surfaces draw one document.
+
+   No `size-adjust` on it, and no size named anywhere: the words keep the sizes
+   abcjs gives them (the table of roles in resources/mdm.js).
+
+   The three overrides are not decoration. abcjs reserves the vertical room for
+   every row of text by measuring the line box and not the ink: getTextSize
+   puts a real <text> in the drawing and asks it for getBBox. Latin Modern
+   declares 1.13 + 0.29 em where Times declares 0.89 + 0.22, so the first score
+   of example.mdm grew from 353.39px tall to 391.39, a tenth taller, for words
+   that had not changed size. 89.11 and 21.63 are Times New Roman's own
+   numbers (hhea ascender 1825/2048 and descender 443/2048), and they are not
+   rounded. They were, to 89 and 22, because at 22 that score lands exactly on
+   abcjs's 353.39; the pair was tuned on one score and was worse on every
+   other. Chrome rounds an SVG text's ascent and its descent to whole pixels
+   separately, and 22% of the 16px a 12pt row is drawn at is 3.52, which
+   rounds up where Helvetica's 3.39 rounds down, so every row of chord symbols
+   and every annotation stood a pixel taller than abcjs draws it (three on the
+   tune that carries every role at once). The third is zero rather than Times'
+   87/2048: a line gap has nothing to do with the box abcjs measures, and it
+   measured inert here. The editor's stylesheet carries the same four faces on
+   the same terms and the whole of the reasoning. */
+@font-face {
+  font-family: "Latin Modern Roman Score";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  ascent-override: 89.11%;
+  descent-override: 21.63%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  ascent-override: 89.11%;
+  descent-override: 21.63%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  ascent-override: 89.11%;
+  descent-override: 21.63%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Bold.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score";
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  ascent-override: 89.11%;
+  descent-override: 21.63%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
+}
+
+/* The same four files a third time, for the one role abcjs sets in a sans and
+   not in a Times: the annotation, the word a player reads off the staff. A
+   face put in the place of another at the same nominal size only keeps the
+   size if the two have the same x-height, and Helvetica's is 0.528 em against
+   Latin Modern's 0.431, so "cresc." came out a fifth short. `size-adjust`
+   scales the glyphs and the metrics together, and the two overrides are the
+   family's above divided by that same 122.51%, which puts the line box back
+   where it was: abcjs reserves a row of text by the box, so the alternative,
+   asking for 14.5pt instead of 12 in the table of roles, would have bought
+   the right x-height and a tenth more height with it. The chord symbol, the
+   other sans role, is drawn in the plain family at abcjs's own size, because
+   a chord is read off its capital and its figures and those already agree.
+   The editor's stylesheet carries the same four faces and the measurements
+   behind them. */
+@font-face {
+  font-family: "Latin Modern Roman Score Wide";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  size-adjust: 122.51%;
+  ascent-override: 72.73%;
+  descent-override: 17.66%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score Wide";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  size-adjust: 122.51%;
+  ascent-override: 72.73%;
+  descent-override: 17.66%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score Wide";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  size-adjust: 122.51%;
+  ascent-override: 72.73%;
+  descent-override: 17.66%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Bold.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score Wide";
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  size-adjust: 122.51%;
+  ascent-override: 72.73%;
+  descent-override: 17.66%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
+}
+
+/* And the switch the engraving reads. This sheet rides with the page only for
+   a document set in the roman, so the two properties exist exactly when the
+   score is to be drawn in it and mdm.js has nothing to ask the filter: no
+   face named, no format passed, and abcjs keeps what it compiled in. The
+   editor carries the same tokens under #app.mdm-text--roman. */
+html:root {
+  --mdm-score-face: "Latin Modern Roman Score";
+  --mdm-score-face-wide: "Latin Modern Roman Score Wide";
+}

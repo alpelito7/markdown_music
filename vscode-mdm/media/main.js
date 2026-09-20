@@ -430,7 +430,63 @@
     'italic bold 16px "Latin Modern Roman"',
   ];
 
+  // And the same four again, twice, under the two names the engraving spends.
+  // Two families of the same files, because the annotation is the one role
+  // abcjs does not set in a Times and has to be drawn larger to be the size
+  // it was; the stylesheet gives the numbers. They are warmed for the same
+  // reason as the prose's and one more: abcjs measures the room a word needs
+  // with the face that is in when it draws, so engraving against the fallback
+  // lays the staff out for a face the reader never sees.
+  const SCORE_FACES = [
+    '16px "Latin Modern Roman Score"',
+    'italic 16px "Latin Modern Roman Score"',
+    'bold 16px "Latin Modern Roman Score"',
+    'italic bold 16px "Latin Modern Roman Score"',
+    '16px "Latin Modern Roman Score Wide"',
+    'italic 16px "Latin Modern Roman Score Wide"',
+    'bold 16px "Latin Modern Roman Score Wide"',
+    'italic bold 16px "Latin Modern Roman Score Wide"',
+  ];
+
   let textFont = SETTINGS.textFont || "roman";
+
+  // The face the words on a staff are set in, or "" when the engraving keeps
+  // the faces abcjs compiled in. It is read off the sheet (--mdm-score-face,
+  // set with --mdm-text under #app.mdm-text--roman) rather than spelled here,
+  // so the family is named once, beside the @font-face that declares it. Read
+  // when the face changes and kept, because renderScore runs from a widget's
+  // toDOM and a computed-style read there costs a style pass per score.
+  let scoreFace = "";
+  // And the second of them, for the annotation alone. Kept apart rather than
+  // spelled as the first one plus a word, so that a family renamed in the
+  // sheet is renamed in one place.
+  let scoreFaceWide = "";
+  // And whether the four files have been fetched, which is a separate thing
+  // and has to be waited for. abcjs measures the room every word needs with
+  // the face that is in when it draws, and keeps that measurement in a cache
+  // of its own keyed by the string and the attributes it drew with (strings
+  // under twenty characters, which is most of what a staff carries: a part
+  // label, a chord, a syllable of a lyric). A score engraved under this
+  // family's name before the woff2 lands is laid out by the fallback's
+  // metrics and keeps that layout, redraw or no redraw. So a
+  // score drawn before then is drawn as a sans document's is, in abcjs's own
+  // faces, and engraved again the moment the face arrives, under a name abcjs
+  // has not measured yet.
+  //
+  // Once for the session and never taken back: a document read in the sans
+  // and turned to the roman later has the files already, so the turn costs no
+  // engraving in the wrong face.
+  //
+  // document.fonts.check() is not the test for this, and was tried: on the
+  // exported page it answers false for a face whose own load() has just
+  // resolved, while other faces of the page are still loading.
+  let scoreFacesIn = !(document.fonts && document.fonts.load);
+  function readScoreFace(token) {
+    const root = document.getElementById("app");
+    if (!root || !window.getComputedStyle) return "";
+    const named = getComputedStyle(root).getPropertyValue(token);
+    return named ? named.trim() : "";
+  }
 
   // The tip names the face the click leads to, not the one being read, and it
   // names it by what the reader would call it rather than by the name of the
@@ -470,14 +526,44 @@
     const root = document.getElementById("app");
     if (!root) return;
     root.classList.toggle("mdm-text--roman", textFont === "roman");
+    const wasFace = scoreFace + "/" + scoreFaceWide;
+    scoreFace = readScoreFace("--mdm-score-face");
+    scoreFaceWide = readScoreFace("--mdm-score-face-wide");
     updateTextFontButton();
     remeasureText();
+    // Only when the face really moved, and only when it can be used. This
+    // function runs on every settings message the host sends, which is every
+    // change to any mdm.* setting, and an engraving thrown away and made
+    // again costs a sounding score its playhead line and its timing walk. And
+    // while the files are still on their way there is nothing to gain by
+    // drawing now: that engraving could not name the face and would be
+    // replaced by the one afterFacesArrive makes.
+    if (
+      scoreFace + "/" + scoreFaceWide !== wasFace &&
+      (!scoreFace || scoreFacesIn)
+    ) {
+      engraveScoresAgain();
+    }
     if (textFont !== "roman" || !document.fonts || !document.fonts.load) return;
     Promise.all(
-      ROMAN_FACES.map(function (face) {
+      ROMAN_FACES.concat(SCORE_FACES).map(function (face) {
         return document.fonts.load(face);
       })
-    ).then(remeasureText, remeasureText);
+    ).then(afterFacesArrive, remeasureText);
+  }
+  // The faces are in. Not on the rejected branch, which is where the old
+  // handler put both: Promise.all gives up on the first face that fails, so
+  // taking that for arrival would name a family to abcjs with nothing loaded
+  // behind it, which is the one thing this flag is here to prevent. A face
+  // that never comes leaves the engraving in abcjs's own, as a sans document
+  // is drawn, and the next settings message asks for it again.
+  function afterFacesArrive() {
+    const first = !scoreFacesIn;
+    scoreFacesIn = true;
+    remeasureText();
+    // Only the arrival is worth an engraving. This resolves again on every
+    // settings message, the files being in the browser's cache by then.
+    if (first) engraveScoresAgain();
   }
 
   // ---------- Justified text ----------
@@ -9280,6 +9366,95 @@
   // read. A pass while a player is open costs a coalesced frame.
   function releaseScore() {
     if (player) scheduleAfterRender();
+  }
+
+  // Every role abcjs draws words with, at the size and the shape abcjs gives
+  // it: the point size is abcjs 6.7.0's own default, which it draws at 4/3 (a
+  // title at 20 pt comes out at 27 px). The sizes are not ours to move. They
+  // were held to a ladder over the prose's x-height for a while and that was
+  // taken back on 2026-09-10; what this table changes is the face and nothing
+  // else, so a title stays at 27 px, a part label at 20, the lyric at 17 in
+  // bold. The page and the paper carry the same table (resources/mdm.js and
+  // chrome_page in mdm.lua), which is what keeps the three surfaces drawing
+  // one document.
+  //
+  // headerfont and footerfont are in it for completeness and draw nothing
+  // here: abcjs writes a %%header and a %%footer only in the print mode it
+  // keeps for its own tunebooks, which nothing in this project asks for
+  // (`e.header && o` in the bundle, where o is that flag).
+  //
+  // The third slot is the family, and it is there for the annotation. That
+  // and the chord symbol are the two roles abcjs does not set in a Times,
+  // and they want opposite things from the same swap. An annotation is a
+  // word a player reads off the staff (cresc., dolce, poco a poco) and it is
+  // lowercase, so what says how big it looks is the x-height, and Latin
+  // Modern's is a fifth shorter than Helvetica's at the same nominal size:
+  // the owner saw "cresc." come out as fine print beside the notes. It goes
+  // in the wide family, which is the same four files scaled to the sans's
+  // x-height with the line box held where it was. The stylesheet has the
+  // numbers, and why a larger size in this table was not the answer: abcjs
+  // reserves a row of text by its box, so 14.5 instead of 12 would have
+  // bought the right x-height and a tenth more height with it.
+  //
+  // gchordfont takes the plain family at abcjs's own size, because a chord
+  // is read off its capital and its figures and those already agree between
+  // the two faces: "Cmaj7" comes out 46.22 px wide against Helvetica's
+  // 46.23. In the wide family it was a fifth larger than abcjs draws it and
+  // pushed the system wider to fit. It is in the table at the owner's word
+  // of 2026-09-19, which closes the exception the first round of this left
+  // open, and it takes the exported PDF with it: a face this table does not
+  // name is resolved against the machine that exported, so a score of chord
+  // symbols printed differently on two machines and now does not.
+  //
+  // Three roles are still missing, the three a tablature staff spends
+  // (tablabelfont, tabnumberfont and tabgracefont, which abcjs gives
+  // Trebuchet MS and Arial). Nothing here draws a tablature staff, and the
+  // round that takes them should take the three together.
+  const SCORE_TEXT_ROLES = {
+    titlefont: [20, ""],
+    subtitlefont: [16, ""],
+    composerfont: [14, "italic"],
+    partsfont: [15, ""],
+    tempofont: [15, "bold"],
+    vocalfont: [13, "bold"],
+    voicefont: [13, "bold"],
+    wordsfont: [16, ""],
+    textfont: [16, ""],
+    historyfont: [16, ""],
+    infofont: [14, "italic"],
+    measurefont: [14, "italic"],
+    repeatfont: [13, ""],
+    tripletfont: [11, "italic"],
+    annotationfont: [12, "", "wide"],
+    gchordfont: [12, ""],
+    headerfont: [12, ""],
+    footerfont: [12, ""],
+  };
+
+  // What abcjs is handed for the face, or nothing at all when the document is
+  // in the sans and the engraving keeps the faces abcjs compiled in.
+  //
+  // A string and not an object: abcjs takes `{face, size}` without complaint
+  // and writes font-family="[ object Object ]" into the SVG (6.7.0, measured).
+  // The family arrives from the sheet already quoted, which is the form abcjs
+  // parses for a name of several words.
+  //
+  // This goes in the parameters and NOT into the ABC source, though a
+  // `%%titlefont` line prepended to the text sets exactly the same thing. The
+  // source is the document: it is what a click opens, what the copy button
+  // hands out and what the player renders, and every character offset into it
+  // would shift by the length of whatever was prepended. A document that sets
+  // its own `%%titlefont` still wins over this, because abcjs applies the
+  // tune's own directives after the format it was handed (verified on 6.7.0).
+  function scoreFormat() {
+    if (!scoreFace || !scoreFaceWide || !scoreFacesIn) return null;
+    const out = {};
+    Object.keys(SCORE_TEXT_ROLES).forEach(function (role) {
+      const spec = SCORE_TEXT_ROLES[role];
+      const face = spec[2] === "wide" ? scoreFaceWide : scoreFace;
+      out[role] = face + (spec[1] ? " " + spec[1] : "") + " " + spec[0];
+    });
+    return out;
   }
 
   // Engraves one score into its <code>. abcjs is loaded by the page before

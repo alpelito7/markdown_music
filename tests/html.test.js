@@ -580,10 +580,12 @@ test("the page is the editor's: its ground, its ink, its measure", { skip }, asy
 });
 
 test("the score's own text is drawn at abcjs's own sizes", { skip }, async () => {
-  // The page hands abcjs no `format`, as the editor hands it none (renderScore
-  // in vscode-mdm/media/main.js), so every word on a staff keeps the size
-  // abcjs gives it. They were held to a ladder over the prose's x-height for
-  // a while instead, and that was taken back on 2026-09-10.
+  // Every word on a staff keeps the SIZE abcjs gives it. They were held to a
+  // ladder over the prose's x-height for a while instead, and that was taken
+  // back on 2026-09-10; nothing of ours has named a size since, here or in
+  // the editor (renderScore in vscode-mdm/media/main.js). The page this opens
+  // is rendered with no look at all, so it is in the filter's fallback sans
+  // and abcjs keeps its own faces as well; the face is read below.
   const h = await open();
   const l = await looks(h.page);
   // A 20 pt title, which abcjs draws at 4/3.
@@ -599,6 +601,48 @@ test("the score's own text is drawn at abcjs's own sizes", { skip }, async () =>
     "score text at a size abcjs never draws: " + JSON.stringify(l.scoreText)
   );
   await h.close();
+});
+
+// And the face is the document's, which is the other half of it: a page set
+// in the roman engraves its scores in the roman too, at those same sizes. The
+// family is one of its own and not the `"Latin Modern Roman"` the prose is
+// set in, because that one carries a `size-adjust` here and none in the
+// editor, and a score naming it would come out 22.5% larger on the page than
+// in the editor it was written in.
+test("the page draws a score in the face the document is set in", { skip }, async () => {
+  const drawn = (page) =>
+    page.evaluate(() => {
+      const out = {};
+      document.querySelectorAll(".mdm-fit svg text").forEach((t) => {
+        const cls = (t.getAttribute("class") || "?").split(" ")[0];
+        if (!out[cls]) {
+          out[cls] = t.getAttribute("font-family") + " | " + t.getAttribute("font-size");
+        }
+      });
+      return out;
+    });
+
+  const roman = await open(EXAMPLE_PAGE);
+  const r = await drawn(roman.page);
+  assert.equal(r["abcjs-title"], "Latin Modern Roman Score | 27");
+  assert.equal(r["abcjs-part"], "Latin Modern Roman Score | 20");
+  assert.equal(r["abcjs-lyric"], "Latin Modern Roman Score | 17");
+  assert.equal(r["abcjs-chord"], "Latin Modern Roman Score | 16");
+  // The annotation is drawn in the other family of the same face, at the same
+  // size: abcjs gives that role a sans, and a face put in its place at the
+  // same nominal size only keeps the size if the x-heights agree. The wide
+  // family is the same four files scaled until they do, with the line box
+  // held where it was (mdm-roman.css).
+  assert.equal(r["abcjs-annotation"], "Latin Modern Roman Score Wide | 16");
+  await roman.close();
+
+  // A page in the sans is handed no format at all and keeps abcjs's own.
+  const sans = await open(EXAMPLE_SANS_PAGE);
+  const p = await drawn(sans.page);
+  assert.equal(p["abcjs-title"], "Times New Roman | 27");
+  assert.equal(p["abcjs-lyric"], "Times New Roman | 17");
+  assert.equal(p["abcjs-chord"], "Helvetica | 16");
+  await sans.close();
 });
 
 test("code is on the editor's card, in the palette's colours", { skip }, async () => {

@@ -836,16 +836,20 @@
     // beside it unmoved). The drawing keeps the size it is engraved at, and a
     // window too narrow for it scrolls the card sideways, which is what a
     // wide equation and a wide table already do.
-    var visual = ABCJS.renderAbc(paper, source, {
+    var params = {
       // The classes the stylesheet keys on: the staff lines it recolours, and
       // the notes the player lights up. The paddings are the editor's, so the
-      // engraving sits in the text the same way here as it does there.
+      // engraving sits in the text the same way here as it does there, and so
+      // is the table of faces below it.
       add_classes: true,
       paddingtop: 2,
       paddingbottom: 2,
       paddingleft: 0,
       paddingright: 0,
-    })[0];
+    };
+    var format = scoreFormat();
+    if (format) params.format = format;
+    var visual = ABCJS.renderAbc(paper, source, params)[0];
     // The box the score sits in, which carries the alignment (mdm-look.css)
     // and, for a score narrower than the column, the width as well: held to
     // the drawing, its auto margins centre it.
@@ -883,6 +887,8 @@
     // Before anything asks the engine whether it can play: registering later
     // would leave a context of abcjs's own running beside ours.
     if (document.querySelector(".mdm-block.mdm-play")) registerAudioGraph(ABCJS);
-    blocks.forEach(renderBlock);
+    withScoreFace(function () {
+      blocks.forEach(renderBlock);
+    });
   });
 })();

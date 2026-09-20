@@ -4339,6 +4339,120 @@ Not done here, and left on the record by the sheet: superscript, subscript,
 small caps, and the Insert menu for equation, table, picture, footnote and
 rule. The two spans have no key; the letter row of D19 is spent.
 
+### The words on a staff in the document's face (2026-09-19)
+
+With
+`mdm.textFont: roman` the text abcjs draws around a staff is set in Latin
+Modern too, on all three surfaces, and at the sizes abcjs gives it: the 2026-09-10
+decision stands, only the face moves. The chord symbols are left out at the
+owner's word and stay in abcjs's sans, to be looked at again before the next
+version is cut (which happened the same day: see *The chord symbols in too*
+at the end of this file, which also unrounds the two metric overrides this
+round arrived at). A page and a document in the sans are untouched, and no font
+rides with them.
+
+Three things the round turned up, none of them obvious from the code:
+
+- The family cannot be the prose's `"Latin Modern Roman"`. On the page every
+  face of it carries `size-adjust: 122.51%` and in the editor it does not, the
+  compensation there being a `font-size-adjust` on `.cm-content`, so a score
+  naming it is engraved 22.5% larger on the page than in the editor. It names
+  `"Latin Modern Roman Score"` instead, the same four files declared a third
+  time, unscaled, in all three places that engrave.
+- Latin Modern declares a line box of 1.13 + 0.29 em where Times declares
+  0.89 + 0.22, and abcjs reserves the vertical room for a row of text by that
+  box (`getTextSize` puts a real `<text>` in the drawing and asks it for
+  `getBBox`). Left alone the first score of `example.mdm` grew from 353.39px
+  tall to 391.39. The three metric overrides on the face are Times New Roman's
+  own numbers (hhea 1825/2048 and 443/2048) and bring it back to 353.39 exactly.
+- abcjs keeps the room it measured for a word in a cache of its own, keyed by
+  the string and the attributes it drew with. Engraving under the family's name
+  before the woff2 has landed therefore lays the staff out by the fallback's
+  metrics **and keeps that layout**, whatever is drawn afterwards. The first
+  version of this change did exactly that, and the mutation below is what found
+  it: the editor's score was laid out for Times and redrawn in Latin Modern, and
+  removing the overrides changed nothing because the layout never came from the
+  real face. All three surfaces now hold the face back until its files are in
+  and engrave as a sans document does until then. `document.fonts.check()` is
+  not the test for that and was tried: on the exported page it answers false for
+  a face whose own `load()` has just resolved, while other faces are still
+  loading (measured, Chrome 151.0.7922.137).
+
+Tests: *a score in the sans is abcjs's own, word for word* (the old *the words
+on a score keep abcjs's own sizes*, reseeded, since in the roman it is no longer
+true by design), *a score in the roman takes the document's face and keeps
+abcjs's sizes* and *the face the host sends engraves the scores again* in
+`webview-look.test.js`; *the page draws a score in the face the document is set
+in* in `html.test.js`; *the words on a printed score are the document's face* in
+`render.test.js`, which also reads the two engravings out of `mdm_cache` and
+holds them to the same height. *a score that names a font size of its own keeps
+it* became *a score that names a font of its own keeps it* and now reads the
+face as well. `abcjsCacheName` in `render.test.js` follows `abcjs 4` and the
+face. Eight mutations, each by exact string and put back by the same string:
+
+- `style.css`: the three metric overrides off the engraving's face: the
+  editor's roman score is engraved 233.10px tall where abcjs draws it 207.10.
+- `mdm-roman.css`: `--mdm-score-face` naming the prose's `"Latin Modern
+  Roman"`: *a score is drawn on the page at the size it is drawn in the
+  editor* fails on "the title is drawn a different width on the page", 414px
+  against the editor's 338, which is the 22.5% that family's `size-adjust`
+  adds.
+- `mdm.lua`: `chrome_page` handed no face: the printed engraving carries
+  Liberation Serif again.
+- `mdm.lua`: the face left out of the cache name: the roman engraving is looked
+  for under a name nothing was written to.
+- `main.js`: `engraveScoresAgain()` dropped from `applyTextFont`: the switch to
+  the roman still lands (the face's own promise redraws) and the switch back to
+  the sans does not, so a score stays in Latin Modern on a sans document.
+- `main.js`: `gchordfont` added to the table: the chord symbols leave the sans.
+- `resources/mdm.js`: the page handed no face: its title comes out in Times.
+- `resources/mdm.js`: the page engraving without waiting for the face:
+  **not caught, and it is not an oversight**. With the metric overrides in place
+  the fallback and the real face report the same line box, so the layout is the
+  same either way and nothing observable moves. The wait is what makes that
+  independent of the overrides and of whichever face a machine falls back to;
+  a test for it would have to take the overrides off first. The same holds for
+  the other two waits, `scoreFacesIn` in `main.js` and the `Promise.all`
+  before `draw(true)` in `mdm.lua`: remove either and nothing goes red, for
+  the same reason. All three are in `## Pending`.
+
+A review of the round afterwards found five defects in it, all fixed here, and
+worth keeping because none of them is visible from the diff:
+
+- `applyTextFont` runs on every settings message the host sends, which is
+  every change to any `mdm.*` setting, and it re-engraved unconditionally. A
+  reader dragging the outline sash wiped and redrew every score on screen,
+  twice; a sounding one lost its playhead line and its timing walk each time.
+  Now it engraves only when `readScoreFace()` comes back different, and
+  `afterFacesArrive` only on the arrival that flips the flag. Ninth mutation,
+  the guard removed, caught by the new *a settings message that leaves the
+  face where it was leaves the scores drawn*.
+- `.then(afterFacesArrive, afterFacesArrive)` set `scoreFacesIn` on the
+  rejected branch too, and `Promise.all` gives up on the first face that
+  fails, so one blocked woff2 named a family to abcjs with nothing loaded
+  behind it. That is the one thing the flag exists to prevent. The rejected
+  branch is `remeasureText` now, as it was before this round.
+- `renderScore` left the old engraver in `SCORE_VISUALS` when `renderAbc`
+  threw. Before this round it was only ever called on a fresh `<code>`; it is
+  the re-engraving that made a stale entry possible, and the player would have
+  walked a drawing that is no longer in the page.
+- `mdm.lua` named the four faces without checking they are there, and the
+  digest records the face that was ASKED for. A copy of the extension without
+  `resources/lm/fonts/` printed an honest sans engraving and cached it under
+  the roman's name, and restoring the files did not dislodge it. Measured both
+  ways: with the files gone the engraving is named `3b3bf2ba…` and carries
+  Liberation Serif, with them back `b15a2e7c…` and LMRoman10. `roman` is now
+  `and score_faces_in_place()`, taken before the digest.
+- The table left out `headerfont` and `footerfont`, which abcjs draws for
+  `%%header` and `%%footer` in Times New Roman like every role in the table.
+  Added. The three tablature fonts stay out with the chord symbols: abcjs
+  gives all four a sans of their own.
+
+And two numbers in it were wrong: the self-contained page carries 255 KB of
+duplicated face and not 191 (191 KB is the four files on disk, base64 adds the
+third), and the printed crop grows 309 pt to 313, not the 12% by which the
+roman is wider on one string.
+
 ### The underline button off again, and the list glyphs made one family (2026-09-19, later)
 
 Two decisions of the owner's, the same day as the two sections above.
@@ -4587,6 +4701,108 @@ while HL4's test was running, so the guard saw the file change under the
 mutation and left it alone rather than clobber the other edit. The line went
 back on the content that was then on disk. The guard earned its keep; a
 mutation script that touches a shared tree wants one.
+
+### The chord symbols in too, and the annotation at the size it looked (2026-09-19, last)
+
+The owner looked at *The words on a staff in the document's face*, above, in
+a real window and asked for two things: the chord symbols in the document's
+face after all, which closes the exception that round left open, and `cresc.`
+drawn at the size it was, which it was not.
+
+Both come from the same place. Fifteen of the seventeen roles in the table
+reach it out of a Times, where Latin Modern is a near enough substitute that
+nobody looked twice (x-height 0.431 em against 0.469, a 7% drop). The other
+two, `annotationfont` and `gchordfont`, reach it out of **Helvetica**, whose
+x-height is 0.528, and a face put in the place of another at the same nominal
+size only keeps its size if the two agree on that number, since the x-height
+is what a reader sees as size. They do not agree, and the two roles want
+opposite things about it:
+
+- An **annotation** is a word (cresc., dolce, poco a poco), usually with no
+  capital in it at all, so its whole ink is the x-height and it came out a
+  fifth short. It is drawn in a second family, `"Latin Modern Roman Score
+  Wide"`, the same four files with `size-adjust: 122.51%` (the prose's own
+  ratio, 0.528 over 0.431, which this project had already measured for
+  `font-size-adjust`) and the two metric overrides divided by that same
+  scale, so the line box comes back to where it was. Verified at 16, 160 and
+  1600px: the two families reserve the same box.
+- A **chord symbol** is read off its capital and its figures, and there the
+  two faces already agree: cap 0.68 em against 0.69, figure 0.68 against
+  0.70, and "Cmaj7" 46.22px wide against 46.23 at abcjs's 12 pt. It takes the
+  plain family at that same size. Drawn in the wide one it was a fifth larger
+  than abcjs draws it and pushed the system wider to fit, which is what the
+  bench showed and what settled it.
+
+**A size in the table was not an option for the annotation**, and this is the
+part that is not obvious: abcjs reserves the vertical room for a row of text
+by the box, so asking for 14.5 pt instead of 12 buys the right x-height and a
+taller score with it. Measured on a tune with an annotation over and under
+it: 131.24px at 12, 143.24 at 14, a tenth taller. Only a `size-adjust`, which
+scales the glyphs and the metrics together and can then be undone on the
+metrics alone, gives one without the other.
+
+**And the two overrides are unrounded now**, which is a change to the round
+above. They were Times' own hhea numbers taken to the whole per cent, 89 and
+22, because at 22 the first score of `example.mdm` lands exactly on abcjs's
+353.39. Chrome rounds an SVG text's ascent and its descent to whole pixels
+**separately**, and 22% of the 16px a 12 pt row is drawn at is 3.52, which
+rounds up where Helvetica's 3.39 rounds down: every row of chords and every
+annotation stood a pixel taller than abcjs draws it. Measured over the seven
+scores of `example.mdm` and `score-annotations.mdm`, as the difference from
+what abcjs draws:
+
+| overrides | ex 1 | ex 2 | all roles | song | plain | cresc | big | total |
+|---|---|---|---|---|---|---|---|---|
+| 89 / 22 | 0 | +1 | +3 | 0 | 0 | +1 | 0 | 5 |
+| 89.11 / 21.63 | -1 | +1 | 0 | 0 | 0 | 0 | 0 | **2** |
+| 89.11 / 22.5 | +2 | +1 | +4 | 0 | 0 | +1 | 0 | 8 |
+| 88 / 21.63 | -1 | +1 | -5 | 0 | 0 | 0 | 0 | 7 |
+
+The two pixels left are a floor no override reaches, and finding out why was
+worth the hour: **Chrome takes the box of an SVG text as the union of the
+declared box and the ink in it.** `example.mdm`'s first score is short at the
+row of its part name, where Liberation Serif's "p" descends past its own
+declared descent and Latin Modern's does not (23px against 22 at 20px); its
+second is tall at its row of chords, where "Cmaj7" has a "j" that does the
+same the other way round. A face cannot be told to stop having a descender.
+
+Tests: the three of the round above grew. *a score in the roman takes the
+document's face and keeps abcjs's sizes* now reads the chord as the
+document's face and the annotation as the wide one, measures the
+annotation's ink through a canvas (every attribute assertion passes with the
+woff2 gone, and `getBBox` gives the line box, which the overrides hold equal
+on purpose, so neither can see an x-height), and holds each row's reserved
+box to abcjs's own. *the page draws a score in the face the document is set
+in* reads the two families. *the words on a printed score are the document's
+face* carries a chord symbol and an annotation in its fixture now, the two
+roles that were the risk, and `abcjsCacheName` follows `abcjs 6`. Nine
+mutations, all caught:
+
+- **M1** `style.css`, the descent back to the rounded 22%: the chord's row is
+  reserved by a box of 18 where abcjs reserves it by 17.
+- **M2** `main.js`, `gchordfont` commented out of the table: the chord
+  symbols are not in the document's face.
+- **M3** `main.js`, the annotation back in the plain family: it is not in the
+  wide face.
+- **M4** `style.css`, the wide family's `size-adjust` removed: the
+  annotation's ink is 7px tall where the sans draws it 10. This is the one
+  that reproduces what the owner saw.
+- **M5** `style.css`, the wide family's overrides not divided by its scale:
+  the engraving is 210.10px tall where abcjs draws it 207.10.
+- **M6** `style.css`, `--mdm-score-face-wide` deleted: nothing is in the
+  document's face at all, the format being withheld unless both tokens are
+  there.
+- **M7** `mdm.lua`, `gchordfont` commented out: the printed PDF carries
+  `["LMRoman10-Regular", "LMRoman10-Bold", "LiberationSans"]`. That third
+  name is the whole of the argument for this round on paper.
+- **M8** `mdm.lua`, the wide family not written into the page Chrome prints:
+  `LiberationSerif` this time, the annotation falling back.
+- **M9** `mdm-roman.css`, the wide token deleted: the exported page draws its
+  scores in Times again.
+
+What did not change: the sizes are still abcjs's, the sans is untouched on
+every surface, and a document that names its own `%%annotationfont` still
+wins.
 
 ### The small caps glyph again, by its letters (2026-09-19, after all the above)
 

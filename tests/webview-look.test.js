@@ -4678,11 +4678,19 @@ for (const side of ["light", "dark"]) {
 
 // ---------- The words a score carries ----------
 
-// Every piece of text abcjs draws around a staff keeps the size abcjs gives
-// it: renderScore (main.js) hands it no `format` block. These words were held
-// to a ladder over the prose's x-height for a while instead, and that was
-// taken back on 2026-09-10, so what this section pins is that the editor
-// draws exactly what abcjs draws when it is left alone, word for word.
+// Every piece of text abcjs draws around a staff keeps the SIZE abcjs gives
+// it, on either face. These words were held to a ladder over the prose's
+// x-height for a while and that was taken back on 2026-09-10, so what this
+// section pins is that no size of ours ever reaches them.
+//
+// The FACE is the document's, and only when the document is in the roman:
+// renderScore hands abcjs a format that names the face for every role it
+// draws, the chord symbols with them (asked on 2026-09-19), in two families:
+// the plain one for the fourteen roles abcjs sets in a Times and for the
+// chord, and the wide one for the annotation, which is the lowercase word a
+// player reads off the staff and needs the sans's x-height to be the size it
+// was. In the sans nothing is handed over at all and the engraving is
+// abcjs's own, word for word, which is what the first test here reads.
 //
 // The comparison is against abcjs itself, in the same page, rather than
 // against a table of sizes: the same tune rendered by the same vendored abcjs
@@ -4753,8 +4761,42 @@ const scoreWords = (page, tune) =>
         +titleOf(ours).getBoundingClientRect().width.toFixed(1),
         +titleOf(stock).getBoundingClientRect().width.toFixed(1),
       ],
+      // The ink of the annotation, which is what the wide family is for and
+      // what no attribute shows: "over" is all x-height, so its ink ascent is
+      // the x-height of the face it was drawn in. getBBox and
+      // getBoundingClientRect both give the line box here, which the metric
+      // overrides hold equal on purpose, so this goes through a canvas with
+      // the font the browser computed for the drawn word.
+      annoInk: [ours, stock].map((svg) => {
+        const t = Array.from(svg.querySelectorAll(".abcjs-annotation")).find(
+          (e) => e.getAttribute("font-size")
+        );
+        if (!t) return null;
+        const cs = getComputedStyle(t);
+        const c = document.createElement("canvas").getContext("2d");
+        c.font =
+          cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+        const m = c.measureText(t.textContent);
+        return [+m.width.toFixed(2), +m.actualBoundingBoxAscent.toFixed(2)];
+      }),
+      // The box each row of text is reserved by, which is the number abcjs
+      // asks the browser for (getTextSize puts a real <text> in the drawing
+      // and reads getBBox) and the only place the metric overrides show.
+      rowBox: ["abcjs-annotation", "abcjs-chord", "abcjs-title"].reduce(
+        (out, cls) => {
+          out[cls] = [ours, stock].map((svg) => {
+            const t = Array.from(svg.querySelectorAll("." + cls)).find((e) =>
+              e.getAttribute("font-size")
+            );
+            return t ? +t.getBBox().height.toFixed(2) : null;
+          });
+          return out;
+        },
+        {}
+      ),
       adjust: getComputedStyle(titleOf(ours)).fontSizeAdjust,
       proseAdjust: getComputedStyle(document.querySelector("#app .cm-content")).fontSizeAdjust,
+      height: [+ours.getAttribute("height"), +stock.getAttribute("height")],
     };
     scratch.remove();
     return out;
@@ -4766,15 +4808,16 @@ const wordSize = (rows, cls) => {
   return row ? row.split(" | ")[2] : null;
 };
 
-test("the words on a score keep abcjs's own sizes", { skip }, async () => {
+test("a score in the sans is abcjs's own, word for word", { skip }, async () => {
   const h = await open({
     text: scoreDoc(SCORE_TUNE),
     scores: 1,
-    seed: { settings: { textFont: "roman" } },
+    seed: { settings: { textFont: "sans" } },
   });
   const w = await scoreWords(h.page, SCORE_TUNE);
   assert.ok(w.ours.length >= 5, "too few words drawn to compare: " + JSON.stringify(w.ours));
-  // Word for word what abcjs draws when nobody hands it a format.
+  // Word for word what abcjs draws when nobody hands it a format: the sans
+  // document hands it nothing.
   assert.deepEqual(w.ours, w.stock, "the editor's score text is not abcjs's own");
   // abcjs states these in points and draws them at 4/3: a 20 pt title at
   // 27 px, a 15 pt part label at 20, a 13 pt lyric at 17 and in bold, a
@@ -4784,14 +4827,8 @@ test("the words on a score keep abcjs's own sizes", { skip }, async () => {
   assert.equal(wordSize(w.ours, "abcjs-lyric"), "17");
   assert.equal(wordSize(w.ours, "abcjs-chord"), "16");
   assert.equal(wordSize(w.ours, "abcjs-annotation"), "16");
-  // And drawn at those sizes. The roman prose carries font-size-adjust
-  // 0.528, and the engraving is taken out of it (style.css): the attributes
-  // above would otherwise draw Times a seventh larger than abcjs does.
-  assert.equal(w.proseAdjust, "0.528", "the prose is not adjusted, so this proves nothing");
-  assert.equal(w.adjust, "none", "the score's words inherit the prose's adjust");
   // Within a pixel, which is what sub-pixel placement leaves between the
   // editor's centred score and the scratch one (310.8 against 310.9 measured).
-  // An inherited adjust would add a seventh, about 46 px on this title.
   assert.ok(
     Math.abs(w.titleInk[0] - w.titleInk[1]) <= 1,
     "the title is drawn " + w.titleInk[0] + " px wide where abcjs draws it " + w.titleInk[1]
@@ -4803,16 +4840,221 @@ test("the words on a score keep abcjs's own sizes", { skip }, async () => {
   await h.close();
 });
 
+// And in the roman the words are the document's face at abcjs's sizes. The
+// face is named to abcjs and not set in CSS, which is what keeps the staff
+// laid out for the words the reader sees: abcjs measures the room a word
+// needs with the face that is in when it draws.
+test("a score in the roman takes the document's face and keeps abcjs's sizes", { skip }, async () => {
+  const h = await open({
+    text: scoreDoc(SCORE_TUNE),
+    scores: 1,
+    seed: { settings: { textFont: "roman" } },
+  });
+  const w = await scoreWords(h.page, SCORE_TUNE);
+  assert.ok(w.ours.length >= 5, "too few words drawn to compare: " + JSON.stringify(w.ours));
+  const faces = {};
+  w.ours.forEach((row) => {
+    const bits = row.split(" | ");
+    faces[bits[0]] = bits[3];
+  });
+  ["abcjs-title", "abcjs-part", "abcjs-lyric", "abcjs-chord"].forEach((cls) => {
+    assert.equal(faces[cls], "Latin Modern Roman Score", cls + " is not in the document's face");
+  });
+  // The annotation is the one role drawn in the other family, and it is the
+  // other family because abcjs gives it a sans: a word set at the same
+  // nominal size in a face with a smaller x-height reads smaller, and
+  // "cresc." came out as fine print beside the notes.
+  assert.equal(
+    faces["abcjs-annotation"],
+    "Latin Modern Roman Score Wide",
+    "the annotation is not in the wide face"
+  );
+  // Every size, weight and style is still abcjs's: the face moved and nothing
+  // else did. The rows are `class | text | size | family | weight | style`,
+  // so this drops the family, which is the one column that is meant to differ,
+  // and keeps the two that carry the shape: a table that lost `bold` off the
+  // lyric or `italic` off the composer fails here, where a height check
+  // cannot see either.
+  const shape = (r) => {
+    const bits = r.split(" | ");
+    return [bits[0], bits[1], bits[2], bits[4], bits[5]].join(" | ");
+  };
+  assert.deepEqual(
+    w.ours.map(shape),
+    w.stock.map(shape),
+    "a word is drawn at a size, weight or style abcjs did not give it"
+  );
+  // And the face is not only named, it is drawn. Every assertion above reads
+  // an attribute abcjs writes whether or not the woff2 ever arrived, so with
+  // the four files gone they all still pass; the drawn width does not. Latin
+  // Modern is the wider face: this title measures 345.9 px against Times'
+  // 310.9, and the height cannot tell them apart because the metric overrides
+  // hold the roman to Times' line box on purpose.
+  assert.ok(
+    w.titleInk[0] > w.titleInk[1] * 1.05,
+    "the title is drawn " + w.titleInk[0] + " px wide where Times draws it " +
+      w.titleInk[1] + ": the face was named but not loaded"
+  );
+  // And the drawing is the same height it was in the sans. Latin Modern
+  // declares a line box of 1.13 + 0.29 em where Times declares 0.89 + 0.22,
+  // and abcjs reserves the room for a row of text by that box, so without the
+  // metric overrides on the face (style.css) this score comes out a tenth
+  // taller for words that have not changed size.
+  // A pixel of slack and no more, and this tune spends it: 206.099 against
+  // abcjs's 207.099, at the row of its part name. Chrome takes the box of an
+  // SVG text as the union of the declared box and the ink in it, and
+  // Liberation Serif's "p" descends past its own declared descent where
+  // Latin Modern's does not, so "partials" measures 22px where abcjs
+  // measures 23. No metric override reaches that. Without the overrides at
+  // all this score is 233.099 against 207.099, an eighth taller.
+  // The slack is a hair over a pixel because these are floats: the two
+  // differ by 1.0000000000000284 here, and a bare `<= 1` reads that as two
+  // pixels.
+  assert.ok(
+    Math.abs(w.height[0] - w.height[1]) <= 1.000001,
+    "the roman engraving is " + w.height[0] + " px tall where abcjs draws it " + w.height[1]
+  );
+  // And the annotation is the size it was, which is the whole of why it has a
+  // family to itself. "over" has neither an ascender nor a capital, so what
+  // is measured here is the x-height: Helvetica's is 0.528 em and Latin
+  // Modern's 0.431, so in the plain family the same word came out a fifth
+  // shorter (7 px of ink against 10 at the 16 px abcjs draws a 12 pt
+  // annotation at) while every attribute above still passed.
+  assert.ok(
+    w.annoInk[0] && w.annoInk[1],
+    "no annotation was drawn to measure: " + JSON.stringify(w.annoInk)
+  );
+  assert.ok(
+    Math.abs(w.annoInk[0][1] - w.annoInk[1][1]) <= 1,
+    "the annotation's ink is " + w.annoInk[0][1] + " px tall where the sans draws it " +
+      w.annoInk[1][1]
+  );
+  // And every row is reserved by the box abcjs reserved it by, which is what
+  // the metric overrides are for and the only place they show. The two that
+  // matter here are the two roles abcjs sets in a sans: Chrome rounds an SVG
+  // text's ascent and its descent to whole pixels separately, so a descent
+  // override of 22% of the 16px a 12pt row is drawn at (3.52) rounds up
+  // where Helvetica's 3.39 rounds down, and a row of chords and a row of
+  // annotations each stood a pixel taller than abcjs draws them. The faces
+  // carry Times' own 21.63% for that reason (style.css).
+  ["abcjs-annotation", "abcjs-chord", "abcjs-title"].forEach((cls) => {
+    assert.deepEqual(
+      w.rowBox[cls][0],
+      w.rowBox[cls][1],
+      cls + " is reserved by a box of " + w.rowBox[cls][0] +
+        " where abcjs reserves it by " + w.rowBox[cls][1]
+    );
+  });
+  // The roman prose carries font-size-adjust 0.528, and the engraving is
+  // taken out of it (style.css): without that the words would be redrawn at
+  // an x-height meant for another face.
+  assert.equal(w.proseAdjust, "0.528", "the prose is not adjusted, so this proves nothing");
+  assert.equal(w.adjust, "none", "the score's words inherit the prose's adjust");
+  // The staff and the clef are paths from abcjs's own units; no face reaches
+  // them, on either side of the setting.
+  assert.deepEqual(w.staff[0], w.staff[1], "the staff is not abcjs's");
+  assert.deepEqual(w.clef[0], w.clef[1], "the clef is not abcjs's");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A change of face is a new engraving and nothing short of one: abcjs writes
+// the family onto every <text> as it draws, and lays the staff out around the
+// room those words take, so a score already on screen cannot be restyled into
+// the new face. applyTextFont draws them all again, both ways, with no reload
+// in between.
+test("the face the host sends engraves the scores again", { skip }, async () => {
+  const h = await open({
+    text: scoreDoc(SCORE_TUNE),
+    scores: 1,
+    seed: { settings: { textFont: "sans" } },
+  });
+  const drawnTitle = () =>
+    h.page.evaluate(() => {
+      const t = Array.from(
+        document.querySelectorAll("#app code.language-abc svg .abcjs-title")
+      ).find((e) => e.getAttribute("font-size"));
+      return t ? t.getAttribute("font-family") + " | " + t.getAttribute("font-size") : null;
+    });
+  // Five seconds and then say what is actually on the staff: a bare wait
+  // fails with nothing but a timeout, and what a reader of the failure needs
+  // is the face the score was left in.
+  const titleIn = async (family) => {
+    try {
+      await h.page.waitForFunction((want) => {
+        const t = Array.from(
+          document.querySelectorAll("#app code.language-abc svg .abcjs-title")
+        ).find((e) => e.getAttribute("font-size"));
+        return !!t && t.getAttribute("font-family") === want;
+      }, { timeout: 5000 }, family);
+    } catch (e) {
+      assert.equal(await drawnTitle(), family + " | 27", "the scores were not engraved again");
+      throw e;
+    }
+  };
+
+  assert.equal(await drawnTitle(), "Times New Roman | 27");
+  await postSettings(h.page, { textFont: "roman" });
+  await titleIn("Latin Modern Roman Score");
+  // The size is abcjs's on both sides of the switch: what moved is the face.
+  assert.equal(await drawnTitle(), "Latin Modern Roman Score | 27");
+  await postSettings(h.page, { textFont: "sans" });
+  await titleIn("Times New Roman");
+  assert.equal(await drawnTitle(), "Times New Roman | 27");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// And a settings message that does not move the face leaves the engraving
+// alone. applyTextFont runs on every one of them, and the host sends one for
+// every change to any mdm.* setting, so an unguarded re-engrave would wipe
+// and redraw every score on screen when the reader touched the alignment or
+// the outline. A sounding score would lose its playhead line and its timing
+// walk each time.
+test("a settings message that leaves the face where it was leaves the scores drawn", { skip }, async () => {
+  const h = await open({
+    text: scoreDoc(SCORE_TUNE),
+    scores: 1,
+    seed: { settings: { textFont: "roman" } },
+  });
+  // The drawing is marked, and the mark can only survive an engraving it did
+  // not have: renderScore empties the <code> and abcjs builds a new svg.
+  await h.page.evaluate(() => {
+    document.querySelector("#app code.language-abc svg").dataset.mdmKept = "1";
+  });
+  await postSettings(h.page, { textFont: "roman", textAlign: "left" });
+  await sleep(200);
+  const kept = await h.page.evaluate(() => {
+    const svg = document.querySelector("#app code.language-abc svg");
+    const t = Array.from(svg.querySelectorAll(".abcjs-title")).find((e) => e.getAttribute("font-size"));
+    return { mark: svg.dataset.mdmKept || null, face: t && t.getAttribute("font-family") };
+  });
+  assert.equal(kept.mark, "1", "the score was engraved again for a setting that is not the face");
+  assert.equal(kept.face, "Latin Modern Roman Score", "the score lost the document's face");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // A document that sets a size of its own gets it: abcjs applies the tune's
 // own directives, and the editor hands it nothing to override them with. What
 // the document does not name keeps abcjs's own size.
-test("a score that names a font size of its own keeps it", { skip }, async () => {
+test("a score that names a font of its own keeps it", { skip }, async () => {
   const tune = SCORE_TUNE.replace("X:1", "X:1\n%%titlefont Times-Roman 30");
-  const h = await open({ text: scoreDoc(tune), scores: 1 });
+  const h = await open({
+    text: scoreDoc(tune),
+    scores: 1,
+    seed: { settings: { textFont: "roman" } },
+  });
   const w = await scoreWords(h.page, tune);
   // 30 points as abcjs draws them, which is 4/3 of that in pixels.
   assert.equal(wordSize(w.ours, "abcjs-title"), "40", "the document's own title size was overridden");
   assert.equal(wordSize(w.ours, "abcjs-part"), "20", "a size the document did not name moved");
+  // And the face it named, over the document's own: abcjs applies a tune's
+  // directives after the format it was handed. The roles the tune says
+  // nothing about are still the document's.
+  const face = (cls) => (w.ours.find((r) => r.startsWith(cls + " |")) || "").split(" | ")[3];
+  assert.equal(face("abcjs-title"), "Times New Roman", "the tune's own face was overridden");
+  assert.equal(face("abcjs-part"), "Latin Modern Roman Score", "a face the tune did not name moved");
   assert.deepEqual(h.errors, []);
   await h.close();
 });

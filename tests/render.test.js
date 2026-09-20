@@ -50,12 +50,15 @@ function cacheName(abc, ink, staff) {
 }
 
 // What an abcjs engraving is named after: the engraver with its recipe
-// version (`abcjs 3` in mdm.lua), then the block and the colours, as above.
-// The default engraver on a machine with a Chrome, which this one is: the
-// webview suites already need it.
-function abcjsCacheName(abc, ink, staff) {
+// version (`abcjs 5` in mdm.lua), then the block, the colours as above, and
+// the face its words are set in, since the same score in the roman and in the
+// sans are two drawings and cannot share one file. The default engraver on a
+// machine with a Chrome, which this one is: the webview suites already need
+// it.
+function abcjsCacheName(abc, ink, staff, face) {
   return sha1(
-    "abcjs 3\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF));
+    "abcjs 6\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF) +
+      " " + (face || "sans"));
 }
 
 // And a KaTeX formula: the recipe, the mode (I inline, D display), the TeX
@@ -1363,6 +1366,21 @@ test("a word the filter does not know falls back to the plain look", () => {
 
 // ---------- The face of the text ----------
 
+// Every @font-face block of a stylesheet, gathered by the family it names.
+// Counting a declaration across the whole sheet stopped telling the truth
+// when the same files came to be declared under three names: `size-adjust:
+// 122.51%` is the prose's scale on two of the prose's faces and the
+// annotation's on four of the engraving's, and one number cannot say which.
+const faceBlocks = (css) => {
+  const out = {};
+  (css.match(/@font-face\s*\{[^}]*\}/g) || []).forEach((block) => {
+    const fam = (block.match(/font-family:\s*("[^"]*")/) || [])[1];
+    if (!fam) return;
+    (out[fam] = out[fam] || []).push(block);
+  });
+  return out;
+};
+
 test("the roman travels to the page, and only when it is asked for", () => {
   const dir = freshDir("look-roman-html");
   fs.writeFileSync(path.join(dir, "doc.mdm"), PLAIN_DOC);
@@ -1398,13 +1416,16 @@ test("the roman travels to the page, and only when it is asked for", () => {
   // keeps @font-face size-adjust when it prints HTML to PDF, but drops the
   // inherited font-size-adjust and used to leave prose at 9.96 pt beside
   // inline KaTeX at 12.05 pt.
+  const blocks = faceBlocks(sheet);
+  const prose = blocks['"Latin Modern Roman"'] || [];
+  assert.equal(prose.length, 4, "the four text faces are not all declared");
   assert.equal(
-    (sheet.match(/size-adjust: 122\.51%/g) || []).length,
+    prose.filter((b) => b.includes("size-adjust: 122.51%")).length,
     2,
     "the regular exported roman is left at its own x-height"
   );
   assert.equal(
-    (sheet.match(/size-adjust: 118\.92%/g) || []).length,
+    prose.filter((b) => b.includes("size-adjust: 118.92%")).length,
     2,
     "the bold exported roman is left at its own x-height"
   );
@@ -1439,10 +1460,51 @@ test("the roman travels to the page, and only when it is asked for", () => {
     !/\.katex[\s\S]{0,40}font-size:/.test(sheet),
     "the export is still resizing the maths"
   );
+  // And the eight the engraving spends, which are the same four files under
+  // two names of their own. The plain family is left unscaled where the
+  // prose's carries a `size-adjust`, so the page draws a score at the size
+  // the editor draws it; the wide one is scaled, by the prose's own ratio,
+  // because the role it is for is the one abcjs sets in a sans. The metric
+  // overrides are what keeps the drawing from growing, and the wide family's
+  // are the plain family's divided by its scale so that both reserve the
+  // same box (mdm-roman.css has the measurements).
+  const score = blocks['"Latin Modern Roman Score"'] || [];
+  assert.equal(score.length, 4, "the four engraving faces are not all declared");
   assert.equal(
-    (sheet.match(/font-family: "Latin Modern Roman"/g) || []).length,
+    score.filter((b) =>
+      /ascent-override: 89\.11%/.test(b) && /descent-override: 21\.63%/.test(b)
+    ).length,
     4,
-    "the four text faces are not all declared"
+    "an engraving face lost the line box abcjs reserves its rows by"
+  );
+  assert.equal(
+    score.filter((b) => b.includes("size-adjust")).length,
+    0,
+    "the engraving's face was scaled with the prose's"
+  );
+  const wide = blocks['"Latin Modern Roman Score Wide"'] || [];
+  assert.equal(wide.length, 4, "the four annotation faces are not all declared");
+  assert.equal(
+    wide.filter((b) =>
+      /size-adjust: 122\.51%/.test(b) &&
+      /ascent-override: 72\.73%/.test(b) &&
+      /descent-override: 17\.66%/.test(b)
+    ).length,
+    4,
+    "the annotation's face is not the score's scaled to the sans's x-height"
+  );
+  // The tokens mdm.js reads to know it is to name those faces to abcjs. They
+  // live in this sheet, which rides only for a document set in the roman, so
+  // a sans page has nothing to read and abcjs keeps what it compiled in.
+  assert.match(
+    sheet,
+    /--mdm-score-face:\s*"Latin Modern Roman Score"/,
+    "the page has no way to know the score is to be drawn in the roman"
+  );
+  assert.match(
+    sheet,
+    /--mdm-score-face-wide:\s*"Latin Modern Roman Score Wide"/,
+    "the page has no way to know what to draw an annotation in"
   );
   // And the faces came with it, or every word would be drawn in Georgia.
   assert.deepEqual(
@@ -1489,6 +1551,10 @@ test("the roman travels to the page, and only when it is asked for", () => {
   assert.ok(!("--mdm-text" in lookBlock(sans)), "the sans page named a face");
   assert.ok(!sans.includes("mdm-roman.css"), "the roman rode along for nothing");
   assert.ok(!sans.includes("Latin Modern Roman"), "a face rode along for nothing");
+  assert.ok(
+    !sans.includes("--mdm-score-face"),
+    "the sans page named a face for its engraving"
+  );
   // What it does carry is the reset on the engraving, which is the reason
   // that rule was taken out of the roman sheet. Nothing on a sans page sets a
   // font-size-adjust today, so the rule costs it nothing and protects it the
@@ -1518,11 +1584,20 @@ test("a self-contained roman page carries its own faces", () => {
   );
   assert.equal(r.status, 0, r.stderr);
   const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
-  // KaTeX's twenty, and the four of the text. A page that fetched the text
-  // faces from beside itself would read in Georgia wherever it was opened.
+  // KaTeX's twenty, the four of the text and the eight of the engraving. A
+  // page that fetched the text faces from beside itself would read in Georgia
+  // wherever it was opened.
+  //
+  // The engraving's eight are the text's same four files, declared twice more
+  // under two families of their own (mdm-roman.css says why there are two), so
+  // a page taken into one file carries them three times over: 255 KB apiece,
+  // measured, the four files being 191 KB on disk and base64 adding the third.
+  // Only a page that asks for `embed-resources` pays it, and one that leaves
+  // its dependencies beside it pays nothing, all three families naming the
+  // same four URLs.
   assert.equal(
     (html.match(/url\(data:font\/woff2;base64,/g) || []).length,
-    24,
+    32,
     "the text faces were not taken into the page"
   );
   assert.ok(
@@ -2682,6 +2757,121 @@ test("the PDF is engraved by the editor's abcjs when a Chrome is at hand", () =>
   assert.equal(
     wideSlices && wideSlices.length, 2,
     "the wide abcjs score is not two slices at its own width in TeX");
+});
+
+// The words on a staff go onto the paper in the face the document is set in,
+// which is the third surface of the same rule: the editor draws them in it
+// (webview-look.test.js), the exported page draws them in it (html.test.js),
+// and the sheet Chrome prints from carries the same four faces by absolute
+// URL out of the filter's own directory.
+//
+// This also settles something that was never right: with nothing named, the
+// score's words were left to whatever the exporting machine substituted for
+// Times New Roman and Helvetica, so two machines printed two documents from
+// one .mdm. What goes into the PDF now is the file this repository ships.
+const FACE_ABC = `X:1
+T:Partials
+L:1/4
+K:C clef=treble
+P:partials
+"Cmaj7"C, C "^cresc."G c e g _b c' |
+w: n=1 2 3 4 5 6 7 8
+`;
+
+const FACE_DOC = `---
+title: "A face on paper"
+format:
+  pdf:
+    documentclass: article
+filters:
+  - mdm
+---
+
+A paragraph of prose beside the staff.
+
+\`\`\`abc
+${FACE_ABC}\`\`\`
+`;
+
+// The faces a PDF carries, by name. pdffonts and not a read of the bytes: an
+// engraving Chrome writes as Type 3 keeps its font dictionary inside a
+// compressed object stream, where a regex over the file cannot see it.
+function embedded(pdf) {
+  const out = execFileSync("pdffonts", [pdf], { encoding: "utf8" });
+  return out
+    .split("\n")
+    .slice(2)
+    .map((row) => row.trim().split(/\s+/)[0])
+    .filter((name) => name && name !== "name")
+    .map((name) => name.replace(/^[A-Z]{6}\+/, ""));
+}
+
+test("the words on a printed score are the document's face", () => {
+  const dir = freshDir("pdf-score-face");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), FACE_DOC);
+  const cache = path.join(dir, "mdm_cache");
+
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:roman"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const roman = abcjsCacheName(FACE_ABC, null, null, "roman");
+  const romanPdf = path.join(cache, roman + ".pdf");
+  assert.ok(fs.existsSync(romanPdf), "the roman score was not engraved");
+  assert.match(
+    fs.readFileSync(romanPdf, "latin1"),
+    /LMRoman10/,
+    "the printed score is not in the document's face"
+  );
+  // And nothing else is embedded in it. Naming the faces this machine happens
+  // to substitute would pass on a box whose serif fallback is another one, so
+  // the assertion is the other way round: every face in the file is the
+  // document's. This is what catches a role the table forgot, which is why
+  // the fixture carries a chord symbol and an annotation as well as a title,
+  // a part name and a lyric: those two are the roles abcjs draws in a sans,
+  // and until 2026-09-19 the chord was left out of the table, so this file
+  // embedded LiberationSans beside LMRoman10 and one .mdm still printed as
+  // two documents on two machines.
+  assert.deepEqual(
+    embedded(romanPdf).filter((f) => !/LMRoman/.test(f)),
+    [],
+    "the printed score carries a face off the exporting machine: " +
+      JSON.stringify(embedded(romanPdf))
+  );
+
+  // The sans keeps abcjs's own, and keeps an entry of its own in the cache:
+  // the same score in the two faces is two drawings and a warm cache must not
+  // hand one over for the other.
+  const s2 = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:sans"], dir);
+  assert.equal(s2.status, 0, s2.stderr);
+  const sans = abcjsCacheName(FACE_ABC);
+  assert.notEqual(sans, roman, "the two faces share a cache entry");
+  const sansPdf = path.join(cache, sans + ".pdf");
+  assert.ok(fs.existsSync(sansPdf), "the sans score was not engraved");
+  assert.ok(
+    !/LMRoman10/.test(fs.readFileSync(sansPdf, "latin1")),
+    "the sans page took the roman onto the paper"
+  );
+  assert.ok(embedded(sansPdf).length > 0, "the sans engraving embedded no face at all");
+
+  // And the drawing is the same height in both, which is what the metric
+  // overrides on the face are for (mdm.lua, score_face_css). Latin Modern
+  // declares a line box of 1.13 + 0.29 em where Times declares 0.89 + 0.22,
+  // and abcjs reserves the room for a row of text by that box: without them
+  // this score comes out a tenth taller for words that have not changed size.
+  // The width does grow a little, and only a little: the crop is to the ink
+  // and the staff sets most of it, where the title string alone is 11% wider
+  // in the roman.
+  const tall = (pdf) => {
+    const out = execFileSync("pdfinfo", [pdf], { encoding: "utf8" });
+    const size = /Page size:\s+([\d.]+) x ([\d.]+)/.exec(out);
+    assert.ok(size, "no page size in " + pdf);
+    return Number(size[2]);
+  };
+  assert.ok(
+    Math.abs(tall(romanPdf) - tall(sansPdf)) <= 1,
+    "the roman engraving is " + tall(romanPdf) + " pt tall against the sans's " + tall(sansPdf)
+  );
 });
 
 // A picture is atomic to LaTeX: whole, a score that does not fit the space

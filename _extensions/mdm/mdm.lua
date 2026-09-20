@@ -1405,6 +1405,15 @@ local PX_TO_PT = 0.75
 -- the literal tag, so a build that ever carried one cannot be embedded and
 -- says so by failing over to abcm2ps.
 local FILTER_DIR = (debug.getinfo(1, "S").source or ""):match("^@(.*)[/\\]") or "."
+
+-- A font is named to Chrome by absolute URL, and the filter's own directory
+-- is absolute only when Quarto handed it so: rooted here otherwise, on the
+-- working directory the render runs in. Both pages Chrome prints, the score's
+-- and the formulas', spend this.
+local function abs_path(p)
+  if p:sub(1, 1) == "/" then return p end
+  return pandoc.system.get_working_directory() .. "/" .. p
+end
 local abcjs_bundle = nil
 local function read_abcjs()
   if abcjs_bundle ~= nil then return abcjs_bundle end
@@ -1450,17 +1459,161 @@ local function chrome_sandbox_flag()
   return sandbox_flag
 end
 
+-- Every role abcjs draws words with, at the size and the shape abcjs gives
+-- it: the point size is abcjs 6.7.0's own default, which it draws at 4/3 (a
+-- title at 20 pt comes out at 27 px). What the table changes is the face and
+-- nothing else, so a title stays at 27 px, a part label at 20, the lyric at
+-- 17 in bold. The editor carries the same table (renderScore in
+-- vscode-mdm/media/main.js) and so does the page the browser draws
+-- (renderBlock in resources/mdm.js), which is what keeps the three surfaces
+-- drawing one document.
+--
+-- The fourth field is the family. Two roles reach this table out of a sans
+-- and not out of a Times, and they want opposite things from the swap: an
+-- annotation is a lowercase word whose apparent size is its x-height, and
+-- Latin Modern's is a fifth shorter than Helvetica's, so it is drawn in the
+-- wide family; a chord symbol is read off its capital and its figures, which
+-- the two faces already agree on, so it takes the plain family at abcjs's own
+-- size. The editor's copy of this table carries the measurements.
+--
+-- Three roles are still missing, the three a tablature staff spends. Here a
+-- missing role costs more than a look: a face this table does not name is
+-- resolved against the exporting machine's fonts, so it comes out of two
+-- machines as two drawings and the digest cannot see the difference. Nothing
+-- in this project draws a tablature staff.
+local SCORE_TEXT_ROLES = {
+  { "titlefont", 20, "" },
+  { "subtitlefont", 16, "" },
+  { "composerfont", 14, "italic" },
+  { "partsfont", 15, "" },
+  { "tempofont", 15, "bold" },
+  { "vocalfont", 13, "bold" },
+  { "voicefont", 13, "bold" },
+  { "wordsfont", 16, "" },
+  { "textfont", 16, "" },
+  { "historyfont", 16, "" },
+  { "infofont", 14, "italic" },
+  { "measurefont", 14, "italic" },
+  { "repeatfont", 13, "" },
+  { "tripletfont", 11, "italic" },
+  { "annotationfont", 12, "", "wide" },
+  { "gchordfont", 12, "" },
+  -- These two draw nothing here and are named for completeness: abcjs writes
+  -- a %%header or a %%footer only in the print mode it keeps for its own
+  -- tunebooks, which this page does not ask for.
+  { "headerfont", 12, "" },
+  { "footerfont", 12, "" },
+}
+
+-- The two families the words on a staff are set in when the document is in
+-- the roman, and the four faces that carry each. They are families of their
+-- own and not the `"Latin Modern Roman"` the prose is set in, because that one
+-- is drawn at two different sizes on the two surfaces a score has to match
+-- across: scaled by `size-adjust` on the page, left as it comes in the editor
+-- with a `font-size-adjust` over it. A score naming it would come out 22.5%
+-- larger here than in the editor it was written in.
+--
+-- The metric overrides of the first are Times New Roman's own line box (hhea
+-- 1825/2048 and 443/2048), which is what abcjs reserved the vertical room by
+-- before: Latin Modern declares 1.13 + 0.29 em against Times' 0.89 + 0.22, and
+-- without them the first score of example.mdm grew a tenth taller for words
+-- that had not changed size. The second is the same files scaled to the
+-- x-height of the sans abcjs gives an annotation (0.528 em against Latin
+-- Modern's 0.431), with the same overrides divided by that scale so the line
+-- box comes back to where it was.
+--
+-- resources/lm/mdm-roman.css declares both families on the same terms for the
+-- page, and vscode-mdm/media/style.css for the editor, and those two carry the
+-- measurements behind every number here.
+local SCORE_FACE = '"Latin Modern Roman Score"'
+local SCORE_FACE_WIDE = '"Latin Modern Roman Score Wide"'
+local SCORE_FACE_FILES = {
+  { "normal", 400, "LatinModernRoman-Regular.woff2" },
+  { "italic", 400, "LatinModernRoman-Italic.woff2" },
+  { "normal", 700, "LatinModernRoman-Bold.woff2" },
+  { "italic", 700, "LatinModernRoman-BoldItalic.woff2" },
+}
+
+-- The four files have to be on disk before the page names them, and the answer
+-- is needed before the digest is taken, not after: the digest records which
+-- face was ASKED for, so a sans drawing cached under the roman's name would go
+-- on being served once the files came back. read_abcjs and read_katex guard
+-- their own assets the same way, by reading them and giving up the page.
+local score_faces_here = nil
+local function score_faces_in_place()
+  if score_faces_here ~= nil then return score_faces_here end
+  local dir = abs_path(FILTER_DIR) .. "/resources/lm/fonts"
+  score_faces_here = true
+  for _, f in ipairs(SCORE_FACE_FILES) do
+    if not file_exists(dir .. "/" .. f[3]) then score_faces_here = false end
+  end
+  return score_faces_here
+end
+
+-- The faces by absolute URL (quoted, for a path with spaces in it), so the
+-- page can live in the cache directory and still find them, which is what the
+-- formula page does with KaTeX's own.
+local function score_face_css()
+  local dir = abs_path(FILTER_DIR) .. "/resources/lm/fonts"
+  local out = {}
+  for _, fam in ipairs({
+    { SCORE_FACE, "", "89.11%", "21.63%" },
+    { SCORE_FACE_WIDE, " size-adjust: 122.51%;", "72.73%", "17.66%" },
+  }) do
+    for _, f in ipairs(SCORE_FACE_FILES) do
+      out[#out + 1] = "  @font-face { font-family: " .. fam[1] .. ";" ..
+        " font-style: " .. f[1] .. "; font-weight: " .. f[2] .. ";" ..
+        " font-display: block;" .. fam[2] ..
+        " ascent-override: " .. fam[3] .. "; descent-override: " .. fam[4] ..
+        "; line-gap-override: 0%;" ..
+        ' src: url("file://' .. dir .. "/" .. f[3] .. '") format("woff2"); }'
+    end
+  end
+  return table.concat(out, "\n")
+end
+
+-- The same four, as the shapes document.fonts.load is asked for: the face has
+-- to be in before the first word is drawn, because abcjs measures the room a
+-- word needs with the face that is in when it draws.
+local function score_face_shapes_js()
+  local out = {}
+  for _, fam in ipairs({ SCORE_FACE, SCORE_FACE_WIDE }) do
+    for _, f in ipairs(SCORE_FACE_FILES) do
+      local shape = (f[1] == "italic" and "italic " or "") ..
+        (f[2] == 700 and "bold " or "") .. "16px " .. fam
+      out[#out + 1] = js_string(shape)
+    end
+  end
+  return "[" .. table.concat(out, ", ") .. "]"
+end
+
+local function score_format_js()
+  local out = {}
+  for _, r in ipairs(SCORE_TEXT_ROLES) do
+    local face = r[4] == "wide" and SCORE_FACE_WIDE or SCORE_FACE
+    local spec = face .. (r[3] ~= "" and (" " .. r[3]) or "") ..
+      " " .. r[2]
+    out[#out + 1] = "  " .. r[1] .. ": " .. js_string(spec) .. ","
+  end
+  return "{\n" .. table.concat(out, "\n") .. "\n}"
+end
+
 -- The page Chrome prints: the engraving alone, on a sheet big enough for any
 -- score and trimmed to the ink afterwards.
 --
--- One thing it does not share with the page the browser draws (mdm.js,
--- renderBlock), and it is open: it passes no `format`, so every title, part
--- name, lyric and annotation on paper keeps the size abcjs has had since
--- abcm2ps (a title at 20 pt, drawn at 4/3, so 27 px against the 23 the
--- screen asks for) where the editor and the page hold each one to a fraction
--- of the prose's x-height. The scale no longer stands in the way: a pixel of
--- this page goes onto the paper as a sixteenth of the em, as it does beside
--- the editor's text, so the screen's own numbers are the right ones here.
+-- It draws what the browser draws (mdm.js, renderBlock) and on the same
+-- terms: the same paddings, the same table of faces, no size named anywhere.
+-- A pixel of this page goes onto the paper as a sixteenth of the em, as it
+-- does beside the editor's text, so the screen's own numbers are the right
+-- ones here. The faces it needs are mostly not the machine's any more: they
+-- are named by absolute URL out of this filter's own directory. Before this
+-- every word on a staff was left to whatever the exporting machine
+-- substituted for Times New Roman and Helvetica (Liberation Serif and
+-- Liberation Sans on the owner's, measured off the cache), so two machines
+-- printed two documents from one .mdm. What is left of that is the roles the
+-- table below leaves out: a tune carrying chord symbols still embeds the
+-- machine's sans for them (measured: LMRoman10 and LiberationSans in one
+-- engraving), and the digest cannot see which sans it was.
 --
 -- The stylesheet is the svg slice of mdm-look.css, rule for rule. The staff
 -- lines are abcjs's own 0.7 px, which is what the editor draws, 0.44 pt
@@ -1470,12 +1623,13 @@ end
 -- which is how a staff came out heavy on paper and light on screen. The body
 -- is left transparent and Chrome is not asked to print backgrounds, so the
 -- page colour of the document shows through, as it does under an EPS.
-local function chrome_page(source, ink, staff)
+local function chrome_page(source, ink, staff, roman)
   local abcjs = read_abcjs()
   if not abcjs then return nil end
   return table.concat({
     '<!doctype html><meta charset="utf-8">',
     "<style>",
+    roman and score_face_css() or "",
     "  html, body { margin: 0; padding: 0; background: transparent; }",
     "  @page { margin: 0; size: " .. CHROME_PAGE_PX.w .. "px " ..
       CHROME_PAGE_PX.h .. "px; }",
@@ -1497,11 +1651,23 @@ local function chrome_page(source, ink, staff)
     abcjs,
     "</script>",
     "<script>",
-    'ABCJS.renderAbc(document.getElementById("paper"), ' ..
-      js_string(source) .. ", {",
-    "  add_classes: true,",
-    "  paddingtop: 2, paddingbottom: 2, paddingleft: 0, paddingright: 0,",
-    "});",
+    "var MDM_FACES = " .. (roman and score_face_shapes_js() or "null") .. ";",
+    "var MDM_FORMAT = " .. (roman and score_format_js() or "null") .. ";",
+    -- The face reaches the engraving only once its files are really in.
+    -- abcjs keeps the room it measured for a word in a cache keyed by the
+    -- string and the attributes it drew with (strings under twenty
+    -- characters, which is most of what a staff carries), so engraving against the
+    -- fallback under this family's name would lay the staff out by the
+    -- fallback's metrics and keep that layout. A print that cannot get the
+    -- face comes out as a sans one, which is the honest degrade.
+    "function draw(withFace) {",
+    "  var params = {",
+    "    add_classes: true,",
+    "    paddingtop: 2, paddingbottom: 2, paddingleft: 0, paddingright: 0,",
+    "  };",
+    "  if (withFace && MDM_FORMAT) params.format = MDM_FORMAT;",
+    '  ABCJS.renderAbc(document.getElementById("paper"), ' ..
+      js_string(source) .. ", params);",
     -- Where one staff system ends and the next begins: the gaps the
     -- engraving itself leaves, which is where the page may break the
     -- drawing (insert_score cuts it there). abcjs wraps each system in a
@@ -1513,19 +1679,29 @@ local function chrome_page(source, ink, staff)
     -- arrive they are measured in fallback metrics. Nothing waits on this
     -- attribute; a run that never writes it engraves a score in one piece,
     -- which is what every score was until now.
-    "document.fonts.ready.then(function () {",
-    '  var svg = document.querySelector("#paper svg");',
-    "  var lines = [];",
-    "  if (svg) {",
-    '    svg.querySelectorAll(":scope > g.abcjs-staff-wrapper").forEach(',
-    "      function (g) {",
-    "        var r = g.getBoundingClientRect();",
-    "        lines.push([+r.top.toFixed(2), +r.bottom.toFixed(2)]);",
-    "      });",
-    "  }",
-    '  document.documentElement.setAttribute(',
-    '    "data-mdm-lines", JSON.stringify(lines));',
-    "});",
+    "  document.fonts.ready.then(function () {",
+    '    var svg = document.querySelector("#paper svg");',
+    "    var lines = [];",
+    "    if (svg) {",
+    '      svg.querySelectorAll(":scope > g.abcjs-staff-wrapper").forEach(',
+    "        function (g) {",
+    "          var r = g.getBoundingClientRect();",
+    "          lines.push([+r.top.toFixed(2), +r.bottom.toFixed(2)]);",
+    "        });",
+    "    }",
+    '    document.documentElement.setAttribute(',
+    '      "data-mdm-lines", JSON.stringify(lines));',
+    "  });",
+    "}",
+    -- The face goes in before the first word is drawn and not after, or the
+    -- print would go out with the roman's glyphs in the fallback's spacing.
+    -- document.fonts.check() is no use as the test: it answers false for a
+    -- face whose own load() has just resolved while others are still loading.
+    "if (MDM_FACES && document.fonts && document.fonts.load) {",
+    "  Promise.all(MDM_FACES.map(function (f) {",
+    "    return document.fonts.load(f);",
+    "  })).then(function () { draw(true); }, function () { draw(false); });",
+    "} else { draw(!!MDM_FORMAT); }",
     "</script>",
   }, "\n")
 end
@@ -1583,8 +1759,8 @@ end
 -- Chrome paginates what will not fit one sheet, of which only the first is
 -- inserted, exactly the one page abcm2ps -E writes; a score that long has
 -- outgrown a paragraph anyway.
-local function engrave_abcjs(source, ink, staff, digest)
-  local page = chrome_page(source, ink, staff)
+local function engrave_abcjs(source, ink, staff, roman, digest)
+  local page = chrome_page(source, ink, staff, roman)
   if not page or not chrome_path or not has_pdfcrop then return false end
   local html = CACHE_DIR .. "/" .. digest .. ".html"
   local raw = CACHE_DIR .. "/" .. digest .. ".chrome.pdf"
@@ -1594,8 +1770,10 @@ local function engrave_abcjs(source, ink, staff, digest)
   f:write(page)
   f:close()
   -- The virtual time budget is what lets the render script run to its end
-  -- before the print; with the bundle inline it is settled at load, and the
-  -- budget is a ceiling, not a wait.
+  -- before the print. The bundle is inline, so nothing waits on the network
+  -- for it; a page in the roman does fetch four local faces and holds the
+  -- engraving behind them, which is still a budget and not a wait, virtual
+  -- time standing still while a load is pending.
   local pipe = io.popen(string.format(
     '"%s" --headless=new --disable-gpu --no-pdf-header-footer%s' ..
     " --virtual-time-budget=4000 --print-to-pdf=%s --dump-dom %s 2>/dev/null" ..
@@ -1671,14 +1849,6 @@ end
 -- Bumped whenever the page below changes shape: a warm cache would
 -- otherwise keep serving formulas measured under the old recipe.
 local KATEX_RECIPE = "katex 2"
-
--- The fonts are named by absolute URL, and the filter's own directory is
--- absolute only when Quarto handed it so: rooted here otherwise, on the
--- working directory the render runs in.
-local function abs_path(p)
-  if p:sub(1, 1) == "/" then return p end
-  return pandoc.system.get_working_directory() .. "/" .. p
-end
 
 local katex_assets = nil
 local function read_katex()
@@ -2137,27 +2307,34 @@ local chrome_warned = false
 local function render_latex(el)
   local source = el.text
   if not source:match("\n$") then source = source .. "\n" end
-  -- What names a cache entry is the engraver, its parameters, the block and
-  -- the two colours it was drawn in: the same score on the two sides of the
-  -- look is two engravings and cannot share one file, and the two engravers
-  -- cannot share one either. What with_engraver_header adds for abcm2ps is
-  -- not part of the name, so a block that needed it keeps the name it would
-  -- have had without it.
+  -- What names a cache entry is the engraver, its parameters, the block, the
+  -- two colours it was drawn in and the face its words are set in: the same
+  -- score on the two sides of the look is two engravings and cannot share one
+  -- file, the same score in the roman and in the sans is two more, and the two
+  -- engravers cannot share one either. What with_engraver_header adds for
+  -- abcm2ps is not part of the name, so a block that needed it keeps the name
+  -- it would have had without it.
   local ink, staff = engraving_colors()
+  local roman = look and look.text_font == "roman" and score_faces_in_place()
   local wants_abcjs = not (look and look.engraver == "abcm2ps")
 
   if wants_abcjs and chrome_path and has_pdfcrop then
-    -- The leading `abcjs 3` is the engraver and the recipe: a change to the
-    -- page it prints from (chrome_page) has to bump it, or a warm cache
-    -- would keep serving the old drawing. 3 is the page with no staffwidth
-    -- and no stroke on the staff lines.
+    -- The leading `abcjs 6` is the engraver and the recipe: a change to the
+    -- page it prints from (chrome_page) has to bump it, or a warm cache would
+    -- keep serving the old drawing, and SCORE_TEXT_ROLES is part of that page
+    -- though it is not in the string. 3 was the page with no staffwidth and
+    -- no stroke on the staff lines; 4 set the words in the face the document
+    -- is set in; 5 is 4 with headerfont and footerfont named as well; 6 takes
+    -- the chord symbols into the face too, draws the annotation in the wide
+    -- family and unrounds the two metric overrides.
     local digest = sha1(
-      "abcjs 3\n" .. source .. "\n" .. ink .. " " .. staff)
+      "abcjs 6\n" .. source .. "\n" .. ink .. " " .. staff ..
+      (roman and " roman" or " sans"))
     if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
       return insert_score(digest, true)
     end
     run("mkdir -p " .. CACHE_DIR)
-    if engrave_abcjs(source, ink, staff, digest) then
+    if engrave_abcjs(source, ink, staff, roman, digest) then
       return insert_score(digest, true)
     end
     quarto.log.warning(
