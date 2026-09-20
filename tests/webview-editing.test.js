@@ -456,6 +456,47 @@ test("Enter in a list item keeps a no-break space and carries the list on", { sk
 // the caret at `pos`, or with the carets or ranges of `pos` when it is a
 // list, and hands back the text, the head of the main selection and
 // whether the editor still has the focus.
+async function pressOn(text, pos, keys) {
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
+  for (const key of keys) {
+    if (typeof key === "string") await h.page.keyboard.press(key);
+    else if (key.chord) await chord(h.page, key.chord, key.key);
+    else await h.page.keyboard.type(key.type);
+  }
+  const out = await docText(h.page);
+  const head = await h.page.evaluate(() => window.__mdm.view.state.selection.main.head);
+  const focused = await h.page.evaluate(() => window.__mdm.view.hasFocus);
+  const ranges = await selectionRanges(h.page);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  return { text: out, head, focused, ranges };
+}
+
+// The toolbar button `name` pressed `times` times with the selection at
+// `pos`, as pressOn takes it.
+async function buttonOn(text, pos, name, times) {
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
+  for (let i = 0; i < (times || 1); i++) {
+    await h.page.click('#app button[data-type="' + name + '"]');
+    await sleep(120);
+  }
+  const out = await docText(h.page);
+  const ranges = await selectionRanges(h.page);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  return { text: out, ranges };
+}
+const B = { chord: ["Control"], key: "b" };
+const I = { chord: ["Control"], key: "i" };
+const E = { chord: ["Control"], key: "e" };
+const K = { chord: ["Control"], key: "k" };
+
+// VS Code's webview host listens for keydown on the page's window, in the
+// bubble phase and whatever the page did with the default, and hands every
+// key to the workbench (did-keydown in VS Code 1.133.0's host page): Ctrl+B
+// set bold and hid the Explorer. The listener here stands in for it.
 
 test("Enter continues a numbered list and renumbers what follows (ED01)", { skip }, async () => {
   const out = await pressOn("1. first\n2. second\n3. third\n", 18, ["Enter"]);
@@ -658,6 +699,331 @@ test("Tab in prose puts a tab at the caret and never makes code of the paragraph
   out = await pressOn("```python\n  x = 1\n```\n", 14, [{ chord: ["Shift"], key: "Tab" }]);
   assert.equal(out.text, "```python\nx = 1\n```\n");
 });
+
+test("Ctrl+B with the caret inside bold takes the bold off, and at its end steps out of it (ED07, ED22)", { skip }, async () => {
+  let text = "This is **already bold** text.\n";
+  let out = await pressOn(text, text.indexOf("ready"), [B]);
+  assert.equal(out.text, "This is already bold text.\n");
+  assert.equal(out.head, text.indexOf("ready") - 2);
+  // Italic and code take off the run of their own kind.
+  out = await pressOn("An *italic* word\n", 6, [I]);
+  assert.equal(out.text, "An italic word\n");
+  out = await pressOn("Run `make all` now\n", 8, [E]);
+  assert.equal(out.text, "Run make all now\n");
+  // Bold typed after Ctrl+B is closed by the next Ctrl+B, a step past the
+  // closing marks, and no empty pair is left (ED22).
+  out = await pressOn("Say\n", 3, [B, { type: "loud" }, B, { type: " soft" }]);
+  assert.equal(out.text, "Say**loud** soft\n");
+  out = await pressOn("Say\n", 3, [E, { type: "loud" }, E, { type: " soft" }]);
+  assert.equal(out.text, "Say`loud` soft\n");
+  // A caret in the middle of a word wraps the word.
+  out = await pressOn("Make this longer.\n", 7, [B]);
+  assert.equal(out.text, "Make **this** longer.\n");
+});
+
+test("Ctrl+B and Ctrl+I on a selection write marks the readers read as meant (ED08)", { skip }, async () => {
+  // Spaces at the edge of the selection stay outside the marks.
+  let out = await pressOn("word next\n", [{ anchor: 0, head: 5 }], [B]);
+  assert.equal(out.text, "**word** next\n");
+  // Across two paragraphs, or two items: each line's own text is wrapped.
+  out = await pressOn("First paragraph.\n\nSecond paragraph.\n", [{ anchor: 0, head: 35 }], [B]);
+  assert.equal(out.text, "**First paragraph.**\n\n**Second paragraph.**\n");
+  out = await pressOn("- one\n- two\n", [{ anchor: 0, head: 11 }], [B]);
+  assert.equal(out.text, "- **one**\n- **two**\n");
+  // A selection running out of a bold run extends the run over it.
+  let text = "a **bold** word\n";
+  out = await pressOn(text, [{ anchor: text.indexOf("ld**"), head: text.indexOf("rd") }], [B]);
+  assert.equal(out.text, "a **bold wo**rd\n");
+  // Ctrl+I on the text of a bold run makes it bold italic, not italic.
+  out = await pressOn("**forte**\n", [{ anchor: 2, head: 7 }], [I]);
+  assert.equal(out.text, "***forte***\n");
+  // Italic over a selection that starts in bold and runs past it (ED08).
+  text = "Some **half bold** plain words.\n";
+  out = await pressOn(text, [{ anchor: text.indexOf("half"), head: text.indexOf("plain") + 5 }], [I]);
+  assert.equal(out.text, "Some ***half bold** plain* words.\n");
+  // A selection inside a bold run comes out of it, the spaces beside it
+  // left outside the marks.
+  text = "**already bold text**\n";
+  out = await pressOn(text, [{ anchor: text.indexOf("bold"), head: text.indexOf("bold") + 4 }], [B]);
+  assert.equal(out.text, "**already** bold **text**\n");
+  // Code holding a backtick gets a longer fence.
+  out = await pressOn("a`b\n", [{ anchor: 0, head: 3 }], [E]);
+  assert.equal(out.text, "``a`b``\n");
+});
+
+test("Ctrl+K edits the link around the caret instead of nesting one, and makes a selected address the destination (ED29)", { skip }, async () => {
+  let text = "Read [the standard](https://abcnotation.com/wiki) first.\n";
+  let out = await pressOn(text, text.indexOf("standard"), [K]);
+  assert.equal(out.text, text);
+  assert.deepEqual(out.ranges, [[text.indexOf("https"), text.indexOf(")")]]);
+  // An empty address: the caret between its parentheses.
+  text = "See [here]() now.\n";
+  out = await pressOn(text, 6, [K]);
+  assert.equal(out.text, text);
+  assert.deepEqual(out.ranges, [[11, 11]]);
+  // An address selected goes where the address goes, the caret in the label.
+  text = "See https://abcnotation.com today.\n";
+  out = await pressOn(text, [{ anchor: 4, head: 27 }], [K]);
+  assert.equal(out.text, "See [](https://abcnotation.com) today.\n");
+  assert.deepEqual(out.ranges, [[5, 5]]);
+  // Words selected are the label, the caret where the address goes.
+  out = await pressOn("See here now.\n", [{ anchor: 4, head: 8 }], [K]);
+  assert.equal(out.text, "See [here]() now.\n");
+  assert.deepEqual(out.ranges, [[11, 11]]);
+});
+
+test("a toolbar button works on the selection where it is, in a table cell or over inline maths (G064)", { skip }, async () => {
+  let text = "| a | b |\n|---|---|\n| cell | 2 |\n\nAfter.\n";
+  let out = await buttonOn(text, [{ anchor: text.indexOf("cell"), head: text.indexOf("cell") + 4 }], "bold");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| **cell** | 2 |\n\nAfter.\n");
+  text = "Energy $E=mc^2$ is famous.\n";
+  out = await buttonOn(text, [{ anchor: 7, head: 15 }], "bold");
+  assert.equal(out.text, "Energy **$E=mc^2$** is famous.\n");
+});
+
+
+test("the strikethrough button writes Pandoc's ~~ and takes it off by the same rules as bold", { skip }, async () => {
+  let out = await buttonOn("Some words here.\n", [{ anchor: 5, head: 10 }], "strikethrough");
+  assert.equal(out.text, "Some ~~words~~ here.\n");
+  // A caret inside the run takes its marks off; one inside a word wraps it.
+  out = await buttonOn("Some ~~words~~ here.\n", 9, "strikethrough");
+  assert.equal(out.text, "Some words here.\n");
+  out = await buttonOn("Some words here.\n", 7, "strikethrough");
+  assert.equal(out.text, "Some ~~words~~ here.\n");
+  // Not the single ~ of a subscript, which is Pandoc's and stays.
+  out = await buttonOn("H~2~O is water.\n", [{ anchor: 6, head: 8 }], "strikethrough");
+  assert.equal(out.text, "H~2~O ~~is~~ water.\n");
+});
+
+test("the task button puts a box behind the marker a line has, makes a bulleted task of a line with none, and takes only the box off", { skip }, async () => {
+  const text = "- Violin\n1. Viola\n# Cello\nFlute\n";
+  let out = await buttonOn(text, [{ anchor: 0, head: text.length }], "task-list");
+  assert.equal(out.text, "- [ ] Violin\n1. [ ] Viola\n- [ ] Cello\n- [ ] Flute\n");
+  // Every line a task already: the boxes go, ticked or not, the items stay.
+  out = await buttonOn("- [ ] Violin\n1. [x] Viola\n", [{ anchor: 0, head: 25 }], "task-list");
+  assert.equal(out.text, "- Violin\n1. Viola\n");
+  // Some a task and some not: the rest get a box, the ticked one keeps it.
+  out = await buttonOn("- [x] Violin\n- Viola\n", [{ anchor: 0, head: 20 }], "task-list");
+  assert.equal(out.text, "- [x] Violin\n- [ ] Viola\n");
+  // Inside a quote the box goes behind the quote's > and the marker.
+  out = await buttonOn("> - Cello\n", 6, "task-list");
+  assert.equal(out.text, "> - [ ] Cello\n");
+});
+
+test("the quote button quotes the whole of the blocks it touches and takes a quote off again", { skip }, async () => {
+  // A caret quotes its whole paragraph: a line left out would stay in the
+  // quote as lazy continuation.
+  let out = await buttonOn("First line\nsecond line.\n\nNext.\n", 3, "quote");
+  assert.equal(out.text, "> First line\n> second line.\n\nNext.\n");
+  out = await buttonOn("> First line\n> second line.\n\nNext.\n", 20, "quote");
+  assert.equal(out.text, "First line\nsecond line.\n\nNext.\n");
+  // Two blocks selected are one quote, the blank line between them marked;
+  // the blank lines at the edges are not.
+  let text = "\nOne.\n\n- a\n- b\n\nAfter.\n";
+  out = await buttonOn(text, [{ anchor: 0, head: 15 }], "quote");
+  assert.equal(out.text, "\n> One.\n>\n> - a\n> - b\n\nAfter.\n");
+  // A fence touched is taken whole, fences and all.
+  text = "```\ncode\n```\n";
+  out = await buttonOn(text, 6, "quote");
+  assert.equal(out.text, "> ```\n> code\n> ```\n");
+  // A score is a fence like any other, taken whole from any of its lines.
+  out = await buttonOn("```abc\nX:1\nK:C\n```\n", 12, "quote");
+  assert.equal(out.text, "> ```abc\n> X:1\n> K:C\n> ```\n");
+  // A lazy line has no > of its own and is in the quote all the same, so
+  // the quote comes off rather than going a level deeper.
+  out = await buttonOn("> a\nb\n", 2, "quote");
+  assert.equal(out.text, "a\nb\n");
+  // Off takes one level: a quote in a quote comes out one level up, and a
+  // quote inside a list item loses the > behind the marker.
+  out = await buttonOn("> > deep\n", 5, "quote");
+  assert.equal(out.text, "> deep\n");
+  out = await buttonOn("- > quoted item\n", 6, "quote");
+  assert.equal(out.text, "- quoted item\n");
+  // A triple click's selection, ending at the head of the next line, does
+  // not take that line.
+  out = await buttonOn("One.\n\nTwo.\n", [{ anchor: 0, head: 6 }], "quote");
+  assert.equal(out.text, "> One.\n\nTwo.\n");
+  // The header is never quoted.
+  out = await buttonOn("---\ntitle: T\n---\n\nText.\n", [{ anchor: 0, head: 23 }], "quote");
+  assert.equal(out.text, "---\ntitle: T\n---\n\n> Text.\n");
+});
+
+
+
+
+test("a heading level from the menu goes after a quote's mark, in place of a list marker, over the level a line had, and makes ATX of a setext heading (G065)", { skip }, async () => {
+  let out = await headingOn("> Cello\n", 3, 1);
+  assert.equal(out.text, "> # Cello\n");
+  assert.equal(out.open, 0);
+  assert.equal(out.focused, true);
+  out = await headingOn("- Violin\n", 3, 1);
+  assert.equal(out.text, "# Violin\n");
+  out = await headingOn("## Title\n", 4, 5);
+  assert.equal(out.text, "##### Title\n");
+  out = await headingOn("Title\n=====\n\nBody.\n", 2, 3);
+  assert.equal(out.text, "### Title\n\nBody.\n");
+  // The ticked level again: a paragraph, the hashes or the underline gone,
+  // and for every selected line, a list item staying an item.
+  out = await headingOn("## Title\n", 4, 2);
+  assert.equal(out.text, "Title\n");
+  out = await headingOn("Title\n-----\n\nBody.\n", 2, 2);
+  assert.equal(out.text, "Title\n\nBody.\n");
+  out = await headingOn("## Title\n- Violin\n", [{ anchor: 12, head: 3 }], 2);
+  assert.equal(out.text, "Title\n- Violin\n");
+  // Every selected line, whatever it was, blank lines left alone.
+  out = await headingOn("one\n\ntwo\n###### six\n", [{ anchor: 0, head: 19 }], 2);
+  assert.equal(out.text, "## one\n\n## two\n## six\n");
+});
+
+test("a heading level from the menu on an empty line writes the hashes to type after, parted from a paragraph or an item above", { skip }, async () => {
+  let out = await headingOn("Text.\n\n\n", 7, 2);
+  assert.equal(out.text, "Text.\n\n## \n");
+  assert.deepEqual(out.ranges, [[10, 10]]);
+  // Right under a paragraph, and right under an item, Pandoc would read the
+  // hashes into the text above.
+  out = await headingOn("Text.\n\n", 6, 1);
+  assert.equal(out.text, "Text.\n\n# \n");
+  out = await headingOn("- a\n\n", 4, 3);
+  assert.equal(out.text, "- a\n\n### \n");
+});
+
+// A row of the menu works on the selection where it is: with the caret in
+// inline maths, which shows its source while the caret is in it, a press on
+// the row put the maths away first and the caret with it onto the line below.
+test("a heading level from the menu lands on the line the caret was in, inside inline maths", { skip }, async () => {
+  const out = await headingOn("Energy $E=mc^2$ here.\n\nAfter.\n", 9, 2);
+  assert.equal(out.text, "## Energy $E=mc^2$ here.\n\nAfter.\n");
+});
+
+//
+// The block twin of inline code, its rules a level up: on a blank line an
+// empty block with the caret right after the opening backticks, where the
+// language is typed; with a bare caret in text, a block under the paragraph
+// or block it is in, never through it; a selection put in a block; from
+// inside a block, its fences taken off, an empty one leaving a blank line.
+
+test("the code block button opens an empty block with the caret after its backticks, and a second press leaves a blank line", { skip }, async () => {
+  let out = await buttonOn("Some prose.\n\n", 13, "code-block");
+  assert.equal(out.text, "Some prose.\n\n```\n```");
+  assert.deepEqual(out.ranges, [[16, 16]]);
+  out = await buttonOn("Some prose.\n\n", 13, "code-block", 2);
+  assert.equal(out.text, "Some prose.\n\n");
+  assert.deepEqual(out.ranges, [[13, 13]]);
+  // Text on both sides of the blank line: a blank line parts the block from
+  // each, the air the page leaves around a block. A second press leaves
+  // those two where they are: taking them would have glued the paragraphs
+  // together in the case that reads the same, the caret two lines under
+  // the text.
+  out = await buttonOn("Before.\n\nAfter.\n", 8, "code-block");
+  assert.equal(out.text, "Before.\n\n```\n```\n\nAfter.\n");
+  assert.deepEqual(out.ranges, [[12, 12]]);
+  out = await buttonOn("Before.\n\nAfter.\n", 8, "code-block", 2);
+  assert.equal(out.text, "Before.\n\n\n\nAfter.\n");
+  assert.deepEqual(out.ranges, [[9, 9]]);
+});
+
+test("with a bare caret in text the code block opens under the paragraph, heading, table or equation, never through it", { skip }, async () => {
+  // Two lines, one paragraph.
+  let out = await buttonOn("Here is the tune:\nstill the same paragraph.\n", 5, "code-block");
+  assert.equal(out.text, "Here is the tune:\nstill the same paragraph.\n\n```\n```\n");
+  assert.deepEqual(out.ranges, [[48, 48]]);
+  out = await buttonOn("# Title\nText.\n", 3, "code-block");
+  assert.equal(out.text, "# Title\n\n```\n```\n\nText.\n");
+  out = await buttonOn("| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter.\n", 22, "code-block");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| 1 | 2 |\n\n```\n```\n\nAfter.\n");
+  out = await buttonOn("$$\nE=mc^2\n$$\n\nAfter.\n", 5, "code-block");
+  assert.equal(out.text, "$$\nE=mc^2\n$$\n\n```\n```\n\nAfter.\n");
+  // Inside a callout, before its closing :::.
+  out = await buttonOn("::: {.callout-note}\ninside\n:::\n", 26, "code-block");
+  assert.equal(out.text, "::: {.callout-note}\ninside\n\n```\n```\n\n:::\n");
+});
+
+test("the code block button puts the selected lines in a block, under a longer fence when a fence is among them, and takes a block it cuts into whole", { skip }, async () => {
+  let out = await buttonOn('print("hi")\nx = 1\n', [{ anchor: 0, head: 17 }], "code-block");
+  assert.equal(out.text, '```\nprint("hi")\nx = 1\n```\n');
+  assert.deepEqual(out.ranges, [[3, 3]]);
+  // Blank lines at the edges stay outside, and so does the line a selection
+  // ends at the head of (a triple click takes the line break).
+  out = await buttonOn("\n\nx = 1\n\nnext\n", [{ anchor: 0, head: 9 }], "code-block");
+  assert.equal(out.text, "\n\n```\nx = 1\n```\n\nnext\n");
+  assert.deepEqual(out.ranges, [[5, 5]]);
+  // A fence among the lines: one backtick more outside, as inline code
+  // around a backtick gets a longer run.
+  out = await buttonOn("para\n\n```\ncode\n```\n", [{ anchor: 0, head: 19 }], "code-block");
+  assert.equal(out.text, "````\npara\n\n```\ncode\n```\n````\n");
+  // Ending inside that fence takes the fence whole.
+  out = await buttonOn("para\n\n```\ncode\n```\n", [{ anchor: 0, head: 12 }], "code-block");
+  assert.equal(out.text, "````\npara\n\n```\ncode\n```\n````\n");
+  // And a callout it runs into.
+  out = await buttonOn("before\n\n::: {.callout-note}\ninside\n:::\n", [{ anchor: 0, head: 30 }], "code-block");
+  assert.equal(out.text, "```\nbefore\n\n::: {.callout-note}\ninside\n:::\n```\n");
+});
+
+test("inside a fenced block the code block button takes the fences off and leaves the lines, in a quote and in a list as well", { skip }, async () => {
+  let out = await buttonOn("```abc\nX:1\nK:C\n```\n", 10, "code-block");
+  assert.equal(out.text, "X:1\nK:C\n");
+  assert.deepEqual(out.ranges, [[3, 3]]);
+  // From the fence line the caret lands at the head of what was the first
+  // line of the block.
+  out = await buttonOn("```abc\nX:1\n```\n", 6, "code-block");
+  assert.equal(out.text, "X:1\n");
+  assert.deepEqual(out.ranges, [[0, 0]]);
+  out = await buttonOn("```abc\nX:1\n```\n", [{ anchor: 0, head: 14 }], "code-block");
+  assert.equal(out.text, "X:1\n");
+  out = await buttonOn("> ```abc\n> X:1\n> ```\n", 14, "code-block");
+  assert.equal(out.text, "> X:1\n");
+  out = await buttonOn("- ```\n  code\n  ```\n", 10, "code-block");
+  assert.equal(out.text, "- code\n");
+});
+
+test("the code block carries the marks of the quote or the item it opens in, and Enter after the language goes on inside it", { skip }, async () => {
+  let out = await buttonOn("> A quote.\n", 10, "code-block");
+  assert.equal(out.text, "> A quote.\n>\n> ```\n> ```\n");
+  // An empty quoted line takes the block, and gives back a bare > for it,
+  // with no space left after the mark.
+  out = await buttonOn("> T\n>\n> U\n", 5, "code-block");
+  assert.equal(out.text, "> T\n>\n> ```\n> ```\n>\n> U\n");
+  out = await buttonOn("> T\n>\n> U\n", 5, "code-block", 2);
+  assert.equal(out.text, "> T\n>\n>\n>\n> U\n");
+  // In a list no blank line: it would be all the block added to the list
+  // besides itself.
+  out = await buttonOn("- Violin\n- Viola\n", 8, "code-block");
+  assert.equal(out.text, "- Violin\n  ```\n  ```\n- Viola\n");
+  // An empty item takes the fence on its marker's line.
+  out = await buttonOn("- Violin\n- \n", 11, "code-block");
+  assert.equal(out.text, "- Violin\n- ```\n  ```\n");
+  out = await buttonOn("- Violin\n- \n", 11, "code-block", 2);
+  assert.equal(out.text, "- Violin\n- \n");
+  // A task's box is content: the block stands at the item's column, where
+  // Pandoc reads it as the item's; set past the box it is paragraph text.
+  out = await buttonOn("- [ ] Buy milk\n", 14, "code-block");
+  assert.equal(out.text, "- [ ] Buy milk\n  ```\n  ```\n");
+  for (const [text, at, typed] of [
+    ["> A quote.\n", 10, "> A quote.\n>\n> ```abc\n> X:1\n> ```\n"],
+    ["- [ ] Buy milk\n", 14, "- [ ] Buy milk\n  ```abc\n  X:1\n  ```\n"],
+  ]) {
+    const h = await open({ text, scores: 0 });
+    await setSelection(h.page, at);
+    await h.page.click('#app button[data-type="code-block"]');
+    await sleep(120);
+    await h.page.keyboard.type("abc");
+    await h.page.keyboard.press("Enter");
+    await h.page.keyboard.type("X:1");
+    assert.equal(await docText(h.page), typed);
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// Enter's continuation counts a task's box, for the text after it, and the
+// new line of a fence in a task was set past the box: four spaces of the
+// item's own went into every line of the code, and a score's `X:1` was read
+// indented (measured with Pandoc 3.8.3).
+test("Enter in a fence inside a task keeps to the item's column, not past its box (G071)", { skip }, async () => {
+  const out = await pressOn("- [ ] a\n  ```\n  x\n  ```\n", 17, ["Enter", { type: "y" }]);
+  assert.equal(out.text, "- [ ] a\n  ```\n  x\n  y\n  ```\n");
+});
+
 
 // ---- The clicks of the bench (section 22) ----
 
@@ -1225,15 +1591,59 @@ test("Ctrl+B wraps every range and unwraps it again", { skip }, async () => {
   await h.close();
 });
 
-test("the heading button cycles the level of every selected line", { skip }, async () => {
-  const h = await open({ text: "one\ntwo\n###### six\n", scores: 0 });
-  await setSelection(h.page, [{ anchor: 0 }, { anchor: 4 }, { anchor: 10 }]);
-  await h.page.click('#app button[data-type="headings"]');
-  assert.equal(await docText(h.page), "# one\n# two\nsix\n");
-  await h.page.click('#app button[data-type="headings"]');
-  assert.equal(await docText(h.page), "## one\n## two\n# six\n");
+// The four buttons that share a Mod- binding name it in their tip, and the
+// chord a tip names is the one that does what the button does: each is
+// pressed on a selected word and the file compared with a click of the button
+// on the same selection. On a Mac the tip says the Cmd CodeMirror binds `Mod`
+// to there, read under a navigator.platform that says Mac.
+test("the bold, italic, code and link buttons name the shortcut that does what they do", { skip }, async () => {
+  const text = "one word here\n";
+  const h = await open({ text, scores: 0 });
+  const buttons = ["bold", "italic", "inline-code", "link"];
+  const tips = await h.page.evaluate((names) =>
+    names.map((n) => {
+      const b = document.querySelector('#app button[data-type="' + n + '"]');
+      return [b.getAttribute("aria-label"), b.getAttribute("aria-keyshortcuts")];
+    }), buttons);
+  assert.deepEqual(tips, [
+    ["Bold (Ctrl+B)", "Control+B"],
+    ["Italic (Ctrl+I)", "Control+I"],
+    ["Inline code (Ctrl+E)", "Control+E"],
+    ["Link (Ctrl+K)", "Control+K"],
+  ]);
+  const word = [{ anchor: 4, head: 8 }];
+  for (let i = 0; i < buttons.length; i++) {
+    const key = /\(Ctrl\+(.)\)$/.exec(tips[i][0])[1].toLowerCase();
+    await setSelection(h.page, word);
+    await h.page.click('#app button[data-type="' + buttons[i] + '"]');
+    const clicked = await docText(h.page);
+    assert.notEqual(clicked, text, buttons[i] + " changed nothing, so the comparison reads nothing");
+    await h.page.evaluate((t) => {
+      const view = window.__mdm.view;
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: t } });
+    }, text);
+    await setSelection(h.page, word);
+    await chord(h.page, ["Control"], key);
+    assert.equal(await docText(h.page), clicked, "Ctrl+" + key.toUpperCase() + " does not do what " + buttons[i] + " does");
+    await h.page.evaluate((t) => {
+      const view = window.__mdm.view;
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: t } });
+    }, text);
+  }
   assert.deepEqual(h.errors, []);
   await h.close();
+
+  const mac = await open({ text, scores: 0, platform: "MacIntel" });
+  const macTips = await mac.page.evaluate(() => {
+    const b = document.querySelector('#app button[data-type="bold"]');
+    return [navigator.platform, b.getAttribute("aria-label"), b.getAttribute("aria-keyshortcuts")];
+  });
+  assert.deepEqual(macTips, ["MacIntel", "Bold (\u2318B)", "Meta+B"]);
+  // And the Cmd it names is what CodeMirror binds there.
+  await setSelection(mac.page, word);
+  await chord(mac.page, ["Meta"], "b");
+  assert.equal(await docText(mac.page), "one **word** here\n");
+  await mac.close();
 });
 
 test("Ctrl+Enter leaves a fenced block into a fresh paragraph below it", { skip }, async () => {
@@ -2378,6 +2788,8 @@ const BAR = [
   "|",
   "list",
   "ordered-list",
+  "task-list",
+  "quote",
   "|",
   "mdm-match-substring",
   "|",

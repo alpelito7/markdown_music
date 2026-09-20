@@ -198,6 +198,14 @@ async function open(options) {
     window.__docBase = seed.docBase || null;
     window.__fileBase = seed.fileBase || null;
   }, opts.seed || {});
+  // `platform`: what navigator.platform says, read before the page's scripts
+  // run, for what CodeMirror and main.js decide per platform (Cmd for `Mod`
+  // on a Mac).
+  if (opts.platform) {
+    await page.evaluateOnNewDocument((platform) => {
+      Object.defineProperty(Navigator.prototype, "platform", { get: () => platform });
+    }, opts.platform);
+  }
   if (opts.clipboard) {
     // Headless has no clipboard to write to; what was copied is recorded.
     await page.evaluateOnNewDocument(() => {

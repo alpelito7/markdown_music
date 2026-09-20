@@ -5615,9 +5615,12 @@
   // lands in the middle.
   function toggleInline(mark) {
     return function (v) {
+      const state = v.state;
+      const tree = CM.syntaxTree(state);
+      const kind = INLINE_KIND[mark];
       const len = mark.length;
       v.dispatch(
-        v.state.changeByRange(function (range) {
+        state.changeByRange(function (range) {
           const from = range.from;
           const to = range.to;
           const before = v.state.sliceDoc(Math.max(0, from - len), from);
@@ -5631,20 +5634,36 @@
               range: CM.EditorSelection.range(from - len, to - len),
             };
           }
-          const inner = v.state.sliceDoc(from, to);
-          if (inner.startsWith(mark) && inner.endsWith(mark) && inner.length >= 2 * len) {
+          if (range.empty) {
+            const line = state.doc.lineAt(from);
+            const col = from - line.from;
+            const word = /[\p{L}\p{N}]/u;
+            if (col > 0 && col < line.length && word.test(line.text[col - 1]) && word.test(line.text[col])) {
+              let a = col;
+              let b = col;
+              while (a > 0 && word.test(line.text[a - 1])) a--;
+              while (b < line.length && word.test(line.text[b])) b++;
+              const out = [];
+              wrapPart(state, tree, mark, line.from + a, line.from + b, out);
+              const set = state.changes(out);
+              return { changes: set, range: range.map(set) };
+            }
             return {
-              changes: { from: from, to: to, insert: inner.slice(len, inner.length - len) },
-              range: CM.EditorSelection.range(from, to - 2 * len),
+              changes: [
+                { from: from, insert: mark },
+                { from: to, insert: mark },
+              ],
+              range: CM.EditorSelection.range(from + len, to + len),
             };
           }
-          return {
-            changes: [
-              { from: from, insert: mark },
-              { from: to, insert: mark },
-            ],
-            range: CM.EditorSelection.range(from + len, to + len),
-          };
+          const out = [];
+          const last = state.doc.lineAt(to).number;
+          for (let n = state.doc.lineAt(from).number; n <= last; n++) {
+            const part = wrappablePart(state, tree, state.doc.line(n), from, to);
+            if (part) wrapPart(state, tree, mark, part.from, part.to, out);
+          }
+          const set = state.changes(out);
+          return { changes: set, range: range.map(set) };
         })
       );
       return true;
@@ -5672,99 +5691,233 @@
   function cycleHeading(v) {
     const changes = [];
     const seen = new Set();
-    v.state.selection.ranges.forEach(function (range) {
-      const first = v.state.doc.lineAt(range.from).number;
-      const last = v.state.doc.lineAt(range.to).number;
+    const parsed = [];
+    state.selection.ranges.forEach(function (range) {
+      const first = doc.lineAt(range.from).number;
+      const last = doc.lineAt(range.to).number;
       for (let n = first; n <= last; n++) {
         if (seen.has(n)) continue;
         seen.add(n);
-        const line = v.state.doc.line(n);
-        const m = /^(#{1,6})\s+/.exec(line.text);
-        if (!m) {
-          changes.push({ from: line.from, insert: "# " });
-        } else if (m[1].length === 6) {
-          changes.push({ from: line.from, to: line.from + m[0].length });
-        } else {
-          changes.push({ from: line.from, insert: "#" });
-        }
+        const line = doc.line(n);
+        if (/^[ \t>]*$/.test(line.text) || unmarkableLine(tree, line)) continue;
+        const m = LIST_LINE.exec(line.text);
+        parsed.push({
+          at: line.from + m[1].length,
+          bullet: m[2],
+          number: m[3],
+          box: m[5] || "",
+          markLen: m[0].length - m[1].length,
+        });
       }
     });
-    if (changes.length) v.dispatch({ changes: changes });
-    return true;
+    return parsed;
   }
 
-  // A list marker in front of each selected line, or off again if every one
-  // of them already carries one of that kind.
+  // A lone caret on a line with nothing of its own, where the line buttons
+  // start a line of their kind to type into: the line, or null. Every line
+  // button skips blank lines, so on an empty one they did nothing at all.
+  function emptyLineAtCaret(state, tree) {
+    const sel = state.selection;
+    if (sel.ranges.length !== 1 || !sel.main.empty) return null;
+    const line = state.doc.lineAt(sel.main.head);
+    if (!/^[ \t>]*$/.test(line.text) || unmarkableLine(tree, line)) return null;
+    return line;
+  }
+
+  // Writes a marker at the end of such a line, past a quote's `>` (with the
+  // space a bare `>` lacks), and leaves the caret after it. Under a line of
+  // a paragraph the line is kept blank and the marker goes on a new one
+  // with the same quote marks: Pandoc lets neither a list nor a quote break
+  // into a paragraph (3.8.3 reads `Text.` over `- a` as one paragraph,
+  // `Text. - a`), where the editor's CommonMark would draw a list the page
+  // does not have. An item under an item's paragraph is the next item of
+  // that list and needs no blank line; a quote under one does.
+  function startLine(v, tree, line, mark, item) {
+    const doc = v.state.doc;
+    let part = false;
+    if (line.number > 1) {
+      const prev = doc.line(line.number - 1);
+      const block = /^[ \t>]*$/.test(prev.text) ? null : blockOfLine(tree, prev);
+      if (block && block.name === "Paragraph") part = !(item && block.parent && block.parent.name === "ListItem");
+    }
+    const own = (/>$/.test(line.text) ? " " : "") + mark;
+    const insert = part ? "\n" + line.text + own : own;
+    v.dispatch({
+      changes: { from: line.to, insert: insert },
+      selection: CM.EditorSelection.cursor(line.to + insert.length),
+    });
+  }
+
+  // The list buttons: a marker of the kind in front of each selected line's
+  // own text, or off again when every line carries one already. A line with
+  // the other kind of marker changes kind, a heading line's hashes make way
+  // for the marker, a quote keeps its `>` in front, a task box stays, and
+  // blank lines are left blank and not counted (G065: `1. - Violin`,
+  // `4. > Cello` and a numbered blank line). The numbers run from one over
+  // the lines taken. A caret on an empty line starts an item there.
   function toggleList(ordered) {
     return function (v) {
-      const linesSeen = [];
-      const seen = new Set();
-      v.state.selection.ranges.forEach(function (range) {
-        const first = v.state.doc.lineAt(range.from).number;
-        const last = v.state.doc.lineAt(range.to).number;
-        for (let n = first; n <= last; n++) {
-          if (!seen.has(n)) {
-            seen.add(n);
-            linesSeen.push(v.state.doc.line(n));
-          }
-        }
-      });
-      const re = ordered ? /^(\s*)\d+\.\s+/ : /^(\s*)[-*+]\s+/;
-      const all = linesSeen.every(function (line) {
-        return re.test(line.text);
-      });
+      const state = v.state;
+      const tree = CM.syntaxTree(state);
+      const empty = emptyLineAtCaret(state, tree);
+      if (empty) {
+        startLine(v, tree, empty, ordered ? "1. " : "- ", true);
+        return true;
+      }
+      const parsed = markableLines(state, tree);
+      const all =
+        parsed.length > 0 &&
+        parsed.every(function (p) {
+          return ordered ? p.number : p.bullet;
+        });
       const changes = [];
-      linesSeen.forEach(function (line, i) {
-        const m = re.exec(line.text);
-        if (all && m) {
-          changes.push({ from: line.from + m[1].length, to: line.from + m[0].length });
-        } else if (!m) {
-          const indent = /^\s*/.exec(line.text)[0];
-          changes.push({
-            from: line.from + indent.length,
-            insert: ordered ? i + 1 + ". " : "- ",
-          });
+      let k = 0;
+      parsed.forEach(function (p) {
+        if (all) {
+          changes.push({ from: p.at, to: p.at + p.markLen });
+          return;
         }
+        k++;
+        if (ordered ? p.number : p.bullet) {
+          if (ordered && p.number !== String(k)) changes.push({ from: p.at, to: p.at + p.number.length, insert: String(k) });
+          return;
+        }
+        changes.push({ from: p.at, to: p.at + p.markLen - p.box.length, insert: ordered ? k + ". " : "- " });
       });
       if (changes.length) v.dispatch({ changes: changes });
       return true;
     };
   }
 
-  // Ctrl+Enter: out of the block the caret is in (a fence, an equation, a
-  // list, a quote, a callout, a heading line), into a fresh paragraph below
-  // it. Plain Enter inside a code block is a newline, as in any code editor:
-  // the closing fence is a line of text the caret can walk past.
-  const LEAVABLE = /^(FencedCode|CodeBlock|BlockMath|Callout|Blockquote|BulletList|OrderedList|Table|ATXHeading[1-6]|SetextHeading[12]|HTMLBlock|FrontMatter)$/;
-  function leaveBlock(v) {
+  // The task button: a box on each selected line, or off again when every
+  // line has one. The box goes behind the marker an item has, bulleted or
+  // numbered (Pandoc 3.8.3 ticks both), and a line with no marker, a
+  // heading's hashes and all, becomes a bulleted task. Taken off, only the
+  // box goes and the item stays an item, since the box is the one thing
+  // this button adds to an item; the list buttons take the marker. A caret
+  // on an empty line starts a task there.
+  function toggleTask(v) {
     const state = v.state;
     const tree = CM.syntaxTree(state);
+    const empty = emptyLineAtCaret(state, tree);
+    if (empty) {
+      startLine(v, tree, empty, "- [ ] ", true);
+      return true;
+    }
+    const parsed = markableLines(state, tree);
+    const boxed = function (p) {
+      return !!p.box && !!(p.bullet || p.number);
+    };
+    const all = parsed.length > 0 && parsed.every(boxed);
     const changes = [];
-    const cursors = [];
-    let offset = 0;
+    parsed.forEach(function (p) {
+      const head = p.at + p.markLen - p.box.length;
+      if (all) changes.push({ from: head, to: p.at + p.markLen });
+      else if (boxed(p)) return;
+      else if (p.bullet || p.number) changes.push({ from: head, insert: "[ ] " });
+      else changes.push({ from: p.at, to: head, insert: "- [ ] " });
+    });
+    if (changes.length) v.dispatch({ changes: changes });
+    return true;
+  }
+
+  // The block a line belongs to, below the containers that hold it (a
+  // paragraph, a heading, a fence, a table), read at the head of the line's
+  // own text so an item's marker does not answer for its paragraph; null on
+  // a line that is only containers. Read from the root down, the first
+  // node under the run of containers: walked up from the inside, the tree
+  // of a language mounted in the block (the header's YAML) has holders'
+  // names of its own and stopped the walk inside it.
+  function blockOfLine(tree, line) {
+    const head = Math.min(line.from + LINE_PREFIX.exec(line.text)[0].length, line.to);
+    const chain = [];
+    for (let n = tree.resolveInner(head, head < line.to ? 1 : -1); n; n = n.parent) chain.unshift(n);
+    for (let i = 0; i < chain.length; i++) {
+      if (!CODE_HOLDERS.test(chain[i].name)) return chain[i];
+    }
+    return null;
+  }
+
+  // The lines the quote button works on: those the selection touches, taken
+  // out to the whole of every block they are part of, less the blank lines
+  // at the edges. A paragraph is taken whole because a line left out of it
+  // stays in the quote anyway, as lazy continuation (CommonMark 5.1), and a
+  // fence or a table would be cut in two. A selection that ends at the head
+  // of a line, as a triple click leaves it, does not take that line. The
+  // header is never quoted.
+  function quoteLines(state, tree) {
+    const doc = state.doc;
+    const lines = new Set();
     state.selection.ranges.forEach(function (range) {
-      let node = tree.resolveInner(range.head, -1);
-      let block = null;
-      while (node) {
-        if (LEAVABLE.test(node.name)) block = node;
-        node = node.parent;
+      let first = doc.lineAt(range.from).number;
+      let last = doc.lineAt(range.to).number;
+      if (last > first && range.to === doc.line(last).from) last--;
+      for (let n = first; n <= last; n++) {
+        const block = blockOfLine(tree, doc.line(n));
+        if (!block) continue;
+        first = Math.min(first, doc.lineAt(block.from).number);
+        last = Math.max(last, lastLineOf(doc, block).number);
       }
-      const at = block ? state.doc.lineAt(block.to).to : state.doc.lineAt(range.head).to;
-      const insert = "\n\n";
-      changes.push({ from: at, insert: insert });
-      cursors.push(at + insert.length + offset);
-      offset += insert.length;
+      const taken = [];
+      for (let n = first; n <= last; n++) {
+        const block = blockOfLine(tree, doc.line(n));
+        if (!(block && block.name === "FrontMatter")) taken.push(n);
+      }
+      while (taken.length && isBlank(doc.line(taken[0]).text)) taken.shift();
+      while (taken.length && isBlank(doc.line(taken[taken.length - 1]).text)) taken.pop();
+      taken.forEach(function (n) {
+        lines.add(n);
+      });
     });
-    v.dispatch({
-      changes: changes,
-      selection: CM.EditorSelection.create(
-        cursors.map(function (p) {
-          return CM.EditorSelection.cursor(p);
-        }),
-        0
-      ),
-      scrollIntoView: true,
+    return Array.from(lines).sort(function (a, b) {
+      return a - b;
     });
+  }
+
+  // The first `>` of a line, behind an item's marker when the quote is in
+  // a list, and the one space after it.
+  const QUOTE_MARK = /^([ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?)>[ \t]?/;
+
+  // The quote button: each line of the blocks the selection touches one
+  // quote deeper, blank lines between them included so the blocks stay one
+  // quote, or one quote shallower when every line is in a quote already.
+  // The `>` goes at the head of the line, so a list selected becomes a
+  // list in a quote. A caret on an empty line starts a quote there.
+  function toggleQuote(v) {
+    const state = v.state;
+    const tree = CM.syntaxTree(state);
+    const empty = emptyLineAtCaret(state, tree);
+    if (empty) {
+      startLine(v, tree, empty, "> ", false);
+      return true;
+    }
+    const doc = state.doc;
+    const lines = quoteLines(state, tree).map(function (n) {
+      return doc.line(n);
+    });
+    const quoted = function (line) {
+      if (QUOTE_MARK.test(line.text)) return true;
+      // A lazy line has no `>` of its own and is in the quote all the same.
+      const head = Math.min(line.from + LINE_PREFIX.exec(line.text)[0].length, line.to);
+      for (let n = tree.resolveInner(head, head < line.to ? 1 : -1); n; n = n.parent) {
+        if (n.name === "Blockquote") return true;
+      }
+      return false;
+    };
+    const texts = lines.filter(function (line) {
+      return !isBlank(line.text);
+    });
+    const all = texts.length > 0 && texts.every(quoted);
+    const changes = [];
+    lines.forEach(function (line) {
+      if (!all) {
+        changes.push({ from: line.from, insert: isBlank(line.text) ? ">" : "> " });
+        return;
+      }
+      const m = QUOTE_MARK.exec(line.text);
+      if (m) changes.push({ from: line.from + m[1].length, to: line.from + m[0].length });
+    });
+    if (changes.length) v.dispatch({ changes: changes });
     return true;
   }
 
@@ -6706,9 +6859,10 @@
   // Anywhere but the text, whatever is open for editing goes back to its
   // drawing: the dead margin, the outline and its grip, the toolbar and its
   // panels. Caught on the way down at the document, so it is done before the
-  // click is answered by whatever it was actually for; the buttons that work
-  // on the caret only meet this with a caret inside a block, where they have
-  // nothing to say anyway.
+  // click is answered by whatever it was actually for. Not the buttons that
+  // work on the selection (bold, a link, a list), which have to find it
+  // where it is: with a word selected in a table cell, the Bold button put
+  // the caret out under the table first and wrote `****` there (G064).
   function dismissFromOutside(e) {
     if (e.button !== 0 || !e.target || !e.target.closest || !view) return;
     // The player is not "anywhere but the text": listening to a score while
@@ -7410,8 +7564,19 @@
     '<svg viewBox="0 0 16 16"><path d="M6.5 2h5.5l-.4 1.9H9.8L7.6 12.1h1.8L9 14H3.5l.4-1.9h1.8L7.9 3.9H6.1Z"/></svg>';
   const CODE_ICON =
     '<svg viewBox="0 0 16 16"><path d="M5.2 3.6 6.4 4.8 3.3 8l3.1 3.2-1.2 1.2L.9 8Zm5.6 0L15.1 8l-4.3 4.4-1.2-1.2L12.7 8 9.6 4.8Z"/></svg>';
+  // The code block: the chevrons of inline code, a little smaller, between
+  // a rule above and a rule below for the two fence lines of the block
+  // (design-code-block.html, variant B, the owner's pick). The rules are
+  // the list glyphs' bars at full width.
+  const CODE_BLOCK_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="1" y="1.2" width="14" height="1.4" rx=".7"/><path d="M1.2 8 4.8 4.4 5.93 5.53 3.46 8 5.93 10.47 4.8 11.6ZM14.8 8 11.2 4.4 10.07 5.53 12.54 8 10.07 10.47 11.2 11.6Z"/><rect x="1" y="13.4" width="14" height="1.4" rx=".7"/></svg>';
   const LINK_ICON =
     '<svg viewBox="0 0 16 16"><path d="M6.6 9.4a3 3 0 0 1 0-4.2l2-2a3 3 0 0 1 4.2 4.2l-1 1-1.1-1.1 1-1a1.5 1.5 0 0 0-2.1-2.1l-2 2a1.5 1.5 0 0 0 0 2.1ZM9.4 6.6a3 3 0 0 1 0 4.2l-2 2a3 3 0 0 1-4.2-4.2l1-1 1.1 1.1-1 1a1.5 1.5 0 0 0 2.1 2.1l2-2a1.5 1.5 0 0 0 0-2.1Z"/></svg>';
+  // Two H standing on the same line, one the height of the other's cap: the
+  // H every editor draws for a heading, and a second size to say the button
+  // opens the six levels rather than making a first-level heading, which is
+  // what the 1 it carried used to say (design-heading-icon.html, A, the
+  // owner's pick).
   const HEADING_ICON =
     '<svg viewBox="0 0 16 16"><path d="M2 2.5h2.1v4.3h4.3V2.5h2.1v11h-2.1V8.8H4.1v4.7H2Z"/><path d="M12.3 8.2h1.3v5.3h-1.3V9.6l-1 .6-.5-1Z"/></svg>';
   const LIST_ICON =
@@ -7679,6 +7844,10 @@
     if (spec.menu || spec.build) {
       const panel = document.createElement("div");
       panel.className = "mdm-menu";
+      // A panel whose rows work on the selection (the heading levels) is
+      // exempt with its button: a press on a row put the block being edited
+      // away before the row could find the lines it was for.
+      if (spec.caret) panel.classList.add("mdm-btn--caret");
       item.appendChild(panel);
       // What each row can do is read again every time the panel opens, not
       // once when it is filled: the Audio rows of the export panel grey out

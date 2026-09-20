@@ -3147,6 +3147,70 @@ the head of the code line -> the same; **TA14** Shift+Tab taking nothing
 off a code line -> the same; **KM2** Shift+Tab bound to the nesting -> the
 two item drills; **KM3** Tab unbound -> the item drill and the prose drill.
 
+The shortcuts and the buttons, the same day (P4-c). `toggleInline`
+looked at nothing but the characters either side of the range, so a caret
+inside bold wrote a new pair into it, Ctrl+I on the text of bold took one
+star off each side and made it italic, and a selection was wrapped whole
+across paragraphs, edge spaces and all, which no reader reads as marks
+(G063, G075). The three commands read the tree now: a caret inside a run
+of their kind takes the run's marks off, and at the end of its text steps
+out past the closing mark, so bold typed after Ctrl+B is closed by the
+next Ctrl+B with no empty pair left; a caret in the middle of a word wraps
+the word and anywhere else writes an empty pair, which the same key takes
+off again; a selection of the whole of a run's text takes the marks off,
+one inside a run is taken out of it, the run closed before it and opened
+again after it with the spaces beside it outside the marks, and any other
+is wrapped line by line, each line's own text past its quote marks, list
+marker and hashes, spaces at the edges left outside, merged with the runs
+of the kind it touches, and a code span holding backticks fenced by one
+more (CommonMark 6.1). The results were put through Pandoc's export
+reader and its CommonMark reader on the way: `***half bold** plain*` is
+`em(strong(half bold) plain)` in both. `insertLink` inside a link nested a
+second one, and the outer link was lost to the inner (G074): now the
+link's address is selected, or the caret goes between the parentheses of
+an empty one, and a selected address becomes the destination with the
+caret in the label (ED29). The Bold button with a word selected in a
+table cell wrote `****` on the line under the table, since the mousedown
+on any button first put the open block away and the caret with it
+(G064): the buttons that work on the selection (`mdm-btn--caret`: heading,
+bold, italic, code, link, the lists) are exempt from `dismissFromOutside`,
+and the theme button and the bare bar still put a block away, which the
+test above them keeps. The list buttons put their marker on top of the
+other kind's, of a `>` and of a `#`, and numbered blank lines (G065): a
+line changes kind now, a heading's hashes make way for the marker, a task
+box keeps its place, the `>` stays in front, blank lines are left blank
+and uncounted, and the numbers run from one over the lines taken; the
+heading button puts its hashes after a quote's mark, in place of a list
+marker (an item is not a heading of the document), and makes the ATX
+heading of the next level of a setext heading, underline gone. Twenty-two
+mutations of `main.js`, all caught: **IL1** the run around the range
+unread -> *Ctrl+B with the caret inside bold takes the bold off, and at
+its end steps out of it*, *Ctrl+B and Ctrl+I on a selection write marks
+the readers read as meant* and *Ctrl+B wraps every range and unwraps it
+again*; **IL2** the step out off -> the caret drill; **IL3** the strong
+run's stars taken for a bare pair -> the selection drill; **IL4** the
+word not wrapped -> the caret drill; **IL5** the edge spaces wrapped ->
+the selection drill; **IL6** a selection wrapped whole across lines ->
+the same; **IL7** the line's prefix wrapped -> the same; **IL8** a run
+the selection starts inside not extended -> the same; **IL9** the code
+fence not lengthened -> the same; **IL10** the space beside a selection
+inside a run put inside the marks -> the same; **LK1** the link around
+the caret ignored -> *Ctrl+K edits the link around the caret instead of
+nesting one, and makes a selected address the destination*; **LK2** the
+caret not put between empty parentheses -> the same; **LK3** an address
+made a label -> the same; **HD1** the hashes stacked on a list marker ->
+*the heading button puts its hashes after a quote's mark and in place of a
+list marker, and makes ATX of a setext heading*; **HD2** setext left as
+it was -> the same; **HD3** the hashes put before the quote's mark -> the
+same; **LS1** blank lines numbered -> *the list buttons change the kind of
+a list, take it off again, and leave blank lines and quote marks as they
+are*; **LS2** the other kind's marker kept under the new one -> the same;
+**LS3** the second press not taking the list off -> the same; **LS4** a
+heading's hashes kept under the marker -> the same; **DM1** the caret
+buttons not exempt from the dismiss -> *a toolbar button works on the
+selection where it is, in a table cell or over inline maths*; **DM2** the
+class not put on the buttons -> the same.
+
 The clicks, the same day (P4-d). The bullet and the number an item is
 drawn with took the click as text: CodeMirror put the caret on one side of
 the hidden `- `, and the letter typed next made `x- Viola`, which no reader
@@ -3387,6 +3451,168 @@ widget that says it is equal, so an emphasis deleted from the file stayed
 on screen. *a caption drawn again when its marks go, though the words are
 the same* (`webview-editing.test.js`) was written for it, and the mutation
 is caught.
+
+### The shortcut in the tip (2026-09-19)
+
+Bold, Italic, Inline code and Link name the Mod- binding they share in
+their tip, `Bold (Ctrl+B)`, or `Bold (⌘B)` where CodeMirror binds `Mod` to
+Cmd (the same `/Mac/` test on navigator.platform), with
+`aria-keyshortcuts` beside it. `open()` in `webview/helpers.js` takes a
+`platform` to say what navigator.platform reads. *the bold, italic, code and
+link buttons name the shortcut that does what they do*
+(`webview-editing.test.js`) reads the four tips, presses the chord each one
+names on a selected word against a click of the button, and on MacIntel
+reads ⌘ and presses Meta+B. **KT1** the tips without the shortcut -> caught;
+**KT2** the platform test answering "not a Mac" always -> caught; **KT3**
+Inline code naming K -> caught.
+
+### The code block button and Ctrl+Shift+8 (2026-09-19)
+
+The block twin of inline code, beside it in the bar, drawn with the glyph
+the owner picked in `design-code-block.html` (B, the chevrons between two
+rules), and `Ctrl+Shift+8` (`⌥⌘8` on a Mac), Notion's key for a code block,
+which the owner asked for as "a standard key, if there is one" (Typora's
+`Ctrl+Shift+K` is Delete Line here; D19 in `vscode-mdm/docs/cm6-migration.md`).
+`toggleCodeBlock` in `main.js`: on a blank line, an empty block with the
+caret right after the opening backticks; with a bare caret in text, the
+block under the paragraph or block it stands in; a selection into the block,
+with a block of one piece it cuts into taken whole and a longer fence over a
+fence among its lines; inside a block, the fences off, and an empty one
+leaves one blank line. A blank line parts the new block from text beside it,
+except inside a list; the marks of a quote and of an item go on its lines,
+and in a task it stands at the item's column and not past the box, where
+Pandoc 3.8.3 reads a fence as paragraph text. Enter in a fence inside a task
+owed the same column and set the new line four spaces past the box:
+`continueMarkup` takes `blockPrefix` now.
+
+The first version merged the blank lines around an empty block into it on
+the way out, so that a second press gave back what the first was pressed on.
+It cannot: a blank line under a paragraph and two blank lines under it come
+out as the same block, and in the second case the merge glued the paragraph
+below to the one above. An empty block leaves one blank line, and nothing
+around it goes.
+
+In `webview-editing.test.js`: *the code block button opens an empty block
+with the caret after its backticks, and a second press leaves a blank line*;
+*with a bare caret in text the code block opens under the paragraph,
+heading, table or equation, never through it*; *the code block button puts
+the selected lines in a block, under a longer fence when a fence is among
+them, and takes a block it cuts into whole*; *inside a fenced block the code
+block button takes the fences off and leaves the lines, in a quote and in a
+list as well*; *the code block carries the marks of the quote or the item it
+opens in, and Enter after the language goes on inside it*; *Enter in a fence
+inside a task keeps to the item's column, not past its box (G071)*;
+*Ctrl+Shift+8 does what the code block button does, the tip names it, and
+abc typed after the backticks makes a score*; and `code-block` in `BAR`.
+
+### Strikethrough, task list and quote buttons (2026-09-19)
+
+G085's missing buttons, with no key (D19 in `vscode-mdm/docs/cm6-migration.md`;
+glyphs and the key schemes in `design-markdown-buttons.html`, variant A of
+each applied as my pick). Strikethrough is `toggleInline("~~")`, bold's rules
+with `Strikethrough`/`StrikethroughMark`. `toggleTask` boxes the item a line
+is, numbered ones too (Pandoc 3.8.3 ticks both), makes a bulleted task of a
+line with none and takes only the box off. `toggleQuote` quotes the whole of
+every block the selection touches (`blockOfLine`, read from the root down,
+because walked up from inside, the header's mounted YAML tree stopped the
+walk at a `Document` of its own and the header was quoted), the blank lines
+between them with a bare `>`, not the header, not a line a triple click's
+selection only reaches the head of; and one level off when every line is
+quoted, a lazy line counted as quoted. On an empty line the four line
+buttons (the two lists as well, which did nothing there) write their marker
+for the caret, parted by a blank line from a paragraph above (Pandoc reads
+`Text.` over `- a` as `Text. - a`), except an item under an item.
+
+In `webview-editing.test.js`: *the strikethrough button writes Pandoc's ~~
+and takes it off by the same rules as bold*; *the task button puts a box
+behind the marker a line has, makes a bulleted task of a line with none, and
+takes only the box off*; *the quote button quotes the whole of the blocks it
+touches and takes a quote off again*; *on an empty line the line buttons
+start a line of their kind, parted from a paragraph above as Pandoc needs*;
+and `strikethrough`, `task-list`, `quote` in `BAR`. Round, each against those
+four and the list test, the file restored and its hash checked after:
+**MB1** no `~~` in `INLINE_KIND`, **MB2** the strike marks looked up as
+`EmphasisMark`, **MB3** a boxed line boxed again, **MB4** the task off takes
+the marker, **MB5** the block is the innermost node, **MB6** a triple click
+takes the next line, **MB7** the header quoted, **MB8** a blank line quoted
+as `> `, **MB9** the `>` behind an item's marker not found, **MB10** never
+parted from a paragraph, **MB11** an item parted from an item, **MB12** the
+empty line ignored, **MB13** a lazy line not counted as quoted, **MB14** an
+empty line in a fence started, **MB15** the caret left before the marker:
+all 15 caught.
+
+The owner changed the task glyph the same day: the first row a check mark
+alone and no box, since a tick cut out of a box could not be seen at 15px.
+
+Not answered: the list buttons on a line WITH text right under a paragraph
+(`Text.` over `Flute`) still write `- Flute` glued to it, which the editor
+draws as a list and Pandoc reads as `Text. - Flute`; that was so before
+this change. Not seen in a real VS Code window.
+
+### The heading button as a menu (2026-09-19)
+
+At the owner's request the heading button opens a menu, a paragraph and the
+six levels, instead of stepping each line one level up. `setHeading(level)`
+keeps `cycleHeading`'s rules (the hashes after a quote's `>` and in place of
+a list marker, a setext heading made ATX) and sets the level over any a line
+had; a paragraph takes the hashes or the underline off and leaves a list
+item an item. `headingMenuItems` ticks the level of the caret's line, read
+at each opening (`build`). The panel of a menu whose button acts on the
+caret carries `mdm-btn--caret`, so a press on a row does not put the open
+block away first: inline maths is one, and the heading went to the line
+below it.
+
+In `webview-editing.test.js`, replacing *the heading button cycles the level
+of every selected line* and the G065 test of the cycle: *the heading menu
+lists the six levels, the level of the caret's line ticked, and no
+paragraph* (named so since the row went, below);
+*a heading level from the menu goes after a quote's mark, in place of a list
+marker, over the level a line had, and makes ATX of a setext heading
+(G065)*; *a heading level from the menu lands on the line the caret was in,
+inside inline maths*. Round: **MH1** the panel not exempt, **MH2** hashes
+added over hashes, **MH3** the setext underline kept, **MH4** a paragraph
+takes the list marker, **MH5** the level never read, **MH6** the menu filled
+once, **MH7** the focus not given back to the text (not caught at first;
+`headingOn` now asserts the focus, and then caught), **MH8** blank lines
+made headings: all 8 caught.
+
+The Paragraph row taken off at the owner's word, the same day: the ticked
+level picked again makes every selected line a paragraph, as a list button
+pressed twice takes its list off. The tests ask it of `## Title` and of a
+setext heading with level 2, and of `## Title` over `- Violin`, which keeps
+its item; the empty-line case of a paragraph went, since no row asks it
+now. **MH9** the ticked level set again instead of taken off -> caught,
+`## Title` left as it was. The icon went with the row: the H with a 1
+named the level the button used to make, so it is two H now, one the height
+of the other's cap (`design-heading-icon.html`, A of five, the owner's pick
+over the H alone, the H with an outline, the `#` and the H with a menu
+caret). No test reads the glyph; the toolbar tests that draw every button in
+the chrome's brass pass with it.
+
+### Keys that stop at the text, and a heading on an empty line (2026-09-19)
+
+The owner saw Ctrl+B set bold and hide the Explorer. VS Code's webview host
+page (1.133.0) listens for keydown on the page's window, bubble phase, with
+no look at defaultPrevented, and posts every key to the workbench. The five
+formatting bindings now carry CodeMirror's `stopPropagation`; Ctrl+S and
+Ctrl+Z do not, since VS Code saves and undoes from that message. *the
+formatting keys stop at the text, and reach VS Code from anywhere else*
+stands a window keydown listener in for the host's. The owner also found
+that a heading from the menu did nothing on an empty line, where the four
+line buttons write their marker; now it writes the hashes, parted from a
+paragraph or an item above (Pandoc 3.8.3: `Text.` over `## H` is `Text. ##
+H`, and so is an item's text): *a heading level from the menu on an empty
+line writes the hashes to type after, parted from a paragraph or an item
+above*. Round: **MK1** Ctrl+B, **MK2** Ctrl+K, **MK3** Ctrl+Shift+8 not
+stopped, **MH9** the empty line skipped, **MH10** a heading under an item
+not parted: all 5 caught. Both seen in a real VS Code through the
+demo-clips rig (a probe in the scratchpad, not kept): Ctrl+B in the text
+bold with the side bar shut, and in the margin the side bar opened; the
+menu's Heading 2 on an empty line under a paragraph left the blank line and
+wrote `## ` on the next. Trap met on the way: the rig's eased pointer
+crossed the editor tab and VS Code's own hover (monaco-hover) came down
+over the toolbar and took the click; `warp` straight to the button does
+not raise it.
 
 ## Pending
 
