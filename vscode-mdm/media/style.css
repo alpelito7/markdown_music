@@ -811,19 +811,30 @@ body {
    that box. With margins here every line below a heading drifted from the
    map by the margins above it, and a click on the lower half of a paragraph
    landed on the line after it. */
+/* The air above a heading is its first line's and the rule under it its
+   last line's: a setext heading written over several lines is one heading
+   (mdm-h-first, mdm-h-last from buildDecorations; an ATX heading is both). */
 #app .cm-line.mdm-h {
   font-weight: 600;
   line-height: 1.3;
+}
+#app .cm-line.mdm-h.mdm-h-first {
   padding-top: 0.6em;
 }
 #app .cm-line.mdm-h1 {
   font-size: 2em;
+}
+#app .cm-line.mdm-h1.mdm-h-first {
   padding-top: 0.4em;
+}
+#app .cm-line.mdm-h1.mdm-h-last {
   padding-bottom: 0.2em;
   border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
 }
 #app .cm-line.mdm-h2 {
   font-size: 1.5em;
+}
+#app .cm-line.mdm-h2.mdm-h-last {
   padding-bottom: 0.15em;
   border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
 }
@@ -878,7 +889,8 @@ body {
    prose carries it. */
 #app .cm-line.mdm-blank {
   line-height: 1;
-  padding: 0;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 /* A mark that is showing (the caret is on its node): quiet, so the text
    keeps the eye. */
@@ -964,16 +976,56 @@ body {
 #app .mdm-link:hover {
   text-decoration: underline;
 }
-#app .mdm-bullet {
+/* ---------- Lists ----------
+
+   An item hangs under its text: the frame sets every line of it 1.5em in
+   (--mdm-inset, a level at a time), the first row comes back by the same
+   1.5em (text-indent) and the marker is drawn in that gap, a box of 1.5em
+   with the bullet, the number or the task's box right-aligned in it and a
+   space before the text. The page draws its lists on the same measures
+   (mdm-look.css, `li::before`), which is what makes them the editor's:
+   Bootstrap's 2rem and the browser's own marker were not. A block that
+   opens on the item's line (`- ***`) carries the marker in its wrapper's
+   gap instead (.mdm-li-marker--block). */
+#app .cm-line.mdm-li-first {
+  text-indent: -1.5em;
+}
+#app .mdm-li-marker {
   display: inline-block;
-  width: 1em;
-  text-align: center;
+  width: 1.5em;
+  box-sizing: border-box;
+  text-indent: 0;
+  text-align: right;
+  white-space: pre;
+}
+#app .mdm-bullet {
+  color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
+}
+#app .mdm-li-number {
   color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
 }
 #app .mdm-task {
-  margin: 0 0.35em 0 0;
+  width: 13px;
+  height: 13px;
+  margin: 0;
   vertical-align: -2px;
   cursor: pointer;
+}
+/* The space between a task's box and its text, the 0.28em the page gives
+#app .mdm-li-gap {
+  display: inline-block;
+  width: 0.28em;
+  overflow: hidden;
+}
+#app .mdm-block-framed {
+  position: relative;
+}
+/* Placed against the wrapper's padding box, which starts after the inset
+   border: the gap is the 1.5em just before it. */
+#app .mdm-li-marker--block {
+  position: absolute;
+  top: 0;
+  left: -1.5em;
 }
 #app .mdm-hr {
   height: 0;
@@ -990,9 +1042,38 @@ body {
   cursor: pointer;
 }
 #app .cm-line.mdm-quote {
-  border-left: 3px solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
-  padding-left: 14px;
   color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
+}
+/* ---------- The frame a line stands in ----------
+
+   A line inside a quote or a callout, and a block drawn instead of its
+   source inside one (.mdm-block-framed, the wrapper the widget gets):
+   buildDecorations works out the levels around it, outermost first, and
+   writes them into two properties, the bars as one gradient and the inset
+   as a width, 17px a level (the 3px bar and 14 of air the quote has always
+   drawn). One gradient because a line is one element and a border draws one
+   bar, which is why three nested quotes used to draw as one. The inset is a
+   transparent border rather than padding, so that the padding a card, a
+   heading or a blank line has of its own is left alone; the gradient is
+   drawn from the border edge, where the bars are. */
+#app {
+  --mdm-quote-bar: color-mix(in srgb, var(--mdm-ink) 22%, transparent);
+}
+#app .mdm-framed {
+  border-left: var(--mdm-inset, 0px) solid transparent;
+  background-image: var(--mdm-bars, none);
+  background-origin: border-box;
+  background-clip: border-box;
+  background-repeat: no-repeat;
+}
+/* A card in a frame: its ground starts after the inset and the bars go on
+   over the inset, two layers where the card alone was a colour. */
+#app .cm-line.mdm-framed.mdm-code-line,
+#app .cm-line.mdm-framed.mdm-math-line {
+  background-color: transparent;
+  background-image: var(--mdm-bars, none), linear-gradient(var(--mdm-syn-card), var(--mdm-syn-card));
+  background-origin: border-box, padding-box;
+  background-clip: border-box, padding-box;
 }
 #app .cm-line.mdm-table-line,
 #app .cm-line.mdm-html-line {
@@ -1079,7 +1160,7 @@ body {
   font-size: 0.88em;
   line-height: 1.5;
   color: var(--mdm-syn-base);
-  background: var(--mdm-syn-card);
+  background-color: var(--mdm-syn-card);
   padding: 0 0.9em;
   /* A line of source keeps its line. The prose rewraps at the column because
      that is what prose does, and this is the other kind of text in the
@@ -1160,6 +1241,19 @@ body {
   display: block;
   height: 0;
   width: calc(var(--mdm-card-chars, 0) * 1ch + 1.8em);
+}
+/* A fenced block with nothing in it: the card, one row tall, in the place
+   of its two fence lines (EmptyCardWidget), on the measures of a card's
+   line above, and positioned for its number in the margin. */
+#app .mdm-empty-card {
+  font-size: 0.88em;
+  line-height: 1.5;
+  min-height: 1.5em;
+  padding: 0.55em 0.9em;
+  background-color: var(--mdm-syn-card);
+  border-radius: 4px;
+  position: relative;
+  cursor: text;
 }
 #app .cm-line.mdm-code-first,
 #app .cm-line.mdm-math-first,
@@ -1786,24 +1880,31 @@ body {
    whole range sits on an accent bar with a light tint, per callout type, and
    the ::: fence lines are shown small and faint (still there, still
    editable) until the caret is on them. */
-#app .cm-line.mdm-co-line {
-  --mdm-co-color: #4c7bd0;
-  border-left: 3px solid var(--mdm-co-color);
-  padding-left: 14px;
+#app {
+  --mdm-co-note: #4c7bd0;
+  --mdm-co-tip: #3e9d63;
+  --mdm-co-warning: #cf9236;
+  --mdm-co-important: #c94f4f;
+  --mdm-co-caution: #b0682f;
+}
+/* The bar is the frame's (.mdm-framed above, one per level, in the colour
+   of its kind); the row keeps the tint of the innermost callout. */
+#app .mdm-co-line {
+  --mdm-co-color: var(--mdm-co-note);
   padding-right: 10px;
-  background: color-mix(in srgb, var(--mdm-co-color) 5%, transparent);
+  background-color: color-mix(in srgb, var(--mdm-co-color) 5%, transparent);
 }
-#app .cm-line.mdm-co--tip {
-  --mdm-co-color: #3e9d63;
+#app .mdm-co--tip {
+  --mdm-co-color: var(--mdm-co-tip);
 }
-#app .cm-line.mdm-co--warning {
-  --mdm-co-color: #cf9236;
+#app .mdm-co--warning {
+  --mdm-co-color: var(--mdm-co-warning);
 }
-#app .cm-line.mdm-co--important {
-  --mdm-co-color: #c94f4f;
+#app .mdm-co--important {
+  --mdm-co-color: var(--mdm-co-important);
 }
-#app .cm-line.mdm-co--caution {
-  --mdm-co-color: #b0682f;
+#app .mdm-co--caution {
+  --mdm-co-color: var(--mdm-co-caution);
 }
 #app .cm-line.mdm-co-first {
   padding-top: 0.4em;
@@ -1816,6 +1917,10 @@ body {
 #app .cm-line.mdm-co-fence {
   font-size: 0.72em;
   font-family: var(--vscode-editor-font-family, monospace);
+}
+/* The fading is the text's: on the row it took the bar and the number with
+   it (G096). */
+#app .mdm-co-fence-text {
   opacity: 0.5;
 }
 

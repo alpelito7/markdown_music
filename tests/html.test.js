@@ -2036,3 +2036,105 @@ test("the page leaves the air around a heading that the editor leaves, in either
     }
   }
 });
+
+// A list on the page is set on the editor's measures (mdm-look.css, Lists;
+// style.css, Lists): 1.5em of hanging indent a level, the marker in the gap
+// and the text starting after it. Read on both surfaces from the column's
+// left edge, the text of an item at three levels, the second row of an item
+// that wraps, a task's text and a numbered item's, and the box of the task.
+test("the page hangs a list under its text where the editor does, level by level", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const text =
+    "Intro.\n\n- level one bullet\n  1. level two number\n     - level three bullet with enough words to wrap onto a " +
+    "second row at the side-by-side width, hanging under its text and not under the first level\n- [ ] a task\n\n8. eight\n9. nine\n";
+  const NEEDLES = ["level one", "level two", "level three", "a task", "eight"];
+  const name = "lists-roman";
+  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+  await page.evaluate(() => document.fonts.ready);
+  const exported = await page.evaluate((needles) => {
+    const main = document.querySelector("main.content");
+    const left = main.getBoundingClientRect().left;
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+    const xOf = (needle) => {
+      for (const n of nodes) {
+        const i = n.textContent.indexOf(needle);
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(n, i);
+        range.setEnd(n, i + needle.length);
+        return Math.round(range.getBoundingClientRect().left - left);
+      }
+      return null;
+    };
+    const box = main.querySelector("li input[type=checkbox]");
+    // Where a wrapped row of the third level starts: the item's own left
+    // edge, since the marker stands outside it.
+    const third = main.querySelector("ul > li > ol > li > ul > li");
+    return {
+      xs: needles.map(xOf),
+      wrapped: third ? Math.round(third.getBoundingClientRect().left - left) : null,
+      box: box ? Math.round(box.getBoundingClientRect().left - left) : null,
+    };
+  }, NEEDLES);
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+
+  const h = await openEditor({ text, scores: 0 });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+    await h.page.evaluate(() => {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    });
+    await h.page.mouse.click(2, 2);
+    await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+    editor = await h.page.evaluate((needles) => {
+      const view = window.__mdm.view;
+      const left = view.contentDOM.getBoundingClientRect().left;
+      const doc = view.state.doc.toString();
+      const box = document.querySelector("#app input.mdm-task");
+      // The start of the second visual row of the third level's line: the
+      // first position whose box stands lower than the line's first one.
+      const line = view.state.doc.lineAt(doc.indexOf("level three"));
+      const top = view.coordsAtPos(line.from).top;
+      let wrapped = null;
+      for (let pos = line.from + 1; pos <= line.to && wrapped === null; pos++) {
+        const c = view.coordsAtPos(pos);
+        if (c && c.top > top + 4) wrapped = Math.round(c.left - left);
+      }
+      return {
+        xs: needles.map((needle) => Math.round(view.coordsAtPos(doc.indexOf(needle)).left - left)),
+        wrapped,
+        box: box ? Math.round(box.getBoundingClientRect().left - left) : null,
+      };
+    }, NEEDLES);
+  } finally {
+    await h.close();
+  }
+  NEEDLES.forEach((needle, i) => {
+    assert.ok(
+      Math.abs(exported.xs[i] - editor.xs[i]) <= 1,
+      needle + " starts " + exported.xs[i] + "px into the column on the page and " + editor.xs[i] + " in the editor"
+    );
+  });
+  assert.deepEqual(editor.xs, [24, 48, 72, 24, 24], "the editor's levels: " + JSON.stringify(editor.xs));
+  assert.equal(editor.wrapped, 72, "the editor hangs the wrapped row under the text");
+  assert.equal(exported.wrapped, editor.wrapped, "the page hangs it there too");
+  assert.ok(
+    Math.abs(exported.box - editor.box) <= 2,
+    "the task's box stands " + exported.box + "px into the column on the page and " + editor.box + " in the editor"
+  );
+});

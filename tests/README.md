@@ -2768,6 +2768,85 @@ to six, hashes hidden*, with the setext case still green, since its underline
 goes through `hideLines`. The `todo` cases are the record of what the branch
 owes and are not mutated until their fix lands.
 
+The frame a line stands in (P2 of the branch, 2026-09-16). A line inside a
+quote or a callout is drawn inside every level around it: `buildDecorations`
+gathers the levels as it enters the container nodes and writes them on the
+line as a gradient of bars (3 px a bar, 17 px a level) and an inset, a
+transparent border so the padding of a card or a heading in a frame stays
+its own; a block drawn instead of its source (a rule, an equation, a table,
+a score) takes the frame on a wrapper. With it: blank lines inside a
+container are the em-tall gap (`mdm-blank`), the rule carries the number of
+its line, the `>` of a quote inside a fence is hidden with the rest, and the
+fading of a callout fence is the text's and not the row's. Six mutations,
+all caught: **FR1** the quote adding no level -> *Q03*, *Q05*, *Q08* and the
+look's *a quote in a quote and a callout in a quote wear one bar per level,
+and a drawn block stands inside them*; **FR2** `framed` handing the block
+back bare -> *Q05* (the rule in the quote without the quote's roles) and the
+look test (the wrapper's inset, the rule's place); **FR3** the rule without
+its number -> *T01* and *Q05*; **FR4** the fence's fading mark not added ->
+the look test; **FR5** a blank line in a frame read with the prose's rule
+(so `>` alone is not blank) -> *Q03* and *Q05*; **FR6** the inset border
+dropped from `style.css` -> the look test. The page already sets a quote in
+a quote 17 px a level (Bootstrap's blockquote under mdm-look.css, measured
+at 17 and 34), and the list rules follow in the next round with a test on
+both surfaces; the page's callouts are Quarto's own, a header with an icon
+on a 5 px bar in a smaller face, which the editor's bar and tint do not
+match, and that difference stands until it is decided.
+
+Lists, the same day. An item hangs under its text: every list level sets
+its lines 1.5em in through the frame, the first row of an item comes back
+by the same 1.5em (`mdm-li-first`) and the marker is drawn in that gap as a
+box of 1.5em (`MarkerWidget`, in place of the marker as typed, its
+indentation and the space after it): a bullet, the number the list gives
+the item (its start and its place, not the digits typed), or a task's box
+alone, followed by a gap of a set width; the indentation a continuation
+line carries in the source is hidden, level by level; a block opening on
+the item's line (`- ***`, `- $$`) takes the marker into its wrapper's gap.
+The page draws its lists on the same measures (mdm-look.css, both copies):
+1.5em a level, the browser's marker off and a `li::before` box of 1.5em in
+its place, the `list-item` counter for the number (it follows Pandoc's
+`start`), and a task's box, bare, in a `<label>` or in a `<p>` as Pandoc
+writes it, pulled into the gap by its 13px and the 0.28em the editor's gap
+is. Six mutations, all caught: **LI1** the marker never drawn -> *L01*,
+*L02*, *L14*, *L15*, *TL01* and the look's *a list hangs under its text,
+level by level, with the marker drawn in the gap*; **LI2** the number
+taken from the digits typed -> *L02* and the look test; **LI3** the list
+adding no level to the frame -> every list case and the look test; **LI4**
+the continuation indentation left in the flow -> *L07* and *L15*; **LI5**
+`text-indent` back to 0 in `style.css` -> the look test; **LI6** the page's
+lists back at Bootstrap's 2rem in `_extensions/mdm/resources/mdm-look.css`
+-> `html.test.js`'s *the page hangs a list under its text where the editor
+does, level by level* (34 px against 24). Two differences stand: the
+editor draws the delimiter typed on an ordered item (`3)`) where Pandoc
+writes every list with a point; the fence opening on an item's line is
+answered below.
+
+The blocks read whole, the same day. Inside a list item or a quote Lezer
+gives a fence one `CodeText` per line, the container's indentation and `>`
+left out, and the editor read the first alone: a score in a list was
+engraved from its first line, Copy copied one line and a card's bottom edge
+landed on its second line. `fenceSource` joins the parts line by line, a
+line break for every line of the block Lezer gives no part for (a blank
+line in a quoted fence), and feeds the score, the card, Copy and the count
+of scores the export reads; `blockTex` gives KaTeX the content of a
+display block past the `>` and the item's indentation of every line. With
+them an empty fence is drawn as an empty card carrying its number
+(`EmptyCardWidget`), a setext heading of several lines puts its air above
+the first line and its rule under the last (`mdm-h-first`, `mdm-h-last`;
+an ATX heading is both), and a fence opening on an item's line, whose
+hidden first line took the marker with it, draws the marker in the gap
+beside the card's first line. Six mutations, all caught: **SC1** the
+source read from the first part again -> the look's *a score and a card
+inside a list or a quote are read whole: engraved, and copied without the
+marks* (no notes engraved, one line copied; the conformance rows cannot
+tell, a score row being ⟦score⟧ either way); **SC2** KaTeX handed the raw
+content -> *M10b*; **SC3** the empty fence hidden again -> *F06*; **SC4**
+`mdm-h-last` put on the first line -> *H09b* and the look's *a setext
+heading of two lines draws its air above the first line and its rule under
+the last*; **SC5** the floating marker not drawn -> *L14b*; **SC6** the
+h1's rule back on every line of the heading in `style.css` -> the setext
+look test.
+
 Links by definition (the parser, the same day). Lezer closes every `[...]`
 into a Link, so `[sic]`, `[Ctrl]`, `[^1]` and `[@key]` were blue links with
 their brackets hidden and `[Sonata [K. 331]](url)` was no link at all, the

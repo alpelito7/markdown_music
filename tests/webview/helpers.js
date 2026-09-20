@@ -572,6 +572,63 @@ function setSettingPosts(page) {
 // a rule ⟦hr⟧, and CodeMirror's zero-width widget buffers and the buttons
 // of a block's rail are left out. This is what the conformance tests
 // compare against the page, row for row.
+function rows(page) {
+  return page.evaluate(() => {
+    const out = [];
+    let cover = null; // the number a zero-height cover left for the block after it
+    const content = document.querySelector("#app .cm-content");
+    for (const el of content.children) {
+      const rect = el.getBoundingClientRect();
+      const line = el.classList.contains("cm-line");
+      if (!line && rect.height === 0) {
+        if (el.hasAttribute("data-mdm-line")) cover = el.getAttribute("data-mdm-line");
+        continue;
+      }
+      // A drawn block is the widget itself, so the row is wrapped for the
+      // walk below to find the widget as a child like any inline one.
+      const clone = document.createElement("div");
+      clone.appendChild(el.cloneNode(true));
+      clone.querySelectorAll(".cm-widgetBuffer, .mdm-chrome").forEach((x) => x.remove());
+      clone.querySelectorAll(".mdm-math").forEach((x) => {
+        const ann = x.querySelector("annotation");
+        // The tail a block draws under its equation (`$$ {#eq-mass}`) is
+        // text of the row, after the equation.
+        const tail = x.querySelector(".mdm-math-tail");
+        x.replaceWith("⟦math:" + (ann ? ann.textContent : x.textContent) + "⟧" + (tail ? tail.textContent : ""));
+      });
+      const boxes = Array.from(el.querySelectorAll("input.mdm-task"));
+      clone.querySelectorAll("input.mdm-task").forEach((x, i) => {
+        x.replaceWith(boxes[i] && boxes[i].checked ? "☑" : "☐");
+      });
+      clone.querySelectorAll("img.mdm-image").forEach((x) => {
+        x.replaceWith("⟦img:" + (x.getAttribute("alt") || "") + "⟧");
+      });
+      clone.querySelectorAll(".mdm-hr").forEach((x) => x.replaceWith("⟦hr⟧"));
+      clone.querySelectorAll(".mdm-score").forEach((x) => x.replaceWith("⟦score⟧"));
+      // A drawn block inside a quote or a callout is wrapped in its frame
+      // (mdm-block-framed): the row wears the wrapper's roles and the
+      // block's, and carries the number the block carries (a rule).
+      const inner = el.classList.contains("mdm-block-framed") ? el.lastElementChild : el;
+      const roles = Array.from(el.classList)
+        .concat(inner === el ? [] : Array.from(inner.classList))
+        .filter((c) => c.indexOf("mdm-") === 0)
+        .sort();
+      if (!line) {
+        // A drawn block: its kind is its class.
+        if (el.querySelector("code.language-abc")) roles.push("score");
+      }
+      out.push({
+        kind: line ? "line" : "block",
+        n: line ? el.getAttribute("data-mdm-line") : inner.getAttribute("data-mdm-line") || cover,
+        roles: roles.join(" "),
+        text: clone.textContent,
+        h: Math.round(rect.height),
+      });
+      if (!line) cover = null;
+    }
+    return out;
+  });
+}
 
 // Puppeteer counts two clicks less than ~500 ms apart at nearby points as a
 // double click, whatever they were meant as. Every click made through here

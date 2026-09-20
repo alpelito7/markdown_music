@@ -2977,6 +2977,339 @@
     if (from.note) paintInkAt(from.note, inkEndsAt);
   }
 
+  // ---- Exporting a score's audio ----
+  //
+  // What lands on disk is what the reader hears: the same tune, sounded with
+  // the same options the player mounts it with (MDM_AUDIO.synthOptions), and
+  // for a WAV the same rendering, one AudioBuffer primed note by note faster
+  // than real time. The bytes go to the host, which writes them beside the
+  // document; nothing here reaches the file system, and none of it needs
+  // Quarto, TeX or Chrome.
+  //
+  // MIDI and WAV are what the editor can write on its own. MP3 is put off: no
+  // browser encodes it, so it would mean either vendoring an encoder (LGPL,
+  // and the webview's CSP has no worker-src to run it off the main thread) or
+  // leaning on ffmpeg being installed, which nothing the reader can reach
+  // without an export is allowed to need.
+  const AUDIO_FORMATS = [
+    { to: "midi", label: "MIDI" },
+    { to: "wav", label: "WAV" },
+  ];
+
+  // How long a file may wait for the host to say it was written. The host
+  // answers each file before the next score is rendered, so this is only ever
+  // reached when a message is lost, and a run that hangs would hold the audio
+  // output and the host's lock for as long as the editor is open.
+  const AUDIO_ACK_MS = 60000;
+
+  // Exports in flight, which the output's idle rules read (restAudioWhenIdle,
+  // visibilitychange above): a suspended context never returns from the
+  // resume() prime() waits on.
+  let audioExports = 0;
+  // The runs this editor has open, by the id the host answers them with. There
+  // is normally one: the host turns away a second export of the same document
+  // and the run ends on its own answer. Keyed all the same, because the run
+  // that is answered second is not necessarily the run that was asked second,
+  // and a run whose answers went to another would wait out its own timeout.
+  const audioRuns = new Map();
+  let audioRunSeq = 0;
+
+  // Every score of the document, in the order they are written in, numbered
+  // from one. Read off the syntax tree and not off the widgets on screen:
+  // CodeMirror builds a widget for the viewport alone, and the numbering has
+  // to be the same whichever button asked for it, so a score below the fold
+  // counts. ensureSyntaxTree parses whatever has not been parsed yet and
+  // answers null if it could not reach the end inside the budget, which is the
+  // one case where the count would be short. Two seconds is the most the
+  // editor may stand still for a press: that is the parser running on this
+  // thread. A document it cannot read in that time is one the reader is asked
+  // to press again for, by which time the parse that goes on in the background
+  // has covered more of it.
+  //
+  // What the host calls a score is a little wider than this: hasScores in
+  // extension.js takes `.abc` anywhere in a brace, while the editor draws one
+  // only where the class comes first (isAbcInfo). The numbering follows the
+  // editor, since it is the editor's scores the reader is looking at.
+  function documentScores(state) {
+    const tree = CM.ensureSyntaxTree(state, state.doc.length, 2000);
+    if (!tree) return null;
+    const doc = state.doc;
+    const out = [];
+    tree.iterate({
+      enter: function (ref) {
+        if (ref.name !== "FencedCode") return;
+        const node = ref.node;
+        const info = node.getChild("CodeInfo");
+        if (!isAbcInfo(info ? doc.sliceString(info.from, info.to) : "")) return false;
+        out.push({
+          number: out.length + 1,
+          end: scoreEnd(doc, node, ref.to),
+          source: fenceSource(doc, node),
+        });
+        return false;
+      },
+    });
+    return out;
+  }
+
+  // Whether the document has no score in it at all, which is what greys the
+  // Audio rows of the export menu. The tree that is already there answers it
+  // for every document with a score on screen, and only one with none in
+  // sight is worth waiting on the parser for; 100 ms rather than the two
+  // seconds the export itself allows, because this runs on the press that
+  // opens a panel and not on the press that writes the files.
+  //
+  // An answer that cannot be reached in that time is "it has one", so the
+  // rows stay live: a row that cannot be pressed and does not say why is
+  // worse than a press the host answers by naming what a score is.
+  function scoreless(state) {
+    if (!state) return false;
+    if (anyScore(CM.syntaxTree(state), state.doc)) return false;
+    const tree = CM.ensureSyntaxTree(state, state.doc.length, 100);
+    return tree ? !anyScore(tree, state.doc) : false;
+  }
+
+  function anyScore(tree, doc) {
+    let seen = false;
+    tree.iterate({
+      enter: function (ref) {
+        if (seen) return false;
+        if (ref.name !== "FencedCode") return;
+        const info = ref.node.getChild("CodeInfo");
+        if (isAbcInfo(info ? doc.sliceString(info.from, info.to) : "")) seen = true;
+        return false;
+      },
+    });
+    return seen;
+  }
+
+  // The number of the score a rail button belongs to: the widget hangs on the
+  // end of its block, which is the position documentScores reports, and that
+  // holds for two scores written from the same source.
+  function scoreNumber(block) {
+    const scores = view ? documentScores(view.state) : null;
+    if (!scores) return 0;
+    const pos = blockPos(block);
+    const hit = scores.filter(function (score) {
+      return score.end === pos;
+    })[0];
+    return hit ? hit.number : 0;
+  }
+
+  // The bytes of one score, or why it has none. The tune is parsed and not
+  // engraved: what the synth reads is the tune data, and an engraving is a
+  // drawing of it that a hidden panel cannot measure anyway.
+  function scoreAudio(A, source, format) {
+    try {
+      return scoreBytes(A, source, format);
+    } catch (e) {
+      // Everything up to the synth is synchronous (the parse, the flattening,
+      // the MIDI), so a tune abcjs cannot read would otherwise throw out of
+      // the run and take the scores after it with it.
+      return Promise.resolve({ reason: "failed", detail: String((e && e.message) || e) });
+    }
+  }
+
+  function scoreBytes(A, source, format) {
+    const options = MDM_AUDIO.synthOptions(window.MDM_SOUNDFONT);
+    const tune = (A.parseOnly(source) || [])[0];
+    if (!tune) return Promise.resolve({ reason: "empty" });
+    const title = (tune.metaText && tune.metaText.title) || null;
+    const flattened = tune.setUpAudio(options);
+    // Nothing to play is not the same as nothing to last: a bar of rests has
+    // a duration and no note, and a silent file would be a poor answer.
+    if (!MDM_AUDIO.noteCount(flattened)) {
+      return Promise.resolve({ title: title, reason: "empty" });
+    }
+    if (format === "midi") {
+      return Promise.resolve({ title: title, bytes: MDM_AUDIO.midiBytes(A, tune, options) });
+    }
+    if (!A.synth || !A.synth.supportsAudio()) {
+      return Promise.resolve({ title: title, reason: "unsupported" });
+    }
+    // Asked before a note is fetched: a sample the extension does not carry
+    // leaves a rejected promise in abcjs's cache and prime() then throws it
+    // with the raw URL in the message, which says nothing to a musician.
+    const missing = MDM_AUDIO.unplayable(A, flattened);
+    if (missing.length) {
+      return Promise.resolve(Object.assign({ title: title }, missing[0]));
+    }
+    const synth = new A.synth.CreateSynth();
+    return synth
+      .init({
+        visualObj: tune,
+        options: options,
+        // What SynthController.go hands the synth, and what the tune is drawn
+        // and played at here. Left out, abcjs falls back to 180 of the tune's
+        // own beats, which is a compound meter's 6/8 sounded half again as
+        // fast as the player sounds it (measured).
+        millisecondsPerMeasure: tune.millisecondsPerMeasure(),
+      })
+      .then(function () {
+        return synth.prime();
+      })
+      .then(function () {
+        const buffer = synth.getAudioBuffer();
+        if (!buffer || !buffer.length) return { title: title, reason: "empty" };
+        const channels = [];
+        for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+          channels.push(buffer.getChannelData(channel));
+        }
+        const bytes = MDM_AUDIO.wavBytes(channels, buffer.sampleRate);
+        // The buffers are the biggest thing in the page (a three-minute tune
+        // is about 30MB of samples), and the run holds the next score right
+        // after this one.
+        synth.audioBuffers = [];
+        return { title: title, bytes: bytes };
+      })
+      .catch(function (e) {
+        return { title: title, reason: "failed", detail: String((e && e.message) || e) };
+      });
+  }
+
+  // A run is a conversation with the host, one score at a time: `start` says
+  // how many files to expect and is answered before a note is rendered, each
+  // file or skip is acknowledged before the next score is begun, so nothing
+  // is rendered for a host that is not writing it, and `done` always follows,
+  // from a finally, so a throw here cannot leave the host's progress
+  // notification up and its lock held.
+  function audioReply(run, message) {
+    return new Promise(function (resolve) {
+      let settled = false;
+      const timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        run.waiting = null;
+        resolve({ ok: false });
+      }, AUDIO_ACK_MS);
+      run.waiting = function (reply) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(reply);
+      };
+      vscode.postMessage(message);
+    });
+  }
+
+  function exportAudio(format, number) {
+    const known = AUDIO_FORMATS.some(function (entry) {
+      return entry.to === format;
+    });
+    if (!view || !known) return Promise.resolve();
+    const A = window.ABCJS;
+    if (!A) return Promise.resolve();
+    // Inside the click, before anything is awaited: a context made and
+    // resumed under a gesture is allowed to run whatever the autoplay policy
+    // says, and prime() ends by waiting on that resume. A MIDI touches none
+    // of this, and a MIDI export therefore opens no output at all.
+    if (format === "wav") {
+      makeAudioGraph();
+      if (A.synth) registerAudioGraph(A);
+      if (audioCtx && audioCtx.state !== "running") {
+        try {
+          audioCtx.resume();
+        } catch (e) {
+          // a context the browser has already taken away
+        }
+      }
+    }
+    const scores = documentScores(view.state);
+    const chosen = !scores
+      ? []
+      : number
+      ? scores.filter(function (score) {
+          return score.number === number;
+        })
+      : scores;
+    audioRunSeq++;
+    const run = { id: "r" + audioRunSeq, waiting: null, cancelled: false };
+    audioRuns.set(run.id, run);
+    audioExports++;
+    const skipped = [];
+    return audioReply(run, {
+      type: "exportAudio",
+      step: "start",
+      id: run.id,
+      format: format,
+      count: scores ? scores.length : 0,
+      total: chosen.length,
+      // The tree could not be read to the end in the time it was given, so
+      // the count above is not the document's and the host says so rather
+      // than writing a part of it.
+      unread: !scores,
+    }).then(function (reply) {
+      if (!reply || !reply.ok) return null;
+      // One score at a time, each one after a turn of the event loop so that
+      // the editor answers the keyboard between them. setTimeout and not
+      // requestAnimationFrame: a hidden panel runs no frames, and a reader
+      // who changes tab mid-export would leave the run standing there.
+      return chosen.reduce(function (queue, score) {
+        return queue.then(function () {
+          if (run.cancelled) return null;
+          return new Promise(function (resolve) {
+            setTimeout(resolve, 0);
+          })
+            .then(function () {
+              return scoreAudio(A, score.source, format);
+            })
+            .then(function (made) {
+              if (run.cancelled) return null;
+              if (!made.bytes) {
+                skipped.push(Object.assign({ number: score.number }, made));
+                return audioReply(run, {
+                  type: "exportAudio",
+                  step: "skip",
+                  id: run.id,
+                  number: score.number,
+                  title: made.title || null,
+                  reason: made.reason,
+                  program: made.program,
+                  pitch: made.pitch,
+                  detail: made.detail,
+                });
+              }
+              return audioReply(run, {
+                type: "exportAudio",
+                step: "file",
+                id: run.id,
+                number: score.number,
+                title: made.title || null,
+                bytes: made.bytes,
+              }).then(function (ack) {
+                // A host that could not write this one will not write the
+                // next either: it has said what is wrong and the run ends.
+                if (ack && ack.ok === false) run.cancelled = true;
+                return ack;
+              });
+            });
+        });
+      }, Promise.resolve());
+    })
+      .catch(function (e) {
+        run.failed = String((e && e.message) || e);
+      })
+      .then(function () {
+        vscode.postMessage({
+          type: "exportAudio",
+          step: "done",
+          id: run.id,
+          aborted: !!(run.cancelled || run.failed),
+        });
+        audioRuns.delete(run.id);
+        audioExports--;
+        // The output goes back to the rules it lives by, rather than being
+        // rested here come what may: a player still open keeps it, a panel
+        // that went out of sight while this ran lets it go, an editor still
+        // inside the minute after a player closed keeps its minute (and gets
+        // a new timer, since the one it had may have passed over this run),
+        // and an output nothing else is using is let go now.
+        if (audioExports || player) return;
+        if (document.visibilityState === "hidden" || !audioAwake) restAudio();
+        else restAudioWhenIdle();
+      });
+  }
+
   // ---------- Rendering: decorations over the syntax tree ----------
 
   // What shows where depends on two things: the Markdown structure, read from
@@ -3178,6 +3511,13 @@
       this.preview = !!preview;
       this.active = !!active;
       this.open = !!open;
+      this.frame = frame || null;
+      // What the closing line carries after its `$$` (`$$ {#eq-mass}`, `$$
+      // where *c* is the hypotenuse.`): the parser leaves it as a paragraph
+      // of its own on that line, the page runs it on after the equation, so
+      // the widget draws it under the equation, painted as a cell of a
+      // table is (G052). `key` is its source, for eq; `parts` its content.
+      this.tail = tail || null;
     }
     eq(other) {
       return (
@@ -3186,7 +3526,9 @@
         other.block === this.block &&
         other.preview === this.preview &&
         other.active === this.active &&
-        other.open === this.open
+        other.open === this.open &&
+        frameKey(other.frame) === frameKey(this.frame) &&
+        (other.tail ? other.tail.key : "") === (this.tail ? this.tail.key : "")
       );
     }
     className() {
@@ -3225,7 +3567,7 @@
     toDOM() {
       const el = document.createElement(this.block ? "div" : "span");
       this.paint(el);
-      return el;
+      return framed(el, this.frame);
     }
     // The preview is rebuilt on every keystroke as the source changes; painting
     // in place instead of from scratch keeps the same element, so its entrance
@@ -3244,7 +3586,7 @@
         this.block && from && from.block && !from.preview &&
         from.tex === this.tex && from.display === this.display
       ) {
-        const chrome = dom.querySelector(":scope > .mdm-chrome");
+        const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
         if (!chrome) return false;
         switchChrome(chrome, this);
         return true;
@@ -3281,18 +3623,24 @@
   // not every caret or every block a selection covers, so that one block at a
   // time is the caret's (holdsMainHead; style.css, `#app .mdm-chrome`).
   class ScoreWidget extends WidgetType {
-    constructor(source, active, open) {
+    constructor(source, active, open, frame) {
       super();
       this.source = source;
       this.active = !!active;
       this.open = !!open;
+      this.frame = frame || null;
     }
     eq(other) {
-      return other.source === this.source && other.active === this.active && other.open === this.open;
+      return (
+        other.source === this.source &&
+        other.active === this.active &&
+        other.open === this.open &&
+        frameKey(other.frame) === frameKey(this.frame)
+      );
     }
     updateDOM(dom, view, from) {
       if (!from || from.source !== this.source) return false;
-      const chrome = dom.querySelector(":scope > .mdm-chrome");
+      const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
       if (!chrome) return false;
       switchChrome(chrome, this);
       return true;
@@ -3320,7 +3668,7 @@
       code.className = "language-abc";
       block.appendChild(code);
       renderScore(code, this.source);
-      return block;
+      return framed(block, this.frame);
     }
     // The chrome and the player are theirs, and a click on the score itself
     // is answered by the editor's click handler (revealBlock), so CodeMirror
@@ -3459,20 +3807,52 @@
     }
   }
 
-  class RuleWidget extends WidgetType {
-    eq() {
-      return true;
+  // A fenced block with no body (three backticks, three backticks): both
+  // fence lines used to be hidden and nothing stood for the block, no card,
+  // no rail, no number (G035). It is drawn as an empty card in their place,
+  // carrying the number of its first line; a caret on either line opens it.
+  class EmptyCardWidget extends WidgetType {
+    constructor(n, frame) {
+      super();
+      this.n = n;
+      this.frame = frame || null;
+    }
+    eq(other) {
+      return other.n === this.n && frameKey(other.frame) === frameKey(this.frame);
     }
     toDOM() {
       const el = document.createElement("div");
-      el.className = "mdm-hr";
-      return el;
+      el.className = "mdm-empty-card";
+      el.setAttribute("data-mdm-line", String(this.n));
+      return framed(el, this.frame);
     }
     ignoreEvent() {
       return false;
     }
   }
-  const RULE = new RuleWidget();
+
+  // The rule carries the number of its line, the way a block cover does: the
+  // line is replaced whole, so the number decoration on it is never reached
+  // and the margin used to jump from 2 to 4 around a rule (G044).
+  class RuleWidget extends WidgetType {
+    constructor(n, frame) {
+      super();
+      this.n = n;
+      this.frame = frame || null;
+    }
+    eq(other) {
+      return other.n === this.n && frameKey(other.frame) === frameKey(this.frame);
+    }
+    toDOM() {
+      const el = document.createElement("div");
+      el.className = "mdm-hr";
+      el.setAttribute("data-mdm-line", String(this.n));
+      return framed(el, this.frame);
+    }
+    ignoreEvent() {
+      return false;
+    }
+  }
 
   class ImageWidget extends WidgetType {
     constructor(src, alt, width) {
@@ -3691,13 +4071,14 @@
   // while no caret is in them. Equal while the source is the same, so the
   // element survives carets going in and out of the document around it.
   class TableWidget extends WidgetType {
-    constructor(source, model) {
+    constructor(source, model, frame) {
       super();
       this.source = source;
       this.model = model;
+      this.frame = frame || null;
     }
     eq(other) {
-      return other.source === this.source;
+      return other.source === this.source && frameKey(other.frame) === frameKey(this.frame);
     }
     toDOM() {
       const model = this.model;
@@ -3732,7 +4113,7 @@
       });
       table.appendChild(body);
       wrap.appendChild(table);
-      return wrap;
+      return framed(wrap, this.frame);
     }
     // The click puts the caret at the source, which the editor's own handler
     // does (revealBlock); CodeMirror leaves the event alone.
@@ -3747,24 +4128,38 @@
   // in a callout, in a list and in a quote at the same time.
   function lineClassCollector(doc) {
     const lines = new Map(); // line number -> Set of classes
+    const marks = new Map(); // the same, for classes that leave `bare` alone
+    const styles = new Map(); // line number -> extra style declarations
     const widths = new Map(); // line number -> characters of its card's longest line
+    const addTo = function (map, from, to, cls) {
+      const first = doc.lineAt(from).number;
+      const last = doc.lineAt(Math.max(from, to)).number;
+      for (let n = first; n <= last; n++) {
+        let set = map.get(n);
+        if (!set) map.set(n, (set = new Set()));
+        cls.split(" ").forEach(function (c) {
+          if (c) set.add(c);
+        });
+      }
+    };
     return {
       // Whether a line has been given no class at all, which is what says it
       // is prose: every block of the document (a fence, the front matter, a
-      // table, a quote) classes the lines it covers.
+      // table) classes the lines it covers. A container (a quote, a list
+      // item, a callout) does not: its lines are prose in a frame, and a
+      // blank one among them is the em-tall gap a blank line is (mdm-blank),
+      // so containers class their lines through `mark` below.
       bare: function (n) {
         return !lines.has(n);
       },
       add: function (from, to, cls) {
-        const first = doc.lineAt(from).number;
-        const last = doc.lineAt(Math.max(from, to)).number;
-        for (let n = first; n <= last; n++) {
-          let set = lines.get(n);
-          if (!set) lines.set(n, (set = new Set()));
-          cls.split(" ").forEach(function (c) {
-            if (c) set.add(c);
-          });
-        }
+        addTo(lines, from, to, cls);
+      },
+      mark: function (from, to, cls) {
+        addTo(marks, from, to, cls);
+      },
+      style: function (n, css) {
+        styles.set(n, (styles.get(n) ? styles.get(n) + "; " : "") + css);
       },
       // The card a line belongs to, in characters of its longest line. A
       // card's lines keep their lines (style.css) and are therefore as wide
@@ -3792,10 +4187,28 @@
       },
       decorations: function () {
         const out = [];
+        const numbers = new Set();
         lines.forEach(function (set, n) {
-          const spec = { class: Array.from(set).join(" ") };
+          numbers.add(n);
+        });
+        marks.forEach(function (set, n) {
+          numbers.add(n);
+        });
+        styles.forEach(function (css, n) {
+          numbers.add(n);
+        });
+        numbers.forEach(function (n) {
+          const all = new Set(lines.get(n) || []);
+          (marks.get(n) || []).forEach(function (c) {
+            all.add(c);
+          });
+          const spec = {};
+          if (all.size) spec.class = Array.from(all).join(" ");
+          const style = [];
           const chars = widths.get(n);
-          if (chars) spec.attributes = { style: "--mdm-card-chars: " + chars };
+          if (chars) style.push("--mdm-card-chars: " + chars);
+          if (styles.has(n)) style.push(styles.get(n));
+          if (style.length) spec.attributes = { style: style.join("; ") };
           out.push(Decoration.line(spec).range(doc.line(n).from));
         });
         return out;
@@ -3806,6 +4219,52 @@
   // Which fence info strings are scores: ```abc and Pandoc's ```{.abc .play}.
   function isAbcInfo(info) {
     return /^(abc\b|\{\s*\.abc\b)/.test(info.trim());
+  }
+
+  // Where a fenced block ends: the closing fence when it has one, and the end
+  // of the last line the node covers when the document stops before it. It is
+  // the position a block widget hangs on, which is how a rail button and the
+  // export find the same score (ScoreWidget, documentScores).
+  function scoreEnd(doc, node, to) {
+    const marks = node.getChildren("CodeMark");
+    return marks.length > 1 ? doc.lineAt(marks[1].from).to : doc.lineAt(to).to;
+  }
+
+  // The body of a fenced block, its CodeText children as one range. At the
+  // top level Lezer gives one; inside a list item or a quote it gives one
+  // per line, the container's indentation and > marks left out, and the
+  // editor read the first alone: a score in a list was engraved from its
+  // first line, Copy copied one line, and a card's bottom edge landed on
+  // its second line (G034).
+  function fenceBody(node) {
+    const parts = node.getChildren("CodeText");
+    return parts.length ? { from: parts[0].from, to: parts[parts.length - 1].to } : null;
+  }
+  // The source of the block, line by line: the parts Lezer gives, and a
+  // line break for every line of the block it gives no part for (a blank
+  // line inside a quoted fence).
+  function fenceSource(doc, node) {
+    const parts = node.getChildren("CodeText");
+    if (!parts.length) return "";
+    const marks = node.getChildren("CodeMark");
+    const end = marks.length > 1 ? doc.lineAt(marks[1].from).number : doc.lineAt(node.to).number + 1;
+    let out = "";
+    let n = doc.lineAt(parts[0].from).number;
+    parts.forEach(function (part) {
+      const at = doc.lineAt(part.from).number;
+      while (n < at) {
+        out += "\n";
+        n++;
+      }
+      out += doc.sliceString(part.from, part.to);
+      const last = doc.lineAt(part.to).number;
+      n = doc.sliceString(part.to - 1, part.to) === "\n" ? last : last + 1;
+    });
+    while (n < end) {
+      out += "\n";
+      n++;
+    }
+    return out;
   }
 
   // The number of a source line, carried on the line itself rather than drawn
@@ -3946,10 +4405,23 @@
         if (name === "FencedCode") {
           const marks = node.getChildren("CodeMark");
           const info = node.getChild("CodeInfo");
-          const body = node.getChild("CodeText");
+          const body = fenceBody(node);
           const infoText = info ? text(info.from, info.to) : "";
-          const source = body ? text(body.from, body.to) : "";
+          const source = fenceSource(doc, node);
           const openLine = doc.lineAt(n.from);
+          // The > of a quote the fence stands in: Lezer hangs them under the
+          // fence, where the walk never goes (this branch returns false), so
+          // they were drawn on the card's lines (G033).
+          node.getChildren("QuoteMark").forEach(function (m) {
+            const line = doc.lineAt(m.from);
+            if (!touched(line.from, line.to)) {
+              const r = markWithSpace(m);
+              hide(r.from, r.to);
+            }
+          });
+          // The line the closing fence is on, which the decorations below hide
+          // and mark; where the block ENDS is scoreEnd, the one definition the
+          // export's count of the document's scores reads as well.
           const closeLine = marks.length > 1 ? doc.lineAt(marks[1].from) : null;
           const blockFrom = openLine.from;
           const blockTo = scoreEnd(doc, node, n.to);
@@ -3959,7 +4431,7 @@
           if (isAbcInfo(infoText)) {
             decos.push(
               Decoration.widget({
-                widget: new ScoreWidget(source, active, open),
+                widget: new ScoreWidget(source, active, open, frameOf(openLine.number)),
                 block: true,
                 side: 1,
               }).range(blockTo)
@@ -4014,6 +4486,8 @@
                 Decoration.mark({ class: "mdm-fence-info" }).range(info.from, info.to)
               );
             }
+          } else if (!body) {
+            cover(openLine.from, closeLine ? closeLine.to : openLine.to, new EmptyCardWidget(openLine.number + hidden, frameOf(openLine.number)));
           } else {
             hideLines(openLine.from, openLine.to);
             if (closeLine) hideLines(closeLine.from, closeLine.to);
@@ -4036,7 +4510,7 @@
 
         if (name === "BlockMath") {
           const content = node.getChild("BlockMathContent");
-          const tex = content ? text(content.from, content.to) : "";
+          const tex = content ? blockTex(content) : "";
           const blockFrom = doc.lineAt(n.from).from;
           const blockTo = doc.lineAt(n.to).to;
           const out = renderTex(tex, true);
@@ -4045,7 +4519,9 @@
           if (open || out.html) {
             decos.push(
               Decoration.widget({
-                widget: new MathWidget(tex, true, true, false, active, open),
+                widget: new MathWidget(
+                  tex, true, true, false, active, open, frameOf(doc.lineAt(blockFrom).number), tail
+                ),
                 block: true,
                 side: 1,
               }).range(blockTo)
@@ -4109,7 +4585,15 @@
           }
           marks.forEach(function (m) {
             const line = doc.lineAt(m.from);
-            if (!touched(line.from, line.to)) lines.add(m.from, m.from, "mdm-co-fence");
+            if (!touched(line.from, line.to)) {
+              lines.mark(m.from, m.from, "mdm-co-fence");
+              // The fading goes on the fence's text and not on the row: an
+              // opacity on the row faded its bar and its number with it,
+              // and the bar arrived in three bands (G096).
+              if (m.to > m.from) {
+                decos.push(Decoration.mark({ class: "mdm-co-fence-text" }).range(m.from, m.to));
+              }
+            }
           });
           return true;
         }
@@ -4145,7 +4629,7 @@
         }
 
         if (name === "Blockquote") {
-          lines.add(n.from, n.to, "mdm-quote");
+          frameLevel(n.from, n.to, { kind: "quote" });
           return true;
         }
 
@@ -4162,20 +4646,67 @@
         }
 
         if (name === "ListItem") {
-          lines.add(n.from, n.to, "mdm-li");
           const mark = node.getChild("ListMark");
-          if (mark) {
-            const line = doc.lineAt(mark.from);
-            const bullet = /^[-*+]$/.test(text(mark.from, mark.to));
-            if (bullet && !touched(line.from, line.to)) {
-              decos.push(Decoration.replace({ widget: BULLET }).range(mark.from, mark.to));
-            }
-            const task = node.getChild("Task");
-            const marker = task && task.getChild("TaskMarker");
-            if (marker && !touched(line.from, line.to)) {
-              const checked = /x/i.test(text(marker.from, marker.to));
-              decos.push(Decoration.replace({ widget: new CheckboxWidget(checked) }).range(marker.from, marker.to));
-            }
+          if (!mark) return true;
+          const line = doc.lineAt(mark.from);
+          const markText = text(mark.from, mark.to);
+          const ordered = node.parent.name === "OrderedList";
+          // The content column of the item: the marker and the spaces after
+          // it, one when there are five or more or none (CommonMark 5.2).
+          let after = 0;
+          while (mark.to + after < line.to && text(mark.to + after, mark.to + after + 1) === " ") after++;
+          if (after === 0 || after > 4) after = 1;
+          const col = mark.to - line.from + after;
+          // The item's own indentation: the spaces before its marker, up to
+          // the one a quote mark keeps for itself.
+          let from = mark.from;
+          while (
+            from > line.from &&
+            /[ \t]/.test(text(from - 1, from)) &&
+            !(from - 1 > line.from && text(from - 2, from - 1) === ">")
+          ) {
+            from--;
+          }
+          // The number the list gives the item: its start and its place.
+          let index = 0;
+          for (let s = node.prevSibling; s; s = s.prevSibling) {
+            if (s.name === "ListItem") index++;
+          }
+          const task = node.getChild("Task");
+          const box = task && task.getChild("TaskMarker");
+          let marker;
+          if (box) {
+            marker = { kind: "task", text: "", checked: /x/i.test(text(box.from, box.to)) };
+          } else if (ordered) {
+            const head = node.parent.firstChild && node.parent.firstChild.getChild("ListMark");
+            const start = head ? parseInt(text(head.from, head.to), 10) : 1;
+            marker = { kind: "number", text: String((isNaN(start) ? 1 : start) + index) + markText.slice(-1) };
+          } else {
+            marker = { kind: "bullet", text: "•" };
+          }
+          frameLevel(n.from, n.to, {
+            kind: "list",
+            col: col,
+            width: line.from + col - from,
+            first: line.number,
+            marker: marker,
+          });
+          if (!touched(line.from, line.to)) {
+            // The marker as typed, its indentation and the space after it
+            // (for a task, its box and the space after that), replaced by
+            // the drawn marker in the hanging gap; the line hangs its first
+            // row back by the gap (style.css, .mdm-li-first).
+            const to = box
+              ? box.to < line.to && text(box.to, box.to + 1) === " "
+                ? box.to + 1
+                : box.to
+              : line.from + col;
+            decos.push(
+              Decoration.replace({
+                widget: new MarkerWidget(marker.kind, marker.text, marker.checked),
+              }).range(from, to)
+            );
+            lines.mark(line.from, line.from, "mdm-li-first");
           }
           return true;
         }
@@ -4183,7 +4714,12 @@
         if (name === "HorizontalRule") {
           const line = doc.lineAt(n.from);
           if (!touched(line.from, line.to)) {
-            decos.push(Decoration.replace({ widget: RULE, block: true }).range(line.from, line.to));
+            decos.push(
+              Decoration.replace({
+                widget: new RuleWidget(line.number + hidden, frameOf(line.number)),
+                block: true,
+              }).range(line.from, line.to)
+            );
           } else {
             lines.add(n.from, n.to, "mdm-mark-line");
           }
@@ -4298,7 +4834,10 @@
     // what a block shows is the one above; the numbering only follows it.
     for (let n = 1; n <= doc.lines; n++) {
       const line = doc.line(n);
-      if (lines.bare(n) && /^\s*$/.test(line.text)) {
+      // Blank is spaces and tabs alone (CommonMark 2.1; a line of a no-break
+      // space is a paragraph), and inside a quote the > marks on their own.
+      const blank = frames.has(n) ? /^[ \t>]*$/ : /^[ \t]*$/;
+      if (lines.bare(n) && blank.test(line.text)) {
         lines.add(line.from, line.from, "mdm-blank");
       }
       decos.push(lineNumber(n + hidden).range(line.from));
@@ -5591,7 +6130,7 @@
     let node = tree.resolveInner(pos, 1);
     while (node && node.name !== "FencedCode") node = node.parent;
     if (!node) return null;
-    const body = node.getChild("CodeText");
+    const body = fenceBody(node);
     // The DOM lines of the block, for the pulse.
     const lines = [];
     if (body) {
@@ -5603,7 +6142,7 @@
         if (el) lines.push(el);
       }
     }
-    return { source: body ? view.state.sliceDoc(body.from, body.to) : "", lines: lines };
+    return { source: fenceSource(view.state.doc, node), lines: lines };
   }
 
   // ---- The rail under the pointer ----
@@ -5705,12 +6244,19 @@
       key: "mdm-open-rails",
       read: function () {
         const moves = [];
-        view.contentDOM.querySelectorAll(":scope > .mdm-score, :scope > .mdm-math--block").forEach(function (block) {
+        const blocks = view.contentDOM.querySelectorAll(
+          ":scope > .mdm-score, :scope > .mdm-math--block, " +
+            ":scope > .mdm-block-framed > .mdm-score, :scope > .mdm-block-framed > .mdm-math--block"
+        );
+        blocks.forEach(function (block) {
           const rail = block.querySelector(":scope > .mdm-chrome");
           if (!rail) return;
           const lineClass = block.classList.contains("mdm-score") ? "mdm-abc-line" : "mdm-math-line";
+          // The block's place among the lines is its wrapper's when it has
+          // one (a block in a quote).
+          const outer = block.parentElement.classList.contains("mdm-block-framed") ? block.parentElement : block;
           let first = null;
-          for (let el = block.previousElementSibling; el && el.classList.contains(lineClass); el = el.previousElementSibling) {
+          for (let el = outer.previousElementSibling; el && el.classList.contains(lineClass); el = el.previousElementSibling) {
             first = el;
           }
           const lift = first

@@ -4275,6 +4275,205 @@ const headingLines = (page) =>
     })
   );
 
+test("a quote in a quote and a callout in a quote wear one bar per level, and a drawn block stands inside them", { skip }, async () => {
+  // buildDecorations writes the frame of a line (its levels, outermost
+  // first) as one gradient of bars and an inset of 17 px a level, and a
+  // block drawn instead of its source takes the frame on a wrapper. Read
+  // against the column: the text of a line stands past its bars, a nested
+  // quote's second bar starts 17 px in, a callout's bar is in its colour
+  // beside the quote's, the number keeps its column, and a rule inside a
+  // quote is drawn from the inset and not from the column's edge. The
+  // fading of a callout fence is the text's, the row keeps its bar.
+  const text =
+    "> Level one\n>\n> > Level two\n> > ***\n\n::: {.callout-warning}\n> Quoted in a warning.\n:::\n\nAfter.\n";
+  const h = await open({ text, scores: 0 });
+  await h.page.evaluate(() => {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  });
+  await h.page.mouse.click(2, 2);
+  await new Promise((r) => setTimeout(r, 150));
+  const got = await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    const left = view.contentDOM.getBoundingClientRect().left;
+    const doc = view.state.doc.toString();
+    const x = (needle) => Math.round(view.coordsAtPos(doc.indexOf(needle)).left - left);
+    const lineOf = (needle) => {
+      const dom = view.domAtPos(doc.indexOf(needle)).node;
+      return (dom.nodeType === 1 ? dom : dom.parentElement).closest(".cm-line");
+    };
+    const two = lineOf("Level two");
+    const warn = lineOf("Quoted in a warning.");
+    const fence = lineOf("callout-warning");
+    const wrap = document.querySelector("#app .mdm-block-framed");
+    const rule = wrap && wrap.querySelector(".mdm-hr");
+    return {
+      one: x("Level one"),
+      two: x("Level two"),
+      warn: x("Quoted in a warning."),
+      twoBars: getComputedStyle(two).backgroundImage,
+      twoNumber: getComputedStyle(two, "::before").marginRight,
+      warnBars: getComputedStyle(warn).backgroundImage,
+      warnTint: getComputedStyle(warn).backgroundColor,
+      wrapInset: wrap ? getComputedStyle(wrap).borderLeftWidth : null,
+      ruleX: rule ? Math.round(rule.getBoundingClientRect().left - left) : null,
+      ruleNumber: rule ? rule.getAttribute("data-mdm-line") : null,
+      fenceRow: getComputedStyle(fence).opacity,
+      fenceText: getComputedStyle(fence.querySelector(".mdm-co-fence-text")).opacity,
+    };
+  });
+  assert.equal(got.one, 17, "one level in: " + JSON.stringify(got));
+  assert.equal(got.two, 34, "two levels in: " + JSON.stringify(got));
+  assert.equal(got.warn, 34, "a callout and a quote in: " + JSON.stringify(got));
+  // Two bars in the gradient of the nested line, one at 0 and one at 17,
+  // each 3 px wide: the stops the browser reports, in order (a stop given
+  // as a pair comes back as two).
+  const stops = (g) => (g.match(/(\d+)px/g) || []).map((v) => parseInt(v, 10));
+  assert.deepEqual(stops(got.twoBars), [0, 3, 3, 17, 17, 20, 20], "two bars: " + got.twoBars);
+  assert.equal(got.twoNumber, "48px", "the number's margin takes the inset back: " + got.twoNumber);
+  // The callout's bar in the warning's colour first, then the quote's bar.
+  assert.match(got.warnBars, /^linear-gradient\(to right, rgb\(207, 146, 54\) 0px, rgb\(207, 146, 54\) 3px/, "the warning's bar: " + got.warnBars);
+  assert.deepEqual(stops(got.warnBars), [0, 3, 3, 17, 17, 20, 20], "the quote's bar beside it: " + got.warnBars);
+  assert.notEqual(got.warnTint, "rgba(0, 0, 0, 0)", "the row keeps the callout's tint");
+  assert.equal(got.wrapInset, "34px", "the rule's wrapper is set in two levels");
+  assert.equal(got.ruleX, 34, "the rule is drawn from the inset");
+  assert.equal(got.ruleNumber, "4", "the rule carries its line's number");
+  assert.equal(got.fenceRow, "1", "the fence row itself is not faded");
+  assert.equal(got.fenceText, "0.5", "the fence text is");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a list hangs under its text, level by level, with the marker drawn in the gap", { skip }, async () => {
+  // Every level sets its lines 1.5em in (the frame's inset), the first row
+  // of an item comes back by 1.5em and the marker is drawn in that gap, a
+  // box of 1.5em ending where the text starts: a bullet, the number the
+  // list gives the item (its start and its place, not the digits typed),
+  // or a task's box alone. A row that wraps hangs under the text and not
+  // under the marker, and a block opening on the item's line takes the
+  // marker into its wrapper's gap.
+  // Two ordered lists with prose between them: a blank line alone does not
+  // end a list, and one numbered on through the blank would be right.
+  const text =
+    "- level one bullet\n  1. level two number\n     - level three bullet with enough words to wrap onto a second row " +
+    "of its own at this width, hanging under its text\n- [ ] a task\n\n8. eight\n9. nine\n10. ten\n\nProse.\n\n1. alpha\n1. beta\n1. gamma\n\n- ***\n";
+  const h = await open({ text, scores: 0 });
+  await h.page.setViewport({ width: 700, height: 900 });
+  await h.page.evaluate(() => {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  });
+  await h.page.mouse.click(2, 2);
+  await new Promise((r) => setTimeout(r, 200));
+  const got = await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    const left = view.contentDOM.getBoundingClientRect().left;
+    const doc = view.state.doc.toString();
+    const x = (needle) => Math.round(view.coordsAtPos(doc.indexOf(needle)).left - left);
+    // The start of the second visual row of the line holding `needle`: the
+    // first position whose box stands lower than the line's first one.
+    const secondRow = (needle) => {
+      const line = view.state.doc.lineAt(doc.indexOf(needle));
+      const top = view.coordsAtPos(line.from).top;
+      for (let pos = line.from + 1; pos <= line.to; pos++) {
+        const c = view.coordsAtPos(pos);
+        if (c && c.top > top + 4) return Math.round(c.left - left);
+      }
+      return null;
+    };
+    const markers = Array.from(document.querySelectorAll("#app .mdm-li-marker"));
+    const one = markers[0].getBoundingClientRect();
+    const task = document.querySelector("#app .mdm-li-marker.mdm-li-task input.mdm-task");
+    const wrap = document.querySelector("#app .mdm-block-framed");
+    return {
+      levels: ["level one", "level two", "level three", "a task", "eight", "ten", "beta"].map(x),
+      hanging: secondRow("level three"),
+      markerRight: Math.round(one.right - left),
+      markerWidth: Math.round(one.width),
+      markerTexts: markers.map((m) => m.textContent),
+      taskInGap: !!task,
+      blockMarker: wrap ? wrap.querySelector(":scope > .mdm-li-marker--block") !== null : null,
+      blockMarkerRight: wrap ? Math.round(wrap.querySelector(":scope > .mdm-li-marker--block").getBoundingClientRect().right - left) : null,
+      ruleX: wrap ? Math.round(wrap.querySelector(".mdm-hr").getBoundingClientRect().left - left) : null,
+    };
+  });
+  assert.deepEqual(got.levels, [24, 48, 72, 24, 24, 24, 24], "text set in 24 px a level: " + JSON.stringify(got));
+  assert.equal(got.hanging, 72, "the wrapped row hangs under the text: " + JSON.stringify(got));
+  assert.equal(got.markerRight, 24, "the marker box ends where the text starts");
+  assert.equal(got.markerWidth, 24, "the marker box is 1.5em");
+  assert.deepEqual(
+    got.markerTexts,
+    ["• ", "1. ", "• ", " ", "8. ", "9. ", "10. ", "1. ", "2. ", "3. ", "• "],
+    "the markers drawn: " + JSON.stringify(got.markerTexts)
+  );
+  assert.ok(got.taskInGap, "the task's box stands in the gap");
+  assert.equal(got.blockMarker, true, "a rule on the item's line takes the bullet into its wrapper");
+  assert.equal(got.blockMarkerRight, 24, "in the wrapper's gap");
+  assert.equal(got.ruleX, 24, "and the rule is drawn from the inset");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a score and a card inside a list or a quote are read whole: engraved, and copied without the marks", { skip }, async () => {
+  // Inside a container Lezer gives a fence one CodeText per line, and the
+  // editor read the first: a score in a list was engraved from its first
+  // line, so nothing was drawn, and Copy copied one line. The parts are
+  // joined now (fenceSource), a blank line of the block included.
+  const text =
+    "- A tune in a list:\n\n  ```abc\n  X:1\n  K:C\n  CDEF GABc|\n  ```\n\n> ```abc\n> X:2\n> K:G\n> GABc dedB|\n> ```\n\n" +
+    "> ```py\n> a = 1\n>\n> b = 2\n> ```\n";
+  const h = await open({ text, scores: 2, clipboard: true });
+  const notes = await h.page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-score")).map((s) => s.querySelectorAll(".abcjs-note").length)
+  );
+  assert.deepEqual(notes.map((n) => n > 0), [true, true], "both scores are engraved with notes: " + JSON.stringify(notes));
+  const sources = await h.page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-score")).map((s) => s.getAttribute("data-mdm-source"))
+  );
+  assert.deepEqual(sources, ["X:1\nK:C\nCDEF GABc|", "X:2\nK:G\nGABc dedB|"]);
+  // Copy on the quoted score, from its rail.
+  await caretInBlock(h.page, "#app .mdm-score", 1);
+  await sleep(500);
+  let button = await h.page.evaluate(() => {
+    const btn = document.querySelector("#app .mdm-score .mdm-chrome--active .mdm-copy");
+    const r = btn.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await h.page.mouse.click(button.x, button.y);
+  await sleep(200);
+  assert.equal(await h.page.evaluate(() => window.__copied[window.__copied.length - 1]), "X:2\nK:G\nGABc dedB|");
+  // And on the quoted card, whose blank line is kept.
+  await caretInBlock(h.page, "#app .cm-line.mdm-code-line:has(.mdm-chrome--code)", 0);
+  await sleep(500);
+  button = await h.page.evaluate(() => {
+    const btn = document.querySelector("#app .mdm-chrome--code.mdm-chrome--active .mdm-copy");
+    const r = btn.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await h.page.mouse.click(button.x, button.y);
+  await sleep(200);
+  assert.equal(await h.page.evaluate(() => window.__copied[window.__copied.length - 1]), "a = 1\n\nb = 2");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a setext heading of two lines draws its air above the first line and its rule under the last", { skip }, async () => {
+  const h = await open({ text: "First line\nsecond line\n===\n\nAfter.\n", scores: 0 });
+  const got = await h.page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll("#app .cm-line.mdm-h"));
+    return lines.map((l) => {
+      const cs = getComputedStyle(l);
+      return { pt: cs.paddingTop, pb: cs.paddingBottom, bb: cs.borderBottomWidth };
+    });
+  });
+  assert.equal(got.length, 2);
+  assert.notEqual(got[0].pt, "0px", "air above the first line");
+  assert.equal(got[0].bb, "0px", "no rule under the first line");
+  assert.equal(got[0].pb, "0px", "no air under the first line");
+  assert.equal(got[1].pt, "0px", "no air above the second line");
+  assert.equal(got[1].bb, "1px", "the rule under the last line");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a heading's line keeps its height, with the caret away and in it", { skip }, async () => {
   for (const face of ["roman", "sans"]) {
     const h = await open({ text: HEADINGS_DOC, scores: 0, seed: { settings: { textFont: face } } });

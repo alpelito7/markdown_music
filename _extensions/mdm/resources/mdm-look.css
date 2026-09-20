@@ -347,6 +347,62 @@ body blockquote.blockquote {
   margin-bottom: 1em;
   color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);
 }
+/* Lists on the editor's measures (style.css, Lists): 1.5em of hanging
+   indent a level, the marker drawn in the gap as a box of 1.5em with the
+   bullet or the number right-aligned in it and a space before the text.
+   The browser's own marker is turned off, since neither its gap nor its
+   box can be set to the editor's; the number is the list-item counter,
+   which follows the `start` Pandoc writes. A task's box, Pandoc's own
+   input, is pulled into the gap by the width of the box and the space. */
+body main.content ul,
+body main.content ol {
+  list-style: none;
+  padding-left: 1.5em;
+  margin-bottom: 1em;
+}
+body main.content li > ul,
+body main.content li > ol {
+  margin-bottom: 0;
+}
+body main.content li {
+  position: relative;
+}
+body main.content ul > li::before,
+body main.content ol > li::before {
+  position: absolute;
+  top: 0;
+  left: -1.5em;
+  width: 1.5em;
+  box-sizing: border-box;
+  text-align: right;
+  white-space: pre;
+  color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
+}
+body main.content ul > li::before {
+  content: "• ";
+}
+body main.content ol > li::before {
+  content: counter(list-item) ". ";
+}
+/* A task: Pandoc writes its box as the first thing in the item, bare in a
+   list of tasks alone (`ul.task-list`), inside a <label> in a list that
+   mixes tasks with other items, inside a <p> in a loose list. The box
+   stands in the gap alone, as the editor draws it, ending a space before
+   the text: pulled back by its own 13px and the space, and the bullet
+   left off. */
+body main.content li:has(> input[type="checkbox"]:first-child)::before,
+body main.content li:has(> label:first-child > input[type="checkbox"]:first-child)::before,
+body main.content li:has(> p:first-child > input[type="checkbox"]:first-child)::before {
+  content: none;
+}
+body main.content li > input[type="checkbox"]:first-child,
+body main.content li > label:first-child > input[type="checkbox"]:first-child,
+body main.content li > p:first-child > input[type="checkbox"]:first-child {
+  width: 13px;
+  height: 13px;
+  margin: 0 0.28em 0 calc(-13px - 0.28em);
+  vertical-align: -2px;
+}
 body hr {
   height: 0;
   margin: 0.6em 0;
