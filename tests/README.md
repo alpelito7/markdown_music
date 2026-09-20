@@ -3253,6 +3253,48 @@ followed from the editor opens an address outside and a file in VS Code*;
 **OL2** the fragment kept on the path -> the same; **OL3** the escapes
 kept -> the same; **OL4** the message unanswered -> the same.
 
+The outline and the search, the same day (P5). The panel opened at
+startup listed the headings of the first 3000 characters, CodeMirror's
+initial parse, and nothing refreshed it when the background parse landed
+(G111): while the panel is open and the parse is not done, the rest is
+parsed for the panel in slices of 40 ms between frames, the list drawn
+from the tree each slice reaches, which also takes it past the parser's
+own reach of the viewport and 100000 characters. Three mechanisms were
+written first, a refresh on every transaction the background parse lands,
+a forced slice inside every refresh and this loop, and none of the three
+could be seen to fail while the other two stood; the loop alone stays.
+The rows printed the heading's source, with the `#` runs stripped by a
+regex that took the sharp off `Sonata in F#` and the first line alone of
+a setext heading (G112, G113): a row is now the heading's inline content
+read as a table cell is, marks off, a link its label, an equation set by
+KaTeX, a setext heading whole with its line breaks as spaces, and an
+attribute block on the heading (`{#sec-x}`) left off, as Pandoc's table
+of contents leaves it; the tooltip is the plain text, an equation as its
+source. Three differences on the record: Pandoc's Markdown reads
+`## Sonata in F#` as "Sonata in F" and CommonMark keeps the sharp, which
+the editor follows and the export's copy will escape (P6, `withBreaks`);
+Pandoc reads a setext heading of two lines as a paragraph, and the editor
+lists it as the heading CommonMark makes of it; headings inside a quote or
+a list item are listed, as VS Code's outline lists them, where Pandoc's
+contents leave them out. Ctrl+F reached no handler while the document was
+unfocused, the state it opens in (G118): a document-level Ctrl+F opens the
+search panel, the document counted as entered ahead of it, since the field
+takes the focus inside the update that mounts the panel, where syncFocus
+cannot dispatch the effect; a match inside a hidden block then opens the
+block when it is the current one. That the hidden YAML header is not
+searched stays as it is: the search runs over the editor's text, and the
+header is the host's. Nine mutations of `main.js`, all caught: **OT1** the
+parse loop off -> *the outline lists every heading of a long document as
+the parse lands, with no caret move*; **OT2** the slice's tree not handed
+to the refresh -> the same; **OT3** the heading read as its source -> *an
+outline row reads as the editor draws the heading*; **OT4** the attribute
+block kept -> the same; **OT5** the setext line break kept -> the same;
+**OT6** the row drawn as text -> the same, by the equation and the marks;
+**OT7** an equation empty in the tooltip -> the same; **SR1** the
+document-level Ctrl+F off -> *Ctrl+F opens the search from an unfocused
+document, and a match inside a hidden block opens the block*; **SR2** the
+document not entered ahead of the panel -> the same, by the block.
+
 The dialect, second part (P6-b), the same day: the Pandoc syntax the
 export reads and the editor had no node for, in `pandoc.js`. Raw TeX
 (G013): a backslash before letters, with its brace and bracket groups, is
@@ -3465,6 +3507,50 @@ names on a selected word against a click of the button, and on MacIntel
 reads ⌘ and presses Meta+B. **KT1** the tips without the shortcut -> caught;
 **KT2** the platform test answering "not a Mac" always -> caught; **KT3**
 Inline code naming K -> caught.
+
+### The search panel takes the pointer (2026-09-19)
+
+A click on the search field (CodeMirror's panel, Ctrl+F) left the focus on
+the body: `deadMargin` in `main.js` takes a press inside the view and outside
+`.cm-content` as a press in the margin beside the text, and the panel is
+both. What was typed went nowhere and Escape could not close the panel. The
+panels are exempt now. *the search panel takes the pointer: a click on its
+field types there, and Escape or its button closes it*
+(`webview-editing.test.js`) clicks the field, the replace field, Replace all
+and the close button, and presses Escape from the field. **SP1** the
+`.cm-panels` exemption removed -> caught, the field does not take the focus.
+
+### The search as a row of the toolbar (2026-09-19)
+
+The owner chose variant C of `design-search.html`: the search is a row
+under the toolbar, as the player's is, built by `searchPanel` in `main.js`
+(CodeMirror's `createPanel`, `top: true`) on the query and the commands of
+`@codemirror/search`, which the bundle now exports (`SearchQuery`,
+`getSearchQuery`, `setSearchQuery`, `searchPanelOpen`, `findNext`,
+`findPrevious`, `selectMatches`, `replaceNext`, `replaceAll`; the bundle was
+rebuilt byte for byte first to check the build still reproduces). The
+controls keep CodeMirror's names, so the two tests above only moved from
+`.cm-search` to `.mdm-search`. *the search is a row under the toolbar that
+counts its matches and keeps its options on the disc*
+(`webview-editing.test.js`) reads where the row stands, that every control
+is a brass toolbar button, the count through Enter, Shift+Enter, the case
+and whole-word options and a search with no match. **SR1** the field not
+focused on mount -> caught (the first version had exactly this, and typing
+went into the document); **SR2** the panel at the foot -> caught, no top
+row; **SR3** the options never on the disc -> caught; **SR4** the count
+never finding its place -> caught.
+
+The theme menu then opened under the search row: CodeMirror's base theme
+stacks `.cm-panels` at 300, over the toolbar (2) that holds the drop-downs.
+The row is at 1, over the scroller's own layer at 0. *a drop-down of the
+toolbar opens over the search row, and the text scrolls under it* reads
+`elementFromPoint` where the menu and the row overlap and over text scrolled
+under the row. **SR5** the rule removed -> caught, the field over the menu;
+**SR6** the row at -1 -> caught, the text over the row.
+The focused field's ring went from 2px (its border and a 1px box-shadow)
+to its 1px border alone, at the owner's asking; the same test reads the
+width, the brass and that there is no shadow. **SR7** the shadow back ->
+caught.
 
 ### The code block button and Ctrl+Shift+8 (2026-09-19)
 

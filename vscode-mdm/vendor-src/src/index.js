@@ -21,7 +21,8 @@ export {
 export {
   searchKeymap, selectNextOccurrence, selectSelectionMatches,
   highlightSelectionMatches, search, openSearchPanel, closeSearchPanel,
-  SearchCursor,
+  SearchCursor, SearchQuery, getSearchQuery, setSearchQuery, searchPanelOpen,
+  findNext, findPrevious, selectMatches, replaceNext, replaceAll,
 } from "@codemirror/search";
 export {
   syntaxTree, ensureSyntaxTree, syntaxTreeAvailable, HighlightStyle,

@@ -850,6 +850,110 @@ body {
   fill: currentColor;
   stroke-width: 0;
 }
+/* ---------- The search panel (Ctrl+F) ----------
+
+   A row under the toolbar, as the player's row is (searchPanel in main.js;
+   design-search.html, variant C). CodeMirror puts its panels in a strip of
+   its own over the scroller and paints that strip #f5f5f5 or #333338 from
+   its base theme, whatever the side: the page's ground and the toolbar's
+   rule instead, so the row reads as one more row of the bar. */
+#app .cm-panels {
+  background: var(--mdm-syn-page);
+  color: var(--mdm-ink);
+  /* Under the toolbar and its drop-downs (z-index 2 on .mdm-toolbar, which
+     holds them): CodeMirror's base theme puts its panels at 300, and the
+     theme menu opened under the search row. Over the scroller still, which
+     is a layer of its own at 0 and holds every block's buttons, so the text
+     scrolls under the row and not over it. */
+  z-index: 1;
+}
+#app .cm-panels-top {
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
+}
+#app .mdm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 2px;
+  padding: 3px 8px;
+  font-family: var(--mdm-sans);
+  font-size: 13px;
+}
+/* The search and the replace keep together, so a narrow pane puts the
+   replace under the search rather than an arrow on a line of its own. */
+#app .mdm-search__group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+#app .mdm-search__field {
+  display: flex;
+  align-items: center;
+  width: 220px;
+  max-width: 100%;
+  height: 26px;
+  box-sizing: border-box;
+  padding-right: 2px;
+  margin-right: 2px;
+  border: 1px solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mdm-ink) 4%, var(--mdm-syn-page));
+}
+/* The field that holds the keyboard wears the brass, the one mark of focus
+   the chrome has: its own 1px border in the brass and nothing over it. A
+   second pixel of box-shadow drew a 2px ring that the owner found too heavy
+   (2026-09-19). */
+#app .mdm-search__field:focus-within {
+  border-color: var(--mdm-play-accent);
+}
+#app .mdm-search__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--mdm-ink);
+  font: inherit;
+}
+#app .mdm-search__input::placeholder {
+  color: color-mix(in srgb, var(--mdm-ink) 50%, transparent);
+}
+/* Aa, ab and .*: letters and not drawings, since that is what they are in
+   every editor, in the brass and at the weight of the glyphs. */
+#app .mdm-search .mdm-search__opt {
+  width: 24px;
+  height: 20px;
+  flex: none;
+  font: 600 12px var(--mdm-sans);
+}
+#app .mdm-search__count {
+  min-width: 5.5em;
+  padding: 0 6px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--mdm-ink) 75%, transparent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#app .mdm-search__close {
+  margin-left: auto;
+}
+#app .mdm-search__input::selection {
+  background: color-mix(in srgb, var(--mdm-play-accent) 35%, transparent);
+}
+/* The matches in the text, in the brass of the chrome and not CodeMirror's
+   yellow and orange: every match at the disc's weight, the current one
+   deeper and ringed, the way the sheet showed them. */
+#app .cm-searchMatch {
+  background: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
+  border-radius: 2px;
+}
+#app .cm-searchMatch.cm-searchMatch-selected {
+  background: color-mix(in srgb, var(--mdm-play-accent) 45%, transparent);
+  outline: 1px solid var(--mdm-play-accent);
+}
 /* Drop-down panels (export, theme, score fill). */
 #app .mdm-menu {
   display: none;

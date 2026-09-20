@@ -1799,6 +1799,282 @@ test("Up and Down step into a hidden block past a rule glued to it (G101)", { sk
   assert.ok(out.head >= first && out.head <= first + 9, "Down did not enter the table past the rule: " + out.head);
 });
 
+// ---- The outline and the search ----
+
+test("the outline lists every heading of a long document as the parse lands, with no caret move (G111)", { skip }, async () => {
+  // Opened with the panel shown, the list was filled once from the first
+  // 3000 characters parsed and stayed there until a keystroke.
+  const filler = "Some prose to fill the section with words enough to matter. ".repeat(6) + "\n\n";
+  let text = "";
+  for (let i = 1; i <= 80; i++) text += "## Section " + i + "\n\n" + filler;
+  let h = await open({ text, scores: 0, seed: { settings: { outline: "shown", frontMatter: "hidden" } } });
+  await sleep(600);
+  const rows = (page) => page.evaluate(() => document.querySelectorAll("#app .mdm-outline__row").length);
+  assert.equal(await rows(h.page), 80);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  // Past the parser's own reach, the viewport and 100000 characters after
+  // it: the rest is parsed for the panel between frames.
+  const big = "Words of prose that fill the section with text enough to count. ".repeat(16) + "\n\n";
+  text = "";
+  for (let i = 1; i <= 300; i++) text += "## Section " + i + "\n\n" + big;
+  assert.ok(text.length > 250000, "the document is not past the parser's reach: " + text.length);
+  h = await open({ text, scores: 0, seed: { settings: { outline: "shown", frontMatter: "hidden" } } });
+  await h.page.waitForFunction(() => document.querySelectorAll("#app .mdm-outline__row").length === 300, { timeout: 15000 });
+  assert.equal(await rows(h.page), 300);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("an outline row reads as the editor draws the heading: marks off, a link its label, maths set, a sharp kept, a setext heading whole, attributes off (G112, G113)", { skip }, async () => {
+  const text =
+    [
+      "## Sonata in F#",
+      "",
+      "## Title ##",
+      "",
+      "# A *heading* with `code`, $e^{i\\pi}+1=0$, a [link](https://commonmark.org)",
+      "",
+      "Theme and",
+      "variations",
+      "=========",
+      "",
+      "## Attributed {#sec-attr .unnumbered}",
+      "",
+      "> ## Quoted",
+      "",
+      "- ## In a list",
+      "",
+    ].join("\n") + "\n";
+  const h = await open({ text, scores: 0, seed: { settings: { outline: "shown", frontMatter: "hidden" } } });
+  await sleep(400);
+  const rows = await h.page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-outline__row")).map((r) => ({
+      text: r.textContent,
+      title: r.title,
+      katex: r.querySelectorAll(".katex").length,
+      marks: Array.from(r.querySelectorAll("em, code, .mdm-link")).map((e) => e.tagName.toLowerCase()),
+    }))
+  );
+  assert.deepEqual(
+    rows.map((r) => r.title),
+    [
+      "Sonata in F#",
+      "Title",
+      "A heading with code, $e^{i\\pi}+1=0$, a link",
+      "Theme and variations",
+      "Attributed",
+      "Quoted",
+      "In a list",
+    ]
+  );
+  assert.deepEqual(rows.map((r) => r.text).filter((t, i) => i !== 2), ["Sonata in F#", "Title", "Theme and variations", "Attributed", "Quoted", "In a list"]);
+  assert.ok(rows[2].text.startsWith("A heading with code, ") && rows[2].text.endsWith(", a link"), "the row shows source: " + rows[2].text);
+  assert.equal(rows[2].katex, 1, "the equation is not set in the row");
+  assert.deepEqual(rows[2].marks, ["em", "code", "span"]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("Ctrl+F opens the search from an unfocused document, and a match inside a hidden block opens the block (G118)", { skip }, async () => {
+  const text = "Prose with GABc in it.\n\n```text\nGABc again\n```\n\nAfter.\n";
+  const h = await open({ text, scores: 0 });
+  await sleep(200);
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), false, "the document opened focused");
+  await chord(h.page, ["Control"], "f");
+  await sleep(200);
+  assert.equal(await h.page.evaluate(() => !!document.querySelector("#app .mdm-search")), true, "no search panel opened");
+  assert.equal(
+    await h.page.evaluate(() => document.activeElement && document.activeElement.getAttribute("name") === "search"),
+    true,
+    "the search field did not take the focus"
+  );
+  await h.page.keyboard.type("GABc");
+  await h.page.keyboard.press("Enter");
+  await sleep(200);
+  assert.deepEqual(await selectionRanges(h.page), [[text.indexOf("GABc"), text.indexOf("GABc") + 4]]);
+  // The next match sits in a hidden code block: selected, it is in view,
+  // with the block open around it.
+  await h.page.keyboard.press("Enter");
+  await sleep(300);
+  const second = text.indexOf("GABc again");
+  assert.deepEqual(await selectionRanges(h.page), [[second, second + 4]]);
+  assert.ok(
+    (await h.page.evaluate(() => document.querySelectorAll("#app .cm-line.mdm-fence-line").length)) > 0,
+    "the code block did not open on its match"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The panel is inside the view and outside the text, and the handler that
+// takes a press in the margin beside the text (deadMargin in main.js) took a
+// press on it too: a click on the search field left the focus on the body,
+// so what was typed went nowhere and Escape could not close the panel. Each
+// control of the panel is pressed with the pointer here, as a reader does.
+test("the search panel takes the pointer: a click on its field types there, and Escape or its button closes it", { skip }, async () => {
+  const text = "Prose with a word in it, and another word.\n";
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, 2);
+  await chord(h.page, ["Control"], "f");
+  await sleep(200);
+  // Back into the text, and then to the field by the pointer.
+  await h.page.click("#app .cm-content");
+  await h.page.click('#app .mdm-search [name="search"]');
+  assert.equal(
+    await h.page.evaluate(() => document.activeElement && document.activeElement.getAttribute("name")),
+    "search",
+    "a click on the search field did not give it the focus"
+  );
+  await h.page.keyboard.type("word");
+  assert.equal(await h.page.$eval('#app .mdm-search [name="search"]', (f) => f.value), "word");
+  await h.page.click('#app .mdm-search [name="replace"]');
+  await h.page.keyboard.type("term");
+  assert.equal(await h.page.$eval('#app .mdm-search [name="replace"]', (f) => f.value), "term");
+  await h.page.click('#app .mdm-search [name="replaceAll"]');
+  assert.equal(await docText(h.page), text.replace(/word/g, "term"));
+  // Escape from the field closes the panel.
+  await h.page.click('#app .mdm-search [name="search"]');
+  await h.page.keyboard.press("Escape");
+  await sleep(100);
+  assert.equal(await h.page.evaluate(() => !!document.querySelector("#app .mdm-search")), false, "Escape left the panel open");
+  // And so does its own button.
+  await chord(h.page, ["Control"], "f");
+  await sleep(200);
+  await h.page.click('#app .mdm-search [name="close"]');
+  await sleep(100);
+  assert.equal(await h.page.evaluate(() => !!document.querySelector("#app .mdm-search")), false, "the close button left the panel open");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The search is a row under the toolbar, the way the player's row is
+// (searchPanel in main.js, design-search.html variant C): it stands between
+// the bar and the text rather than over the text, its controls are the
+// toolbar's brass buttons, an option that is on sits on the disc, and it
+// counts the matches as VS Code does ("2 of 5", "? of 5" off every match).
+test("the search is a row under the toolbar that counts its matches and keeps its options on the disc", { skip }, async () => {
+  const text = "A word, a Word, a WORD.\n\nMore words and a word.\n";
+  const h = await open({ text, scores: 0 });
+  // Ctrl+F over a selected word searches for it.
+  await setSelection(h.page, [{ anchor: 2, head: 6 }]);
+  await chord(h.page, ["Control"], "f");
+  await sleep(200);
+  const panel = () =>
+    h.page.evaluate(() => {
+      const p = document.querySelector("#app .mdm-search");
+      const bar = document.querySelector("#app .mdm-toolbar").getBoundingClientRect();
+      const row = document.querySelector("#app .cm-panels-top").getBoundingClientRect();
+      const first = document.querySelector("#app .cm-content .cm-line").getBoundingClientRect();
+      const ink = getComputedStyle(document.querySelector("#app .mdm-toolbar .mdm-btn")).color;
+      return {
+        value: p.querySelector('[name="search"]').value,
+        focus: document.activeElement && document.activeElement.getAttribute("name"),
+        count: p.querySelector(".mdm-search__count").textContent,
+        on: [...p.querySelectorAll(".mdm-btn--on")].map((b) => b.name),
+        gap: row.top - bar.bottom,
+        clear: first.top - row.bottom,
+        glyphs: [...p.querySelectorAll("button")].map((b) => [b.name, b.classList.contains("mdm-btn"), getComputedStyle(b).color === ink]),
+      };
+    });
+  let seen = await panel();
+  assert.equal(seen.value, "word");
+  assert.equal(seen.focus, "search");
+  // The field with the keyboard is ringed in the brass by its own 1px border
+  // and nothing over it: a box-shadow made it a 2px ring, which the owner
+  // found too heavy (2026-09-19).
+  const ring = await h.page.evaluate(() => {
+    const f = getComputedStyle(document.querySelector("#app .mdm-search__field--find"));
+    const brass = getComputedStyle(document.querySelector("#app")).getPropertyValue("--mdm-play-accent").trim();
+    const probe = document.createElement("span");
+    probe.style.color = brass;
+    document.body.appendChild(probe);
+    const want = getComputedStyle(probe).color;
+    probe.remove();
+    return { width: f.borderTopWidth, color: f.borderTopColor, want, shadow: f.boxShadow };
+  });
+  assert.equal(ring.width, "1px");
+  assert.equal(ring.color, ring.want, "the focused field is not ringed in the brass");
+  assert.equal(ring.shadow, "none", "the focused field has a second ring over its border");
+  assert.ok(Math.abs(seen.gap) <= 1, "the row does not stand under the toolbar: " + seen.gap);
+  assert.ok(seen.clear >= 0, "the row covers the text by " + -seen.clear + "px");
+  for (const [name, btn, brass] of seen.glyphs) {
+    assert.ok(btn && brass, "the " + name + " button is not one of the toolbar's brass buttons");
+  }
+  assert.deepEqual(
+    seen.glyphs.map((g) => g[0]),
+    ["case", "word", "re", "prev", "next", "select", "replace", "replaceAll", "close"]
+  );
+  // Five matches without the case, the selection on the first.
+  assert.equal(seen.count, "1 of 5");
+  await h.page.keyboard.press("Enter");
+  assert.equal((await panel()).count, "2 of 5");
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.press("Enter");
+  await h.page.keyboard.up("Shift");
+  assert.equal((await panel()).count, "1 of 5");
+  // The case on: the disc, and three matches.
+  await h.page.click('#app .mdm-search [name="case"]');
+  seen = await panel();
+  assert.deepEqual(seen.on, ["case"]);
+  assert.equal(seen.focus, "search", "a press on an option took the focus out of the field");
+  assert.equal(seen.count, "1 of 3");
+  // Whole words as well: "words" goes.
+  await h.page.click('#app .mdm-search [name="word"]');
+  assert.equal((await panel()).count, "1 of 2");
+  // Off every match, the place is unknown.
+  await setSelection(h.page, 0);
+  assert.equal((await panel()).count, "? of 2");
+  await h.page.click('#app .mdm-search [name="search"]');
+  await h.page.keyboard.press("End");
+  await h.page.keyboard.type("zz");
+  assert.equal((await panel()).count, "No results");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The row is under the toolbar's drop-downs and over the text. CodeMirror's
+// base theme stacks its panels at 300, and the theme menu, which hangs from
+// the toolbar (z-index 2), opened under the search row (seen 2026-09-19);
+// the row is at 1 now, still over the scroller, which is a layer of its own
+// at 0. Read with elementFromPoint where the two overlap, and over the text
+// scrolled under the row.
+test("a drop-down of the toolbar opens over the search row, and the text scrolls under it", { skip }, async () => {
+  const text = Array.from({ length: 80 }, (_, i) => "Line " + i + " with a word in it.").join("\n\n") + "\n";
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, 3);
+  await chord(h.page, ["Control"], "f");
+  await sleep(200);
+  await h.page.click('#app button[data-type="mdm-theme"]');
+  await sleep(200);
+  const hit = await h.page.evaluate(() => {
+    const row = document.querySelector("#app .cm-panels-top").getBoundingClientRect();
+    const menu = document.querySelector("#app .mdm-toolbar__item--open .mdm-menu").getBoundingClientRect();
+    const x = Math.max(row.left, menu.left) + 10;
+    const y = (Math.max(row.top, menu.top) + Math.min(row.bottom, menu.bottom)) / 2;
+    const el = document.elementFromPoint(x, y);
+    return { overlap: menu.top < row.bottom && menu.bottom > row.top, inMenu: !!(el && el.closest(".mdm-menu")), el: el && el.className };
+  });
+  assert.ok(hit.overlap, "the menu does not reach down over the search row, so this reads nothing");
+  assert.ok(hit.inMenu, "the search row is drawn over the theme menu: " + hit.el);
+  // A click on the text puts the menu away and leaves the search open.
+  await h.page.click("#app .cm-content");
+  await h.page.evaluate(() => {
+    window.__mdm.view.scrollDOM.scrollTop = 600;
+  });
+  await sleep(200);
+  const over = await h.page.evaluate(() => {
+    const row = document.querySelector("#app .cm-panels-top").getBoundingClientRect();
+    const content = document.querySelector("#app .cm-content").getBoundingClientRect();
+    const el = document.elementFromPoint(content.left + 20, (row.top + row.bottom) / 2);
+    return { under: content.top < row.top, inRow: !!(el && el.closest(".cm-panels")), el: el && el.className };
+  });
+  assert.ok(over.under, "the text was not scrolled under the row, so this reads nothing");
+  assert.ok(over.inRow, "the text is drawn over the search row: " + over.el);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---- Reveal semantics ----
 
 test("a display equation is a widget over hidden source until a caret enters it", { skip }, async () => {

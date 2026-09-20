@@ -4257,7 +4257,7 @@
   function partsText(parts) {
     return parts
       .map(function (p) {
-        return p.kind === "text" ? p.text : p.parts ? partsText(p.parts) : "";
+        return p.kind === "text" ? p.text : p.kind === "math" ? p.source : p.parts ? partsText(p.parts) : "";
       })
       .join("");
   }
@@ -7905,9 +7905,14 @@
   // The strip is everything .cm-content does not cover, and the stylesheet
   // makes that box the text column itself, so this boundary and the one the
   // pointer changes at are the same one.
+  //
+  // Except CodeMirror's panels (the search, Ctrl+F), which are inside the
+  // view and outside the text: taken for margin, a click on the search field
+  // left the focus on the body, so what was typed went nowhere and Escape
+  // could not close the panel.
   function deadMargin(e) {
     if (e.button !== 0 || !e.target || !e.target.closest || !view) return;
-    if (e.target.closest(".cm-content")) return;
+    if (e.target.closest(".cm-content, .cm-panels")) return;
     const box = view.scrollDOM.getBoundingClientRect();
     if (e.clientX - box.left >= view.scrollDOM.clientWidth) return;
     e.preventDefault();
@@ -7934,8 +7939,246 @@
     // Named here because the bar left the text and stopped being covered by
     // the .cm-content test; this listener is in the capture phase, so the bar
     // cannot answer for itself either.
-    if (e.target.closest(".cm-content, .mdm-audio")) return;
+    // The search panel works on the selection the way those buttons do: a
+    // press on its field or its arrows must not put away the block its
+    // current match opened.
+    if (e.target.closest(".cm-content, .mdm-audio, .mdm-btn--caret, .cm-panels")) return;
     dismissOpenBlock();
+  }
+
+  // ---------- The search panel (Ctrl+F) ----------
+  //
+  // A row under the toolbar, the way the player's row is (design-search.html,
+  // variant C, chosen 2026-09-19): the text moves down rather than being
+  // covered, the glyphs are the toolbar's brass buttons and an option that is
+  // on sits on the toolbar's disc. CodeMirror's own panel was 10px grey
+  // buttons, browser checkboxes and a close button 9px wide. Only the panel
+  // is ours: the query, the matches drawn in the text and every command are
+  // @codemirror/search's, so Ctrl+F, Ctrl+G, F3 and Escape keep working.
+  //
+  // The controls keep the names CodeMirror's panel gave them (search,
+  // replace, next, prev, select, replace, replaceAll, close), which is what
+  // the tests find them by.
+
+  // Fill only, on the 16-unit grid of the toolbar's icons.
+  const SEARCH_ICONS = {
+    prev: '<svg viewBox="0 0 16 16"><path d="M8 1.9 13 6.9l-1.2 1.2-3-3V14H7.2V5.1l-3 3L3 6.9Z"/></svg>',
+    next: '<svg viewBox="0 0 16 16"><path d="M8 14.1 3 9.1l1.2-1.2 3 3V2h1.6v8.9l3-3L13 9.1Z"/></svg>',
+    // Every match: three lines selected at once.
+    select:
+      '<svg viewBox="0 0 16 16"><rect x="1.5" y="2.6" width="13" height="2.2" rx=".6"/><rect x="1.5" y="6.9" width="13" height="2.2" rx=".6"/><rect x="1.5" y="11.2" width="13" height="2.2" rx=".6"/></svg>',
+    replace: '<svg viewBox="0 0 16 16"><path d="M1.5 7.2h9.4L8.3 4.6l1.2-1.2L14.1 8l-4.6 4.6-1.2-1.2 2.6-2.6H1.5Z"/></svg>',
+    replaceAll:
+      '<svg viewBox="0 0 16 16"><path d="M1.5 4.3h9.4L8.8 2.2 9.9 1.1l3.6 3.6-3.6 3.6-1.1-1.1 2.1-2.1H1.5Z"/><rect x="1.5" y="9.6" width="12" height="1.6" rx=".6"/><rect x="1.5" y="12.8" width="12" height="1.6" rx=".6"/></svg>',
+    close:
+      '<svg viewBox="0 0 16 16"><path d="M3.4 2.3 8 6.9l4.6-4.6 1.1 1.1L9.1 8l4.6 4.6-1.1 1.1L8 9.1l-4.6 4.6-1.1-1.1L6.9 8 2.3 3.4Z"/></svg>',
+  };
+  // How many matches are counted before the count says "+": the count is
+  // taken again on every keystroke, and a document is not searched past it.
+  const SEARCH_COUNT_CAP = 1000;
+
+  function searchPanel(view) {
+    let query = CM.getSearchQuery(view.state);
+    const dom = document.createElement("div");
+    dom.className = "mdm-search";
+
+    const input = function (name, label) {
+      const el = document.createElement("input");
+      el.type = "text";
+      el.name = name;
+      el.placeholder = label;
+      el.setAttribute("aria-label", label);
+      el.spellcheck = false;
+      el.autocomplete = "off";
+      el.className = "mdm-search__input";
+      return el;
+    };
+    const box = function (el) {
+      const wrap = document.createElement("span");
+      wrap.className = "mdm-search__field";
+      wrap.appendChild(el);
+      return wrap;
+    };
+    const button = function (name, tip, html, run, cls) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.name = name;
+      btn.className = "mdm-btn mdm-tip mdm-tip--s" + (cls ? " " + cls : "");
+      btn.setAttribute("aria-label", tip);
+      btn.innerHTML = html;
+      // The focus stays in the field, so a press on an arrow and then a key
+      // carry on the search that was being typed.
+      btn.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+      });
+      btn.addEventListener("click", function () {
+        run();
+      });
+      return btn;
+    };
+    const group = function (children) {
+      const g = document.createElement("span");
+      g.className = "mdm-search__group";
+      children.forEach(function (c) {
+        g.appendChild(c);
+      });
+      return g;
+    };
+
+    const search = input("search", "Find");
+    // What openSearchPanel focuses and selects.
+    search.setAttribute("main-field", "true");
+    const replace = input("replace", "Replace");
+
+    // The options, as the field's own buttons: on is the disc and nothing else.
+    const options = [
+      { name: "case", key: "caseSensitive", tip: "Match case", text: "Aa" },
+      { name: "word", key: "wholeWord", tip: "Match whole word", text: "ab" },
+      { name: "re", key: "regexp", tip: "Use regular expression", text: ".*" },
+    ].map(function (o) {
+      o.btn = button(
+        o.name,
+        o.tip,
+        o.text,
+        function () {
+          o.btn.classList.toggle("mdm-btn--on");
+          commit();
+        },
+        "mdm-search__opt"
+      );
+      return o;
+    });
+    const findBox = box(search);
+    findBox.classList.add("mdm-search__field--find");
+    options.forEach(function (o) {
+      findBox.appendChild(o.btn);
+    });
+
+    const count = document.createElement("span");
+    count.className = "mdm-search__count";
+    count.setAttribute("aria-live", "polite");
+
+    const act = function (command) {
+      return function () {
+        command(view);
+      };
+    };
+    const close = button("close", "Close (Escape)", SEARCH_ICONS.close, function () {
+      CM.closeSearchPanel(view);
+      view.focus();
+    });
+    close.classList.add("mdm-search__close");
+    const sep = document.createElement("span");
+    sep.className = "mdm-toolbar__sep";
+
+    dom.appendChild(
+      group([
+        findBox,
+        count,
+        button("prev", "Previous match (Shift+Enter)", SEARCH_ICONS.prev, act(CM.findPrevious)),
+        button("next", "Next match (Enter)", SEARCH_ICONS.next, act(CM.findNext)),
+        button("select", "Select all matches", SEARCH_ICONS.select, act(CM.selectMatches)),
+      ])
+    );
+    dom.appendChild(
+      group([
+        sep,
+        box(replace),
+        button("replace", "Replace", SEARCH_ICONS.replace, act(CM.replaceNext)),
+        button("replaceAll", "Replace all", SEARCH_ICONS.replaceAll, act(CM.replaceAll)),
+      ])
+    );
+    dom.appendChild(close);
+
+    // The fields and the options from a query, and a query from them.
+    const show = function (q) {
+      search.value = q.search;
+      replace.value = q.replace;
+      options.forEach(function (o) {
+        o.btn.classList.toggle("mdm-btn--on", !!q[o.key]);
+        o.btn.setAttribute("aria-pressed", q[o.key] ? "true" : "false");
+      });
+    };
+    const commit = function () {
+      const spec = { search: search.value, replace: replace.value };
+      options.forEach(function (o) {
+        spec[o.key] = o.btn.classList.contains("mdm-btn--on");
+        o.btn.setAttribute("aria-pressed", spec[o.key] ? "true" : "false");
+      });
+      const q = new CM.SearchQuery(spec);
+      if (q.eq(query)) return;
+      query = q;
+      view.dispatch({ effects: CM.setSearchQuery.of(q) });
+    };
+    // "3 of 12" with the selection on the third match, "? of 12" off every
+    // match, as VS Code counts.
+    const recount = function (state) {
+      let text = "";
+      if (query.search && !query.valid) text = "Invalid";
+      else if (query.search) {
+        const main = state.selection.main;
+        let n = 0;
+        let at = 0;
+        const cursor = query.getCursor(state);
+        for (let m = cursor.next(); !m.done; m = cursor.next()) {
+          n++;
+          if (m.value.from === main.from && m.value.to === main.to) at = n;
+          if (n >= SEARCH_COUNT_CAP) break;
+        }
+        const total = n >= SEARCH_COUNT_CAP ? n + "+" : String(n);
+        text = n === 0 ? "No results" : (at || "?") + " of " + total;
+      }
+      count.textContent = text;
+      dom.classList.toggle("mdm-search--none", text === "No results" || text === "Invalid");
+    };
+
+    search.addEventListener("input", commit);
+    replace.addEventListener("input", commit);
+    dom.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.altKey && !e.ctrlKey && !e.metaKey && (e.target === search || e.target === replace)) {
+        e.preventDefault();
+        if (e.target === replace) CM.replaceNext(view);
+        else if (e.shiftKey) CM.findPrevious(view);
+        else CM.findNext(view);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        CM.closeSearchPanel(view);
+        view.focus();
+      } else if (CM.runScopeHandlers(view, e, "search-panel")) {
+        // Ctrl+F selects the field again, Ctrl+G and F3 walk the matches.
+        e.preventDefault();
+      }
+    });
+
+    show(query);
+    return {
+      dom: dom,
+      top: true,
+      // The field takes the keyboard as the panel opens, with what it holds
+      // selected, which is what CodeMirror's own panel does on mount: the
+      // first opening goes through here and not through openSearchPanel's
+      // focus, which only reaches a panel already open.
+      mount: function () {
+        search.select();
+        recount(view.state);
+      },
+      update: function (u) {
+        // A query set from outside the panel (Ctrl+F over a selection) is
+        // shown in it; one set by the panel is already there.
+        let asked = false;
+        u.transactions.forEach(function (tr) {
+          tr.effects.forEach(function (e) {
+            if (!e.is(CM.setSearchQuery)) return;
+            asked = true;
+            if (!e.value.eq(query)) {
+              query = e.value;
+              show(query);
+            }
+          });
+        });
+        if (asked || u.docChanged || u.selectionSet) recount(u.state);
+      },
+    };
   }
 
   // What shows its source while a caret is in it: a fenced block, code or
@@ -8486,6 +8729,18 @@
         CM.history(),
         gestures.of(gestureExtensions()),
         CM.highlightSelectionMatches(),
+        // A paste that carries no text (a picture, or rich text alone) is
+        // not a paste of nothing: CodeMirror's own handler replaced the
+        // selection with the empty string it was given, and the emptied text
+        // went to the host (G082). Taken here, the selection stays as it was.
+        CM.EditorView.domEventHandlers({
+          paste: function (e) {
+            const data = e.clipboardData;
+            if (!data) return false;
+            return !data.getData("text/plain") && !data.getData("text/uri-list");
+          },
+        }),
+        CM.search({ top: true, createPanel: searchPanel }),
         CM.keymap.of(
           mdmKeymap.concat(
             // lang-markdown's own keymap is not installed by the language
@@ -8764,10 +9019,22 @@
   // The headings of the document, read from the Lezer tree so a `#` inside a
   // code block or an equation is not mistaken for one. Both Markdown heading
   // forms are covered: ATX (`## Title`) and Setext (a line underlined with
-  // `===` or `---`). Each entry carries the level, the text with its marks
-  // stripped, and the position to jump to (the start of the heading line).
-  function outlineHeadings(state) {
-    const tree = CM.syntaxTree(state);
+  // `===` or `---`). Each entry carries the level, the heading's inline
+  // content as parts (the same reading a table cell gets: the marks gone,
+  // a link its label, an equation set), its plain text for the tooltip, and
+  // the position to jump to (the start of the heading line). The tree may be
+  // one parsed further than the state's own (the panel asks for the whole
+  // document). What is read is what the editor draws (G112, G113): the
+  // closing `#` run is the one the parser marks, so `Sonata in F#` keeps its
+  // sharp, a setext heading of two lines is whole, and an attribute block
+  // written on the heading (`{#sec-x}`) is left off the row, as Pandoc's
+  // table of contents leaves it. Headings inside quotes and list items are
+  // listed, as VS Code's outline lists them; Pandoc's contents leave them
+  // out, a difference on the record in tests/README.md.
+  function outlineHeadings(state, tree) {
+    const text = function (from, to) {
+      return state.doc.sliceString(from, to);
+    };
     const out = [];
     const walked = tree || CM.syntaxTree(state);
     const refs = definitionsOf(state, walked);
@@ -8779,16 +9046,50 @@
         else if (node.name === "SetextHeading1") level = 1;
         else if (node.name === "SetextHeading2") level = 2;
         if (!level) return;
-        const line = state.doc.lineAt(node.from);
-        let text = state.doc
-          .sliceString(node.from, Math.min(node.to, line.to))
-          .replace(/^#{1,6}\s*/, "")
-          .replace(/\s*#+\s*$/, "")
-          .trim();
-        out.push({ level: level, pos: line.from, text: text || "(untitled)" });
+        const parts = cellParts(node.node, text, LINK_SKIP, smartMarks(node.node, headingTextEnd(node, text), text), refs);
+        // Line breaks of a setext heading read as spaces, and a trailing
+        // attribute block goes with the space before it.
+        parts.forEach(function (p) {
+          if (p.kind === "text") p.text = p.text.replace(/[\r\n]+/g, " ");
+        });
+        const last = parts.length ? parts[parts.length - 1] : null;
+        if (last && last.kind === "text") last.text = last.text.replace(/\s*\{[^{}]*\}\s*$/, "");
+        if (parts.length && parts[0].kind === "text") parts[0].text = parts[0].text.replace(/^\s+/, "");
+        if (last && last.kind === "text") last.text = last.text.replace(/\s+$/, "");
+        const plain = partsText(parts).trim();
+        out.push({
+          level: level,
+          pos: state.doc.lineAt(node.from).from,
+          parts: plain ? parts : [{ kind: "text", text: "(untitled)" }],
+          text: plain || "(untitled)",
+        });
+        return false;
       },
     });
     return out;
+  }
+
+  // The panel lists the whole document, and the parser stops short of it:
+  // CodeMirror parses the viewport and 100000 characters past it, and the
+  // panel opened at startup read the first 3000 alone, the rest arriving
+  // with the background parse that nothing listened to (G111). So while the
+  // panel is open and the parse is not done, the rest is parsed for the
+  // panel in slices of 40 ms between frames, and the list is drawn from the
+  // tree each slice reaches, until it reaches the end. One mechanism and
+  // not three: a refresh on every transaction the background parse lands,
+  // and a forced slice inside every refresh, both covered the same ground
+  // and neither could be seen to fail (tests/README.md).
+  let outlineParse = 0;
+  function parseForOutline() {
+    if (!view || !outlineOpen) return;
+    const state = view.state;
+    if (CM.syntaxTreeAvailable(state, state.doc.length)) return;
+    const seq = ++outlineParse;
+    setTimeout(function () {
+      if (seq !== outlineParse || !view || !outlineOpen) return;
+      const tree = CM.ensureSyntaxTree(view.state, view.state.doc.length, 40);
+      refreshOutline(tree || CM.syntaxTree(view.state));
+    }, 16);
   }
 
   // The outline is a panel down the left edge of the editor, the way the
@@ -8845,7 +9146,7 @@
         "mdm-outline__row mdm-outline__l" + h.level +
         (i === current ? " mdm-outline__row--current" : "");
       row.style.paddingLeft = 8 + (h.level - 1) * 14 + "px";
-      row.textContent = h.text;
+      paintParts(row, h.parts);
       row.title = h.text;
       row.addEventListener("click", function () {
         if (!view) return;
@@ -9405,6 +9706,18 @@
     document.addEventListener("click", closeMenus);
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") closeMenus();
+      // Ctrl+F with the focus anywhere in the page opens the search panel:
+      // the editor's own keymap hears the key only from a caret in the text,
+      // and the document opens unfocused (G118).
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f" && view && !view.hasFocus) {
+        e.preventDefault();
+        // The panel is inside the view, so the field it focuses makes the
+        // document somebody's, and a match inside a hidden block opens it.
+        // Said ahead of the opening: the field is focused inside the update
+        // that mounts the panel, where syncFocus cannot dispatch it.
+        if (!view.state.field(focusField, false)) view.dispatch({ effects: setFocused.of(true) });
+        CM.openSearchPanel(view);
+      }
     });
     return bar;
   }
