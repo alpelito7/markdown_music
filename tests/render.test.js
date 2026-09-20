@@ -759,6 +759,19 @@ test("the look rides on every PDF render, and reads the same metadata", () => {
     "the fifth level has no format under a standard class"
   );
   assert.ok(tex.includes("\\colorlet{mdmrule}{mdmink!14!mdmpage}"), "the hairline is missing");
+  // The highlight, the wash a `[word]{.mark}` is laid on: the editor's own
+  // value carried to paper (butter over the page, 34% on the light side),
+  // and the setter asked for rather than assumed, because Quarto's template
+  // only loads lua-ul when the document carries one of the marks that needs
+  // it. The optional-argument form of the setter stops the render with
+  // "Undefined color", so the colour is a named one (measured 2026-09-19).
+  assert.ok(tex.includes("\\definecolor{mdmbutter}{HTML}{F2C94C}"), "the highlight hue is missing");
+  assert.ok(tex.includes("\\colorlet{mdmhighlight}{mdmbutter!34!mdmpage}"),
+    "the highlight is not the light side's 34% of it");
+  assert.ok(
+    tex.includes("\\@ifundefined{LuaULSetHighLightColor}{}{\\LuaULSetHighLightColor{mdmhighlight}}"),
+    "the highlight colour is not handed to lua-ul, or is handed over unguarded"
+  );
   // The maths at the 1.21 KaTeX sets its own at, and code at the 0.88 the
   // stylesheet gives it. The face is NewCM Book, the correction for paper of
   // the same thickening KaTeX's fonts carry for the screen; Latin Modern

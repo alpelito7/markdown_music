@@ -37,6 +37,13 @@ local look_added = false
 -- code sits on the tint and the page takes the wash, on the dark one the code
 -- drops to the theme's own background and the page rises to the tint, and
 -- white is the light arrangement on a sheet of paper.
+-- `highlight` is the wash a `[word]{.mark}` is laid on, butter over whatever
+-- ground the side gives: the editor's own value (style.css, where the pick is
+-- written down), carried here so the page and the paper mark a word as the
+-- screen does. 34% on a light ground, 26% on the dark one, where the same
+-- strength glares. In TeX the mix is written against mdmpage, which is
+-- defined before this one.
+local HIGHLIGHT_HUE = "#f2c94c"
 local SIDES = {
   light = {
     ink = "#24292e",
@@ -49,6 +56,8 @@ local SIDES = {
     page = "var(--mdm-syn-wash)",
     card_tex = "mdmtint",
     page_tex = "mdmwash",
+    highlight = "color-mix(in srgb, " .. HIGHLIGHT_HUE .. " 34%, transparent)",
+    highlight_tex = "mdmbutter!34!mdmpage",
   },
   dark = {
     ink = "#d4d4d4",
@@ -67,6 +76,8 @@ local SIDES = {
     page = "var(--mdm-syn-tint)",
     card_tex = "mdmink!4!mdmtint",
     page_tex = "mdmtint",
+    highlight = "color-mix(in srgb, " .. HIGHLIGHT_HUE .. " 26%, transparent)",
+    highlight_tex = "mdmbutter!26!mdmpage",
   },
   white = {
     ink = "#24292e",
@@ -79,6 +90,8 @@ local SIDES = {
     page = "#fff",
     card_tex = "mdmtint",
     page_tex = "white",
+    highlight = "color-mix(in srgb, " .. HIGHLIGHT_HUE .. " 34%, transparent)",
+    highlight_tex = "mdmbutter!34!mdmpage",
   },
 }
 
@@ -243,6 +256,8 @@ local function look_css(l)
   put("svg-ink", side.svg_ink)
   put("syn-card", side.card)
   put("syn-page", side.page)
+  put("highlight", side.highlight)
+
   -- Gray staff lines are drawn in a gray of their own; in ink they are left
   -- to the colour the score is drawn in, which is what the editor does by
   -- letting its rule miss them.
@@ -439,6 +454,18 @@ local function look_tex(l)
   put("\\colorlet{mdmwash}{mdmsynbase!2!mdmsynbg}")
   put("\\colorlet{mdmcard}{" .. side.card_tex .. "}")
   put("\\colorlet{mdmpage}{" .. side.page_tex .. "}")
+  -- The highlight, and the one colour here that another package owns. Pandoc
+  -- writes `[word]{.mark}` as `\\hl`, which Quarto's template only has when
+  -- the document carries a strikeout, an underline or a highlight (the
+  -- `$if(strikeout)$` branch of pandoc.tex loads lua-ul under LuaTeX, soul
+  -- otherwise), so the setter is asked for and not assumed. It also wants a
+  -- colour with a name: `\\LuaULSetHighLightColor[HTML]{F2C94C}` stops the
+  -- render with "Undefined color" (measured, a real render, 2026-09-19).
+  color("mdmbutter", HIGHLIGHT_HUE)
+  put("\\colorlet{mdmhighlight}{" .. side.highlight_tex .. "}")
+  put("\\makeatletter")
+  put("\\@ifundefined{LuaULSetHighLightColor}{}{\\LuaULSetHighLightColor{mdmhighlight}}")
+  put("\\makeatother")
   put("\\colorlet{mdmrule}{mdmink!14!mdmpage}")
   put("\\colorlet{mdmquiet}{mdmink!72!mdmpage}")
 

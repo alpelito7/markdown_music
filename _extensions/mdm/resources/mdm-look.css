@@ -414,6 +414,19 @@ body img {
   max-width: 100%;
   border-radius: 3px;
 }
+/* A highlight, Pandoc's `[word]{.mark}`. Left to the browser this is pure
+   #ffff00 with black letters (Chrome, measured, in both colour schemes),
+   which is the one thing on the page nobody chose. The wash is the
+   editor's own, written here by look_css as --mdm-highlight (butter over
+   the document's ground, 34% on a light side and 26% on a dark one), and
+   the letters keep the page's ink rather than the black `<mark>` brings
+   with it. In the PDF the same wash is mdmhighlight, which lua-ul draws
+   \hl in (look_tex). */
+body mark {
+  background: var(--mdm-highlight);
+  color: inherit;
+  border-radius: 2px;
+}
 
 /* ---------- Code: the card and the ten slots ---------- */
 

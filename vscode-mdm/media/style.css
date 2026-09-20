@@ -1166,10 +1166,44 @@ body {
   color: color-mix(in srgb, var(--mdm-ink) 60%, transparent);
 }
 /* A bracketed span with the classes Pandoc turns into a look, drawn as the
+   page draws them: small caps by the face, a mark by a wash of the
+   document's own.
+
+   The wash is butter, B of four on design-highlight-colour.html and the
+   owner's pick, laid over whatever ground the theme gives: 34% of #f2c94c
+   on the light side, 26% on the dark, where the same strength would glare.
+   What it replaces is the browser's `Mark`, which Chrome draws as pure
+   #ffff00 with black letters in both colour schemes (measured), and which
+   on the dark theme cut a hole in the page. The ink is left alone now: the
+   words inside a highlight are the document's ink, not `MarkText`.
+
+   The ratio the wash has to be judged by is not the WCAG one, which for a
+   yellow says nothing: #ffff00 scores 1.04:1 against the light page, lower
+   than every candidate on the sheet. The measure used there is a distance
+   in CIE Lab, and this one sits at dE 23 from the light page and 29 from
+   the dark, against the 97 and 129 of the yellow it replaces.
+
+   The page carries the same value through `--mdm-highlight` (look_css in
+   mdm.lua, `mark` in mdm-look.css) and the PDF through `mdmhighlight`
+   (look_tex), so the three surfaces mark a word alike. */
 #app .mdm-smallcaps {
   font-variant: small-caps;
 }
+#app {
+  --mdm-highlight: color-mix(in srgb, #f2c94c 34%, transparent);
+}
+#app.mdm--dark {
+  --mdm-highlight: color-mix(in srgb, #f2c94c 26%, transparent);
+}
 #app .mdm-highlight {
+  background: var(--mdm-highlight);
+}
+/* The underline the page draws and this did not (measured on Pandoc 3.8.3:
+   `[word]{.underline}` comes out as `<u>word</u>`). The same declaration the
+   browser gives `<u>` draws the same line, so the two surfaces agree with
+   nothing added to mdm-look.css, where `<u>` needs no rule of its own. */
+#app .mdm-underline {
+  text-decoration: underline;
 }
 /* A citation or a cross-reference (PX04): the page resolves it into a
    reference or a link; here it is drawn in the link colour, as written. */

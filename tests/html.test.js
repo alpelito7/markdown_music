@@ -2307,3 +2307,74 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
   }
   assert.equal(exported.captionColor, editor.captionColor, "the caption's colour");
 });
+
+// A highlight is one colour on both surfaces. Both draw it as a wash with an
+// alpha over the ground rather than as a flat colour, so what is compared is
+// the pixel each would paint: the wash is filled over its own ground on a
+// canvas, which is the compositing the browser does, and the two results
+// have to be the same. The value is the owner's pick of 2026-09-19 (butter,
+// B on design-highlight-colour.html); before it both surfaces drew the
+// browser's `Mark`, pure #ffff00 with black letters, which is the one thing
+// on the page nobody had chosen. The words keep the document's ink, so that
+// is compared too.
+function paintedMark(root, sel) {
+  const el = root.querySelector(sel);
+  const wash = getComputedStyle(el).backgroundColor;
+  // The ground is the first ancestor that paints one, which is where the
+  // alpha lands.
+  let ground = "rgb(255, 255, 255)";
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    const bg = getComputedStyle(n).backgroundColor;
+    if (bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(bg)) { ground = bg; break; }
+  }
+  const c = document.createElement("canvas").getContext("2d");
+  c.fillStyle = ground;
+  c.fillRect(0, 0, 1, 1);
+  c.fillStyle = wash;
+  c.fillRect(0, 0, 1, 1);
+  const [r, g, b] = c.getImageData(0, 0, 1, 1).data;
+  return { painted: [r, g, b], ink: getComputedStyle(el).color, ground: ground };
+}
+
+test("the page marks a word in the same colour the editor marks it", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const text = "A [passage]{.mark} in the run of the words.\n";
+  const name = "highlight-colour";
+  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+  const exported = await page.evaluate(
+    (fn) => new Function("root", "sel", fn)(document.querySelector("main.content"), "mark"),
+    paintedMark.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
+  );
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+
+  const h = await openEditor({ text, scores: 0 });
+  let editor;
+  try {
+    editor = await h.page.evaluate(
+      (fn) => new Function("root", "sel", fn)(document.querySelector("#app .cm-content"), ".mdm-highlight"),
+      paintedMark.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
+    );
+  } finally {
+    await h.close();
+  }
+  for (let i = 0; i < 3; i++) {
+    assert.ok(Math.abs(exported.painted[i] - editor.painted[i]) <= 1,
+      "the mark is painted " + exported.painted + " on the page and " + editor.painted +
+      " in the editor (grounds " + exported.ground + " and " + editor.ground + ")");
+  }
+  // Not the browser's yellow on either, which is what this replaced.
+  assert.ok(exported.painted[2] > 120,
+    "the page is back on a pure yellow: " + exported.painted);
+  assert.equal(exported.ink, editor.ink, "the words in a mark are not the same ink on the two surfaces");
+});

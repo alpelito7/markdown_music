@@ -3700,6 +3700,47 @@ which holds the button down, reads the line, and takes the pointer off the
 button before letting go so no press is made. **BK13** the guard removed ->
 caught.
 
+### Underline and highlight, Pandoc's two bracketed spans (2026-09-19)
+
+The owner picked the two glyphs off `design-annotation-icons.html` (A, the U
+over its rule; C, the marker nib) and asked for the buttons. What they write
+is `[word]{.underline}` and `[word]{.mark}`, which the Pandoc 3.8.3 that the
+Quarto here ships turns into `<u>` and `<mark>`; `==word==` comes out as the
+four equals signs, so GitHub's spelling is nobody's here. Checked by hand
+before the code went in, not taken from the sheet:
+`echo 'a [x]{.underline} b and a [y]{.mark} c and ==z==' | pandoc -f markdown
+-t html` gives `a <u>x</u> b and a <mark>y</mark> c and ==z==`.
+
+The edit is not a pair of marks, so `toggleSpan` is its own shape: a class
+goes on or off the attribute of the span the range is already in, which
+makes the two buttons stack into `{.mark .underline}` instead of nesting a
+span in a span, and the span itself comes off with the last of its classes.
+Elsewhere the range is wrapped, the word at a bare caret as the marks do,
+each line's own text across a selection that spans lines, an empty span to
+type into where there is no word, and nothing at all where no mark belongs.
+
+One of the two was a difference and not a gap, which is why the button came
+with a fix: the page underlined `[word]{.underline}` and the editor drew it
+as plain text. One class in the `Span` branch and one rule in style.css;
+nothing in either copy of mdm-look.css, since the page's line is the one the
+browser gives `<u>` and the same declaration draws the same line here.
+
+Tests: *the underline and highlight buttons write Pandoc's bracketed spans,
+and take them off again*; *the two spans stack on one attribute instead of
+nesting, and either class comes off it whole*; AT01 in
+`webview-markdown.test.js` grew the span and now reads the drawn
+`text-decoration`, not just the class; and the bar's order holds the two new
+buttons. Round: **SP1** the span nested instead of stacked, **SP2** the
+class taken off with the space against the brace, **SP3** the last class
+leaving an empty span behind, **SP4** a selection across lines wrapped
+whole, **SP5** the highlight button writing the underline's class, **SP6**
+the editor not drawing the underline, **SP7** the rule dropped from the
+stylesheet, **SP8** the buttons off the bar: all 8 caught.
+
+Not done here, and left on the record by the sheet: superscript, subscript,
+small caps, and the Insert menu for equation, table, picture, footnote and
+rule. The two spans have no key; the letter row of D19 is spent.
+
 ### The underline button off again, and the list glyphs made one family (2026-09-19, later)
 
 Two decisions of the owner's, the same day as the two sections above.
@@ -3872,6 +3913,82 @@ Left on the record:
 - The score block still has no insert gesture, and is left out of the menu
   on purpose: the quarter note is spent twice on the bar already, so a
   ```abc row wants a round of its own.
+
+### The highlight's colour, the small caps glyph, the quote glyph, the order of the marks (2026-09-19, later still)
+
+Four of the owner's calls in one pass.
+
+**The highlight is the document's colour now.** It was the browser's
+`Mark`, which Chrome draws as pure `#ffff00` with black letters in both
+colour schemes (measured), and `lua-ul` draws Pandoc's `\hl` in its own
+`yellow`, so the three surfaces agreed on a colour nobody had chosen. The
+owner picked B on `design-highlight-colour.html`, butter over the ground the
+document has: 34% of `#f2c94c` on a light side, 26% on the dark, where the
+same strength glares. The words keep the document's ink.
+
+The measure that sheet is judged by is a distance in CIE Lab and not the
+WCAG ratio, and that is worth keeping: for a yellow the ratio says nothing,
+since `#ffff00` scores 1.04:1 against the light page, lower than any
+candidate, while sitting dE 97 away from it. The butter is dE 23.
+
+One value, three files, because the editor is the reference: `--mdm-highlight`
+in style.css, the same token written by `look_css` for the page (with a
+`mark` rule in both copies of mdm-look.css), and `mdmhighlight` in the
+preamble `look_tex` writes. The paper had a trap worth writing down: Quarto's
+template loads `lua-ul` only when the document carries a strikeout, an
+underline or a highlight (`$if(strikeout)$` in `pandoc.tex`), so the setter
+is asked for with `\@ifundefined` and not assumed, and it wants a colour with
+a name, since `\LuaULSetHighLightColor[HTML]{F2C94C}` stops the render with
+"Undefined color".
+
+**The small caps glyph stacks its pair.** The owner read the two T of two
+sizes as the heading button, which is two H of two sizes; the shape is the
+same and no letter escapes it (the two A and the two K were drawn and are
+that shape again). A baseline rule under the pair was tried first and read as
+the heading button too, which is the lesson: the rhythm is the thing and
+furniture does not change it. So the pair is stacked now, one letter over the
+other, an arrangement nothing else on the bar uses, and the test holds the
+arrangement on both buttons: small caps stacked, the heading in a row,
+neither drifting into the other's. Also drawn and not taken
+(`design-smallcaps-icon.html`): a cap crossed by the small-cap line, which
+reads as a strikethrough; the word abstracted as one tall stroke and three
+short ones, which reads as a bar chart; and `aA`, the lowercase and the small
+cap it becomes, the most legible of the lot and side by side again. The cost
+of the stack is honest and worth knowing: two letters in half the height each
+make the lightest glyph in that row.
+
+**The quote glyph joins the three beside it**: the task glyph's two bars at
+its rows, with the quote's rule as the marker in the column the check and the
+box stand in. One rule and not one a row, which is the owner's word: a quote's
+bar is a single line down the whole of it.
+
+**The word group is in the order of the marks**: bold, italic, strikethrough,
+then the superscript and subscript, then small caps and the highlight. The
+pairs of punctuation together, the two bracketed spans after them.
+
+Tests: *a highlight is the document's own wash, weaker on the dark side, and
+never black on the words* and *the small caps glyph stacks its pair, where the
+heading glyph sets its two in a row* in `webview-look.test.js`; the block-glyph
+test grew the quote and is now *the four block glyphs are one drawing*; *the
+page marks a word in the same colour the editor marks it* in `html.test.js`,
+which fills each surface's wash over its own ground on a canvas and compares
+the pixel, since both draw an alpha and neither a flat colour; and *the look
+rides on every PDF render* grew the three lines of the preamble. Round:
+**HL1** the editor back on `Mark`, **HL2** the dark side at the light
+strength, **HL3** the page's `mark` rule dropped, **HL4** `look_css` not
+writing the token, **HL5** the setter dropped from the preamble, **HL6** the
+setter handed the colour in the form that fails, **SC1** the small caps
+glyph set back in a row (against the rule it had then; the round was re-run
+against the stack as **SC2** the pair back in a row and **SC3** the stack
+with the small cap on top), **Q1** the quote's rule cut into one a row, **Q2** the quote drawing
+bars of its own, **OR1** the word group back to its old order: all caught, 12 with the two
+the stack added.
+
+One restore was refused and done by hand: another session wrote `mdm.lua`
+while HL4's test was running, so the guard saw the file change under the
+mutation and left it alone rather than clobber the other edit. The line went
+back on the content that was then on disk. The guard earned its keep; a
+mutation script that touches a shared tree wants one.
 
 ### The small caps glyph again, by its letters (2026-09-19, after all the above)
 
