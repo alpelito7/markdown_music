@@ -349,10 +349,188 @@ body {
   font-display: block;
   src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
 }
-/* The token and nothing else: --mdm-text is spent on .cm-scroller alone, so
-   this moves the document and leaves every piece of chrome where it was. */
+/* ---------- The same roman, for the words on a staff ----------
+
+   The four files again, under a name of their own, because the family above
+   does not mean the same thing on the two surfaces that have to draw a score
+   alike. Here it is the face as it comes and the compensation is a
+   `font-size-adjust` on .cm-content; on the exported page each of its faces
+   carries a `size-adjust` instead, 122.51% for the regular and the italic and
+   118.92% for the two bold (mdm-roman.css, which explains why: Chrome keeps
+   the descriptor when it writes a PDF and drops the property). A score that
+   named `"Latin Modern Roman"` would therefore be drawn 22.5% larger on the
+   page than it is here, 18.9% for anything bold, which is the difference the
+   export rule exists to forbid. This family is declared the same way in all
+   three places that engrave a score, so the three draw one document.
+
+   No `size-adjust` on it, and no size named anywhere: the words keep the sizes
+   abcjs gives them, which is the decision of 2026-09-10 and is not reopened
+   here. What changes is the face alone.
+
+   The three overrides are not decoration. abcjs reserves the vertical room for
+   every row of text by measuring the line box, not the ink: getTextSize puts a
+   real <text> in the drawing and asks it for getBBox. Latin Modern declares
+   1.13 + 0.29 em where Times declares 0.89 + 0.22, so the first score of
+   example.mdm grew from 353.39px tall to 391.39, a tenth taller, for words
+   that had not changed size.
+
+   89.11 and 21.63 are Times New Roman's own numbers (hhea ascender 1825/2048
+   and descender 443/2048, read off the Liberation Serif it resolves to here,
+   which is metric-compatible with it), and they are not rounded. They were,
+   to 89 and 22, because at 22 example.mdm's first score lands exactly on
+   abcjs's 353.39px; that pair was tuned on one score and is worse on every
+   other. Chrome rounds an SVG text's ascent and its descent to whole pixels
+   separately, and 22% of the 16px that a 12pt row is drawn at is 3.52, which
+   rounds up where Helvetica's 3.39 rounds down. Every row of chord symbols
+   and every annotation therefore stood a pixel taller than abcjs draws it,
+   and three pixels on the tune that carries every role at once (743.40
+   against abcjs's 740.40). At 21.63 that tune, a row of chords and a row of
+   annotations all land exactly. Measured over the seven scores of
+   example.mdm and score-annotations.mdm, the error is 2 pixels in total
+   where the rounded pair cost 5.
+
+   Those 2 are the floor, and no override reaches them, because Chrome takes
+   the box of an SVG text as the union of the declared box and the ink that
+   sits in it. example.mdm's first score is a pixel short at the row of its
+   part name, where Liberation Serif's "p" descends past its own declared
+   descent and Latin Modern's does not (23px against 22 at the 20px a 15pt
+   row is drawn at); its second is a pixel tall at its row of chords, where
+   "Cmaj7" has a "j" that does the same thing the other way round.
+
+   The third override is not Times', whose hhea line gap is 87/2048: it is
+   zero because a line gap has nothing to do with the box abcjs measures, and
+   it measured inert here (Chrome takes an SVG text's height as ascent plus
+   descent, and 4.248% changed no number above). It is written down so the
+   face's box is fully declared and not half inherited. */
+@font-face {
+  font-family: "Latin Modern Roman Score";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  ascent-override: 89.11%;
+  descent-override: 21.63%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  ascent-override: 89.11%;
+  descent-override: 21.63%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  ascent-override: 89.11%;
+  descent-override: 21.63%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Bold.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score";
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  ascent-override: 89.11%;
+  descent-override: 21.63%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
+}
+/* ---------- And the same roman again, at the size a sans was ----------
+
+   The third declaration of the same four files, for the one kind of text on
+   a staff that abcjs does not set in a Times: the annotation, the word a
+   player reads off the staff (cresc., dolce, poco a poco). abcjs gives it
+   Helvetica 12, and a face swapped for another at the same nominal size is
+   only the same size if the two have the same x-height, which is what a
+   reader sees as size. Helvetica's is 0.528 em and Latin Modern's is 0.431,
+   so the same "cresc." at the same 12 came out a fifth short and read as
+   fine print beside the notes. This is the same measurement, on the same two
+   numbers, that the prose of this editor is already corrected by further
+   down (`font-size-adjust: ex-height 0.528`) and that the exported page
+   carries as `size-adjust: 122.51%`; the annotation is prose on a staff and
+   is owed the same correction.
+
+   Why a family and not a larger size in the table of roles: abcjs reserves
+   the vertical room for a row of text from the box, so asking for 14.5pt
+   instead of 12 would have bought the right x-height and a taller score with
+   it (the tune with an annotation over and under it grew 131.24px to 143.24,
+   a tenth, for a word that was meant to keep its size). A `size-adjust`
+   scales the glyphs and the metrics together, and the two overrides are the
+   family's above divided by that same 122.51% so that the box comes back to
+   where it was: 16px of this face and 16px of the family above both measure
+   a 14px ascent and a 3px descent, which is what Helvetica measures at 16px
+   too. Verified at 16, 160 and 1600px, the two families' line boxes are the
+   same number.
+
+   The chord symbol is the other Helvetica role and it is NOT drawn in this
+   face, which is not an oversight: a chord is read off its capital and its
+   digits, not its lowercase, and there Latin Modern and Helvetica already
+   agree at the same size (cap 0.68 em against 0.69, digit 0.68 against 0.70,
+   and "Cmaj7" 46.22px wide against 46.23 at 12pt). Drawn in this face it
+   came out a fifth larger than abcjs draws it and re-spaced the system to
+   fit. */
+@font-face {
+  font-family: "Latin Modern Roman Score Wide";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  size-adjust: 122.51%;
+  ascent-override: 72.73%;
+  descent-override: 17.66%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score Wide";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  size-adjust: 122.51%;
+  ascent-override: 72.73%;
+  descent-override: 17.66%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score Wide";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  size-adjust: 122.51%;
+  ascent-override: 72.73%;
+  descent-override: 17.66%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-Bold.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman Score Wide";
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  size-adjust: 122.51%;
+  ascent-override: 72.73%;
+  descent-override: 17.66%;
+  line-gap-override: 0%;
+  src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
+}
+/* The tokens and nothing else: --mdm-text is spent on .cm-scroller alone, so
+   this moves the document and leaves every piece of chrome where it was.
+   The two score tokens are the second half of the same switch: the engraving
+   reads them (renderScore in main.js) and names them to abcjs, so the
+   families live in the sheet that declares them and no JavaScript spells a
+   family name out. Both are read, and the engraving keeps abcjs's own faces
+   unless it has both. */
 #app.mdm-text--roman {
   --mdm-text: "Latin Modern Roman", Georgia, "Times New Roman", serif;
+  --mdm-score-face: "Latin Modern Roman Score";
+  --mdm-score-face-wide: "Latin Modern Roman Score Wide";
 }
 /* And the size the roman is drawn at, which is not the size it is asked for.
    What a reader sees as the size of a text is its x-height, not its em, and
@@ -607,6 +785,15 @@ body {
   margin: 0 4px;
   background: color-mix(in srgb, var(--mdm-ink) 18%, transparent);
 }
+/* The end of a row of buttons (rowBreak in main.js): the toolbar wraps, so
+   a child taking the whole width sends the next button to a row of its own.
+   The player's row does the same with its own width; this one draws nothing
+   and takes no height, so the two rows stand as close as two wrapped rows
+   of buttons would. */
+#app .mdm-toolbar__break {
+  width: 100%;
+  height: 0;
+}
 /* Every glyph of the chrome is brass, at rest and under the pointer alike:
    the buttons of this bar, the round pair on a block, the transport of the
    player row. One colour says "this is a control", and the ground under it
@@ -714,6 +901,15 @@ body {
 }
 #app .mdm-menu__item:hover {
   background: color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+}
+/* The key a row shares with the keyboard, written where VS Code writes one
+   in its own menus: at the far edge, quieter than the name, and pushed there
+   by the row's flex so the names stay in one column however long a key is. */
+#app .mdm-menu__key {
+  margin-left: auto;
+  padding-left: 22px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font-size: 12px;
 }
 /* The export panel names its two branches, Document and Audio, and the Audio
    header carries one quiet line saying what a row under it writes: the rail

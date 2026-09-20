@@ -5610,9 +5610,198 @@
   // Every command maps over all the selection ranges, so with several carets
   // it does its thing at each of them.
 
-  // Wrap each range in a pair of marks, or unwrap it if it is already wrapped
-  // (bold, italic, inline code). A collapsed caret gets the pair around it and
-  // lands in the middle.
+  // ---- Inline marks ----
+
+  // The node each mark makes. Superscript and subscript are Pandoc's `x^2^`
+  // and `H~2~O`, which the editor's parser reads too (the Superscript and
+  // Subscript nodes it draws raised and lowered), and `$` is the inline
+  // equation: a pair of marks like the rest, so the Equation row of the
+  // Insert menu writes one and takes it off again.
+  const INLINE_KIND = {
+    "**": "StrongEmphasis",
+    "*": "Emphasis",
+    "`": "InlineCode",
+    "~~": "Strikethrough",
+    "^": "Superscript",
+    "~": "Subscript",
+    "$": "InlineMath",
+  };
+
+  // The marks whose content cannot go in as it stands. Pandoc's superscript
+  // and subscript break on a bare space (measured on the pandoc 3.8.3 the
+  // Quarto here ships: `x^a b^` prints the carets, and the editor's own
+  // parser breaks in the same place), so a space inside them is written as
+  // Pandoc's escaped space, `x^a\ b^`, which both surfaces set as a no-break
+  // space. A content that opens with a bracket is escaped as well: `x^[b]^`
+  // is an inline footnote to Pandoc and `x^\[b]^` the superscript that was
+  // asked for (measured the same day). The escapes come off with the marks.
+  // A tab inside the content is left as it is, and breaks the mark on both
+  // surfaces as a bare space would: Pandoc's escape is for the space, and a
+  // tab inside a word is not a line anybody has written.
+  const ESCAPED_CONTENT = { "^": true, "~": true };
+
+  // The escapes such a content needs, written into `out` in order: a
+  // backslash before every bare space in [from, to], and before a bracket at
+  // its head.
+  function escapeContent(state, from, to, out) {
+    const text = state.sliceDoc(from, to);
+    if (text.charAt(0) === "[") out.push({ from: from, insert: "\\" });
+    for (let i = 0; i < text.length; i++) {
+      if (text.charAt(i) === " " && text.charAt(i - 1) !== "\\") out.push({ from: from + i, insert: "\\" });
+    }
+  }
+
+  // And the same escapes taken off, for a content that stops being one.
+  function unescapeContent(state, from, to, out) {
+    const text = state.sliceDoc(from, to);
+    for (let i = 0; i + 1 < text.length; i++) {
+      if (text.charAt(i) !== "\\") continue;
+      const next = text.charAt(i + 1);
+      if (next !== " " && !(i === 0 && next === "[")) continue;
+      out.push({ from: from + i, to: from + i + 1 });
+      i++;
+    }
+  }
+
+  // The span of `kind` around a position, or null; both sides are asked,
+  // since a caret at the edge of the span's text is inside the span.
+  function spanAround(tree, pos, kind) {
+    const sides = [-1, 1];
+    for (let i = 0; i < sides.length; i++) {
+      for (let n = tree.resolveInner(pos, sides[i]); n; n = n.parent) {
+        if (n.name === kind) return n;
+      }
+    }
+    return null;
+  }
+
+  // The opening and closing marks of a span, or null when it has not both.
+  function spanMarks(span) {
+    const own =
+      {
+        InlineCode: "CodeMark",
+        Strikethrough: "StrikethroughMark",
+        Superscript: "SuperscriptMark",
+        Subscript: "SubscriptMark",
+        InlineMath: "InlineMathMark",
+      }[span.name] || "EmphasisMark";
+    const marks = span.getChildren(own);
+    return marks.length >= 2 ? { open: marks[0], close: marks[marks.length - 1] } : null;
+  }
+
+  // The head of a line's own text: past the marks of the quotes, the list
+  // marker and its task box, and the hashes of a heading.
+  const LINE_PREFIX = /^(?:[ \t]*>)*[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?(?:#{1,6}[ \t]+)?/;
+
+  // Whether a line is one no mark belongs on: code, an equation, raw HTML,
+  // the header, the delimiter row of a table (one TableDelimiter node over
+  // the line, where a pipe of a row is a TableDelimiter of one character).
+  const UNMARKABLE = new RegExp("^(?:FencedCode|CodeBlock|BlockMath|FrontMatter|" + RAW_HTML + ")$");
+  function unmarkableLine(tree, line) {
+    for (let n = tree.resolveInner(line.from, 1); n; n = n.parent) {
+      if (UNMARKABLE.test(n.name)) return true;
+      if (n.name === "TableDelimiter" && n.to - n.from > 1) return true;
+    }
+    return false;
+  }
+
+  // The part of [from, to] on one line that a mark can wrap: the line's own
+  // text, with the spaces at either end left outside the marks (a `**`
+  // after a space cannot close, CommonMark 6.2), or null.
+  function wrappablePart(state, tree, line, from, to) {
+    if (unmarkableLine(tree, line)) return null;
+    let a = Math.max(from, line.from + LINE_PREFIX.exec(line.text)[0].length);
+    let b = Math.min(to, line.to);
+    while (a < b && /[ \t]/.test(state.sliceDoc(a, a + 1))) a++;
+    while (b > a && /[ \t]/.test(state.sliceDoc(b - 1, b))) b--;
+    return a < b ? { from: a, to: b } : null;
+  }
+
+  // Wraps [from, to] in `mark` as one run: a run of the same kind the part
+  // starts or ends inside is extended over it (its mark inside the part
+  // goes, the one outside serves), and the runs inside the part lose their
+  // marks. A code span holding backticks gets a longer fence, and a space
+  // inside it when its text starts or ends with a backtick (CommonMark 6.1);
+  // a superscript or a subscript gets the escapes its content needs
+  // (ESCAPED_CONTENT).
+  //
+  // The changes are pushed in order, the ones inside the part between the
+  // two marks: a ChangeSet handed a change that starts before the one
+  // before it composes the two and reads the later one's positions in the
+  // document the earlier one has already changed (ChangeSet.of), which for
+  // an escape written beside an inserted mark is a character out of place.
+  function wrapPart(state, tree, mark, from, to, out) {
+    const kind = INLINE_KIND[mark];
+    let open = mark;
+    let close = mark;
+    // A tilde against the part would join the mark it writes into the `~~`
+    // of a strikethrough, which is another reading altogether: measured on
+    // pandoc 3.8.3, `~~~x~~~` is a subscript and the strikeout is gone. The
+    // part is left as it stands, and the button does nothing.
+    if (mark === "~" && (state.sliceDoc(Math.max(0, from - 1), from) === "~" || state.sliceDoc(to, Math.min(state.doc.length, to + 1)) === "~")) {
+      return;
+    }
+    if (mark === "`") {
+      const text = state.sliceDoc(from, to);
+      const runs = text.match(/`+/g);
+      let longest = 0;
+      if (runs) runs.forEach(function (r) { longest = Math.max(longest, r.length); });
+      open = close = "`".repeat(longest + 1);
+      if (text.startsWith("`") || text.endsWith("`")) {
+        open += " ";
+        close = " " + close;
+      }
+    }
+    let skipOpen = false;
+    let skipClose = false;
+    const inner = [];
+    tree.iterate({
+      from: from,
+      to: to,
+      enter: function (n) {
+        if (n.name !== kind) return;
+        const marks = spanMarks(n.node);
+        if (!marks) return false;
+        if (marks.open.to <= from && to <= marks.close.from) {
+          // Inside one run of the kind already: nothing to add.
+          skipOpen = skipClose = true;
+          return false;
+        }
+        if (marks.open.from >= from) inner.push({ from: marks.open.from, to: marks.open.to });
+        else skipOpen = true;
+        if (marks.close.to <= to) inner.push({ from: marks.close.from, to: marks.close.to });
+        else skipClose = true;
+        return false;
+      },
+    });
+    if (ESCAPED_CONTENT[mark]) escapeContent(state, from, to, inner);
+    inner.sort(function (a, b) {
+      return a.from - b.from;
+    });
+    if (!skipOpen) out.push({ from: from, insert: open });
+    inner.forEach(function (change) {
+      out.push(change);
+    });
+    if (!skipClose) out.push({ from: to, insert: close });
+  }
+
+  // Ctrl+B, Ctrl+I, Ctrl+E and their buttons, the strikethrough button with
+  // `~~` (Pandoc's strikeout, `<del>` on the page, 3.8.3), the superscript
+  // and subscript buttons with `^` and `~`, and the Equation row of the
+  // Insert menu with `$`: the marks on or off each
+  // range, read off the tree (G063, G075: the raw characters either side of
+  // the range were all that was looked at, so a caret inside bold wrote a
+  // new pair into it, Ctrl+I on bold took one star off each side, and a
+  // selection was wrapped whole across paragraphs, spaces and all). A caret
+  // inside a run of the kind takes the run's marks off, and at the end of
+  // the run's text steps out past its closing mark, so bold typed after
+  // Ctrl+B is closed by a second Ctrl+B with no empty pair left; a caret in
+  // the middle of a word wraps the word, and anywhere else writes an empty
+  // pair to type into, which the same key takes off again. A selection of
+  // the whole of a run's text takes the marks off, one inside the run is
+  // taken out of it (the run closed before it and opened again after it),
+  // and any other is wrapped line by line, each line's own text, merged
+  // with the runs it touches.
   function toggleInline(mark) {
     return function (v) {
       const state = v.state;
@@ -5623,9 +5812,50 @@
         state.changeByRange(function (range) {
           const from = range.from;
           const to = range.to;
-          const before = v.state.sliceDoc(Math.max(0, from - len), from);
-          const after = v.state.sliceDoc(to, Math.min(v.state.doc.length, to + len));
-          if (before === mark && after === mark) {
+          const span = spanAround(tree, from, kind);
+          const marks = span && spanMarks(span);
+          if (marks && from >= marks.open.to && to <= marks.close.from) {
+            if (range.empty && from === marks.close.from && from > marks.open.to) {
+              return { range: CM.EditorSelection.cursor(marks.close.to) };
+            }
+            const out = [];
+            if (range.empty || (from === marks.open.to && to === marks.close.from)) {
+              out.push({ from: marks.open.from, to: marks.open.to });
+              if (ESCAPED_CONTENT[mark]) unescapeContent(state, marks.open.to, marks.close.from, out);
+              out.push({ from: marks.close.from, to: marks.close.to });
+            } else {
+              // Out of the run: the spaces beside the selection stay outside
+              // the marks, and a side with nothing left loses its mark.
+              let a = from;
+              let b = to;
+              while (a > marks.open.to && /[ \t]/.test(state.sliceDoc(a - 1, a))) a--;
+              while (b < marks.close.from && /[ \t]/.test(state.sliceDoc(b, b + 1))) b++;
+              // An escaped space comes out with its backslash, which would
+              // otherwise be left against the mark written in its place and
+              // escape it (`x^a\^ b^`).
+              if (ESCAPED_CONTENT[mark] && a > marks.open.to && state.sliceDoc(a - 1, a) === "\\" && state.sliceDoc(a, a + 1) === " ") a--;
+              if (a === marks.open.to) out.push({ from: marks.open.from, to: marks.open.to });
+              else out.push({ from: a, insert: mark });
+              if (ESCAPED_CONTENT[mark]) unescapeContent(state, a, b, out);
+              if (b === marks.close.from) out.push({ from: marks.close.from, to: marks.close.to });
+              else out.push({ from: b, insert: mark });
+            }
+            const set = state.changes(out);
+            return { changes: set, range: range.map(set) };
+          }
+          // A bare pair around the range, an empty one typed and left: off
+          // again. Not the inner stars of a strong run whose text is the
+          // range, which are the run's own (Ctrl+I on bold makes it bold
+          // italic), and not the inner tildes of a strikethrough: one off
+          // each side would make the strikeout a subscript, and wrapPart
+          // leaves such a run alone for the reason named there.
+          const before = state.sliceDoc(Math.max(0, from - len), from);
+          const after = state.sliceDoc(to, Math.min(state.doc.length, to + len));
+          const outer = mark === "*" ? "StrongEmphasis" : mark === "~" ? "Strikethrough" : null;
+          const host = outer ? spanAround(tree, from, outer) : null;
+          const hostMarks = host && spanMarks(host);
+          const theirs = !!hostMarks && hostMarks.open.to === from && hostMarks.close.from === to;
+          if (before === mark && after === mark && !theirs) {
             return {
               changes: [
                 { from: from - len, to: from },
@@ -5670,26 +5900,246 @@
     };
   }
 
-  // A link around the selection, or an empty one at the caret, with the
-  // caret left where the address goes.
-  function insertLink(v) {
-    v.dispatch(
-      v.state.changeByRange(function (range) {
-        const label = v.state.sliceDoc(range.from, range.to);
-        const insert = "[" + label + "]()";
-        return {
-          changes: { from: range.from, to: range.to, insert: insert },
-          range: CM.EditorSelection.cursor(range.from + insert.length - 1),
-        };
-      })
-    );
-    return true;
+  // ---- Links, images and the spans written like them ----
+  //
+  // What reads one of these; what writes a link or a picture is one gesture
+  // for the two of them and stands with the Insert menu below (linkGesture).
+
+  // The link or image around a position, or null.
+  function linkAround(tree, pos) {
+    const sides = [-1, 1];
+    for (let i = 0; i < sides.length; i++) {
+      for (let n = tree.resolveInner(pos, sides[i]); n; n = n.parent) {
+        if (n.name === "Link" || n.name === "Image") return n;
+      }
+    }
+    return null;
   }
 
-  // The heading level of each selected line goes up one, and a level-six
-  // line goes back to a paragraph; a paragraph becomes a first-level heading.
-  function cycleHeading(v) {
-    const changes = [];
+  // The highlight button writes Pandoc's bracketed span, `[text]{.mark}`,
+  // which the page writes as `<mark>` (measured on the Pandoc 3.8.3 Quarto
+  // ships here). GitHub's `==text==` is not this and neither surface reads
+  // it: Pandoc 3.8.3 prints the four equals signs. The class is an argument
+  // because the shape is general: the underline button that was taken off
+  // used it, and small caps would.
+  // Not a pair of marks like bold and the rest, so the edit has a shape of
+  // its own. Inside a span already, the class goes on or off that span's own
+  // attribute, so the two buttons stack into `{.mark .underline}` instead of
+  // nesting a span in a span, and the span itself comes off with the last of
+  // its classes (`{.mark .underline}` is still read, and still written by
+  // hand, though only one button writes one of them now). Anywhere else the
+  // range is wrapped: the word at a bare
+  // caret, as the marks do, each line's own text across a selection that
+  // spans lines, and an empty span to type into where there is no word.
+  function toggleSpan(className) {
+    // The class with one space beside it: the space before it where there is
+    // one, the space after it where the class is the first in the attribute,
+    // so a span written `{.mark .underline}` by hand loses either class
+    // cleanly and never keeps a space against the brace.
+    const has = new RegExp("(\\s*)\\." + className + "(?![\\w-])(\\s*)");
+    const bare = /^\{\s*\}$/;
+    return function (v) {
+      const state = v.state;
+      const tree = CM.syntaxTree(state);
+      const close = "]{." + className + "}";
+      v.dispatch(
+        state.changeByRange(function (range) {
+          const from = range.from;
+          const to = range.to;
+          const span = spanAround(tree, from, "Span");
+          const attr = span && span.getChild("Attribute");
+          const marks = span ? span.getChildren("LinkMark") : [];
+          if (attr && marks.length >= 2 && to <= span.to) {
+            const src = state.sliceDoc(attr.from, attr.to);
+            if (attributeClasses(src).indexOf(className) < 0) {
+              const set = state.changes({
+                from: attr.to - 1,
+                insert: (bare.test(src) ? "." : " .") + className,
+              });
+              return { changes: set, range: range.map(set) };
+            }
+            const m = has.exec(src);
+            const cut = m[1] ? m[0].length - m[2].length : m[0].length;
+            const left = src.slice(0, m.index) + src.slice(m.index + cut);
+            const set = state.changes(
+              bare.test(left)
+                ? [
+                    { from: marks[0].from, to: marks[0].to },
+                    { from: marks[1].from, to: attr.to },
+                  ]
+                : { from: attr.from + m.index, to: attr.from + m.index + cut }
+            );
+            return { changes: set, range: range.map(set) };
+          }
+          if (range.empty) {
+            const line = state.doc.lineAt(from);
+            const col = from - line.from;
+            const word = /[\p{L}\p{N}]/u;
+            if (col > 0 && col < line.length && word.test(line.text[col - 1]) && word.test(line.text[col])) {
+              let a = col;
+              let b = col;
+              while (a > 0 && word.test(line.text[a - 1])) a--;
+              while (b < line.length && word.test(line.text[b])) b++;
+              const set = state.changes([
+                { from: line.from + a, insert: "[" },
+                { from: line.from + b, insert: close },
+              ]);
+              return { changes: set, range: range.map(set) };
+            }
+            const set = state.changes({ from: from, insert: "[" + close });
+            return { changes: set, range: CM.EditorSelection.cursor(from + 1) };
+          }
+          const out = [];
+          const last = state.doc.lineAt(to).number;
+          for (let n = state.doc.lineAt(from).number; n <= last; n++) {
+            const part = wrappablePart(state, tree, state.doc.line(n), from, to);
+            if (!part) continue;
+            out.push({ from: part.from, insert: "[" }, { from: part.to, insert: close });
+          }
+          const set = state.changes(out);
+          return { changes: set, range: range.map(set) };
+        })
+      );
+      return true;
+    };
+  }
+
+  // ---- Headings and lists ----
+
+  // The setext heading a line belongs to, or null.
+  function setextAround(tree, line) {
+    for (let n = tree.resolveInner(line.from, 1); n; n = n.parent) {
+      if (/^SetextHeading[12]$/.test(n.name)) return n;
+    }
+    return null;
+  }
+
+  // The head of a line as the heading menu reads it: the quote marks, a
+  // list marker with its task box, and a heading's hashes with the space.
+  const HEADING_LINE = /^((?:[ \t]*>)*[ \t]*)((?:[-+*]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?((#{1,6})[ \t]+)?/;
+
+  // The level of the heading a line is, 0 for a paragraph, or null for a
+  // blank line or one no heading belongs on (code, an equation, the header).
+  function headingLevel(tree, line) {
+    if (/^[ \t>]*$/.test(line.text) || unmarkableLine(tree, line)) return null;
+    const setext = setextAround(tree, line);
+    if (setext) return setext.name === "SetextHeading1" ? 1 : 2;
+    const m = HEADING_LINE.exec(line.text);
+    return m[4] ? m[4].length : 0;
+  }
+
+  // The heading menu: every selected line made a heading of the level
+  // picked, or a paragraph at 0. The hashes go after the mark of a quote and
+  // in place of a list marker (G065: `# - Violin` made the marker heading
+  // text), a setext heading becomes an ATX one with its underline gone (the
+  // one form every level has), and blank lines and the lines no heading
+  // belongs on are left alone. A paragraph asked of a list item keeps the
+  // item: taking the marker is the list buttons' to do. On an empty line the
+  // hashes are written for the caret to type after, as the list buttons
+  // write their marker, and parted from a paragraph or an item above:
+  // Pandoc 3.8.3 reads `Text.` over `## H` as `Text. ## H`, and an item's
+  // text runs on into it the same way.
+  function setHeading(level) {
+    return function (v) {
+      const state = v.state;
+      const tree = CM.syntaxTree(state);
+      const doc = state.doc;
+      const hashes = level ? "#".repeat(level) + " " : "";
+      const empty = emptyLineAtCaret(state, tree);
+      if (empty) {
+        if (hashes) startLine(v, tree, empty, hashes, false);
+        return true;
+      }
+      const changes = [];
+      const seen = new Set();
+      state.selection.ranges.forEach(function (range) {
+        const first = doc.lineAt(range.from).number;
+        const last = doc.lineAt(range.to).number;
+        for (let n = first; n <= last; n++) {
+          if (seen.has(n)) continue;
+          seen.add(n);
+          const line = doc.line(n);
+          if (/^[ \t>]*$/.test(line.text) || unmarkableLine(tree, line)) continue;
+          const setext = setextAround(tree, line);
+          if (setext) {
+            const top = doc.lineAt(setext.from);
+            const underline = doc.lineAt(setext.to);
+            if (seen.has(top.number) && top.number !== n) continue;
+            seen.add(top.number);
+            seen.add(underline.number);
+            const head = /^(?:[ \t]*>)*[ \t]*/.exec(top.text)[0].length;
+            if (hashes) changes.push({ from: top.from + head, insert: hashes });
+            changes.push({ from: doc.line(underline.number - 1).to, to: underline.to });
+            continue;
+          }
+          const m = HEADING_LINE.exec(line.text);
+          const at = line.from + m[1].length;
+          if (m[4]) {
+            const head = at + (m[2] || "").length;
+            changes.push({ from: head, to: head + m[3].length, insert: hashes });
+          } else if (hashes) {
+            changes.push({ from: at, to: at + (m[2] || "").length, insert: hashes });
+          }
+        }
+      });
+      if (changes.length) v.dispatch({ changes: changes });
+      return true;
+    };
+  }
+
+  // The level of the line the caret is on: what the menu ticks and what a
+  // key measures itself against. 0 is a paragraph, null a line no heading
+  // belongs on (a blank one, a score, an equation).
+  function headingAtCaret(state) {
+    return state ? headingLevel(CM.syntaxTree(state), state.doc.lineAt(state.selection.main.head)) : null;
+  }
+
+  // What a heading row and its key both do, written once so the two cannot
+  // drift: the level a line already has takes the heading off, as a list
+  // button pressed a second time takes its list off, and every selected line
+  // with it.
+  function applyHeading(level) {
+    return function (v) {
+      setHeading(level === headingAtCaret(v.state) ? 0 : level)(v);
+      return true;
+    };
+  }
+
+  // The rows of the heading menu: Paragraph and the six levels, the one the
+  // caret's line is on ticked, each naming its key. The Paragraph row was
+  // taken off when the ticked level picked again started taking the heading
+  // off, and it is back with the keys (2026-09-19): at the keyboard there is
+  // no tick to read, so a hand that cannot see what level the line is needs
+  // one key that says paragraph whatever it was.
+  function headingMenuItems() {
+    const current = headingAtCaret(view && view.state);
+    return [0, 1, 2, 3, 4, 5, 6].map(function (level) {
+      return {
+        name: level ? "heading-" + level : "paragraph",
+        label:
+          (level ? "Heading " + level : "Paragraph") +
+          (level === current ? '<span class="mdm-swatch__tick">✓</span>' : "") +
+          '<span class="mdm-menu__key">' +
+          shortcutLabel(String(level), BLOCK_MOD) +
+          "</span>",
+        click: function () {
+          if (!view) return;
+          applyHeading(level)(view);
+          view.focus();
+        },
+      };
+    });
+  }
+
+  // The head of a line as the list buttons read it: the quote marks, a list
+  // marker or a heading's hashes, and a task box.
+  const LIST_LINE = /^((?:[ \t]*>)*[ \t]*)(?:([-+*])[ \t]+|(\d+)[.)][ \t]+|(#{1,6})[ \t]+)?(\[[ xX]\][ \t]+)?/;
+
+  // The lines the selection covers that a marker belongs on, once each and
+  // read into their marks: not the blank ones, nor code, an equation or the
+  // header.
+  function markableLines(state, tree) {
+    const doc = state.doc;
     const seen = new Set();
     const parsed = [];
     state.selection.ranges.forEach(function (range) {
@@ -5918,6 +6368,594 @@
       if (m) changes.push({ from: line.from + m[1].length, to: line.from + m[0].length });
     });
     if (changes.length) v.dispatch({ changes: changes });
+    return true;
+  }
+
+  // ---- Code blocks ----
+
+  // Blocks that are one piece: a selection that touches one takes the whole
+  // of it into the new block, since the part left out would lose its fence,
+  // its $$, its header row or its closing tag. A callout holds blocks and
+  // is taken whole only when the selection reaches one of its ::: lines.
+  const CODE_WHOLE = new RegExp("^(?:FencedCode|BlockMath|Table|FrontMatter|" + RAW_HTML + ")$");
+  const CODE_HOLDERS = /^(?:Document|Blockquote|ListItem|BulletList|OrderedList|Callout)$/;
+
+  // How far an item's content stands from where the item starts: its
+  // marker and the spaces after it, and not a task box, which is content to
+  // both readers. A fence set past the box is paragraph text to Pandoc,
+  // where at the item's own column it is a block of the item (measured on
+  // 3.8.3); Enter's continuation counts the box, for the text after it.
+  function itemWidth(level) {
+    const width = level.to - level.from;
+    const box = /^( *)\[.\]$/.exec(level.type.slice(1));
+    return box ? width - level.spaceAfter.length - box[0].length + box[1].length : width;
+  }
+
+  // Where a line's own text starts past the marks of the given container
+  // levels (markupLevels): the > of a quote and the space after it, an
+  // item's marker on the line the item opens, its indentation up to the
+  // marker's width on the lines after.
+  function prefixEnd(line, levels) {
+    let pos = 0;
+    levels.forEach(function (level) {
+      if (!level.item) {
+        const m = /^[ \t]*>[ \t]?/.exec(line.text.slice(pos));
+        if (m) pos += m[0].length;
+        return;
+      }
+      const width = itemWidth(level);
+      if (level.item.from >= line.from && level.item.from <= line.to) {
+        pos = Math.max(pos, level.from + width);
+        return;
+      }
+      let take = 0;
+      while (take < width && pos + take < line.length && /[ \t]/.test(line.text[pos + take])) take++;
+      pos += take;
+    });
+    return Math.min(pos, line.length);
+  }
+
+  // A line with nothing of its own past the marks of its containers.
+  function blankUnder(line, levels) {
+    return isBlank(line.text.slice(prefixEnd(line, levels)));
+  }
+
+  // Whether an item of the levels opens on the line, which then carries
+  // the item's marker where the other lines carry its indentation.
+  function opensItem(line, levels) {
+    return levels.some(function (level) {
+      return level.item && level.item.from >= line.from && level.item.from <= line.to;
+    });
+  }
+
+  // The marks the lines of a new block carry inside the given levels: what
+  // Enter writes on a line that goes on inside them, with an item's
+  // indentation taken to its content's column.
+  function blockPrefix(levels, line) {
+    const prefix = continuationPrefix(levels, line);
+    const inner = levels[levels.length - 1];
+    if (!inner || !inner.item) return prefix;
+    const own = inner.blank(null);
+    return (
+      prefix.slice(0, prefix.length - own.length) +
+      inner.spaceBefore +
+      " ".repeat(Math.max(0, itemWidth(inner) - inner.spaceBefore.length))
+    );
+  }
+
+  // The container levels a line stands in. A fence's lines are read from
+  // the fence, since markupLevels stops at one: its lines are not Markdown.
+  function lineLevels(tree, doc, line) {
+    let node = tree.resolveInner(line.to, -1);
+    for (let n = node; n; n = n.parent) {
+      if (n.name === "FencedCode") {
+        node = n.parent;
+        break;
+      }
+    }
+    return markupLevels(node, doc);
+  }
+
+  function sameLevel(a, b) {
+    return (
+      a.node.name === b.node.name &&
+      a.node.from === b.node.from &&
+      (a.item ? !!b.item && a.item.from === b.item.from : !b.item)
+    );
+  }
+
+  // The fenced block a line is one of, its fence lines included, or null.
+  function fenceOfLine(tree, line) {
+    const probes = [
+      [line.to, -1],
+      [line.from, 1],
+    ];
+    for (let i = 0; i < probes.length; i++) {
+      for (let n = tree.resolveInner(probes[i][0], probes[i][1]); n; n = n.parent) {
+        if (n.name === "FencedCode") return n;
+      }
+    }
+    return null;
+  }
+
+  // The nodes above a line, from both of its ends, each named once.
+  function nodesAbove(tree, line) {
+    const found = [];
+    const probes = [
+      [line.to, -1],
+      [line.from, 1],
+    ];
+    probes.forEach(function (probe) {
+      for (let n = tree.resolveInner(probe[0], probe[1]); n; n = n.parent) {
+        const known = found.some(function (f) {
+          return f.name === n.name && f.from === n.from && f.to === n.to;
+        });
+        if (!known) found.push(n);
+      }
+    });
+    return found;
+  }
+
+  // The last line of a node, not the line after it when the node takes the
+  // line break with it.
+  function lastLineOf(doc, node) {
+    const line = doc.lineAt(node.to);
+    return node.to === line.from && node.to > node.from ? doc.line(line.number - 1) : line;
+  }
+
+  // The fences of a block taken off, its lines left as they stand. A block
+  // with nothing in it goes whole and leaves one blank line, and never the
+  // blank lines around it: which of those the button wrote cannot be read
+  // off the text (a blank line under a paragraph and two blank lines under
+  // it come out as the same block), and taking one it did not write glued
+  // the next paragraph to the one above.
+  function unfence(doc, fence) {
+    const levels = markupLevels(fence.parent, doc);
+    const open = doc.lineAt(fence.from);
+    const marks = fence.getChildren("CodeMark");
+    const last = marks[marks.length - 1];
+    const close = marks.length > 1 && doc.lineAt(last.from).number > open.number ? doc.lineAt(last.from) : null;
+    const end = close ? close.number - 1 : lastLineOf(doc, fence).number;
+    if (end > open.number) {
+      const next = doc.line(open.number + 1);
+      const out = [{ from: open.from + prefixEnd(open, levels), to: next.from + prefixEnd(next, levels) }];
+      if (close) out.push({ from: doc.line(end).to, to: close.to });
+      return out;
+    }
+    // The marks of the line kept, an item's marker with its space and a
+    // quote's > without it.
+    let keep = prefixEnd(open, levels);
+    if (!opensItem(open, levels)) {
+      while (keep > 0 && /[ \t]/.test(open.text[keep - 1])) keep--;
+    }
+    return [{ from: open.from + keep, to: (close || open).to }];
+  }
+
+  // ---- Writing a block where a block belongs ----
+  //
+  // What the code block button does with a bare caret, for any block that
+  // stands on lines of its own: the equation, the table and the rule of the
+  // Insert menu are written the same way, since a rule put through a
+  // paragraph would cut it in two.
+  //
+  // `lines` is the block as it is written and `caret` {line, col} where the
+  // caret is left in it. The lines carry the marks of the containers around
+  // them (blockPrefix), the first one an item's own marker where the block
+  // takes over a line that opens an item, and a blank line parts the block
+  // from the text beside it: the page leaves air around a block whatever
+  // the source says, and the editor draws that air only from a blank line.
+  // Not inside a list item, where the blank line would be all the block
+  // added to the list besides itself.
+
+  // Whether any level is a list item.
+  function insideItem(levels) {
+    return levels.some(function (level) {
+      return !!level.item;
+    });
+  }
+
+  // Whether line `n` of the document has text of its own inside `levels`.
+  function textOnLine(doc, n, levels) {
+    return n >= 1 && n <= doc.lines && !blankUnder(doc.line(n), levels);
+  }
+
+  // The lines behind their marks, and where the caret lands in the result.
+  function blockBody(head, prefix, lines, caret, br) {
+    let text = "";
+    let at = 0;
+    lines.forEach(function (own, i) {
+      text += (i ? br + prefix : head) + own;
+      if (i === caret.line) at = text.length - own.length + caret.col;
+    });
+    return { text: text, at: at };
+  }
+
+  // The block in place of a blank line.
+  function blockOn(state, doc, line, levels, lines, caret) {
+    const br = state.lineBreak;
+    const prefix = blockPrefix(levels, line);
+    const head = opensItem(line, levels) ? line.text.slice(0, prefixEnd(line, levels)) : prefix;
+    const quiet = prefix.replace(/[ \t]+$/, "");
+    const lone = insideItem(levels);
+    const lead = !lone && textOnLine(doc, line.number - 1, levels) ? quiet + br : "";
+    const tail = !lone && textOnLine(doc, line.number + 1, levels) ? br + quiet : "";
+    const body = blockBody(head, prefix, lines, caret, br);
+    return {
+      changes: { from: line.from, to: line.to, insert: lead + body.text + tail },
+      range: CM.EditorSelection.cursor(line.from + lead.length + body.at),
+    };
+  }
+
+  // The block under the block a line of text stands in, `end` being that
+  // block's last line and `line` the one whose containers it goes inside.
+  function blockAfter(state, doc, end, line, levels, lines, caret) {
+    const br = state.lineBreak;
+    const prefix = blockPrefix(levels, line);
+    const quiet = prefix.replace(/[ \t]+$/, "");
+    const lone = insideItem(levels);
+    const lead = br + (lone ? "" : quiet + br);
+    const tail = !lone && textOnLine(doc, end.number + 1, levels) ? br + quiet : "";
+    const body = blockBody(prefix, prefix, lines, caret, br);
+    return {
+      changes: { from: end.to, insert: lead + body.text + tail },
+      range: CM.EditorSelection.cursor(end.to + lead.length + body.at),
+    };
+  }
+
+  // The one-piece block around a line, or null.
+  function wholeAround(tree, line) {
+    const nodes = nodesAbove(tree, line);
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      if (CODE_WHOLE.test(nodes[i].name)) return nodes[i];
+    }
+    return null;
+  }
+
+  // The last line of the block a line of text stands in: the whole of a
+  // one-piece block, or of the paragraph, heading or other block it is part
+  // of, so nothing is written through one.
+  function blockEnd(tree, doc, line, levels) {
+    const whole = wholeAround(tree, line);
+    let end = line;
+    if (whole) {
+      end = lastLineOf(doc, whole);
+    } else {
+      let node = tree.resolveInner(line.from + prefixEnd(line, levels), 1);
+      while (node.parent && !CODE_HOLDERS.test(node.parent.name)) node = node.parent;
+      if (!CODE_HOLDERS.test(node.name)) end = lastLineOf(doc, node);
+    }
+    return end.number < line.number ? line : end;
+  }
+
+  // The code block button and Ctrl+Shift+C, the block twin of inline code
+  // with its rules a level up. Inside a fenced block the fences come off
+  // and the lines between them stay (a block with nothing in it leaves a
+  // blank line). A selection goes into a new block: the lines it touches
+  // less the blank ones at its edges, the whole of any fence, equation,
+  // table or header it touches, and a fence one backtick longer than the
+  // longest among its lines. A bare caret opens an empty block to type
+  // into: on its line when the line is blank, and under the paragraph,
+  // heading or other block it stands in otherwise, never through it. Either
+  // way the caret is left right after the opening backticks, where the
+  // language is written (`abc` for a score, `python`), and Enter from there
+  // goes on into the block. The new lines carry the > of the quotes and the
+  // indentation of the items around them, and a blank line parts the block
+  // from text beside it: the page leaves air around a block whatever the
+  // source says, and the editor draws that air only from a blank line. Not
+  // inside a list item, where the blank line would be all the block added
+  // to the list besides itself.
+  function toggleCodeBlock(v) {
+    const state = v.state;
+    const tree = CM.syntaxTree(state);
+    const doc = state.doc;
+    const br = state.lineBreak;
+    const FENCE = "```";
+    const seen = new Set();
+    // The caret is left right after the opening backticks, where the
+    // language is written, which is line 0 of the two the block is.
+    const FENCE_LINES = [FENCE, FENCE];
+    const FENCE_CARET = { line: 0, col: FENCE.length };
+    // An empty block in place of a blank line.
+    const emptyOn = function (line, levels, range) {
+      if (seen.has("on" + line.number)) return { range: range };
+      seen.add("on" + line.number);
+      return blockOn(state, doc, line, levels, FENCE_LINES, FENCE_CARET);
+    };
+    // An empty block under the block a line of text stands in.
+    const emptyAfter = function (line, levels, range) {
+      const end = blockEnd(tree, doc, line, levels);
+      if (seen.has("after" + end.number)) return { range: range };
+      seen.add("after" + end.number);
+      return blockAfter(state, doc, end, line, levels, FENCE_LINES, FENCE_CARET);
+    };
+    const spec = state.changeByRange(function (range) {
+      const top = doc.lineAt(range.from);
+      let bottom = doc.lineAt(range.to);
+      if (!range.empty && range.to === bottom.from && bottom.number > top.number) bottom = doc.line(bottom.number - 1);
+      const fence = fenceOfLine(tree, top);
+      const other = fence && fenceOfLine(tree, bottom);
+      if (fence && other && other.from === fence.from) {
+        if (seen.has("off" + fence.from)) return { range: range };
+        seen.add("off" + fence.from);
+        const set = state.changes(unfence(doc, fence));
+        return { changes: set, range: range.map(set) };
+      }
+      if (range.empty) {
+        const levels = lineLevels(tree, doc, top);
+        if (blankUnder(top, levels) && !wholeAround(tree, top)) return emptyOn(top, levels, range);
+        return emptyAfter(top, levels, range);
+      }
+      let first = top.number;
+      let last = bottom.number;
+      for (let grew = true; grew; ) {
+        grew = false;
+        [first, last].forEach(function (n) {
+          nodesAbove(tree, doc.line(n)).forEach(function (node) {
+            const from = doc.lineAt(node.from).number;
+            const to = lastLineOf(doc, node).number;
+            const cut = CODE_WHOLE.test(node.name) || (node.name === "Callout" && (from >= first || to <= last));
+            if (!cut) return;
+            if (from < first) {
+              first = from;
+              grew = true;
+            }
+            if (to > last) {
+              last = to;
+              grew = true;
+            }
+          });
+        });
+      }
+      const blank = function (n) {
+        const line = doc.line(n);
+        return blankUnder(line, lineLevels(tree, doc, line));
+      };
+      while (first < last && blank(first)) first++;
+      while (last > first && blank(last)) last--;
+      const head = doc.line(first);
+      if (first === last && blank(first)) return emptyOn(head, lineLevels(tree, doc, head), range);
+      if (seen.has("wrap" + first)) return { range: range };
+      seen.add("wrap" + first);
+      const tail = doc.line(last);
+      const upper = lineLevels(tree, doc, head);
+      const lower = lineLevels(tree, doc, tail);
+      const levels = [];
+      for (let i = 0; i < upper.length && i < lower.length && sameLevel(upper[i], lower[i]); i++) levels.push(upper[i]);
+      let longest = 2;
+      for (let n = first; n <= last; n++) {
+        const run = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?[ \t]*(`{3,})/.exec(doc.line(n).text);
+        if (run) longest = Math.max(longest, run[1].length);
+      }
+      const fenceText = "`".repeat(longest + 1);
+      const prefix = blockPrefix(levels, head);
+      const quiet = prefix.replace(/[ \t]+$/, "");
+      const lone = insideItem(levels);
+      const at = head.from + prefixEnd(head, levels);
+      const lead = !lone && textOnLine(doc, first - 1, levels) ? quiet + br : "";
+      const out = [];
+      if (lead && at > head.from) out.push({ from: head.from, insert: lead });
+      out.push({ from: at, insert: (at === head.from ? lead : "") + fenceText + br + prefix });
+      out.push({
+        from: tail.to,
+        insert: br + prefix + fenceText + (!lone && textOnLine(doc, last + 1, levels) ? br + quiet : ""),
+      });
+      return {
+        changes: state.changes(out),
+        range: CM.EditorSelection.cursor(at + lead.length + fenceText.length),
+      };
+    });
+    v.dispatch(spec, { scrollIntoView: true });
+    return true;
+  }
+
+  // ---- The Insert menu ----
+  //
+  // The annotations the bar has no button of its own for, behind one button
+  // at the end of the block group (design-annotation-icons.html, the set the
+  // owner picked): an equation inline or on lines of its own, a table, a
+  // picture, a footnote and a rule. Every one of them writes standard
+  // Pandoc, and the editor draws all six already; what was missing was the
+  // gesture.
+
+  // The three that stand on lines of their own go where the code block's
+  // empty block goes (blockOn and blockAfter above): on the caret's line
+  // when that line is blank, under the block the caret stands in otherwise,
+  // and never through it.
+  function insertBlock(lines, caret) {
+    return function (v) {
+      const state = v.state;
+      const tree = CM.syntaxTree(state);
+      const doc = state.doc;
+      const seen = new Set();
+      v.dispatch(
+        state.changeByRange(function (range) {
+          const line = doc.lineAt(range.from);
+          const levels = lineLevels(tree, doc, line);
+          if (blankUnder(line, levels) && !wholeAround(tree, line)) {
+            if (seen.has("on" + line.number)) return { range: range };
+            seen.add("on" + line.number);
+            return blockOn(state, doc, line, levels, lines, caret);
+          }
+          const end = blockEnd(tree, doc, line, levels);
+          if (seen.has("after" + end.number)) return { range: range };
+          seen.add("after" + end.number);
+          return blockAfter(state, doc, end, line, levels, lines, caret);
+        }),
+        { scrollIntoView: true }
+      );
+      return true;
+    };
+  }
+
+  // The display equation, written as example.mdm writes one: the `$$` on
+  // lines of their own with the maths between them, which is where the
+  // caret is left.
+  const EQUATION_BLOCK = ["$$", "", "$$"];
+  const EQUATION_CARET = { line: 1, col: 0 };
+
+  // A table of two columns and three rows, the shape of the row's own
+  // glyph: the head, the row that carries the alignment, and two rows to
+  // fill. The caret goes in the first cell of the head, which is the cell a
+  // reader types first. Pandoc needs the delimiter row, and the editor
+  // draws nothing without it.
+  const TABLE_BLOCK = ["|  |  |", "| --- | --- |", "|  |  |", "|  |  |"];
+  const TABLE_CARET = { line: 0, col: 2 };
+
+  // The rule as `***`, and not `---`: text with `---` under it is a setext
+  // heading to CommonMark and to Pandoc alike, so `***` is the one form
+  // that may stand anywhere (the house rule, in CLAUDE.md).
+  const RULE_BLOCK = ["***"];
+  const RULE_CARET = { line: 0, col: 3 };
+
+  // Ctrl+K and the link button, and the picture row of the menu, which is
+  // the same gesture with a `!` in front (`bang`). Inside a link or an
+  // image already, that one is edited and no new one nested in it (G074: of
+  // two links one inside the other the inner one is the link, CommonMark
+  // 6.3, so the outer one was lost): its address is selected, to be typed
+  // over, or the caret goes between the parentheses of an empty one. An
+  // address selected goes where the address goes, with the caret in the
+  // label (ED29); for a picture a file name counts as an address too, since
+  // that is what a picture's address usually is. Any other selection is the
+  // label, with the caret where the address goes; the label of a picture is
+  // what Quarto prints under the figure as its caption.
+  const PICTURE_FILE = /\.(?:png|jpe?g|gif|svg|webp|pdf)$/i;
+  function linkGesture(bang) {
+    return function (v) {
+      const state = v.state;
+      const tree = CM.syntaxTree(state);
+      v.dispatch(
+        state.changeByRange(function (range) {
+          const link = linkAround(tree, range.from);
+          if (link && range.to <= link.to) {
+            const marks = link.getChildren("LinkMark");
+            let paren = null;
+            for (let i = 0; i < marks.length && !paren; i++) {
+              if (state.sliceDoc(marks[i].from, marks[i].to) === "(") paren = marks[i];
+            }
+            if (paren) {
+              // The address after `](`, not an address the label may hold.
+              const urls = link.getChildren("URL");
+              for (let i = 0; i < urls.length; i++) {
+                if (urls[i].from >= paren.to) return { range: CM.EditorSelection.range(urls[i].from, urls[i].to) };
+              }
+              return { range: CM.EditorSelection.cursor(paren.to) };
+            }
+            return { range: range };
+          }
+          const label = state.sliceDoc(range.from, range.to);
+          if (/^(?:[a-z][a-z0-9+.-]*:|www\.)\S+$/i.test(label) || (bang && !/\s/.test(label) && PICTURE_FILE.test(label))) {
+            const insert = bang + "[](" + label + ")";
+            return {
+              changes: { from: range.from, to: range.to, insert: insert },
+              range: CM.EditorSelection.cursor(range.from + bang.length + 1),
+            };
+          }
+          const insert = bang + "[" + label + "]()";
+          return {
+            changes: { from: range.from, to: range.to, insert: insert },
+            range: CM.EditorSelection.cursor(range.from + insert.length - 1),
+          };
+        })
+      );
+      return true;
+    };
+  }
+  const insertLink = linkGesture("");
+  const insertPicture = linkGesture("!");
+
+  // The labels already spoken for, references and definitions alike (the
+  // definition's own `[^1]` is read by the same pattern).
+  function footnoteLabels(doc) {
+    const used = new Set();
+    const ref = /\[\^([^\]\s]+)\]/g;
+    const text = doc.toString();
+    for (let m = ref.exec(text); m; m = ref.exec(text)) used.add(m[1]);
+    return used;
+  }
+
+  // The footnote row: the reference after the words the caret is in, which
+  // is where the glyph shows it, numbered with the lowest number the
+  // document has not used, and the note itself at the end of the document
+  // for the caret to type into. At the end because Pandoc reads a
+  // definition at the top level alone (parseFootnoteDef, cx.depth 1), so
+  // none may be written inside the quote or the list item the caret stands
+  // in; under the last line that has text, or under the caret's own line
+  // when that stands further down, parted by a blank line.
+  function insertFootnote(v) {
+    const state = v.state;
+    const doc = state.doc;
+    const br = state.lineBreak;
+    const used = footnoteLabels(doc);
+    const changes = [];
+    const notes = [];
+    let n = 1;
+    let at = 0;
+    for (let i = doc.lines; i >= 1; i--) {
+      if (!isBlank(doc.line(i).text)) {
+        at = doc.line(i).to;
+        break;
+      }
+    }
+    state.selection.ranges.forEach(function (range) {
+      while (used.has(String(n))) n++;
+      const label = String(n);
+      used.add(label);
+      changes.push({ from: range.to, insert: "[^" + label + "]" });
+      notes.push("[^" + label + "]: ");
+      at = Math.max(at, doc.lineAt(range.to).to);
+    });
+    changes.push({ from: at, insert: br + br + notes.join(br + br) });
+    const set = state.changes(changes);
+    v.dispatch({
+      changes: set,
+      // Past the whole of what was written at the end, which is the end of
+      // the last note: what a reader types next is the note itself.
+      selection: CM.EditorSelection.cursor(set.mapPos(at, 1)),
+      scrollIntoView: true,
+    });
+    return true;
+  }
+
+  // Ctrl+Enter: out of the block the caret is in (a fence, an equation, a
+  // list, a quote, a callout, a heading line), into a fresh paragraph below
+  // it. Plain Enter inside a code block is a newline, as in any code editor:
+  // the closing fence is a line of text the caret can walk past.
+  // A paragraph among them: one written over two source lines was split at
+  // the caret's line instead of left whole (G084).
+  const LEAVABLE = new RegExp(
+    "^(?:FencedCode|CodeBlock|BlockMath|Callout|Blockquote|BulletList|OrderedList|Table|ATXHeading[1-6]|SetextHeading[12]|FrontMatter|Paragraph|" +
+      RAW_HTML +
+      ")$"
+  );
+  function leaveBlock(v) {
+    const state = v.state;
+    const tree = CM.syntaxTree(state);
+    const changes = [];
+    const cursors = [];
+    let offset = 0;
+    state.selection.ranges.forEach(function (range) {
+      let node = tree.resolveInner(range.head, -1);
+      let block = null;
+      while (node) {
+        if (LEAVABLE.test(node.name)) block = node;
+        node = node.parent;
+      }
+      const at = block ? state.doc.lineAt(block.to).to : state.doc.lineAt(range.head).to;
+      const insert = "\n\n";
+      changes.push({ from: at, insert: insert });
+      cursors.push(at + insert.length + offset);
+      offset += insert.length;
+    });
+    v.dispatch({
+      changes: changes,
+      selection: CM.EditorSelection.create(
+        cursors.map(function (p) {
+          return CM.EditorSelection.cursor(p);
+        }),
+        0
+      ),
+      scrollIntoView: true,
+    });
     return true;
   }
 
@@ -6435,28 +7473,53 @@
   // this script (vendor/abcjs), so the engraving is synchronous; what needs
   // the block to be on screen (fitScores measures it) runs afterwards, from
   // the observer below.
-  //
-  // No `format` block, so every word on the staff keeps the size abcjs gives
-  // it: a title at 27 px, a part label at 20, the lyric at 17 in bold, chords
-  // at 16. They were held instead to a ladder over the prose's x-height for a
-  // while, and that was taken back on 2026-09-10. The exported page and the
-  // printed one pass no format either, which is what keeps the three surfaces
-  // drawing the same sizes.
   function renderScore(code, source) {
     try {
       if (!window.ABCJS) return;
+      // The old drawing goes, and the engraver that walked it with it: this
+      // is called a second time on a <code> that already has one (a change of
+      // face), and a throw below would leave the player holding an engraver
+      // whose elements are no longer in the page.
+      SCORE_VISUALS.delete(code);
       code.innerHTML = "";
-      const visual = ABCJS.renderAbc(code, source, {
+      const params = {
         add_classes: true,
         paddingtop: 2,
         paddingbottom: 2,
         paddingleft: 0,
         paddingright: 0,
-      })[0];
+      };
+      const format = scoreFormat();
+      if (format) params.format = format;
+      const visual = ABCJS.renderAbc(code, source, params)[0];
       if (visual) SCORE_VISUALS.set(code, visual);
     } catch (e) {
       // Score rendering must never break editing.
     }
+  }
+
+  // Every score on screen, drawn again, which is what a change of face costs.
+  // abcjs writes the family onto each <text> as it draws and lays the staff
+  // out around the room those words take, so there is nothing to restyle
+  // afterwards: a score in the wrong face is a score that has to be engraved
+  // again. CodeMirror does the same thing for its own reasons whenever a
+  // widget comes back into the viewport, so this is a path the player and the
+  // playhead already live with (afterRender puts both back).
+  function engraveScoresAgain() {
+    let drawn = 0;
+    document
+      .querySelectorAll("code.language-abc")
+      .forEach(function (code) {
+        const block = code.closest("[data-mdm-source]");
+        const source = block && block.getAttribute("data-mdm-source");
+        if (typeof source !== "string") return;
+        renderScore(code, source);
+        drawn++;
+      });
+    // Nothing drawn, nothing to fit or to follow. The guard is not only
+    // thrift: the first call of the session comes from applyTextFont before
+    // the view is built, and afterRender reads the view.
+    if (drawn) afterRender();
   }
 
   // After every change of the content DOM: scores that just appeared are
@@ -7557,7 +8620,8 @@
     '<svg viewBox="0 0 16 16"><path d="M12.68 12.22A6.3 6.3 0 1 1 12.68 3.78L11.01 5.29A4.05 4.05 0 1 0 11.01 10.71Z"/><path d="M9.86 6.33L13.83 2.75L14.72 7.73Z"/></svg>';
 
   // Formatting glyphs, fill only: a bold B, a slanted I, a code chevron pair,
-  // a chain link, an H with a small 1, a bulleted list, a numbered list.
+  // a chain link, two H of different sizes, and the three list glyphs, which
+  // are one drawing with three markers (see LIST_ICON).
   const BOLD_ICON =
     '<svg viewBox="0 0 16 16"><path d="M4 2h4.6q1.7 0 2.6.8t.9 2.1q0 .9-.5 1.6t-1.3.9v.1q1.1.2 1.7 1t.6 1.9q0 1.6-1.1 2.6T8.6 14H4Zm2.3 4.9h2q.8 0 1.2-.4t.4-1-.4-1-1.2-.4h-2Zm0 5.1h2.3q.9 0 1.4-.4t.5-1.1-.5-1.1-1.4-.4H6.3Z"/></svg>';
   const ITALIC_ICON =
@@ -7578,11 +8642,108 @@
   // what the 1 it carried used to say (design-heading-icon.html, A, the
   // owner's pick).
   const HEADING_ICON =
-    '<svg viewBox="0 0 16 16"><path d="M2 2.5h2.1v4.3h4.3V2.5h2.1v11h-2.1V8.8H4.1v4.7H2Z"/><path d="M12.3 8.2h1.3v5.3h-1.3V9.6l-1 .6-.5-1Z"/></svg>';
+    '<svg viewBox="0 0 16 16"><path d="M1 2.5h2v4.5h3.5V2.5h2v11h-2V9H3v4.5H1Z"/><path d="M10 7h1.4v2.55h2.2V7H15v6.5h-1.4v-2.55h-2.2V13.5H10Z"/></svg>';
+  // The three list glyphs are one drawing: two rows of the same bar with a
+  // different marker in front of each. The task glyph had them and the other
+  // two had three thinner rows, so at 15px the three buttons did not read as
+  // a family (the owner asked for the task's construction, 2026-09-19).
+  // The grid is the task glyph's, unchanged: the bars are its own paths,
+  // 7.5 to 14.5 and 1.4 thick, on rows at 4 and 12, and the marker column is
+  // the 0.7 to 6.5 its check and box stand in.
+  //
+  // The markers carry the same weight as those bars. The bullet is a disc of
+  // r 1.9, the mass of the box beside it; the figures are DejaVu Sans Bold at
+  // 5.8 units, where the stem of the 1 measures 364/1493 of the glyph's own
+  // height, which is 1.41 units, the bars' 1.4 (measured in the outline, not
+  // guessed). They hang to the right, as the numbers of a list do in the
+  // margin the editor draws them in.
   const LIST_ICON =
-    '<svg viewBox="0 0 16 16"><circle cx="3" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><rect x="6" y="3.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="7.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="11.3" width="8.5" height="1.4" rx=".7"/></svg>';
+    '<svg viewBox="0 0 16 16"><circle cx="3.4" cy="4" r="1.9"/><circle cx="3.4" cy="12" r="1.9"/><path d="M8.2 3.3H13.8A.7 .7 0 0 1 14.5 4V4A.7 .7 0 0 1 13.8 4.7H8.2A.7 .7 0 0 1 7.5 4V4A.7 .7 0 0 1 8.2 3.3Z"/><path d="M8.2 11.3H13.8A.7 .7 0 0 1 14.5 12V12A.7 .7 0 0 1 13.8 12.7H8.2A.7 .7 0 0 1 7.5 12V12A.7 .7 0 0 1 8.2 11.3Z"/></svg>';
   const OLIST_ICON =
-    '<svg viewBox="0 0 16 16"><path d="M2.2 2.4h1v3.1h-1V3.4l-.7.4-.4-.8Z"/><path d="M1.3 7.2q.2-.9 1.3-.9.6 0 .9.3t.3.8q0 .5-.5 1l-.9.9h1.5v.8H1.2v-.7l1.5-1.5q.3-.3.3-.5 0-.3-.4-.3-.4 0-.5.4Z"/><path d="M1.2 12.7q.2-.8 1.3-.8.6 0 1 .3t.3.7q0 .5-.5.7.6.2.6.8 0 .5-.4.8t-1 .3q-1.1 0-1.3-.9l.8-.2q.1.4.5.4.4 0 .4-.3t-.5-.3h-.3v-.7h.3q.4 0 .4-.3t-.4-.3q-.3 0-.4.3Z"/><rect x="6" y="3.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="7.3" width="8.5" height="1.4" rx=".7"/><rect x="6" y="11.3" width="8.5" height="1.4" rx=".7"/></svg>';
+    '<svg viewBox="0 0 16 16"><path d="M2.04 5.87H3.37V2.12L2.01 2.4V1.38L3.36 1.1H4.78V5.87H6.1V6.9H2.04Z"/><path d="M3.59 13.82H6.1V14.9H1.96V13.82L4.04 11.98Q4.32 11.73 4.45 11.49Q4.59 11.25 4.59 10.99Q4.59 10.59 4.32 10.35Q4.05 10.1 3.6 10.1Q3.26 10.1 2.85 10.25Q2.44 10.4 1.98 10.69V9.44Q2.47 9.27 2.96 9.19Q3.44 9.1 3.91 9.1Q4.93 9.1 5.5 9.55Q6.06 10 6.06 10.81Q6.06 11.27 5.82 11.67Q5.58 12.08 4.81 12.75Z"/><path d="M8.2 3.3H13.8A.7 .7 0 0 1 14.5 4V4A.7 .7 0 0 1 13.8 4.7H8.2A.7 .7 0 0 1 7.5 4V4A.7 .7 0 0 1 8.2 3.3Z"/><path d="M8.2 11.3H13.8A.7 .7 0 0 1 14.5 12V12A.7 .7 0 0 1 13.8 12.7H8.2A.7 .7 0 0 1 7.5 12V12A.7 .7 0 0 1 8.2 11.3Z"/></svg>';
+  // Strikethrough: the S of DejaVu Sans Bold, at the height of the bold B,
+  // cut across the middle where the bar goes, so the bar reads at 15px
+  // instead of melting into the curve (design-markdown-buttons.html, A).
+  const STRIKE_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M11.68 2.75 11.68 5.12 11.37 4.99 11.07 4.87 10.77 4.76 10.47 4.66 10.17 4.57 9.88 4.5 9.59 4.43 9.31 4.38 9.03 4.34 8.75 4.31 8.49 4.3 8.22 4.29 7.9 4.3 7.6 4.32 7.33 4.36 7.09 4.42 6.88 4.49 6.7 4.57 6.55 4.68 6.42 4.8 6.33 4.94 6.26 5.09 6.22 5.27 6.2 5.46 6.21 5.6 6.24 5.74 6.29 5.86 6.35 5.97 6.43 6.07 6.54 6.16 6.66 6.24 6.82 6.32 7 6.39 7.22 6.46 7.47 6.53 7.75 6.59 7.8 6.6 3.71 6.6 3.68 6.5 3.61 6.1 3.59 5.67 3.62 5.13 3.71 4.64 3.86 4.19 4.07 3.78 4.34 3.42 4.67 3.1 5.05 2.82 5.49 2.6 5.98 2.42 6.52 2.3 7.12 2.22 7.77 2.2 8.08 2.2 8.39 2.22 8.7 2.23 9.02 2.26 9.34 2.3 9.66 2.34 9.99 2.39 10.32 2.45 10.65 2.51 10.99 2.58 11.33 2.67 11.68 2.75Z"/><path d="M12.34 9.4 12.39 9.69 12.41 10.15 12.38 10.74 12.29 11.27 12.14 11.76 11.92 12.19 11.65 12.57 11.31 12.9 10.92 13.17 10.45 13.4 9.93 13.57 9.34 13.7 8.68 13.77 7.96 13.8 7.61 13.79 7.25 13.78 6.9 13.75 6.54 13.71 6.19 13.66 5.83 13.6 5.47 13.52 5.11 13.44 4.76 13.35 4.4 13.24 4.04 13.13 3.69 13 3.69 10.56 4.04 10.75 4.39 10.91 4.74 11.06 5.08 11.2 5.42 11.32 5.76 11.42 6.09 11.51 6.42 11.58 6.74 11.64 7.06 11.68 7.37 11.7 7.69 11.71 7.99 11.7 8.27 11.68 8.52 11.63 8.75 11.57 8.95 11.49 9.13 11.4 9.28 11.28 9.41 11.16 9.51 11.01 9.58 10.86 9.62 10.68 9.63 10.5 9.62 10.33 9.59 10.17 9.55 10.03 9.48 9.91 9.4 9.79 9.29 9.69 9.16 9.6 8.99 9.51 8.78 9.42 8.73 9.4Z"/><path d="M1.7 7.3H14.3A.7 .7 0 0 1 15 8V8A.7 .7 0 0 1 14.3 8.7H1.7A.7 .7 0 0 1 1 8V8A.7 .7 0 0 1 1.7 7.3Z"/></svg>';
+  // A highlight: a marker nib over the wash it lays down, the wash drawn
+  // faint so the nib reads first. C of three on the same sheet.
+  const HIGHLIGHT_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M11.9 1.3 14.6 4.0 7.9 10.7 5.2 8.0Z"/><path d="M4.6 8.6 7.3 11.3 3.3 12.4 1.9 11.0Z"/><rect x="1" y="13.4" width="14" height="2.1" rx="1.05" fill-opacity="0.32"/></svg>';
+  // Superscript and subscript: the letter and its figure, which is what
+  // every word processor draws and the one shape a reader does not have to
+  // be told (design-annotation-icons.html, A of three, the owner's pick).
+  // The X reads widest at 15px of the three letters offered; the figure is
+  // DejaVu Sans Bold traced to a path, as the strikethrough's S was, and
+  // the two are mirror images about y=8, so the pair reads as one gesture
+  // in two directions.
+  const SUP_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M7.09 8.41 10.14 12.9H7.78L5.72 9.89L3.68 12.9H1.31L4.36 8.41L1.42 4.1H3.79L5.72 6.94L7.64 4.1H10.02Z"/><path d="M12.36 5.69H14.69V6.7H10.84V5.69L12.78 3.99Q13.04 3.75 13.16 3.53Q13.28 3.3 13.28 3.06Q13.28 2.69 13.03 2.46Q12.78 2.23 12.37 2.23Q12.05 2.23 11.67 2.37Q11.29 2.51 10.85 2.78V1.61Q11.32 1.46 11.77 1.38Q12.22 1.3 12.65 1.3Q13.6 1.3 14.13 1.72Q14.66 2.14 14.66 2.89Q14.66 3.32 14.44 3.7Q14.21 4.07 13.49 4.7Z"/></svg>';
+  const SUB_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M7.09 7.01 10.14 11.5H7.78L5.72 8.49L3.68 11.5H1.31L4.36 7.01L1.42 2.7H3.79L5.72 5.54L7.64 2.7H10.02Z"/><path d="M12.36 13.69H14.69V14.7H10.84V13.69L12.78 11.99Q13.04 11.75 13.16 11.53Q13.28 11.3 13.28 11.06Q13.28 10.69 13.03 10.46Q12.78 10.23 12.37 10.23Q12.05 10.23 11.67 10.37Q11.29 10.51 10.85 10.78V9.61Q11.32 9.46 11.77 9.38Q12.22 9.3 12.65 9.3Q13.6 9.3 14.13 9.72Q14.66 10.14 14.66 10.89Q14.66 11.32 14.44 11.7Q14.21 12.07 13.49 12.7Z"/></svg>';
+  // Small caps: a lowercase a and the small cap it becomes, which is what
+  // the button does to a selection. The owner picked it on 2026-09-19 (G of
+  // design/design-smallcaps-icon.html, kept over the six of
+  // design/design-smallcaps-icon-2.html), and it replaces the stacked pair
+  // of T that shipped unreleased before it.
+  //
+  // The pair is in a row, which is the heading button's arrangement, so what
+  // has to keep the two apart is no longer the arrangement but the letters:
+  // the heading sets one shape at two heights and this sets two shapes at
+  // one height, 6.93 of the 16 box each, since a small cap IS a capital at
+  // the x-height. That is also why the row survived where `Aa` did not.
+  // Placement is measured (design/design-smallcaps-placement.html): the
+  // drawing came off the round 1 sheet sitting low in its square and 0.08
+  // over the right edge, so it is grown 5%, which is as large as a pair this
+  // wide goes, and sat on y 13.6 so it shares a baseline with the H, the B
+  // and the I instead of floating above theirs.
+  //
+  // Drawn and not taken, over the two rounds: one cap crossed by the
+  // small-cap line and the pair under a cap line, both read as the
+  // strikethrough two buttons away; the word abstracted into strokes, which
+  // reads as a bar chart, and the same word in letters, which merges at
+  // 15px; the small cap tucked under the cap's arm, which is the subscript
+  // button's composition; and one stem with two arms, which reads as a
+  // currency mark.
+  const SMALLCAPS_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M3.85 10.46Q3.19 10.46 2.86 10.68Q2.53 10.91 2.53 11.34Q2.53 11.74 2.79 11.97Q3.06 12.2 3.54 12.2Q4.14 12.2 4.55 11.77Q4.94 11.34 4.94 10.7V10.46ZM7.08 9.66V13.43H4.94V12.46Q4.52 13.05 3.99 13.33Q3.46 13.6 2.7 13.6Q1.68 13.6 1.04 13Q0.4 12.4 0.4 11.45Q0.4 10.29 1.2 9.75Q1.99 9.21 3.71 9.21H4.94V9.04Q4.94 8.54 4.56 8.31Q4.16 8.08 3.32 8.08Q2.65 8.08 2.06 8.21Q1.48 8.35 0.98 8.61V7.01Q1.66 6.85 2.34 6.75Q3.02 6.67 3.71 6.67Q5.49 6.67 6.28 7.37Q7.08 8.08 7.08 9.66Z"/><path d="M13.37 12.17H10.57L10.13 13.43H8.34L10.9 6.5H13.03L15.6 13.43H13.81ZM11.01 10.88H12.91L11.97 8.13Z"/></svg>';
+  // The six of the Insert group, each the glyph the owner picked for it on
+  // the same sheet. The equation is the radical with its bar, faint under the
+  // hook where the maths goes; the block twin is that radical between the
+  // two rules of the fence, as the code block is the chevrons between
+  // them. The table is two columns and three rows, the head solid and the
+  // rows it takes faint. The picture is the frame with the sun and the hill
+  // inside it, the drawing every viewer uses. The footnote is a word with
+  // its raised figure, which is what a reference is. The rule is the stroke
+  // between two lines of text, so it reads as a rule and not as a bar.
+  const EQUATION_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M7.15 3H8.37V3.85H7.83L4.46 13H3.79L2.04 8.18L1.21 8.49L1 7.76L3.05 7.03L4.32 10.65Z"/><rect x="7.87" y="3" width="6.93" height="0.95" rx="0.47"/><rect x="9" y="7.4" width="4.6" height="1.6" rx="0.8" fill-opacity="0.45"/></svg>';
+  const EQUATION_BLOCK_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="1.4" rx="0.7"/><path d="M5.83 4.4H6.71V5.01H6.31L3.89 11.6H3.41L2.15 8.13L1.55 8.35L1.4 7.83L2.88 7.3L3.79 9.91Z"/><rect x="6.31" y="4.4" width="7.29" height="0.8" rx="0.4"/><rect x="7.4" y="7.8" width="3.8" height="1.3" rx="0.65" fill-opacity="0.45"/><rect x="1" y="13.6" width="14" height="1.4" rx="0.7"/></svg>';
+  const TABLE_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="1" y="1.5" width="6.25" height="3.33" rx="0.55"/><rect x="8.75" y="1.5" width="6.25" height="3.33" rx="0.55"/><rect x="1" y="6.33" width="6.25" height="3.33" rx="0.55" fill-opacity="0.45"/><rect x="8.75" y="6.33" width="6.25" height="3.33" rx="0.55" fill-opacity="0.45"/><rect x="1" y="11.17" width="6.25" height="3.33" rx="0.55" fill-opacity="0.45"/><rect x="8.75" y="11.17" width="6.25" height="3.33" rx="0.55" fill-opacity="0.45"/></svg>';
+  const PICTURE_ICON =
+    '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M2.6 2.2h10.8a1.6 1.6 0 0 1 1.6 1.6v8.4a1.6 1.6 0 0 1-1.6 1.6H2.6a1.6 1.6 0 0 1-1.6-1.6V3.8a1.6 1.6 0 0 1 1.6-1.6Zm-.2 2.05v7.5a.55.55 0 0 0 .55.55h10.1a.55.55 0 0 0 .55-.55v-7.5a.55.55 0 0 0-.55-.55H2.95a.55.55 0 0 0-.55.55Z"/><circle cx="5.4" cy="6.3" r="1.25"/><path d="M3.0 11.8 6.7 7.6 9.0 10.2 10.7 8.4 13.4 11.8Z"/></svg>';
+  const FOOTNOTE_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="1" y="8.6" width="8.4" height="1.9" rx="0.95"/><path d="M10.63 6.8H11.91V3.18L10.6 3.45V2.47L11.9 2.2H13.27V6.8H14.55V7.8H10.63Z"/></svg>';
+  const RULE_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="1" y="1.3" width="14" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="4" width="10.5" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="7.2" width="14" height="2.1" rx="1.05"/><rect x="1" y="11.4" width="14" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="14.1" width="8.5" height="1.4" rx="0.7" fill-opacity="0.45"/></svg>';
+  // A quote: the bar the editor draws down a quote's left side, running past
+  // two rows of text. Fourth of the block group and built like the other
+  // three (see LIST_ICON): the task glyph's own bars at its rows of 4 and 12,
+  // and the marker in the column its check and box stand in. Three rows of
+  // thin bars was what it had, and beside the three that were rebuilt it was
+  // the odd one out. The marker is one rule and not one a row: a quote's bar
+  // is a single line down the whole of it, which is what the editor draws
+  // and what the owner asked to keep (2026-09-19).
+  const QUOTE_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="2.6" y="1.6" width="1.6" height="12.8" rx=".8"/><path d="M8.2 3.3H13.8A.7 .7 0 0 1 14.5 4V4A.7 .7 0 0 1 13.8 4.7H8.2A.7 .7 0 0 1 7.5 4V4A.7 .7 0 0 1 8.2 3.3Z"/><path d="M8.2 11.3H13.8A.7 .7 0 0 1 14.5 12V12A.7 .7 0 0 1 13.8 12.7H8.2A.7 .7 0 0 1 7.5 12V12A.7 .7 0 0 1 8.2 11.3Z"/></svg>';
+  // A task list: two rows of the list glyph, a done task and one to do: a
+  // check mark alone where the bullet goes, then an empty box (same sheet,
+  // A, changed by the owner: a tick cut out of a box was too small to be
+  // seen at 15px). The mark is drawn at the bars' 1.45 weight.
+  const TASK_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M1.71 3.79 2.8 4.88 5.34 1.84 6.46 2.76 2.9 7.02 .69 4.81Z"/><path d="M8.2 3.3H13.8A.7 .7 0 0 1 14.5 4V4A.7 .7 0 0 1 13.8 4.7H8.2A.7 .7 0 0 1 7.5 4V4A.7 .7 0 0 1 8.2 3.3Z"/><path d="M2 9.6H4.8A1 1 0 0 1 5.8 10.6V13.4A1 1 0 0 1 4.8 14.4H2A1 1 0 0 1 1 13.4V10.6A1 1 0 0 1 2 9.6ZM2.3 11.2V12.8A.3 .3 0 0 0 2.6 13.1H4.2A.3 .3 0 0 0 4.5 12.8V11.2A.3 .3 0 0 0 4.2 10.9H2.6A.3 .3 0 0 0 2.3 11.2Z"/><path d="M8.2 11.3H13.8A.7 .7 0 0 1 14.5 12V12A.7 .7 0 0 1 13.8 12.7H8.2A.7 .7 0 0 1 7.5 12V12A.7 .7 0 0 1 8.2 11.3Z"/></svg>';
   // The Ctrl+D toggle: two text carets standing on a word, drawn as a faint
   // bar. What the icon names is the family the button belongs to, the
   // multicursor, and not the mode in force: which of the two modes is on is
@@ -7828,6 +8989,26 @@
     if (view) view.focus();
   }
 
+  // The second modifier every block key carries: Shift on a PC, Option on a
+  // Mac. Not Shift on a Mac, where the system takes Cmd+Shift+3, 4 and 5 for
+  // its screenshots and Cmd+Shift+Q logs the account out; Notion binds its
+  // own row to Cmd+Option for the same reason, and the code block was bound
+  // that way before this row existed.
+  const BLOCK_MOD = { pc: "Shift", mac: "Alt" };
+
+  // The name of a shortcut as VS Code writes it on the platform in use, for
+  // a button's tip and for a menu row, which have to agree. Written from the
+  // test CodeMirror reads `Mod` with (/Mac/ on navigator.platform; its iOS
+  // branch cannot run in a webview), so a tip cannot name Ctrl where the
+  // binding answers to Cmd.
+  function shortcutLabel(key, also) {
+    const mac = /Mac/.test(navigator.platform);
+    const second = also ? also[mac ? "mac" : "pc"] : "";
+    return mac
+      ? (second ? { Alt: "\u2325", Shift: "\u21e7" }[second] : "") + "\u2318" + key
+      : "Ctrl+" + (second ? second + "+" : "") + key;
+  }
+
   // A button of the bar. `menu` is a list of entries for a drop-down panel:
   // {name, label (HTML), click}; the panel opens on click and closes on a
   // click anywhere else or on Escape.
@@ -7838,7 +9019,16 @@
     btn.type = "button";
     btn.className = "mdm-btn mdm-tip mdm-tip--s";
     btn.setAttribute("data-type", spec.name);
-    btn.setAttribute("aria-label", spec.tip);
+    if (spec.key) {
+      const mac = /Mac/.test(navigator.platform);
+      const also = spec.also ? spec.also[mac ? "mac" : "pc"] : "";
+      btn.setAttribute("aria-label", spec.tip + " (" + shortcutLabel(spec.key, spec.also) + ")");
+      btn.setAttribute("aria-keyshortcuts", (mac ? "Meta+" : "Control+") + (also ? also + "+" : "") + spec.key);
+    } else {
+      btn.setAttribute("aria-label", spec.tip);
+    }
+    // A button that works on the selection is exempt from dismissFromOutside.
+    if (spec.caret) btn.classList.add("mdm-btn--caret");
     btn.innerHTML = spec.icon;
     item.appendChild(btn);
     if (spec.menu || spec.build) {
@@ -7953,6 +9143,17 @@
     return el;
   }
 
+  // The end of a row of the bar. The toolbar wraps, so a child that asks for
+  // the whole width takes what is left of the line with it and the next
+  // button starts a row of its own, which is how the player's row sits under
+  // the buttons (mountPlayer). It draws nothing: where a row ends is said by
+  // the row ending.
+  function rowBreak() {
+    const el = document.createElement("span");
+    el.className = "mdm-toolbar__break";
+    return el;
+  }
+
   function buildToolbar() {
     const bar = document.createElement("div");
     bar.className = "mdm-toolbar";
@@ -8019,15 +9220,76 @@
       { name: "undo", icon: UNDO_ICON, tip: "Undo", click: run(CM.undo) },
       { name: "redo", icon: REDO_ICON, tip: "Redo", click: run(CM.redo) },
       "|",
-      { name: "headings", icon: HEADING_ICON, tip: "Heading", click: run(cycleHeading) },
-      { name: "bold", icon: BOLD_ICON, tip: "Bold", click: run(toggleInline("**")) },
-      { name: "italic", icon: ITALIC_ICON, tip: "Italic", click: run(toggleInline("*")) },
-      { name: "inline-code", icon: CODE_ICON, tip: "Inline code", click: run(toggleInline("`")) },
-      { name: "link", icon: LINK_ICON, tip: "Link", click: run(insertLink) },
+      { name: "headings", icon: HEADING_ICON, tip: "Heading", build: headingMenuItems, caret: true },
+      // `key` is the letter of the Mod- binding the button shares (the
+      // keymap above), named in the tip so the shortcut can be found.
+      { name: "bold", icon: BOLD_ICON, tip: "Bold", key: "B", click: run(toggleInline("**")), caret: true },
+      { name: "italic", icon: ITALIC_ICON, tip: "Italic", key: "I", click: run(toggleInline("*")), caret: true },
+      // No key yet: D19 in docs/cm6-migration.md.
+      // The highlight, after the strikethrough: the last of the marks that
+      // colour words rather than shape them, and Pandoc's bracketed span
+      // `[x]{.mark}`. It takes no key; the letters that would read as its own
+      // are spent or taken (D19).
+      //
+      // Its twin, an underline button writing `[x]{.underline}`, was fitted
+      // beside it on 2026-09-19 and taken off the same day (the owner's call).
+      // Two reasons, in his order: a bracketed span leaks its class name into
+      // any reader that is not Pandoc, where `[word]{.underline}` shows as
+      // those characters and not as a word (the superscript at least leaves
+      // `2^nd^` readable), and this one buys nothing the bar has not got,
+      // since an underline is the typewriter's italic and this editor sets in
+      // Latin Modern through TeX. The highlight pays the same toll for
+      // something italic cannot do, which is to point without changing the
+      // voice. What stays behind is the reading: `.mdm-underline` in
+      // style.css, because the page underlines the span whether or not a
+      // button writes it (the Span branch above).
+      { name: "strikethrough", icon: STRIKE_ICON, tip: "Strikethrough", click: run(toggleInline("~~")), caret: true },
+      // The superscript and the subscript next, a pair of their own and
+      // still a pair of marks like the three before them (`^x^`, `~x~`),
+      // and then the two bracketed spans, which are written with an
+      // attribute and not with punctuation: small caps and the highlight,
+      // the same gesture twice (toggleSpan). The owner set this order on
+      // 2026-09-19, moving the two scripts up off the spans. None of the
+      // four takes a key (D19).
+      { name: "superscript", icon: SUP_ICON, tip: "Superscript", click: run(toggleInline("^")), caret: true },
+      { name: "subscript", icon: SUB_ICON, tip: "Subscript", click: run(toggleInline("~")), caret: true },
+      { name: "small-caps", icon: SMALLCAPS_ICON, tip: "Small caps", click: run(toggleSpan("smallcaps")), caret: true },
+      { name: "highlight", icon: HIGHLIGHT_ICON, tip: "Highlight", click: run(toggleSpan("mark")), caret: true },
+      { name: "link", icon: LINK_ICON, tip: "Link", key: "K", click: run(insertLink), caret: true },
+      // Inline code last of the marks and the code block first of the
+      // blocks, so the two chevrons stand beside each other with only the
+      // separator between them: one is a mark on words inside a line and the
+      // other makes the line a block, which is the cut the separator is
+      // there to make, and it is the cut the keys make too (a letter for the
+      // words, the letter under BLOCK_MOD for what the line is).
+      { name: "inline-code", icon: CODE_ICON, tip: "Inline code", key: "E", click: run(toggleInline("`")), caret: true },
       "|",
-      { name: "list", icon: LIST_ICON, tip: "Bulleted list", click: run(toggleList(false)) },
-      { name: "ordered-list", icon: OLIST_ICON, tip: "Numbered list", click: run(toggleList(true)) },
+      { name: "code-block", icon: CODE_BLOCK_ICON, tip: "Code block", key: "C", also: BLOCK_MOD, click: run(toggleCodeBlock), caret: true },
+      { name: "unordered-list", icon: LIST_ICON, tip: "Unordered list", click: run(toggleList(false)), caret: true },
+      { name: "ordered-list", icon: OLIST_ICON, tip: "Ordered list", click: run(toggleList(true)), caret: true },
+      { name: "task-list", icon: TASK_ICON, tip: "Task list", key: "T", also: BLOCK_MOD, click: run(toggleTask), caret: true },
+      { name: "quote", icon: QUOTE_ICON, tip: "Quote", click: run(toggleQuote), caret: true },
+      // A cut of their own, and then the six that were the Insert menu, as
+      // buttons closing the row: what a document holds beside its words, in
+      // the order a reader meets it (the maths inline and on lines of its
+      // own, then the table, the picture, the note and the rule). One button
+      // held them while the bar was one row, and the row is what they cost:
+      // the owner asked to see the bar in two, so they are spelled out here
+      // and what follows opens the second row ("/" below). The separator is
+      // his call as well: the buttons before it change what a line already
+      // is, these put something new in the document, and two gestures that
+      // different do not share a run.
       "|",
+      { name: "insert-equation", icon: EQUATION_ICON, tip: "Equation", click: run(toggleInline("$")), caret: true },
+      { name: "insert-equation-block", icon: EQUATION_BLOCK_ICON, tip: "Equation block", click: run(insertBlock(EQUATION_BLOCK, EQUATION_CARET)), caret: true },
+      { name: "insert-table", icon: TABLE_ICON, tip: "Table", click: run(insertBlock(TABLE_BLOCK, TABLE_CARET)), caret: true },
+      { name: "insert-picture", icon: PICTURE_ICON, tip: "Picture", click: run(insertPicture), caret: true },
+      { name: "insert-footnote", icon: FOOTNOTE_ICON, tip: "Footnote", click: run(insertFootnote), caret: true },
+      { name: "insert-rule", icon: RULE_ICON, tip: "Horizontal rule", click: run(insertBlock(RULE_BLOCK, RULE_CARET)), caret: true },
+      // The second row starts under the outline button: everything from here
+      // on is a switch over the document as a whole and not an edit of the
+      // text, so the break falls where a separator stood and does its work.
+      "/",
       // Ctrl+D matches whole words by default; this lights up to match inside
       // words too (score -> also the score in scores).
       {
@@ -8116,7 +9378,29 @@
       },
     ];
     specs.forEach(function (spec) {
-      bar.appendChild(spec === "|" ? separator() : toolbarButton(spec));
+      if (spec === "|") bar.appendChild(separator());
+      else if (spec === "/") bar.appendChild(rowBreak());
+      else bar.appendChild(toolbarButton(spec));
+    });
+    // A press on the chrome must not take the focus off the text. The
+    // document draws itself with nobody in it while it is unfocused, so the
+    // source of the caret's line went away for as long as a button was held
+    // down and came back when it was let go: the owner saw the `##` of a
+    // heading go and return around a press on the heading menu (2026-09-19),
+    // and it was every button of the bar, not that menu. preventDefault on
+    // mousedown keeps the focus where it is; the press still arrives, and
+    // the handlers that want the caret back still call view.focus() for a
+    // press made while the text did not have it.
+    // Buttons only, and not the panels CodeMirror puts inside the view (the
+    // search row, whose field is there to be typed in): the player's
+    // progress bar is a div that abcjs drags by hand, and preventing its
+    // default would be preventing the drag.
+    // The rail does it another way, with spans that cannot take the focus at
+    // all, because it stands inside the content where a focusable element
+    // would take the caret with it (chromeButton).
+    document.addEventListener("mousedown", function (e) {
+      const el = e.target && e.target.closest ? e.target.closest("button, [role=button]") : null;
+      if (el && el.closest(".mdm-toolbar, .mdm-outline") && !el.closest(".cm-panels")) e.preventDefault();
     });
     document.addEventListener("click", closeMenus);
     document.addEventListener("keydown", function (e) {

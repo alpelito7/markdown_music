@@ -497,6 +497,47 @@ const K = { chord: ["Control"], key: "k" };
 // bubble phase and whatever the page did with the default, and hands every
 // key to the workbench (did-keydown in VS Code 1.133.0's host page): Ctrl+B
 // set bold and hid the Explorer. The listener here stands in for it.
+test("the formatting keys stop at the text, and reach VS Code from anywhere else", { skip }, async () => {
+  const h = await open({ text: "one word here\n", scores: 0 });
+  await h.page.evaluate(() => {
+    window.__heard = [];
+    window.addEventListener("keydown", (e) => {
+      // The modifiers go down on their own first, and are no one's keys.
+      if (e.ctrlKey && !/^(Control|Shift|Alt|Meta)$/.test(e.key)) window.__heard.push((e.shiftKey ? "Shift+" : "") + e.code);
+    });
+  });
+  const heard = () => h.page.evaluate(() => window.__heard.splice(0));
+  await setSelection(h.page, 5);
+  for (const [mods, key] of [[["Control"], "b"], [["Control"], "i"], [["Control"], "e"], [["Control"], "k"]]) {
+    await chord(h.page, mods, key);
+  }
+  assert.notEqual(await docText(h.page), "one word here\n");
+  assert.deepEqual(await heard(), []);
+  // The block keys too, pressed as a keyboard presses them (blockChord): of
+  // these VS Code keeps Ctrl+Shift+T for Reopen Closed Editor and
+  // Ctrl+Shift+C for an external terminal, and neither may fire from the
+  // text.
+  for (const name of [2, "c", "t"]) await blockChord(h.page, name);
+  assert.deepEqual(await heard(), []);
+  // And the other way for the three the editor gave back: a chord the page
+  // does not bind is VS Code's from the text as well, which is the whole of
+  // what taking U, O and Q off is worth (Ctrl+Shift+O is its Go to Symbol).
+  const before2 = await docText(h.page);
+  for (const name of ["u", "o", "q"]) await blockChord(h.page, name);
+  assert.deepEqual(await heard(), ["Shift+KeyU", "Shift+KeyO", "Shift+KeyQ"]);
+  assert.equal(await docText(h.page), before2);
+  // Ctrl+S is VS Code's to save, from the text as well.
+  await chord(h.page, ["Control"], "s");
+  assert.deepEqual(await heard(), ["KeyS"]);
+  // Out of the text the key is VS Code's, and the text is left alone.
+  const before = await docText(h.page);
+  await h.page.evaluate(() => document.activeElement.blur());
+  await chord(h.page, ["Control"], "b");
+  assert.deepEqual(await heard(), ["KeyB"]);
+  assert.equal(await docText(h.page), before);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
 
 test("Enter continues a numbered list and renumbers what follows (ED01)", { skip }, async () => {
   const out = await pressOn("1. first\n2. second\n3. third\n", 18, ["Enter"]);
@@ -781,6 +822,24 @@ test("a toolbar button works on the selection where it is, in a table cell or ov
   assert.equal(out.text, "Energy **$E=mc^2$** is famous.\n");
 });
 
+test("the list buttons change the kind of a list, take it off again, and leave blank lines and quote marks as they are (ED23)", { skip }, async () => {
+  const text = "- Violin\n- Viola\n\n> Cello\n";
+  let out = await buttonOn(text, [{ anchor: 0, head: text.length }], "ordered-list");
+  assert.equal(out.text, "1. Violin\n2. Viola\n\n> 3. Cello\n");
+  out = await buttonOn("1. Violin\n2. Viola\n\n> 3. Cello\n", [{ anchor: 0, head: 29 }], "unordered-list");
+  assert.equal(out.text, "- Violin\n- Viola\n\n> - Cello\n");
+  out = await buttonOn("- Violin\n- Viola\n\n> - Cello\n", [{ anchor: 0, head: 27 }], "unordered-list");
+  assert.equal(out.text, "Violin\nViola\n\n> Cello\n");
+  // A heading's hashes make way for the marker, and a task box keeps its
+  // place behind the new one.
+  out = await buttonOn("# Cello\n", 3, "unordered-list");
+  assert.equal(out.text, "- Cello\n");
+  out = await buttonOn("- [ ] Violin\n", 8, "ordered-list");
+  assert.equal(out.text, "1. [ ] Violin\n");
+  // The numbers run from one over the lines taken, blank lines not counted.
+  out = await buttonOn("Flute\n\nOboe\n", [{ anchor: 0, head: 12 }], "ordered-list");
+  assert.equal(out.text, "1. Flute\n\n2. Oboe\n");
+});
 
 test("the strikethrough button writes Pandoc's ~~ and takes it off by the same rules as bold", { skip }, async () => {
   let out = await buttonOn("Some words here.\n", [{ anchor: 5, head: 10 }], "strikethrough");
@@ -793,6 +852,260 @@ test("the strikethrough button writes Pandoc's ~~ and takes it off by the same r
   // Not the single ~ of a subscript, which is Pandoc's and stays.
   out = await buttonOn("H~2~O is water.\n", [{ anchor: 6, head: 8 }], "strikethrough");
   assert.equal(out.text, "H~2~O ~~is~~ water.\n");
+});
+
+// Pandoc's bracketed span, `[x]{.mark}`, which the page writes as `<mark>`
+// (checked with the Pandoc 3.8.3 that the Quarto here ships: `==x==` comes
+// out as the four equals signs, so it is not this). The edit is not a pair
+// of marks, so it has its own shape. The underline button that wrote the
+// other span was taken off on 2026-09-19; what it wrote is still read, which
+// AT01 in webview-markdown.test.js holds.
+test("the highlight button writes Pandoc's bracketed span, and takes it off again", { skip }, async () => {
+  let out = await buttonOn("Some words here.\n", [{ anchor: 5, head: 10 }], "highlight");
+  assert.equal(out.text, "Some [words]{.mark} here.\n");
+  // A caret inside the span takes it off, class and brackets and attribute.
+  out = await buttonOn("Some [words]{.mark} here.\n", 8, "highlight");
+  assert.equal(out.text, "Some words here.\n");
+  // A caret inside a word wraps the word, as the marks do.
+  out = await buttonOn("Some words here.\n", 7, "highlight");
+  assert.equal(out.text, "Some [words]{.mark} here.\n");
+  // Nowhere to wrap: an empty span with the caret inside it, to type into.
+  out = await buttonOn("Words here.\n", 0, "highlight");
+  assert.equal(out.text, "[]{.mark}Words here.\n");
+  assert.deepEqual(out.ranges, [[1, 1]]);
+  // Each line's own text across a selection that spans lines, as the marks
+  // do, and blank lines left alone.
+  out = await buttonOn("Flute\n\nOboe\n", [{ anchor: 0, head: 12 }], "highlight");
+  assert.equal(out.text, "[Flute]{.mark}\n\n[Oboe]{.mark}\n");
+  // Not where no mark belongs: inside a fence the line is code.
+  out = await buttonOn("```\nx\n```\n", [{ anchor: 4, head: 5 }], "highlight");
+  assert.equal(out.text, "```\nx\n```\n");
+});
+
+// One button writes a span now, and the shape of the edit is still the
+// general one: a class joins the attribute of the span the range is already
+// in instead of nesting a second span, and the span goes with its last
+// class. The document that proves it is one written by hand with both
+// classes, which Pandoc reads and the editor draws whether or not a button
+// writes it.
+test("a class joins the span it finds instead of nesting, and the last one off takes the span", { skip }, async () => {
+  const sel = [{ anchor: 5, head: 10 }];
+  // Onto a span that is already there: one attribute, two classes.
+  let out = await buttonOn("Some [words]{.underline} here.\n", sel, "highlight");
+  assert.equal(out.text, "Some [words]{.underline .mark} here.\n");
+  // Off again, and the other class keeps the span with no space at the brace.
+  out = await buttonOn("Some [words]{.underline .mark} here.\n", 8, "highlight");
+  assert.equal(out.text, "Some [words]{.underline} here.\n");
+  out = await buttonOn("Some [words]{.mark .underline} here.\n", 8, "highlight");
+  assert.equal(out.text, "Some [words]{.underline} here.\n");
+  // And the last class takes the span with it.
+  out = await buttonOn("Some [words]{.mark} here.\n", 8, "highlight");
+  assert.equal(out.text, "Some words here.\n");
+});
+
+// Pandoc's superscript and subscript, `x^2^` and `H~2~O`, which the editor
+// draws raised and lowered and the page writes as <sup> and <sub>. The pair
+// came to the bar on 2026-09-19 (design-annotation-icons.html). Two things
+// are theirs alone and were measured on the pandoc 3.8.3 the Quarto here
+// ships: neither mark carries a bare space, so a space inside goes in as
+// `\ ` (a no-break space on the page), and neither carries a bracket at the
+// head of its content, since `x^[b]^` is an inline footnote there.
+test("the superscript and subscript buttons write Pandoc's marks, and escape what cannot stand inside them", { skip }, async () => {
+  let out = await buttonOn("The 2nd violin.\n", [{ anchor: 5, head: 7 }], "superscript");
+  assert.equal(out.text, "The 2^nd^ violin.\n");
+  // A caret inside the run takes its marks off again.
+  out = await buttonOn("The 2^nd^ violin.\n", 7, "superscript");
+  assert.equal(out.text, "The 2nd violin.\n");
+  out = await buttonOn("H2O is water.\n", [{ anchor: 1, head: 2 }], "subscript");
+  assert.equal(out.text, "H~2~O is water.\n");
+  out = await buttonOn("H~2~O is water.\n", 2, "subscript");
+  assert.equal(out.text, "H2O is water.\n");
+  // A space inside the content is escaped, and the escape comes off with
+  // the marks.
+  out = await buttonOn("x a b y\n", [{ anchor: 2, head: 5 }], "superscript");
+  assert.equal(out.text, "x ^a\\ b^ y\n");
+  out = await buttonOn("x ^a\\ b^ y\n", 4, "superscript");
+  assert.equal(out.text, "x a b y\n");
+  // And a bracket at the head of it, which would be an inline footnote.
+  out = await buttonOn("see [x] here\n", [{ anchor: 4, head: 7 }], "superscript");
+  assert.equal(out.text, "see ^\\[x]^ here\n");
+});
+
+// Two tildes are the strikethrough and one is the subscript, and the two
+// buttons stand three places apart on the same bar. Measured on pandoc
+// 3.8.3: `~~~x~~~` is a subscript with the strikeout gone, so a subscript
+// asked for over the whole text of a strikethrough cannot be written at all
+// and the button leaves the run as it stands; over part of that text it is
+// written, and `~~H~2~O~~` is read as the strikeout of H, a subscript 2 and
+// an O.
+test("the subscript button never writes the strikethrough's pair of tildes", { skip }, async () => {
+  let out = await buttonOn("a ~~x~~ b\n", [{ anchor: 4, head: 5 }], "subscript");
+  assert.equal(out.text, "a ~~x~~ b\n");
+  out = await buttonOn("a ~~H2O~~ b\n", [{ anchor: 5, head: 6 }], "subscript");
+  assert.equal(out.text, "a ~~H~2~O~~ b\n");
+  // And the strikethrough button is still the one that writes two, over a
+  // subscript's single tildes.
+  out = await buttonOn("H~2~O is water.\n", [{ anchor: 6, head: 8 }], "strikethrough");
+  assert.equal(out.text, "H~2~O ~~is~~ water.\n");
+});
+
+// The third of the bracketed spans the editor draws, the same gesture as the
+// highlight (toggleSpan), which is what the sheet argued for: the class
+// joins the attribute of a span the range is already in instead of nesting a
+// second one.
+test("the small caps button writes Pandoc's span and joins the one it finds", { skip }, async () => {
+  let out = await buttonOn("Some words here.\n", [{ anchor: 5, head: 10 }], "small-caps");
+  assert.equal(out.text, "Some [words]{.smallcaps} here.\n");
+  out = await buttonOn("Some [words]{.smallcaps} here.\n", 8, "small-caps");
+  assert.equal(out.text, "Some words here.\n");
+  out = await buttonOn("Some [words]{.mark} here.\n", [{ anchor: 5, head: 10 }], "small-caps");
+  assert.equal(out.text, "Some [words]{.mark .smallcaps} here.\n");
+});
+
+// The six of the Insert group, the buttons that close the first row of the
+// bar (design-annotation-icons.html, the set the owner picked; they were one
+// menu button until the bar went to two rows).
+async function insertOn(text, pos, row) {
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
+  await h.page.click('#app button[data-type="insert-' + row + '"]');
+  await sleep(120);
+  const out = await docText(h.page);
+  const ranges = await selectionRanges(h.page);
+  const open_ = await h.page.$$eval("#app .mdm-toolbar__item--open", (els) => els.length);
+  const focused = await h.page.evaluate(() => !!document.activeElement.closest(".cm-content"));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  return { text: out, ranges, open: open_, focused };
+}
+
+// The bar stands in two rows, and where it breaks is a decision: the first
+// row is what a reader writes (the words, the blocks, and the six things a
+// document holds beside them), the second what the document as a whole is
+// set in. So the first row ends on the rule and the second begins under the
+// outline button, at the same left edge, whatever the width of the pane.
+test("the bar stands in two rows, the first closing on the rule and the second opening under the outline", { skip }, async () => {
+  const h = await open({ text: "Text.\n", scores: 0 });
+  for (const width of [900, 1400]) {
+    await h.page.setViewport({ width, height: 900 });
+    await sleep(250);
+    const seen = await h.page.evaluate(() => {
+      const bar = document.querySelector("#app .mdm-toolbar");
+      const rows = new Map();
+      [...bar.children].forEach((el) => {
+        const box = el.getBoundingClientRect();
+        const button = el.querySelector("button");
+        if (!button || !box.height) return;
+        const top = Math.round(box.top);
+        if (!rows.has(top)) rows.set(top, []);
+        rows.get(top).push({ name: button.getAttribute("data-type"), left: Math.round(box.left) });
+      });
+      return [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([top, items]) => ({ top, items }));
+    });
+    assert.equal(seen.length, 2, "the bar is not in two rows at " + width + ": " + JSON.stringify(seen.map((r) => r.items.length)));
+    const first = seen[0].items.map((i) => i.name);
+    const second = seen[1].items.map((i) => i.name);
+    assert.equal(first[0], "outline", width + ": the first row does not open on the outline");
+    assert.equal(first[first.length - 1], "insert-rule", width + ": the first row does not close on the rule");
+    assert.deepEqual(first.slice(-6), [
+      "insert-equation",
+      "insert-equation-block",
+      "insert-table",
+      "insert-picture",
+      "insert-footnote",
+      "insert-rule",
+    ], width + ": the six do not close the first row");
+    assert.equal(second[0], "mdm-match-substring", width + ": the second row does not open on the multicursor");
+    assert.equal(second[second.length - 1], "mdm-follow", width + ": the second row does not close on the playhead");
+    assert.equal(seen[1].items[0].left, seen[0].items[0].left, width + ": the second row does not start under the outline");
+    // Two rows of buttons and nothing between them: the break draws nothing
+    // and takes no height, so the rows stand a row apart and no more.
+    assert.ok(seen[1].top - seen[0].top <= 32, width + ": the rows stand " + (seen[1].top - seen[0].top) + "px apart");
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The equation button is a toggle, `$` being a pair of marks like the rest
+// (INLINE_KIND): the selection is wrapped, and pressed inside an equation it
+// takes the dollars off.
+test("the Equation button wraps the selection in dollars and takes them off again", { skip }, async () => {
+  let out = await insertOn("Energy is famous.\n", [{ anchor: 0, head: 6 }], "equation");
+  assert.equal(out.text, "$Energy$ is famous.\n");
+  assert.equal(out.open, 0);
+  assert.equal(out.focused, true);
+  out = await insertOn("$Energy$ is famous.\n", 4, "equation");
+  assert.equal(out.text, "Energy is famous.\n");
+  // Nowhere to wrap: an empty pair with the caret inside it, to type into.
+  out = await insertOn("Text.\n", 0, "equation");
+  assert.equal(out.text, "$$Text.\n");
+  assert.deepEqual(out.ranges, [[1, 1]]);
+});
+
+// The three that stand on lines of their own go where the code block's empty
+// block goes: under the whole of the block the caret is in, never through
+// it, on a blank line when the caret is on one, and inside the quote or the
+// item around them.
+test("the Equation block, Table and Horizontal rule buttons write a block of their own where a block belongs", { skip }, async () => {
+  let out = await insertOn("Text.\n", 2, "equation-block");
+  assert.equal(out.text, "Text.\n\n$$\n\n$$\n");
+  assert.deepEqual(out.ranges, [[10, 10]]);
+  out = await insertOn("Text.\n", 2, "table");
+  assert.equal(out.text, "Text.\n\n|  |  |\n| --- | --- |\n|  |  |\n|  |  |\n");
+  assert.deepEqual(out.ranges, [[9, 9]]);
+  out = await insertOn("Text.\n", 2, "rule");
+  assert.equal(out.text, "Text.\n\n***\n");
+  assert.deepEqual(out.ranges, [[10, 10]]);
+  // A paragraph of two lines is not cut in two: the rule goes under it.
+  out = await insertOn("One\ntwo\n", 1, "rule");
+  assert.equal(out.text, "One\ntwo\n\n***\n");
+  // On a blank line the block is written there.
+  out = await insertOn("Text.\n\n", 6, "rule");
+  assert.equal(out.text, "Text.\n\n***\n");
+  // Inside a quote the block carries the quote's mark, parted from the text
+  // above by a line of the quote's own.
+  out = await insertOn("> Cello\n", 3, "rule");
+  assert.equal(out.text, "> Cello\n>\n> ***\n");
+  // Inside a list item no blank line is written, which would be all the
+  // block added to the list besides itself.
+  out = await insertOn("- Violin\n", 4, "rule");
+  assert.equal(out.text, "- Violin\n  ***\n");
+});
+
+// The picture row is the link gesture with a `!` in front (linkGesture), so
+// what Ctrl+K does with a selection it does with one too, and a file name
+// counts as an address, which is what a picture's address usually is.
+test("the Picture button writes an image and puts a file name where the address goes", { skip }, async () => {
+  let out = await insertOn("See here.\n", [{ anchor: 4, head: 8 }], "picture");
+  assert.equal(out.text, "See ![here]().\n");
+  assert.deepEqual(out.ranges, [[12, 12]]);
+  out = await insertOn("score.png\n", [{ anchor: 0, head: 9 }], "picture");
+  assert.equal(out.text, "![](score.png)\n");
+  assert.deepEqual(out.ranges, [[2, 2]]);
+  // Inside an image already, its address is selected to be typed over, and
+  // no second image is nested in it.
+  const text = "A ![staff](score.png) here.\n";
+  out = await insertOn(text, 5, "picture");
+  assert.equal(out.text, text);
+  assert.deepEqual(out.ranges, [[text.indexOf("score.png"), text.indexOf(")")]]);
+});
+
+// The footnote row writes the reference after the words the caret is in,
+// which is where its glyph shows it, and the note at the end of the
+// document, because Pandoc reads a definition at the top level alone
+// (parseFootnoteDef): nothing is written inside the quote or the item the
+// caret stands in. The caret is left in the note, which is what a reader
+// types next.
+test("the Footnote button numbers the reference and opens its note at the end of the document", { skip }, async () => {
+  let out = await insertOn("The tune is old.\n", 8, "footnote");
+  assert.equal(out.text, "The tune[^1] is old.\n\n[^1]: \n");
+  assert.deepEqual(out.ranges, [[28, 28]]);
+  // The lowest number the document has not used, references and notes alike.
+  out = await insertOn("A[^1] tune.\n\n[^1]: First.\n", 10, "footnote");
+  assert.equal(out.text, "A[^1] tune[^2].\n\n[^1]: First.\n\n[^2]: \n");
+  // From inside a quote the note still goes to the top level, under it.
+  out = await insertOn("> Cello\n", 7, "footnote");
+  assert.equal(out.text, "> Cello[^1]\n\n[^1]: \n");
 });
 
 test("the task button puts a box behind the marker a line has, makes a bulleted task of a line with none, and takes only the box off", { skip }, async () => {
@@ -848,8 +1161,96 @@ test("the quote button quotes the whole of the blocks it touches and takes a quo
   assert.equal(out.text, "---\ntitle: T\n---\n\n> Text.\n");
 });
 
+test("on an empty line the line buttons start a line of their kind, parted from a paragraph above as Pandoc needs", { skip }, async () => {
+  // Under a blank line: the marker on the line, the caret after it.
+  let out = await buttonOn("Text.\n\n\n", 7, "task-list");
+  assert.equal(out.text, "Text.\n\n- [ ] \n");
+  assert.deepEqual(out.ranges, [[13, 13]]);
+  out = await buttonOn("Text.\n\n\n", 7, "quote");
+  assert.equal(out.text, "Text.\n\n> \n");
+  out = await buttonOn("Text.\n\n\n", 7, "unordered-list");
+  assert.equal(out.text, "Text.\n\n- \n");
+  out = await buttonOn("Text.\n\n\n", 7, "ordered-list");
+  assert.equal(out.text, "Text.\n\n1. \n");
+  // Right under a paragraph the line stays blank and the marker goes on
+  // the next one: Pandoc 3.8.3 reads `Text.` over `- a` as `Text. - a`.
+  out = await buttonOn("Text.\n\n", 6, "unordered-list");
+  assert.equal(out.text, "Text.\n\n- \n");
+  assert.deepEqual(out.ranges, [[9, 9]]);
+  // In a quote, with the quote's marks on both lines.
+  out = await buttonOn("> Text.\n>\n", 9, "unordered-list");
+  assert.equal(out.text, "> Text.\n>\n> - \n");
+  // Under an item an item is the list's next one, with no blank line; a
+  // quote there would be read into the item's text, and is parted.
+  out = await buttonOn("- a\n\n", 4, "task-list");
+  assert.equal(out.text, "- a\n- [ ] \n");
+  out = await buttonOn("- a\n\n", 4, "quote");
+  assert.equal(out.text, "- a\n\n> \n");
+  // Not in a fence, where a line is code.
+  out = await buttonOn("```\n\n```\n", 4, "unordered-list");
+  assert.equal(out.text, "```\n\n```\n");
+});
 
+// The heading button opens a menu of Paragraph and the six levels; a row sets
+// the level of every selected line, and the level the caret's line has
+// already, picked again, takes the heading off. Level 0 is the Paragraph row.
+async function headingOn(text, pos, level) {
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
+  await h.page.click('#app button[data-type="headings"]');
+  await h.page.click('#app .mdm-menu__item[data-type="' + (level ? "heading-" + level : "paragraph") + '"]');
+  await sleep(120);
+  const out = await docText(h.page);
+  const ranges = await selectionRanges(h.page);
+  const open_ = await h.page.$$eval("#app .mdm-toolbar__item--open", (els) => els.length);
+  // The focus back in the text, as from every button that acts on the caret.
+  const focused = await h.page.evaluate(() => !!document.activeElement.closest(".cm-content"));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  return { text: out, ranges, open: open_, focused };
+}
 
+const menuRows = (page) =>
+  page.$$eval('#app button[data-type="headings"] + .mdm-menu .mdm-menu__item', (els) =>
+    els.map((el) => [el.getAttribute("data-type"), el.textContent])
+  );
+
+// The Paragraph row went when the ticked level picked again started taking
+// the heading off, and it is back with the keys: at the keyboard there is no
+// tick to read, so a hand needs one key that says paragraph whatever the line
+// was. Every row names its key, written as VS Code writes it per platform.
+test("the heading menu lists Paragraph and the six levels, the caret's line ticked, each naming its key", { skip }, async () => {
+  const h = await open({ text: "## Title\n\nBody.\n", scores: 0 });
+  await setSelection(h.page, 4);
+  await h.page.click('#app button[data-type="headings"]');
+  assert.deepEqual(await menuRows(h.page), [
+    ["paragraph", "ParagraphCtrl+Shift+0"],
+    ["heading-1", "Heading 1Ctrl+Shift+1"],
+    ["heading-2", "Heading 2✓Ctrl+Shift+2"],
+    ["heading-3", "Heading 3Ctrl+Shift+3"],
+    ["heading-4", "Heading 4Ctrl+Shift+4"],
+    ["heading-5", "Heading 5Ctrl+Shift+5"],
+    ["heading-6", "Heading 6Ctrl+Shift+6"],
+  ]);
+  // Read again at each opening: on a paragraph the tick is on Paragraph.
+  await h.page.click('#app button[data-type="headings"]');
+  await setSelection(h.page, 12);
+  await h.page.click('#app button[data-type="headings"]');
+  assert.deepEqual(
+    (await menuRows(h.page)).filter((r) => r[1].includes("✓")).map((r) => r[0]),
+    ["paragraph"]
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+
+  // On a Mac the row names Cmd+Option, which is what the keymap binds there.
+  const mac = await open({ text: "Body.\n", scores: 0, platform: "MacIntel" });
+  await setSelection(mac.page, 2);
+  await mac.page.click('#app button[data-type="headings"]');
+  assert.deepEqual((await menuRows(mac.page))[0], ["paragraph", "Paragraph✓⌥⌘0"]);
+  assert.deepEqual(mac.errors, []);
+  await mac.close();
+});
 
 test("a heading level from the menu goes after a quote's mark, in place of a list marker, over the level a line had, and makes ATX of a setext heading (G065)", { skip }, async () => {
   let out = await headingOn("> Cello\n", 3, 1);
@@ -895,6 +1296,7 @@ test("a heading level from the menu lands on the line the caret was in, inside i
   assert.equal(out.text, "## Energy $E=mc^2$ here.\n\nAfter.\n");
 });
 
+// ---- The code block button and Ctrl+Shift+C ----
 //
 // The block twin of inline code, its rules a level up: on a blank line an
 // empty block with the caret right after the opening backticks, where the
@@ -1024,6 +1426,214 @@ test("Enter in a fence inside a task keeps to the item's column, not past its bo
   assert.equal(out.text, "- [ ] a\n  ```\n  x\n  y\n  ```\n");
 });
 
+// C, with the second modifier every block key has: the code block was on
+// Notion's Ctrl+Shift+8 for a day and moved for the symmetry, so that every
+// digit is a heading level and every block without one is a letter. Not E,
+// the letter of its inline twin, which is Show Explorer in VS Code. The tip
+// names the key as VS Code writes it on each platform.
+test("Ctrl+Shift+C does what the code block button does, the tip names it, and abc typed after the backticks makes a score", { skip }, async () => {
+  const text = "Some prose.\n\n";
+  const tipOf = (page) =>
+    page.evaluate(() => {
+      const b = document.querySelector('#app button[data-type="code-block"]');
+      return [b.getAttribute("aria-label"), b.getAttribute("aria-keyshortcuts")];
+    });
+  const h = await open({ text, scores: 0 });
+  assert.deepEqual(await tipOf(h.page), ["Code block (Ctrl+Shift+C)", "Control+Shift+C"]);
+  await setSelection(h.page, 13);
+  await blockChord(h.page, "c");
+  assert.equal(await docText(h.page), "Some prose.\n\n```\n```");
+  assert.deepEqual(await selectionRanges(h.page), [[16, 16]]);
+  await h.page.keyboard.type("abc");
+  for (const line of ["X:1", "K:C", "CDEF|"]) {
+    await h.page.keyboard.press("Enter");
+    await h.page.keyboard.type(line);
+  }
+  assert.equal(await docText(h.page), "Some prose.\n\n```abc\nX:1\nK:C\nCDEF|\n```");
+  await setSelection(h.page, 0);
+  await h.page.waitForFunction(() => document.querySelectorAll("#app .mdm-score svg").length > 0, { timeout: 5000 });
+  assert.deepEqual(h.errors, []);
+  await h.close();
+
+  const mac = await open({ text, scores: 0, platform: "MacIntel" });
+  assert.deepEqual(await tipOf(mac.page), ["Code block (⌥⌘C)", "Meta+Alt+C"]);
+  await setSelection(mac.page, 13);
+  await chord(mac.page, ["Meta", "Alt"], "c");
+  assert.equal(await docText(mac.page), "Some prose.\n\n```\n```");
+  assert.deepEqual(mac.errors, []);
+  await mac.close();
+});
+
+// The bar does not take the focus off the text. Unfocused the document draws
+// itself with nobody in it, so the source of the caret's line went away for
+// as long as a button was held down and came back when it was let go: the
+// owner saw the `##` of a heading go and return around a press on the
+// heading menu (2026-09-19), and it was every button of the bar. Measured
+// with the button held, which is where it shows; the pointer leaves the
+// button before it is let go, so no press is made and the text is the same
+// one throughout.
+test("a button held down leaves the caret's line showing its source, and the focus in the text", { skip }, async () => {
+  const h = await open({ text: "## From equations to score\n\nBody.\n", scores: 0 });
+  await setSelection(h.page, 6);
+  await sleep(150);
+  const state = () =>
+    h.page.evaluate(() => [document.querySelector("#app .cm-line").textContent, window.__mdm.view.hasFocus]);
+  assert.deepEqual(await state(), ["## From equations to score", true]);
+  for (const name of ["headings", "bold", "unordered-list", "mdm-theme"]) {
+    const at = await h.page.evaluate((n) => {
+      const b = document.querySelector('#app button[data-type="' + n + '"]').getBoundingClientRect();
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    }, name);
+    await h.page.mouse.move(at.x, at.y);
+    await h.page.mouse.down();
+    await sleep(60);
+    assert.deepEqual(await state(), ["## From equations to score", true], name + " held down");
+    await h.page.mouse.move(at.x, at.y + 300);
+    await h.page.mouse.up();
+    await sleep(80);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// ---- The rest of the block keys ----
+
+// The digit is the level, 0 the paragraph, and a letter names the block that
+// has no level (D19). The keys are the page's own keymap and carry
+// CodeMirror's stopPropagation, so a key answered here never reaches the
+// workbench as well. Two of the letters are left: C for the code block and T
+// for the boxes. U, O and Q were the bullets, the numbers and the quote for
+// a day and were given back on 2026-09-19 (the marks are so little to type
+// that the chord bought nothing, and on Linux fcitx5 takes Ctrl+Shift+U for
+// its `U+` prompt before any editor sees it), so they are pressed here to
+// prove they do nothing and reach VS Code instead.
+//
+// Pressed the way a keyboard presses them, which is not the way
+// page.keyboard.press does: a browser applies Shift to `key` itself, so
+// Ctrl+Shift+U arrives as "U" and Ctrl+Shift+2 as whatever the layout writes
+// over the 2, while press("2") with Shift held sends a plain "2".
+// CodeMirror reads those through different branches of its keymap (it falls
+// back to the key's base name by keyCode), and one of them is not the branch
+// a keyboard reaches: with Puppeteer's own "u", Ctrl+Shift+U ran Ctrl+U
+// first, which is undoSelection in historyKeymap. The owner's board is the
+// Spanish one, where none of these digits is the character it is named
+// after, so that is the layout the keys are pressed in here.
+const LAYOUTS = {
+  // code and keyCode of the key, then what each layout writes with Shift.
+  0: ["Digit0", 48, { us: ")", es: "=" }],
+  1: ["Digit1", 49, { us: "!", es: "!" }],
+  2: ["Digit2", 50, { us: "@", es: '"' }],
+  3: ["Digit3", 51, { us: "#", es: "\u00b7" }],
+  5: ["Digit5", 53, { us: "%", es: "%" }],
+  6: ["Digit6", 54, { us: "^", es: "&" }],
+  c: ["KeyC", 67, { us: "C", es: "C" }],
+  u: ["KeyU", 85, { us: "U", es: "U" }],
+  o: ["KeyO", 79, { us: "O", es: "O" }],
+  t: ["KeyT", 84, { us: "T", es: "T" }],
+  q: ["KeyQ", 81, { us: "Q", es: "Q" }],
+};
+
+// Ctrl+Shift+<name> on `layout`, dispatched through CDP because Puppeteer's
+// keyboard cannot send a shifted character with its own keyCode.
+async function blockChord(page, name, layout) {
+  const [code, keyCode, shifted] = LAYOUTS[name];
+  const cdp = await page.createCDPSession();
+  for (const type of ["rawKeyDown", "keyUp"]) {
+    await cdp.send("Input.dispatchKeyEvent", {
+      type: type,
+      key: shifted[layout || "es"],
+      code: code,
+      windowsVirtualKeyCode: keyCode,
+      nativeVirtualKeyCode: keyCode,
+      // Ctrl and Shift, as CDP numbers the modifiers.
+      modifiers: 2 | 8,
+    });
+  }
+  await cdp.detach();
+}
+
+// `text` with the caret at `pos` and Ctrl+Shift+<name> pressed on `layout`.
+async function blockKeyOn(text, pos, name, layout) {
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
+  await blockChord(h.page, name, layout);
+  await sleep(120);
+  const out = await docText(h.page);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  return out;
+}
+
+test("Ctrl+Shift+<digit> sets the heading of that level, the level a line has takes it off, and 0 is the paragraph", { skip }, async () => {
+  assert.equal(await blockKeyOn("Title\n\nBody.\n", 2, 2), "## Title\n\nBody.\n");
+  // The level the line already is, as the ticked row of the menu does.
+  assert.equal(await blockKeyOn("## Title\n", 4, 2), "Title\n");
+  // Another level over it, and the levels past Notion's row of three.
+  assert.equal(await blockKeyOn("## Title\n", 4, 5), "##### Title\n");
+  assert.equal(await blockKeyOn("## Title\n", 4, 6), "###### Title\n");
+  // 0 is the paragraph whatever the level was, which is what it is for: at
+  // the keyboard nothing says what level the line is.
+  assert.equal(await blockKeyOn("###### Title\n", 8, 0), "Title\n");
+  assert.equal(await blockKeyOn("Body.\n", 2, 0), "Body.\n");
+  // Every selected line, blank lines left alone, as a row does.
+  assert.equal(await blockKeyOn("one\n\ntwo\n", [{ anchor: 0, head: 8 }], 3), "### one\n\n### two\n");
+  // Not in a score, where no heading belongs: the line is left as it is.
+  assert.equal(await blockKeyOn("```abc\nX:1\n```\n", 9, 1), "```abc\nX:1\n```\n");
+  // The same key on a US board, where the 2 writes an at sign and not a
+  // quote: the level is the key's own, not the character it prints.
+  assert.equal(await blockKeyOn("Title\n", 2, 2, "us"), "## Title\n");
+});
+
+test("Ctrl+Shift+T does what its button does, and the lists and the quote name no key", { skip }, async () => {
+  const tips = (page) =>
+    page.evaluate(() =>
+      ["unordered-list", "ordered-list", "task-list", "quote"].map((name) => {
+        const b = document.querySelector('#app button[data-type="' + name + '"]');
+        return [b.getAttribute("aria-label"), b.getAttribute("aria-keyshortcuts")];
+      })
+    );
+  const h = await open({ text: "Violin\n", scores: 0 });
+  // U, O and Q were theirs for a day and went on 2026-09-19: a tip that
+  // names a key the editor no longer answers is a tip that lies, so the
+  // three name none, and carry no aria-keyshortcuts for a screen reader
+  // either.
+  assert.deepEqual(await tips(h.page), [
+    ["Unordered list", null],
+    ["Ordered list", null],
+    ["Task list (Ctrl+Shift+T)", "Control+Shift+T"],
+    ["Quote", null],
+  ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+
+  // Every button writes its own mark, key or no key.
+  const pairs = [
+    ["unordered-list", "- Violin\n"],
+    ["ordered-list", "1. Violin\n"],
+    ["task-list", "- [ ] Violin\n"],
+    ["quote", "> Violin\n"],
+  ];
+  for (const [button, written] of pairs) {
+    const byButton = await buttonOn("Violin\n", 3, button);
+    assert.equal(byButton.text, written, button);
+  }
+  // The one key left boxes the line and, pressed again, takes the box off
+  // and leaves the item, as its button does.
+  assert.equal(await blockKeyOn("Violin\n", 3, "t"), "- [ ] Violin\n");
+  assert.equal(await blockKeyOn("- [ ] Violin\n", 8, "t"), "- Violin\n");
+  // The three that went leave the text alone now.
+  for (const name of ["u", "o", "q"]) assert.equal(await blockKeyOn("Violin\n", 3, name), "Violin\n", name);
+
+  // On a Mac the row is Cmd+Option, where Cmd+Shift+3, 4 and 5 are the
+  // system's screenshots.
+  const mac = await open({ text: "Violin\n", scores: 0, platform: "MacIntel" });
+  assert.deepEqual((await tips(mac.page))[2], ["Task list (\u2325\u2318T)", "Meta+Alt+T"]);
+  await setSelection(mac.page, 3);
+  await chord(mac.page, ["Meta", "Alt"], "t");
+  assert.equal(await docText(mac.page), "- [ ] Violin\n");
+  assert.deepEqual(mac.errors, []);
+  await mac.close();
+});
 
 // ---- The clicks of the bench (section 22) ----
 
@@ -2760,13 +3370,24 @@ test("a drawn block is numbered by its first line, and by every line once a care
   await h.close();
 });
 
-// The bar is grouped by concept, and the separators are where the concept
-// changes. Written out in full because the order carries a decision that no
+// The bar is grouped by concept, the separators are where the concept
+// changes, and since 2026-09-19 it stands in two rows: `/` is where the
+// first one ends (rowBreak in main.js). The small caps, superscript and
+// subscript buttons came in with the words that day
+// (design-annotation-icons.html) and the six of the Insert group close the
+// first row behind a separator of their own, spelled out as buttons where
+// one menu button held them while the bar was a single row: that row is what they cost, and the owner asked
+// to see the bar in two rather than pay it. The second row starts under the
+// outline button, with everything that switches the document as a whole.
+// Written out in full because the order carries a decision that no
 // single button can hold on its own: outline leads, because its panel opens
 // down the left edge and the button sits on the side the panel appears; the
 // export follows alone, being the one button that leaves the editor; then the
-// history, then the marks that act on the caret, then the lists, then the one
-// that changes what a selection matches. The last three groups are the ones
+// history, then the marks that act on the caret, then the blocks, then the one
+// that changes what a selection matches. Inline code is the last of the marks
+// and the code block the first of the blocks, so the two chevrons meet at the
+// separator: one marks words inside a line, the other makes the line a block,
+// which is the cut that separator makes. The last three groups are the ones
 // that used to be a single run of seven: the page (what it is painted in,
 // what it is set in, whether it shows the block at the top that is not prose),
 // then the score (the three that dress the music and touch nothing else), then
@@ -2783,14 +3404,27 @@ const BAR = [
   "headings",
   "bold",
   "italic",
-  "inline-code",
+  "strikethrough",
+  "superscript",
+  "subscript",
+  "small-caps",
+  "highlight",
   "link",
+  "inline-code",
   "|",
-  "list",
+  "code-block",
+  "unordered-list",
   "ordered-list",
   "task-list",
   "quote",
   "|",
+  "insert-equation",
+  "insert-equation-block",
+  "insert-table",
+  "insert-picture",
+  "insert-footnote",
+  "insert-rule",
+  "/",
   "mdm-match-substring",
   "|",
   "mdm-theme",
@@ -2812,6 +3446,8 @@ test("the toolbar is grouped by what a button is about", { skip }, async () => {
     Array.from(document.querySelectorAll("#app .mdm-toolbar > *")).map((el) =>
       el.classList.contains("mdm-toolbar__sep")
         ? "|"
+        : el.classList.contains("mdm-toolbar__break")
+        ? "/"
         : el.querySelector("button").getAttribute("data-type")
     )
   );

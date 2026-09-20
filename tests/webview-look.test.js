@@ -1769,6 +1769,86 @@ test("every button draws a glyph of its own, and the score toggle draws a note",
   await h.close();
 });
 
+// The four buttons of the block group are one drawing with four markers.
+// Until 2026-09-19 the bulleted and the numbered ones had three thin rows,
+// the quote three and a tall rule, and the task one two thick rows, so at
+// 15px they did not read as a family; the owner asked for the task glyph's
+// construction across all of them. What is held here is that construction:
+// the two bars of the task glyph, the same paths at the same rows, with a
+// marker of the bars' own weight in front of each. The quote's marker is
+// one rule and not one a row, which is the owner's word too: a quote's bar
+// is a single line down the whole of it. The figures are 5.8 units tall because the stem of DejaVu Sans
+// Bold's 1 is 364/1493 of the glyph's height, which at 5.8 is 1.41, the
+// bars' 1.4 (measured in the outline); a taller figure draws a heavier
+// stroke than the bar beside it.
+test("the four block glyphs are one drawing: the task bars, and a marker of their weight", { skip }, async () => {
+  const h = await open({ scores: 0 });
+  const read = (name) =>
+    h.page.$eval('#app button[data-type="' + name + '"] svg', (svg) => {
+      const box = (el) => {
+        const b = el.getBBox();
+        return { x: +b.x.toFixed(2), y: +b.y.toFixed(2), w: +b.width.toFixed(2), h: +b.height.toFixed(2) };
+      };
+      return {
+        paths: [...svg.querySelectorAll("path")].map((el) => el.getAttribute("d")),
+        circles: [...svg.querySelectorAll("circle")].map((el) => ({
+          cx: +el.getAttribute("cx"), cy: +el.getAttribute("cy"), r: +el.getAttribute("r"),
+        })),
+        boxes: [...svg.querySelectorAll("path")].map(box),
+      };
+    });
+  const [task, unordered, ordered, quote] = await Promise.all(
+    ["task-list", "unordered-list", "ordered-list", "quote"].map(read)
+  );
+  // The task glyph's bars are the two full-width paths of its four.
+  const bars = task.paths.filter((d) => d.startsWith("M8.2 "));
+  assert.equal(bars.length, 2, "the task glyph no longer draws two bars: " + JSON.stringify(task.paths));
+  for (const [name, glyph] of [["unordered", unordered], ["ordered", ordered], ["quote", quote]]) {
+    assert.deepEqual(glyph.paths.filter((d) => d.startsWith("M8.2 ")), bars,
+      "the " + name + " glyph does not carry the task glyph's own bars");
+  }
+  // Two rows, and nothing in the middle where the third row used to be.
+  const rows = task.boxes.filter((b) => b.x > 7).map((b) => +(b.y + b.h / 2).toFixed(1));
+  assert.deepEqual(rows, [4, 12], "the task glyph's rows moved: " + JSON.stringify(rows));
+
+  // The bullets: one disc a row, on one vertical, of the box's mass.
+  assert.equal(unordered.circles.length, 2, "the unordered glyph does not draw two bullets");
+  assert.deepEqual(unordered.circles.map((c) => c.cy), [4, 12], "the bullets are off the rows");
+  assert.equal(unordered.circles[0].cx, unordered.circles[1].cx, "the bullets do not share a vertical");
+  assert.equal(unordered.circles[0].r, unordered.circles[1].r, "the bullets differ in size");
+  assert.ok(Math.abs(unordered.circles[0].r * 2 - 3.8) < 0.01,
+    "the bullet is not the 3.8 across that carries the bars' weight: " + JSON.stringify(unordered.circles));
+
+  // The figures: 5.8 tall, centred on the rows, hanging to the right the way
+  // a numbered list hangs in the margin the editor draws it in.
+  const figures = ordered.boxes.filter((b) => b.x < 7);
+  assert.equal(figures.length, 2, "the ordered glyph does not draw two figures: " + JSON.stringify(ordered.boxes));
+  for (const [i, f] of figures.entries()) {
+    assert.ok(Math.abs(f.h - 5.8) < 0.06, "figure " + (i + 1) + " is not 5.8 tall: " + JSON.stringify(f));
+    assert.ok(Math.abs(f.y + f.h / 2 - rows[i]) < 0.06,
+      "figure " + (i + 1) + " is off its row: " + JSON.stringify(f));
+  }
+  assert.ok(Math.abs((figures[0].x + figures[0].w) - (figures[1].x + figures[1].w)) < 0.06,
+    "the figures do not hang to the right: " + JSON.stringify(figures));
+
+  // The quote: one rule down both rows, in the same marker column, at the
+  // weight of the bars it stands beside. Not two, one to a row: the editor
+  // draws a quote as a single line down the whole of it.
+  const rules = await h.page.$$eval('#app button[data-type="quote"] svg rect', (rs) =>
+    rs.map((r) => ["x", "y", "width", "height"].reduce((o, a) => ((o[a] = +r.getAttribute(a)), o), {}))
+  );
+  assert.equal(rules.length, 1, "the quote glyph does not draw one rule: " + JSON.stringify(rules));
+  const [rule] = rules;
+  assert.ok(rule.height > rule.width * 4, "the quote's marker is not a vertical rule: " + JSON.stringify(rule));
+  assert.ok(Math.abs(rule.width - 1.6) < 0.01, "the quote's rule is off the bars' weight: " + JSON.stringify(rule));
+  assert.ok(rule.y < rows[0] && rule.y + rule.height > rows[1],
+    "the quote's rule does not run past both rows: " + JSON.stringify([rule, rows]));
+  assert.ok(Math.abs(rule.x + rule.width / 2 - unordered.circles[0].cx) < 0.6,
+    "the quote's rule is off the marker column: " + JSON.stringify([rule, unordered.circles[0]]));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- The face of the text ----------
 
 // Everything the face decides, in one round trip: what the document is set in,
@@ -2293,6 +2373,109 @@ test("a named theme brings its own side, palette and all", { skip }, async () =>
   );
   assert.deepEqual(await synVars(h.page), palette("dark").colors);
   assert.equal((await paintedCode(h.page)).keyword, "rgb(10, 11, 12)");
+  await h.close();
+});
+
+// The small caps button and the heading button both say "this letter, and
+// another one of it", and they are now in the same arrangement: a row. The
+// owner read the stacked pair that shipped before as the heading button
+// twice on 2026-09-19 and then picked the row that answers it with the
+// letters instead (G of design/design-smallcaps-icon.html, `aA`). So what
+// keeps them apart is the heights: the heading is one shape at two heights,
+// small caps is two shapes at one, because a small cap IS a capital at the
+// x-height. The placement is held too, since it was measured and not
+// guessed (design/design-smallcaps-placement.html): the pair sits on the
+// heading's baseline and not above it.
+test("the small caps glyph sets two shapes at one height, where the heading glyph sets one shape at two", { skip }, async () => {
+  const h = await open({ scores: 0 });
+  // Measured in the 16x16 the viewBox sets, and through the matrix that
+  // takes the path there: `getBBox()` alone reads a path in its own space,
+  // so a `transform` on the glyph or on a group inside it moves the drawing
+  // and not the numbers, and the placement below would pass on an icon that
+  // had visibly floated off the row (seen, mutating this on 2026-09-19).
+  const read = (name) =>
+    h.page.$$eval('#app button[data-type="' + name + '"] svg path', (ps) =>
+      ps.map((el) => {
+        const b = el.getBBox();
+        const m = el.ownerSVGElement.getScreenCTM().inverse().multiply(el.getScreenCTM());
+        const xs = [];
+        const ys = [];
+        for (const [x, y] of [[b.x, b.y], [b.x + b.width, b.y], [b.x, b.y + b.height], [b.x + b.width, b.y + b.height]]) {
+          xs.push(m.a * x + m.c * y + m.e);
+          ys.push(m.b * x + m.d * y + m.f);
+        }
+        const box = { x: Math.min(...xs), y: Math.min(...ys) };
+        box.w = Math.max(...xs) - box.x;
+        box.h = Math.max(...ys) - box.y;
+        for (const k of ["x", "y", "w", "h"]) box[k] = +box[k].toFixed(2);
+        return box;
+      })
+    );
+  const [caps, heads] = await Promise.all([read("small-caps"), read("headings")]);
+  const overlap = (a, b, axis, size) =>
+    Math.min(a[axis] + a[size], b[axis] + b[size]) - Math.max(a[axis], b[axis]);
+  const baseline = (pair) => Math.max(pair[0].y + pair[0].h, pair[1].y + pair[1].h);
+  assert.equal(caps.length, 2, "the small caps glyph does not draw two letters: " + JSON.stringify(caps));
+  assert.equal(heads.length, 2, "the heading glyph does not draw two letters: " + JSON.stringify(heads));
+
+  // Both are rows: side by side, on one baseline.
+  for (const [what, pair] of [["small caps", caps], ["the heading", heads]]) {
+    assert.ok(overlap(pair[0], pair[1], "x", "w") < 0, what + " is not a row: " + JSON.stringify(pair));
+    assert.ok(overlap(pair[0], pair[1], "y", "h") > 0, what + " is not on one baseline: " + JSON.stringify(pair));
+  }
+  // One height for small caps, two for the heading. The 0.4 of slack is the
+  // overshoot of the round letter, which is 0.16 top and bottom as drawn.
+  assert.ok(
+    Math.abs(caps[0].h - caps[1].h) < 0.4,
+    "the small caps pair is not at one height: " + JSON.stringify(caps)
+  );
+  assert.ok(
+    Math.abs(heads[0].h - heads[1].h) > heads[0].h / 3,
+    "the heading pair is not one shape at two heights: " + JSON.stringify(heads)
+  );
+  // And it sits on the row of letters, not above it.
+  assert.ok(
+    Math.abs(baseline(caps) - baseline(heads)) <= 0.35,
+    "the small caps pair is off the heading's baseline: " +
+      JSON.stringify({ caps: baseline(caps), heads: baseline(heads) })
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A highlight is the document's own wash and not the browser's. Left to
+// `Mark` it was pure #ffff00 with black letters (Chrome, measured, in both
+// colour schemes), which on the dark theme cut a hole in the page; the owner
+// picked butter, B of four on design-highlight-colour.html. Two things are
+// held: the hue and the strength, one a side, and that the words inside keep
+// the document's ink instead of `MarkText`. The page and the PDF carry the
+// same value (--mdm-highlight from look_css, mdmhighlight from look_tex),
+// and html.test.js is where the two surfaces are put side by side.
+test("a highlight is the document's own wash, weaker on the dark side, and never black on the words", { skip }, async () => {
+  const wash = (page) =>
+    page.evaluate(() => {
+      const el = document.querySelector("#app .mdm-highlight");
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, ink: cs.color, prose: getComputedStyle(el.closest(".cm-line")).color };
+    });
+  const text = "A [passage]{.mark} in the line.\n";
+  let h = await open({ text, scores: 0 });
+  const light = await wash(h.page);
+  assert.ok(/0\.34/.test(light.bg), "the light side is not the 34% wash: " + JSON.stringify(light));
+  assert.ok(/0\.949|242/.test(light.bg), "the light side is not butter: " + JSON.stringify(light));
+  assert.equal(light.ink, light.prose, "the words in a highlight are not the document's ink");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+
+  h = await open({
+    text,
+    scores: 0,
+    seed: { settings: { theme: "Monokai" }, themes: [{ name: "Monokai", kind: "dark" }], palette: palette("dark"), side: "dark" },
+  });
+  const dark = await wash(h.page);
+  assert.ok(/0\.26/.test(dark.bg), "the dark side is not the 26% wash: " + JSON.stringify(dark));
+  assert.equal(dark.ink, dark.prose, "the words in a highlight are not the document's ink on the dark side");
+  assert.deepEqual(h.errors, []);
   await h.close();
 });
 
@@ -4800,4 +4983,42 @@ test("a fill under a score never makes the drawing smaller", { skip }, async () 
   assert.ok(Math.abs(pads[0] - 12.8) < 0.05, "no ground beside a drawing with room to spare" + all);
   assert.ok(pads[1] > 0 && pads[1] < 12.8, "the ground did not give way in part" + all);
   assert.equal(pads[3], 0, "ground kept beside a drawing the column cannot hold" + all);
+});
+
+
+// The heading menu names the key of every row. The keys make one column at
+// the panel's right edge, pushed there by the row's flex (margin-left: auto
+// on .mdm-menu__key): the names stay in a column of their own however long a
+// key is, and the key is drawn quieter and smaller than the name, the way VS
+// Code writes a shortcut in its own menus.
+test("the keys of the heading menu make one quiet column at the right edge", { skip }, async () => {
+  const h = await open({ text: "## Title\n\nBody.\n", scores: 0 });
+  await h.page.click('#app button[data-type="headings"]');
+  await sleep(150);
+  const seen = await h.page.evaluate(() => {
+    const panel = document.querySelector("#app .mdm-toolbar__item--open .mdm-menu");
+    const rows = Array.from(panel.querySelectorAll(".mdm-menu__item"));
+    const keys = rows.map((r) => r.querySelector(".mdm-menu__key"));
+    const box = (el) => el.getBoundingClientRect();
+    const size = (el) => parseFloat(getComputedStyle(el).fontSize);
+    return {
+      rows: rows.length,
+      withKey: keys.filter(Boolean).length,
+      lefts: keys.map((k) => Math.round(box(k).left)),
+      gaps: keys.map((k, i) => Math.round(box(rows[i]).right - box(k).right)),
+      names: rows.map((r) => Math.round(box(r).left)),
+      keySize: size(keys[0]),
+      rowSize: size(rows[0]),
+      keyInk: getComputedStyle(keys[0]).color,
+      rowInk: getComputedStyle(rows[0]).color,
+    };
+  });
+  assert.equal(seen.withKey, seen.rows, "a row of the heading menu carries no key");
+  assert.equal(new Set(seen.lefts).size, 1, "the keys do not line up: " + JSON.stringify(seen.lefts));
+  assert.equal(new Set(seen.gaps).size, 1, "the keys are not at one edge: " + JSON.stringify(seen.gaps));
+  assert.ok(seen.lefts[0] > seen.names[0], "the key is not to the right of the name");
+  assert.ok(seen.keySize < seen.rowSize, "the key is drawn as large as the name: " + seen.keySize);
+  assert.notEqual(seen.keyInk, seen.rowInk, "the key is drawn in the ink of the name: " + seen.keyInk);
+  assert.deepEqual(h.errors, []);
+  await h.close();
 });

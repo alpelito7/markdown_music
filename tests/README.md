@@ -3614,6 +3614,342 @@ crossed the editor tab and VS Code's own hover (monaco-hover) came down
 over the toolbar and took the click; `warp` straight to the button does
 not raise it.
 
+### The rest of the block keys, and a bar that stops taking the focus (2026-09-19)
+
+The owner's call after the schemes were weighed (D19): the digit is the
+heading's level and a letter names the block that has none, all on the code
+block's second modifier. `Ctrl+Shift+0` to `6` and `Ctrl+Shift+U`, `O`, `T`,
+`Q`, and `Ctrl+Shift+C` for the code block; `Cmd+Option` on a Mac, where the
+system keeps `Cmd+Shift+3`, `4` and `5` for screenshots and `Cmd+Shift+Q`
+logs the account out. Strikethrough keeps none. The Paragraph row is back in
+the heading menu with them, at the owner's word: at the keyboard there is no
+tick to read, so a hand that cannot see the level needs one key that says
+paragraph whatever the line was. Every row and every button names its key,
+written once (`shortcutLabel`), and the toggle a row and a key share is
+written once too (`applyHeading`).
+
+What was read before binding any of it, in VS Code 1.133.0's
+`workbench.desktop.main.js` and in the vendored CodeMirror: of
+`Ctrl+Shift+0` to `9` the workbench binds only 1 (replace, inside the search
+view) and 5 (split, with the terminal focused); of the letters,
+`Ctrl+Shift+T` is Reopen Closed Editor and `Ctrl+Shift+O` is Go to Symbol in
+Editor, both of which a .mdm gives up only while the caret is in the text;
+no built-in extension binds `ctrl+shift+<digit>`. `Ctrl+Shift+L` was left
+alone because it is `selectSelectionMatches` in CodeMirror's own search
+keymap, which *Ctrl+D selects the next occurrence, Ctrl+Shift+L all of them*
+holds.
+
+Tests: *the heading menu lists Paragraph and the six levels, the caret's
+line ticked, each naming its key*; *Ctrl+Shift+<digit> sets the heading of
+that level, the level a line has takes it off, and 0 is the paragraph*;
+*Ctrl+Shift+U, O, T and Q do what their buttons do, and every tip names its
+key*; the block keys added to *the formatting keys stop at the text, and
+reach VS Code from anywhere else*; and, in `webview-look.test.js`, *the keys
+of the heading menu make one quiet column at the right edge*.
+
+A trap that cost the first round: `page.keyboard.press("u")` with Shift held
+sends `key: "u"`, and a browser sends `"U"`. CodeMirror resolves those
+through different branches of its keymap (`runHandlers` tries the binding
+without Shift first, then falls back to the key's base name by keyCode), and
+with Puppeteer's `"u"` the first branch ran `Ctrl+U`, which is
+`undoSelection` in `historyKeymap`, so the bullets never saw the key and the
+test failed against a binding that works. The block keys are pressed through
+CDP now (`blockChord`), with the character the layout writes over the key,
+and the layout is the owner's Spanish one, where none of the digits is the
+character it is named after (`Ctrl+Shift+2` arrives as `"`, and
+`Ctrl+Shift+8` did as `(` while the code block was still on it). That was
+also the first time the code block's key had been pressed on a Spanish board
+here, and it worked; inside a real VS Code window it still has not been.
+
+Round: **BK1** the menu loses its Paragraph row, **BK2** a menu row stops
+naming its key, **BK3** the tick never lands on Paragraph, **BK4** a heading
+key stops toggling back to a paragraph, **BK5** `Ctrl+Shift+0` gone, **BK6**
+the sixth level has no key, **BK7** the bullets moved to L over
+selectSelectionMatches, **BK8** the task and quote keys swapped, **BK9** a
+block key without `stopPropagation`, **BK10** the Mac row on Cmd+Shift,
+**BK11** the list button stops naming its key, **BK12** the key column not
+pushed to the panel's edge: all 12 caught.
+
+Then the code block off `Ctrl+Shift+8` and onto `Ctrl+Shift+C`, at the
+owner's word and for the symmetry: every digit a heading level, every block
+without one a letter, and no exception left. Not E, its inline twin's
+letter, which is Show Explorer in VS Code, against the external terminal C
+takes; it never shipped on the digit, so nothing had to be migrated. The
+button moved with the key, out of the marks and to the head of the blocks,
+so inline code and the code block stand either side of the toolbar's
+separator, which is the same cut the keys make. *Ctrl+Shift+8 does what the
+code block button does* is now *Ctrl+Shift+C ...* and presses it through
+`blockChord`; *the toolbar is grouped by what a button is about* holds the
+order. Round: **BK14** the key back on the digit, **BK15** the button still
+naming the digit, **BK16** the two code buttons parted again: all 3
+caught.
+
+The owner then saw the `##` of a heading go and come back when he pressed
+the heading button. Measured in the harness with the button held down: the
+focus was the button's, `view.hasFocus` false, and the line drawn as a
+heading with its source away, since an unfocused document draws itself with
+nobody in it. It was every button of the bar and not that menu, and the
+`view.focus()` each handler already called was putting it back after the
+fact. Cured at the press: `mousedown` on a chrome button is prevented, so
+the focus never leaves the text. Buttons only, not the player's progress bar
+(a div abcjs drags by hand) nor the panels CodeMirror puts inside the view
+(the search field is there to be typed in); the rail does it another way
+already, with spans that cannot take the focus at all. Test: *a button held
+down leaves the caret's line showing its source, and the focus in the text*,
+which holds the button down, reads the line, and takes the pointer off the
+button before letting go so no press is made. **BK13** the guard removed ->
+caught.
+
+### The underline button off again, and the list glyphs made one family (2026-09-19, later)
+
+Two decisions of the owner's, the same day as the two sections above.
+
+**The underline button is gone; what it wrote is still read.** The reasons
+are his, and they are not "it is not Markdown", which would take half the
+bar with it (the strikethrough, the task list, the tables, the footnotes,
+the maths and the score are all extensions of one dialect or another). They
+are that a bracketed span leaks its own class into any reader that is not
+Pandoc, where `[word]{.underline}` shows as those characters while `2^nd^`
+at least leaves the word readable, and that an underline is the typewriter's
+italic, which a document set in Latin Modern through TeX has no use for. The
+highlight pays the same toll for something the other marks cannot do, so it
+stays. `.mdm-underline`, the `Span` branch and AT01 all stay too: the page
+underlines the span whether or not a button writes it, and that difference
+is not to be reopened.
+
+The two tests of the pair became one button's: *the highlight button writes
+Pandoc's bracketed span, and takes it off again*, and *a class joins the
+span it finds instead of nesting, and the last one off takes the span*,
+which now proves the general shape of `toggleSpan` against spans written by
+hand with both classes rather than by pressing two buttons.
+
+**The three list buttons are one drawing.** The bulleted and the numbered
+glyphs had three thin rows where the task one had two thick ones, so at the
+15px the toolbar draws they did not read as a family. All three now carry
+the task glyph's own two bar paths, at its rows of 4 and 12, with a marker
+of the bars' weight in the column its check and box stand in: a disc 3.8
+across, and the figures 1 and 2 of DejaVu Sans Bold at 5.8 units. The 5.8 is
+measured and not chosen by eye: the stem of that font's 1 is 364/1493 of the
+glyph's own height, so at 5.8 it draws 1.41 units, the bars' 1.4. The
+figures hang to the right, as the numbers of a list hang in the margin the
+editor draws them in. The two buttons are *Unordered list* and *Ordered
+list* now, the words the format uses, and the id of the first went with the
+name (`list` -> `unordered-list`, named call site by call site in the
+suites and not by a blanket replace, which is how a fixture that looked
+like this one has been broken before).
+
+Test: *the three list glyphs are one drawing: the task bars, and a marker of
+their weight*, in `webview-look.test.js` beside the glyph tests. Round:
+**LG1** the bullet at r 1.6 instead of 1.9, **LG2** a bar of its own instead
+of the task glyph's path, **LG3** the figures grown to 6.6 so the stem
+outweighs the bar, **LG4** the tip back to "Bulleted list", **LG5** the id
+back to `list`, **LG6** an underline button put back on the bar: all 6
+caught, and the file restored after each.
+
+### Small caps, the raised pair, and the Insert menu (2026-09-19, later)
+
+The rest of `design-annotation-icons.html`, which the entry above left on
+the record. The owner picked the glyphs (the raised figure after a word for
+the footnote, two columns and three rows for the table, the frame with the
+sun and the hill for the picture; the sheet's own pick, A, for the letter
+and its figure, the two T, the radical and the rule between two lines), and
+asked for the buttons and what they do. The set is the sheet's: small caps,
+superscript and subscript as buttons in the word group, and the other six
+behind one Insert menu at the end of the block group, because six more
+buttons would have made the bar a second row and the row under it is the
+player's.
+
+Measured before the code went in, on the pandoc 3.8.3 the Quarto here
+ships, since three of these could not be written from the syntax alone:
+
+- `a ~~~x~~~ b` gives `a <sub>x</sub> b`. Three tildes are a subscript and
+  the strikeout is gone, so a subscript asked for over the whole text of a
+  strikethrough cannot be written at all; over part of it, `c ~~H~2~O~~ d`
+  gives `<del>H<sub>2</sub>O</del>`, so that one is written. The button
+  leaves the run alone in the first case and says nothing, which is the one
+  gesture on the bar that can do nothing on purpose.
+- `g x^a b^ h` gives `g x^a b^ h` and `e x^a\ b^ f` gives `e x<sup>a b</sup>
+  f`. A bare space breaks both marks, so a space inside one is written
+  escaped, and Pandoc sets it as a no-break space.
+- `a x^[b]^ c` gives an inline footnote and a stray caret; `a x^\[b]^ c`
+  gives `a x<sup>[b]</sup> c`. So a bracket at the head of the content is
+  escaped too, and the editor's own parser agrees with both forms (`^\[`
+  cannot open a `FootnoteInline`).
+
+Three things in the code are worth knowing:
+
+- `$`, `^` and `~` went into `INLINE_KIND` as marks like `**`, so the
+  superscript, the subscript and the Equation row are `toggleInline` and
+  come off at a second press for free. What that cost was ordering:
+  `ChangeSet.of` composes a change that starts before the one before it and
+  then reads the later one's positions in the document the earlier one has
+  already changed, so `wrapPart` now collects the changes inside the part,
+  sorts them and writes them between the two marks. Out of order, an escape
+  beside an inserted mark lands a character out of place.
+- The empty block `toggleCodeBlock` writes with a bare caret is now three
+  functions of its own (`blockOn`, `blockAfter`, `blockEnd`), which is what
+  the equation block, the table and the rule are written with: the same
+  reading of the paragraph, score or table the caret is in, the same quote
+  marks and item indentation, the same blank line. The code block tests
+  hold that road as they did.
+- A footnote's note goes at the end of the document because Pandoc reads a
+  definition at the top level alone (`parseFootnoteDef`, `cx.depth == 1`),
+  so none may be written inside the quote or the item the caret stands in.
+  The reference goes after the words the caret is in, which is where the
+  glyph shows it, and the caret is left in the note.
+
+Tests: *the superscript and subscript buttons write Pandoc's marks, and
+escape what cannot stand inside them*; *the subscript button never writes
+the strikethrough's pair of tildes*; *the small caps button writes Pandoc's
+span and joins the one it finds*; *the Insert menu lists the six
+annotations, each with its glyph*; *the Equation row wraps the selection in
+dollars and takes them off again*; *the Equation block, Table and Horizontal
+rule rows write a block of their own where a block belongs*; *the Picture
+row writes an image and puts a file name where the address goes*; *the
+Footnote row numbers the reference and opens its note at the end of the
+document*, all in `webview-editing.test.js`, where the bar's order holds the
+four new buttons; and *the rows of the Insert menu draw their glyph in the
+bar's brass, at the bar's size* in `webview-look.test.js`.
+
+Round: **AN1** the escapes dropped from a superscript's content, **AN2** the
+tilde guard dropped, so a subscript is written over a strikethrough, **AN3**
+the escapes left behind when the marks come off, **AN4** the small caps
+button writing the highlight's class, **AN5** the block written through the
+paragraph instead of under it, **AN6** the footnote always numbered 1,
+**AN7** the picture written as a link, **AN8** a row drawing another row's
+glyph, **AN9** the row glyphs left off the brass, **AN10** the Insert button
+off the bar: all 10 caught, and the file restored after each.
+
+**Same day, the bar in two rows.** The owner asked to see it: the six of
+the menu spelled out as buttons closing the first row after the quote, and
+the second row opening under the outline button with the multicursor, which
+is where the switches over the whole document begin. The break is one child
+of the bar asking for the whole width (`rowBreak`, `.mdm-toolbar__break`),
+which is how the player's row has always taken a line of its own inside a
+toolbar that wraps; it draws nothing and takes no height, so the two rows
+stand exactly a row apart. The Insert menu and its glyph went with it, the
+`.mdm-menu__icon` rule with them, and the roster test now reads `/` where
+the row ends. Test: *the bar stands in two rows, the first closing on the
+rule and the second opening under the outline*, measured at 900 and 1400 px
+so the break is the bar's own and not the pane's wrap. Round: **AN11** the
+break back to a separator, **AN12** the break without its width: both
+caught, and **AN13** the separator before the six dropped, caught by the
+roster. The test that read the glyph of a menu row is gone with the menu;
+the six are buttons, so *every button draws a glyph of its own* covers them.
+Shown both ways and settled the same day: the six carry a separator of their
+own after the quote, the owner's call on the two pictures. The buttons
+before it change what a line already is and these put something new in the
+document, so the roster reads `quote`, `|`, then the six.
+
+Left on the record:
+
+- None of the four has a key, as the two spans before them have none: the
+  letter row of D19 is spent, and the pair with some claim to being standard
+  (Google Docs' `Ctrl+.` and `Ctrl+,`, Word's `Ctrl+Shift+=` and `Ctrl+=`)
+  is remembered and not checked against a running copy.
+- The table is written with its cells empty, the caret in the first of the
+  head. Nothing moves the caret from cell to cell yet (`Tab` indents), so a
+  reader fills it by clicking. A table left empty is next to nothing on
+  screen: with the caret away, the two 2-column rows of the drawing measure
+  a few pixels and read as two hairlines (seen in the harness), where the
+  page would draw Quarto's own row rules across the measure. Nothing
+  invented goes into the reader's document, so the cells stay empty; if the
+  empty state is to look like a table, it is the drawing that has to say so,
+  and that is a look round of its own.
+- The subscript over the whole of a strikethrough does nothing and says
+  nothing. The editor has no way to tell a reader that what was asked for
+  cannot be written; the feedback it has is scoped to a block.
+- The escaped space the pair writes is a no-break space on the page and an
+  ordinary space in the editor: the editor hides the backslash of an escape
+  while the node is untouched (G008) and draws the character behind it as
+  it stands, so `x^a\ b^` reads as a raised "a b" on both surfaces, but a
+  line could break inside that superscript here and cannot there. Seen in
+  the code, not measured on a line long enough to break.
+- The footnote's reference and the picture are written wherever the caret
+  is, inside a fence included, because both are the link gesture's road
+  (`Ctrl+K` has always done that) where the marks of the bar refuse on a
+  line no mark belongs on. Nothing tests either case.
+- The score block still has no insert gesture, and is left out of the menu
+  on purpose: the quarter note is spent twice on the bar already, so a
+  ```abc row wants a round of its own.
+
+### The small caps glyph again, by its letters (2026-09-19, after all the above)
+
+The stack of two T lasted a day. Asked for more of them, six further
+arrangements went on `design/design-smallcaps-icon-2.html` and the owner took
+G off the first sheet instead: `aA`, a lowercase a and the small cap it
+becomes, which is what the button does to a selection. So the pair is back in
+a row, the heading button's arrangement, and the thing that keeps the two
+apart is no longer the arrangement but the letters: the heading is one shape
+at two heights, small caps is two shapes at one, 6.93 of the 16 box each,
+because a small cap IS a capital at the x-height.
+
+Placement was decided with a measurement and not by eye
+(`design/design-smallcaps-placement.html`): as drawn on the round 1 sheet the
+pair sat low in its square and 0.08 over the right edge, so it is grown 5%,
+which is as large as a pair this wide goes, and sat on y 13.6, which is the
+baseline the H, the B and the I stand on. `the small caps glyph sets two
+shapes at one height, where the heading glyph sets one shape at two` in
+`webview-look.test.js` replaces the test that held the stack, and holds the
+placement too. Three mutations, all caught:
+
+- **M1** `main.js`, the stacked pair of T back in `SMALLCAPS_ICON`: "small
+  caps is not a row", with the two boxes printed.
+- **M2** `main.js`, the glyph lifted 1.5 off the baseline by a group
+  transform: "the small caps pair is off the heading's baseline", 12.1
+  against 13.5.
+- **M3** `main.js`, the small cap squashed to 72%: "the small caps pair is
+  not at one height", 6.93 against 4.99.
+
+M2 is the one worth keeping. It passed on the first attempt, because the test
+read `el.getBBox()`, which measures a path in its own coordinates: a
+`transform` on the glyph or on a group inside it moves the drawing and leaves
+the numbers alone, so the test would have signed off an icon visibly floating
+off the row. The read goes through `getScreenCTM()` now, from the path's
+space into the 16x16 the viewBox sets, and M2 fails as it should. Any other
+test that measures an icon by `getBBox()` has the same hole.
+
+### The bullets, the numbers and the quote give their keys back (2026-09-19, after the small caps round)
+
+`Ctrl+Shift+U`, `O` and `Q` lasted a day. The owner took them off, and the
+reason is his: `- `, `1. ` and `> ` are so little to type at the head of a
+line that the chord buys nothing. What raised it is that `Ctrl+Shift+U`
+opened a `U+` prompt on his own desktop instead of the bullets, which is
+fcitx5's unicode addon: `libunicode.so` carries `Control+Shift+U` as the
+default of its "Type unicode in Hex number", beside `Control+Alt+Shift+U`
+for the search by character name, and nothing overrides either in
+`~/.config/fcitx5/conf/`. That is the risk Pending 4 was holding, settled by
+removal and not by another letter.
+
+Read in VS Code 1.133.0's `workbench.desktop.main.js` on the way, since a
+key given back goes wherever the workbench sends it: `Ctrl+Shift+U` (3123)
+is Toggle Output on the other platforms and a `linux` override moves it
+there to the chord `Ctrl+K Ctrl+H`, so on Linux the chord is the desktop's
+and nobody else's; `Ctrl+Shift+Q` (3119) is bound nowhere; `Ctrl+Shift+O`
+(3117) is Go to Symbol in Editor, which a custom editor has none of.
+`Ctrl+Shift+C`, `Ctrl+Shift+T` and the seven digits stay.
+
+The three buttons name no key now, in the tip and in `aria-keyshortcuts`
+both: a tip that names a key the editor no longer answers is a tip that
+lies. *Ctrl+Shift+U, O, T and Q do what their buttons do, and every tip
+names its key* becomes *Ctrl+Shift+T does what its button does, and the
+lists and the quote name no key*, which presses the three to prove they do
+nothing and clicks all four buttons to prove the gestures are whole; and
+*the formatting keys stop at the text, and reach VS Code from anywhere
+else* carries the other half, that a chord the page does not bind is heard
+by the window listener standing in for the webview host. Round, all in
+`main.js`:
+
+- **BK1** `Mod-Shift-u` bound again in the keymap: both tests, the bullets
+  written where the text was to be left alone, and `Shift+KeyU` never
+  reaching the listener.
+- **BK2** the ordered-list button given its `key: "O"` back: the tips,
+  "Ordered list (Ctrl+Shift+O)" against "Ordered list".
+- **BK3** `Mod-Shift-q` bound again: the keys that reach VS Code, with
+  `Shift+KeyQ` missing from what was heard.
+
+All 3 caught, and the file restored after each.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -3632,11 +3968,59 @@ not raise it.
 4. The keyboard path inside a real VS Code window (the webview host replays
    the workbench `undo` into the page as `execCommand("undo")`, which the
    editor now ignores; copy, paste and select-all replayed the same way) is
-   covered in Chrome by emulating the replay, not in VS Code itself.
+   covered in Chrome by emulating the replay, not in VS Code itself. The
+   workbench's own undo of the text model (see "Ctrl+Z answered twice") is
+   inferred from a report and emulated the same way. If it is what happens,
+   Ctrl+Z after the header button or the language the hyphenation menu writes
+   may still take them off inside VS Code, whatever *Ctrl+Z leaves what the
+   host wrote in place* says: that test holds CodeMirror's history only. Not
+   looked at in a real window. The block keys are pressed on the owner's
+   Spanish layout in the harness now (`blockChord`, through CDP) and not in
+   a real window either. The one the desktop was known to take is gone: the
+   bullets, the numbers and the quote have no key at all since
+   `Ctrl+Shift+U` opened fcitx5's `U+` prompt on his machine (see the
+   section on it), so what is left to press on his own keyboard is
+   `Ctrl+Shift+0` to `6`, `C` and `T`.
 5. The three webview files share `webview/helpers.js`; a cold-start flake
    was seen once (the first `open()` of a run timing out on its three SVGs)
-   and not reproduced.
-6. Player seek: measured in the harness (a scratch run under `tests/tmp/`),
+   and not reproduced. A second flake, *the caret keeps its place in the
+   line while the outline opens and shuts*, went red twice on 2026-09-19
+   and green twice after, same code: one sampled frame had the caret 126 px
+   (the panel's own width) off its line and the rest were right. Both reds
+   were measured with a second Chrome suite running beside it, so it reads
+   as the frame sampling losing a race under load and not as the caret
+   staying behind, which is what the test was written for. Worth knowing
+   before it is read as a regression: run it alone.
+6. The audio export. The toolbar's Audio branch is written and covered, the
+   shape of its menu included; what is left here is what no test holds. MP3
+   is put off, with the reason beside `AUDIO_FORMATS` in `main.js`. The host's table of 129 General MIDI instrument names was read
+   off the vendored abcjs and is not pinned by a test (parsing the minified
+   bundle for it would break on the next bump); only `program 40 -> violin` is
+   held, by the message a skipped score gives. EBUSY is injected in the host
+   tests, since Linux will not produce it on a rename over an open file, so the
+   Windows behaviour behind that message is reasoned and not measured. And
+   nothing of this has been seen in a real VS Code window yet.
+7. The score's face. Four things are measured and not tested. (a) The three
+   waits for the face, in `main.js`, `resources/mdm.js` and `mdm.lua`, are
+   each unobservable while the metric overrides hold, as the eighth mutation
+   of *The words on a staff in the document's face* records. (b) Two pixels
+   of the engraving cannot be had at all, and which two is measured and
+   written down in *The chord symbols in too*: Chrome takes an SVG text's box
+   as the union of the declared box and the ink, so a part name is a pixel
+   short and a row of chords carrying a "j" a pixel tall. Only the total is
+   asserted, within a pixel, and no test names either row. (c) The degrade
+   when the four woff2 are not on disk was measured by hand (the engraving is
+   named `3b3bf2ba…` and carries Liberation Serif, and `b15a2e7c…` with
+   LMRoman10 once they are back) and no test exercises it. (d) Chrome writes
+   the Latin Modern faces into a score PDF as Type 3 where it writes the sans
+   ones as CID TrueType; poppler warns "Bad bounding box in Type 3 glyph"
+   while rasterising, the outlines are clean at 1200 dpi and `pdftotext`
+   reads the words, but the two faces do not make the same kind of PDF object
+   and a stricter consumer may care. What used to be (a) here, the chord
+   symbols leaving the machine's sans in the printed file, is gone: they are
+   in the table since 2026-09-19 and the fixture of *the words on a printed
+   score are the document's face* carries one.
+8. Player seek: measured in the harness (a scratch run under `tests/tmp/`),
    the audio lands on a single source with no overlap, but the head is drawn
    1 to 5 per cent ahead of where abcjs seeks the sound (larger on a short
    tune), because the head uses the buffer duration, release tail included,
