@@ -2906,3 +2906,114 @@ test("mdm-engraver: abcm2ps leaves the equations to LaTeX", () => {
     !fs.existsSync(path.join(dir, "mdm_cache", katexCacheName("I", INLINE_TEX) + ".pdf")),
     "a KaTeX engraving was cached under abcm2ps");
 });
+
+// The air inside a card of code on paper, above its first line and under its
+// last. Pandoc's card is framed's snugshade, which left \fboxsep, 3 pt,
+// between the card's top edge and the first line's ink, where the printed page
+// leaves 0.64 of its em (7.7 pt at its 12 pt body, measured on example.mdm);
+// the filter adds the difference above and below the text of every piece of
+// the card, so one that goes on to the next page opens there with the same
+// air. Read off a 216 dpi raster: the card is the run of rows that a long run
+// of a colour neither the ground nor ink crosses, and the ink is whatever is
+// dark inside it. At this 10 pt body the target is 6.4 pt; measured 6.0 to 6.3
+// against the ascenders and descenders of these lines.
+test("on paper a card of code leaves the page's air over its first line and under its last, on every page it spans", () => {
+  const dir = freshDir("pdf-code-air");
+  const lines = Array.from(
+    { length: 70 },
+    (_, i) => "value_" + String(i).padStart(3, "0") + " = compute(" + i + ")  # one line of a long card"
+  );
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    [
+      "---",
+      "format:",
+      "  pdf:",
+      "    documentclass: article",
+      "filters:",
+      "  - mdm",
+      "---",
+      "",
+      "A card of code longer than a page:",
+      "",
+      "```python",
+      ...lines,
+      "```",
+      "",
+    ].join("\n")
+  );
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const pdf = path.join(dir, "doc.pdf");
+  const dpi = 216;
+  const bp = 72 / dpi;
+  const pieces = [];
+  for (const page of [1, 2]) {
+    const g = spawnSync(
+      "pdftoppm",
+      ["-gray", "-r", String(dpi), "-f", String(page), "-l", String(page), pdf],
+      { maxBuffer: 1 << 30 }
+    );
+    assert.equal(g.status, 0, String(g.stderr));
+    const buf = g.stdout;
+    const space = (b) => b === 0x20 || b === 0x0a || b === 0x0d || b === 0x09;
+    const fields = [];
+    let at = 0;
+    while (fields.length < 4) {
+      while (space(buf[at])) at++;
+      const start = at;
+      while (!space(buf[at])) at++;
+      fields.push(buf.toString("latin1", start, at));
+    }
+    at++;
+    const w = Number(fields[1]);
+    const h = Number(fields[2]);
+    const px = (x, y) => buf[at + y * w + x];
+    const ground = px(2, h >> 1);
+    const isCard = (v) => Math.abs(v - ground) > 3 && v > 180;
+    let top = -1;
+    let bottom = -1;
+    let x0 = 0;
+    let x1 = 0;
+    for (let y = 0; y < h; y++) {
+      let run = 0;
+      let best = 0;
+      let end = 0;
+      for (let x = 0; x < w; x++) {
+        if (isCard(px(x, y))) {
+          if (++run > best) {
+            best = run;
+            end = x;
+          }
+        } else run = 0;
+      }
+      if (best > 0.5 * w) {
+        if (top < 0) {
+          top = y;
+          x0 = end - best + 1;
+          x1 = end;
+        }
+        bottom = y;
+      } else if (top >= 0) break;
+    }
+    assert.ok(top >= 0, "no card on page " + page);
+    const dark = (y) => {
+      for (let x = x0 + 4; x < x1 - 4; x++) if (px(x, y) < 150) return true;
+      return false;
+    };
+    let first = top;
+    while (first < bottom && !dark(first)) first++;
+    let last = bottom;
+    while (last > top && !dark(last)) last--;
+    pieces.push({ page, over: (first - top) * bp, under: (bottom - last) * bp });
+  }
+  for (const p of pieces) {
+    for (const side of ["over", "under"]) {
+      assert.ok(
+        p[side] > 5.5 && p[side] < 7.5,
+        "page " + p.page + ": " + p[side].toFixed(2) + " bp of card " + side +
+          " the ink, where the page leaves 6.4 (" + JSON.stringify(pieces) + ")"
+      );
+    }
+  }
+});

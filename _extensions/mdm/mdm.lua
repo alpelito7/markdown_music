@@ -639,6 +639,28 @@ local function look_tex(l)
   -- body size and land where the editor puts them; \\small on top of that
   -- would shrink them twice.
   put("\\@ifundefined{fvset}{}{\\fvset{fontsize=\\normalsize}}")
+  -- The air inside a card of code, above its first line and under its last.
+  -- Pandoc's Shaded is framed's snugshade, which leaves \\fboxsep all round,
+  -- 3 pt, and the first line's ink stood 3.0 pt under the card's top edge,
+  -- where the printed page leaves 7.7 pt at a 12 pt body, 0.64 of its em
+  -- (example.mdm, both measured off a 216 dpi raster, 2026-09-19). This is
+  -- snugshade with the difference added above and below the text and nowhere
+  -- else, so the card keeps its width and the text its column. It is added
+  -- inside \\FrameCommand, which framed draws around every piece of a card it
+  -- breaks between pages, so a card that goes on to the next page opens there
+  -- with the same air, as box-decoration-break: clone makes the page do
+  -- (mdm-look.css); framed measures the frame with it, so the page break
+  -- still falls where the card fits.
+  put("\\@ifundefined{Shaded}{}{%")
+  put("  \\renewenvironment{Shaded}{%")
+  put("    \\def\\FrameCommand##1{\\hskip\\@totalleftmargin\\hskip-\\fboxsep")
+  put("      \\colorbox{shadecolor}{\\vbox{\\kern\\dimexpr0.64\\mdmem-\\fboxsep\\relax")
+  put("        ##1\\kern\\dimexpr0.64\\mdmem-\\fboxsep\\relax}}\\hskip-\\fboxsep")
+  put("      \\hskip-\\linewidth\\hskip-\\@totalleftmargin\\hskip\\columnwidth}%")
+  put("    \\MakeFramed{\\advance\\hsize-\\width")
+  put("      \\@totalleftmargin\\z@\\linewidth\\hsize\\@setminipage}%")
+  put("  }{\\par\\unskip\\@minipagefalse\\endMakeFramed}%")
+  put("}")
   -- The editor squeezes no glyph to fit one more word into a line. With
   -- microtype expanding the font, the same paragraph at the same measure took
   -- a word more per line than the editor showed (measured on the opening

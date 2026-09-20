@@ -3891,6 +3891,18 @@ outside changes and stale edits), since this was the text it was shown
 with. **HG1** the
 gap taken whole again (`/^(?:\r?\n)+/`) -> caught by all three.
 
+### The ground to the edge of the sheet (2026-09-19)
+
+A page printed by Chrome, which is the PDF when there is no TeX, had a
+paper-white band over and under the text on every sheet: the block margin is
+`@page`'s, and a page margin is outside the canvas the body's ground is
+painted on. `@page` now takes `background: var(--mdm-syn-page)` in both
+copies of `mdm-look.css`. *on paper the ground reaches the four edges of
+every sheet* (`html.test.js`) prints a two-sheet page with the extension's
+Chrome flags and reads every edge pixel of every sheet at 36 dpi against the
+middle of the left edge. **PG1** the `background` taken out of `@page` in
+both copies -> caught, the corner 255,255,255 against a ground of 242.
+
 ### The shortcut in the tip (2026-09-19)
 
 Bold, Italic, Inline code and Link name the Mod- binding they share in
@@ -4048,6 +4060,48 @@ text that is the one on screen -> caught, by the double-undo test alone;
 fence left behind -> caught; **CB15** an item's marker not kept on the line
 the block opens on -> caught (2); **CB16** a new block's lines without the
 container's marks -> caught.
+
+### A score broken between its systems on paper (2026-09-19)
+
+Printed without TeX, a score longer than what was left of the sheet went on
+to the next one whole and left the foot of the sheet blank: the drawing is
+one SVG, and Chrome prints an SVG in one piece. `mdm.js` keeps a clone of the
+drawing per staff system (`sliceForPrint`), cut where `score_cuts` in
+`mdm.lua` cuts the typeset one, and the print sheet shows the clones in its
+place; the card is `box-decoration-break: clone` on paper. example.mdm prints
+on three sheets instead of four. *on paper a score breaks between two of its
+systems where the sheet runs out* (`html.test.js`) prints six paragraphs and
+a six-system score with part labels, reads the labels off each sheet with
+pdftotext, and reads the computed styles on screen and under print media.
+**SL1** `sliceForPrint` not called -> caught, all six on sheet 2; **SL2** the
+whole drawing not hidden on paper -> caught, sys1 to sys4 printed twice;
+**SL3** no `clone` on the card -> caught; **SL4** the slices not hidden on
+screen -> caught; **SL5** the slices left inline -> caught, all six on
+sheet 2 again (the test also reads that the stack has no gap between
+slices). Taken out of `_extensions/` alone and restored in the same command,
+both trees compared byte for byte after. *on paper the page is scaled, the
+scores fit and the transport is gone* measured a card's slack against the
+whole drawing, which paper now hides, and failed on it (194.1 px); it
+measures against the slices where a score has them.
+
+### The air inside a card of code on paper (2026-09-19)
+
+With TeX, Pandoc's `Shaded` is framed's `snugshade`, which left `\fboxsep`
+(3 pt) between the card's edge and the first and last line's ink, where the
+printed page leaves 0.64 of its em. `look_tex` redefines `Shaded` as
+snugshade with `0.64\mdmem - \fboxsep` more above and below the text inside
+`\FrameCommand`, so every piece of a card broken between pages gets it.
+*on paper a card of code leaves the page's air over its first line and under
+its last, on every page it spans* (`render.test.js`) renders a 70-line card
+across two pages and measures both pieces on a 216 dpi raster: 5.5 to 7.5 bp
+over and under the ink. **CA1** the redefinition skipped (`\@ifundefined`
+pointed at a name that is never defined) -> caught, 2.67 bp over the ink on
+page 1 and 2.33 on page 2. The cost is written down and not answered:
+example.mdm's typeset PDF went from three pages to four, the last system of
+its last score alone on the fourth. The typeset code is also set looser than
+the page's: a line pitch of 16.9 pt against the printed page's 13.25 at the
+same glyph width (both measured on example.mdm), which is the prose's
+`\linespread` reaching the Verbatim, and nothing here changes that.
 
 ### Strikethrough, task list and quote buttons (2026-09-19)
 

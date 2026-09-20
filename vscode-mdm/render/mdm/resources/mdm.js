@@ -648,6 +648,170 @@
     return w;
   }
 
+  // The same drawing once more per staff system, for paper. An SVG is atomic
+  // to Chrome's printer, so a score longer than what was left of the sheet
+  // went on to the next one whole and left the foot of the sheet blank under
+  // the prose above it (example.mdm printed without TeX, 2026-09-19). The
+  // typeset PDF already breaks a score between two systems (score_cuts and
+  // abcjs_score_tex in mdm.lua), and the cuts here are its cuts: down the
+  // middle of the gap between two system wrappers, none where two overlap,
+  // and the title stays with the first system.
+  //
+  // Each slice is a clone of the whole drawing with its viewBox narrowed to
+  // one band, and the bands tile the drawing's box, so the stack prints the
+  // engraving it was cut from with nowhere to break but between systems.
+  // They are drawn only in print (mdm.css, mdm-look.css): on screen the
+  // score stays the one drawing the player lights up, as in the editor.
+  function sliceForPrint(paper) {
+    var svg = paper.querySelector("svg");
+    if (!svg || !svg.viewBox || !svg.viewBox.baseVal) return;
+    var vb = svg.viewBox.baseVal;
+    var lines = [];
+    svg.querySelectorAll(":scope > g.abcjs-staff-wrapper").forEach(function (g) {
+      try {
+        var b = g.getBBox();
+        lines.push([b.y, b.y + b.height]);
+      } catch (e) {
+        // Not laid out: no cut offered here.
+      }
+    });
+    var cuts = [];
+    for (var i = 0; i + 1 < lines.length; i++) {
+      var above = lines[i][1];
+      var below = lines[i + 1][0];
+      var middle = (above + below) / 2;
+      var last = cuts.length ? cuts[cuts.length - 1] : vb.y;
+      if (below > above && middle > last && middle < vb.y + vb.height) {
+        cuts.push(middle);
+      }
+    }
+    if (!cuts.length) return;
+    var slices = document.createElement("div");
+    slices.className = "mdm-slices";
+    slices.setAttribute("aria-hidden", "true");
+    var edges = [vb.y].concat(cuts, [vb.y + vb.height]);
+    for (var k = 0; k + 1 < edges.length; k++) {
+      var h = edges[k + 1] - edges[k];
+      var slice = svg.cloneNode(true);
+      slice.setAttribute("viewBox", vb.x + " " + edges[k] + " " + vb.width + " " + h);
+      slice.setAttribute("height", h);
+      slices.appendChild(slice);
+    }
+    paper.appendChild(slices);
+  }
+
+  // Every role abcjs draws words with, at the size and the shape abcjs gives
+  // it: the point size is abcjs 6.7.0's own default, which it draws at 4/3 (a
+  // title at 20 pt comes out at 27 px). What this table changes is the face
+  // and nothing else, so a title stays at 27 px, a part label at 20, the lyric
+  // at 17 in bold. The editor carries the same table (renderScore in
+  // vscode-mdm/media/main.js) and so does the page the PDF is printed from
+  // (chrome_page in mdm.lua), which is what keeps the three drawing one
+  // document.
+  //
+  // The third slot is the family. Two roles come to this table out of a sans
+  // and not out of a Times, and they want opposite things: the annotation is
+  // a lowercase word (cresc., dolce) whose apparent size is its x-height, and
+  // Latin Modern's is a fifth shorter than Helvetica's, so it is drawn in the
+  // wide family, the same files scaled to the sans's x-height with the line
+  // box held where it was; the chord symbol is read off its capital and its
+  // figures, which already agree, so it takes the plain family at abcjs's own
+  // size. The editor's copy of this table carries the measurements.
+  //
+  // Three roles are still missing, the three a tablature staff spends.
+  var SCORE_TEXT_ROLES = {
+    titlefont: [20, ""],
+    subtitlefont: [16, ""],
+    composerfont: [14, "italic"],
+    partsfont: [15, ""],
+    tempofont: [15, "bold"],
+    vocalfont: [13, "bold"],
+    voicefont: [13, "bold"],
+    wordsfont: [16, ""],
+    textfont: [16, ""],
+    historyfont: [16, ""],
+    infofont: [14, "italic"],
+    measurefont: [14, "italic"],
+    repeatfont: [13, ""],
+    tripletfont: [11, "italic"],
+    annotationfont: [12, "", "wide"],
+    gchordfont: [12, ""],
+    // These two draw nothing here and are named for completeness: abcjs
+    // writes a %%header or a %%footer only in its own print mode.
+    headerfont: [12, ""],
+    footerfont: [12, ""],
+  };
+
+  // The two faces the words on a staff are set in, or "" when the engraving
+  // keeps the faces abcjs compiled in. They are read off the sheet rather than
+  // asked of the filter: mdm-roman.css declares --mdm-score-face and
+  // --mdm-score-face-wide beside the @font-face blocks it names, and that
+  // sheet rides with the page only for a document set in the roman, so the
+  // tokens exist exactly when the score is to be drawn in them. The editor
+  // carries the same two under #app.mdm-text--roman.
+  var scoreFace = "";
+  var scoreFaceWide = "";
+  function readScoreFace(token) {
+    if (!window.getComputedStyle) return "";
+    var named = getComputedStyle(document.documentElement).getPropertyValue(
+      token
+    );
+    return named ? named.trim() : "";
+  }
+
+  // What abcjs is handed for the face, or nothing at all for a page in the
+  // sans. A string and not an object: abcjs takes `{face, size}` without
+  // complaint and writes font-family="[ object Object ]" into the SVG (6.7.0,
+  // measured). A document that sets its own `%%titlefont` still wins, because
+  // abcjs applies the tune's own directives after the format it was handed.
+  function scoreFormat() {
+    if (!scoreFace || !scoreFaceWide) return null;
+    var out = {};
+    Object.keys(SCORE_TEXT_ROLES).forEach(function (role) {
+      var spec = SCORE_TEXT_ROLES[role];
+      var face = spec[2] === "wide" ? scoreFaceWide : scoreFace;
+      out[role] = face + (spec[1] ? " " + spec[1] : "") + " " + spec[0];
+    });
+    return out;
+  }
+
+  // The face has to be in before the first score is drawn and not after, which
+  // is why the name is only put where scoreFormat can see it once the four
+  // files have arrived. abcjs measures the room every word needs with the face
+  // that is in when it draws, and keeps that measurement in a cache of its own
+  // keyed by the string and the attributes it drew with (strings under twenty
+  // characters, which is most of what a staff carries), so a staff laid out
+  // against the fallback keeps that layout whatever is drawn afterwards. A
+  // page that cannot get the face engraves as a sans page does.
+  //
+  // The wait is the fetch of a local woff2, a frame or two, and only a page
+  // set in the roman waits at all. Two traps: document.fonts.ready resolves as
+  // soon as nothing is loading, and nothing is loading until layout has asked
+  // for a face; and document.fonts.check() answers false here for a face whose
+  // own load() has just resolved, while other faces of the page are still
+  // loading, so it cannot be the test either.
+  function withScoreFace(draw) {
+    var face = readScoreFace("--mdm-score-face");
+    var wide = readScoreFace("--mdm-score-face-wide");
+    if (!face || !wide || !document.fonts || !document.fonts.load) {
+      scoreFace = face;
+      scoreFaceWide = wide;
+      return draw();
+    }
+    var shapes = ["16px ", "italic 16px ", "bold 16px ", "italic bold 16px "];
+    var asked = [];
+    [face, wide].forEach(function (name) {
+      shapes.forEach(function (shape) {
+        asked.push(document.fonts.load(shape + name));
+      });
+    });
+    Promise.all(asked).then(function () {
+      scoreFace = face;
+      scoreFaceWide = wide;
+      draw();
+    }, draw);
+  }
+
   function renderBlock(block) {
     var srcEl = block.querySelector(".mdm-src");
     var paper = block.querySelector(".mdm-paper");
@@ -702,6 +866,7 @@
       fit.style.maxWidth = Math.ceil(drawn) + "px";
       card.style.setProperty("--mdm-score-natural", drawn + "px");
     }
+    sliceForPrint(paper);
     if (
       block.classList.contains("mdm-play") &&
       ABCJS.synth &&

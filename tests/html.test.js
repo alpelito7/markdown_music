@@ -1409,9 +1409,11 @@ test("on paper the page is scaled, the scores fit and the transport is gone", { 
       ),
       cards: Array.from(document.querySelectorAll(".mdm-card")).map((card) => ({
         over: card.scrollWidth - card.clientWidth,
+        // What paper draws, which is the slices of a score of several
+        // systems (sliceForPrint in mdm.js) and the drawing itself otherwise.
         slack:
           card.querySelector(".mdm-paper").getBoundingClientRect().height -
-          card.querySelector(".mdm-paper svg").getBoundingClientRect().height,
+          (card.querySelector(".mdm-paper > .mdm-slices") || card.querySelector(".mdm-paper > svg")).getBoundingClientRect().height,
       })),
     };
   });
@@ -1610,6 +1612,188 @@ test("on paper a card of code that goes on past the foot of a sheet opens the ne
         " pt under its top edge, where the card opens with it " + opens.toFixed(1) + " pt under"
     );
   }
+});
+
+// The ground of a printed page reaches the edges of every sheet. The block
+// margin is @page's (see the test above), and a page margin is outside the
+// document's canvas, so the ground the body paints stopped at it: each sheet
+// came out with a paper-white band over and under the text, a white frame on
+// the dark side (seen on 2026-09-19 in an export from a machine with no TeX).
+// @page is given the ground in mdm-look.css. Printed the way the extension
+// prints when there is no TeX, and read in the raster: the four edges of
+// every sheet against the ground the middle of its left edge carries, which
+// is the body's. The light fallback is used, a wash of #f6f6f6 and not white,
+// so a white margin cannot pass for the ground.
+test("on paper the ground reaches the four edges of every sheet", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, () => {
+  const para =
+    "A paragraph of prose long enough to take a few rows of the measure, " +
+    "written again and again so the page runs on to a second sheet and the " +
+    "margin at the foot of one and at the head of the next is printed. ";
+  fs.writeFileSync(
+    path.join(DIR, "ground.mdm"),
+    [
+      "---",
+      'title: "The ground on paper"',
+      "format:",
+      "  html:",
+      "    embed-resources: true",
+      "filters:",
+      "  - mdm",
+      "---",
+      "",
+      ...Array.from({ length: 24 }, () => para.repeat(3) + "\n"),
+    ].join("\n")
+  );
+  const r = spawnSync(MDM, ["render", "ground.mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const pdf = path.join(DIR, "ground.pdf");
+  fs.rmSync(pdf, { force: true });
+  const profile = fs.mkdtempSync(path.join(DIR, "profile-"));
+  const c = spawnSync(
+    CHROME,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-pdf-header-footer",
+      "--virtual-time-budget=6000",
+      "--no-sandbox",
+      "--user-data-dir=" + profile,
+      "--print-to-pdf=" + pdf,
+      path.join(DIR, "ground.html"),
+    ],
+    { encoding: "utf8", timeout: 60000 }
+  );
+  fs.rmSync(profile, { recursive: true, force: true });
+  assert.ok(fs.existsSync(pdf), "Chrome printed nothing: " + c.stderr);
+
+  const prefix = path.join(DIR, "ground-sheet");
+  for (const n of fs.readdirSync(DIR)) if (n.startsWith("ground-sheet-")) fs.rmSync(path.join(DIR, n));
+  assert.equal(spawnSync("pdftoppm", ["-r", "36", pdf, prefix]).status, 0);
+  const sheets = fs.readdirSync(DIR).filter((n) => n.startsWith("ground-sheet-") && n.endsWith(".ppm"));
+  assert.ok(sheets.length >= 2, "the page printed on " + sheets.length + " sheet, and the test needs two");
+  for (const file of sheets) {
+    const { width, height, data } = readPpm(path.join(DIR, file));
+    const at = (x, y) => Array.from(data.subarray((y * width + x) * 3, (y * width + x) * 3 + 3));
+    const ground = at(0, height >> 1);
+    assert.ok(Math.min(...ground) < 250, file + ": the ground is white, so this reads nothing: " + ground);
+    const edges = [];
+    for (let x = 0; x < width; x++) edges.push([x, 0], [x, height - 1]);
+    for (let y = 0; y < height; y++) edges.push([0, y], [width - 1, y]);
+    for (const [x, y] of edges) {
+      const px = at(x, y);
+      assert.ok(
+        px.every((v, i) => Math.abs(v - ground[i]) <= 3),
+        `${file}: the edge at (${x}, ${y}) is ${px}, where the ground is ${ground}`
+      );
+    }
+  }
+});
+
+// A score is broken between two of its staff systems where the sheet runs
+// out, as the typeset PDF breaks it ("a long score is cut so a page can break
+// between two of its systems" in render.test.js). The drawing is one SVG, which
+// Chrome prints whole, so a score longer than what was left of the sheet went
+// on to the next one entire and left the foot of the sheet blank under the
+// prose (example.mdm printed without TeX, 2026-09-19). mdm.js keeps a slice of
+// the drawing per system and the print sheet shows the slices in its place.
+// Six paragraphs leave room on the first sheet for the first system and not
+// for the six (measured: before the slices every one of them printed on the
+// second sheet). The part labels are SVG text, which pdftotext reads, so each
+// names the sheet its system was printed on, and each is printed once: the
+// slices stand in for the drawing on paper and are not printed beside it. On
+// screen the slices are never drawn, and on paper the card's fill, padding
+// and corners go on each piece, as a card of code's do.
+test("on paper a score breaks between two of its systems where the sheet runs out", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, async () => {
+  const para =
+    "A paragraph of prose long enough to take a few rows of the measure, " +
+    "written again so the score under it starts low on the first sheet. ";
+  const abc =
+    "X:1\nT:Slices\nM:4/4\nL:1/8\nK:Am\n" +
+    Array.from({ length: 6 }, (_, i) => "P:sys" + (i + 1) + "\nABcd ef^ga | a^gfe dcBA |").join("\n") +
+    "\n";
+  fs.writeFileSync(
+    path.join(DIR, "slices.mdm"),
+    [
+      "---",
+      'title: "Slices"',
+      "format:",
+      "  html:",
+      "    embed-resources: true",
+      "filters:",
+      "  - mdm",
+      "---",
+      "",
+      ...Array.from({ length: 6 }, () => para.repeat(3) + "\n"),
+      "```abc",
+      abc + "```",
+      "",
+      "After the score.",
+      "",
+    ].join("\n")
+  );
+  const r = spawnSync(MDM, ["render", "slices.mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const html = path.join(DIR, "slices.html");
+  const pdf = path.join(DIR, "slices.pdf");
+  fs.rmSync(pdf, { force: true });
+  const profile = fs.mkdtempSync(path.join(DIR, "profile-"));
+  const c = spawnSync(
+    CHROME,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-pdf-header-footer",
+      "--virtual-time-budget=6000",
+      "--no-sandbox",
+      "--user-data-dir=" + profile,
+      "--print-to-pdf=" + pdf,
+      html,
+    ],
+    { encoding: "utf8", timeout: 60000 }
+  );
+  fs.rmSync(profile, { recursive: true, force: true });
+  assert.ok(fs.existsSync(pdf), "Chrome printed nothing: " + c.stderr);
+  const t = spawnSync("pdftotext", [pdf, "-"], { encoding: "utf8" });
+  assert.equal(t.status, 0, t.stderr);
+  const sheets = t.stdout.split("\f").map((s) => s.match(/sys\d+/g) || []);
+  const where = sheets.map((labels, i) => "sheet " + (i + 1) + ": " + labels.join(" ")).join("; ");
+  for (let n = 1; n <= 6; n++) {
+    const on = sheets.map((labels) => labels.filter((l) => l === "sys" + n).length);
+    assert.equal(on.reduce((a, b) => a + b, 0), 1, "sys" + n + " is printed " + on + " times (" + where + ")");
+  }
+  assert.ok(sheets[0].includes("sys1"), "the score went on to the next sheet whole (" + where + ")");
+  assert.ok(!sheets[0].includes("sys6"), "the whole score fit the first sheet, so this breaks nothing (" + where + ")");
+
+  const url = "file://" + html;
+  const read = () => {
+    const card = document.querySelector(".mdm-card");
+    const slices = card.querySelector(".mdm-slices");
+    return {
+      slices: slices ? slices.querySelectorAll("svg").length : 0,
+      shown: slices ? getComputedStyle(slices).display : "",
+      whole: getComputedStyle(card.querySelector(".mdm-paper > svg")).display,
+      decoration: getComputedStyle(card).boxDecorationBreak,
+      // Room in the stack that no slice takes, which an inline SVG leaves
+      // under itself for the descenders of a line it is not on.
+      gap: slices
+        ? slices.getBoundingClientRect().height -
+          Array.from(slices.querySelectorAll("svg")).reduce((a, s) => a + s.getBoundingClientRect().height, 0)
+        : NaN,
+    };
+  };
+  const screen = await pageAt(url, 1000, read);
+  assert.equal(screen.slices, 6, "a slice per system");
+  assert.equal(screen.shown, "none", "the slices are drawn on screen");
+  assert.notEqual(screen.whole, "none", "the drawing is not drawn on screen");
+  const paper = await pageAt(url, 1000, read, null, false, "print");
+  assert.equal(paper.shown, "block", "the slices are not drawn on paper");
+  assert.equal(paper.whole, "none", "the whole drawing is printed beside its slices");
+  assert.ok(Math.abs(paper.gap) <= 0.5, "the slices stand " + paper.gap.toFixed(1) + " px apart in all");
+  assert.equal(paper.decoration, "clone", "a piece of a card broken between sheets loses its padding and corners");
 });
 
 // And the bar the card holds it back with is drawn under the music, not over

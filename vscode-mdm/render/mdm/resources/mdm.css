@@ -28,3 +28,9 @@
 .mdm-paper svg {
   max-width: none;
 }
+/* The drawing cut into one piece per staff system, which mdm.js keeps for
+   the printer: on paper it stands in for the drawing, so a sheet can break
+   between two systems (mdm-look.css, under print). Never on screen. */
+.mdm-slices {
+  display: none;
+}

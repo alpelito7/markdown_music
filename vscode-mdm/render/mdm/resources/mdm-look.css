@@ -1008,12 +1008,19 @@ body .mdm-audio .abcjs-loading-svg circle {
      an automatic page break: prose could end 15 pt above one edge and resume
      13 pt below the next. A physical page margin is the boundary Chrome does
      honour on every sheet. Chrome scales that margin with the html below, so
-     the inverse factor leaves 2.5 cm on paper. Page margins are outside the
-     document canvas and stay paper-white; that small cost on a dark export is
-     preferable to running one sheet's text into the next. */
+     the inverse factor leaves 2.5 cm on paper.
+
+     The margin is outside the document's canvas, so the ground the body
+     paints stops at it, and every sheet came out with a paper-white band
+     over and under the text (on the dark side a white frame round a dark
+     page). The page box has a background of its own, painted under the
+     margin as well, and the ground is given to it: Chrome 151 resolves the
+     custom property there, since the page inherits from the root, and prints
+     it out to all four edges. */
   @page {
     size: auto;
     margin: calc(2.5cm * 12 / 10 * 803 / 800) 0;
+    background: var(--mdm-syn-page);
   }
   html {
     zoom: calc(10 / 12 * 800 / 803);
@@ -1051,6 +1058,31 @@ body .mdm-audio .abcjs-loading-svg circle {
   }
   body .mdm-paper {
     height: auto !important;
+  }
+  /* A score broken between two staff systems where the sheet runs out, as
+     the typeset PDF breaks it. The drawing is one SVG, which the printer
+     cannot divide, so a score longer than what was left of the sheet went on
+     to the next one whole and left a blank foot under the prose (example.mdm
+     printed without TeX, 2026-09-19). mdm.js keeps a slice of it per system
+     (sliceForPrint), and on paper the slices stand in for it, stacked with no
+     gap so they print the drawing they were cut from (a six-system score
+     that fits its sheet printed within one pixel of the whole drawing at
+     150 dpi, nowhere further off). The card's sideways
+     scroll does not hold the break back (Chrome 151 broke a six-system score
+     after its first system with it and without it). The card's fill, padding
+     and rounded corners go on every piece, as a card of code's do below:
+     sliced, the piece at the foot of the sheet ended flush under its last
+     staff and the next opened square. */
+  body .mdm-paper:has(> .mdm-slices) > svg {
+    display: none;
+  }
+  body .mdm-slices,
+  body .mdm-slices svg {
+    display: block;
+  }
+  body .mdm-card {
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
   /* The player bar. Measured on the print of example.mdm before this rule:
      the transport, the seek track, the clock and the volume under the
