@@ -2827,6 +2827,37 @@ click as two presses, the second labelled as the second (puppeteer's
 (puppeteer-core 25.8) and a press sent with it comes out as a first press,
 which kept the double-click test red until the helper was corrected.
 
+The sample and the blank rows, the same day. CodeMirror measures what a
+line of text is by the first line in view of twenty characters or fewer
+whose children are plain text, and a short setext heading qualified (62 px
+in place of the prose's); `sampleProof` in `buildDecorations` puts the text
+of every heading under an unstyled mark (`mdm-h-text`). And in the roman
+face the caret's box on an empty line is taller than the 16 px blank row,
+so CodeMirror's vertical step cleared the row under a heading and the
+second of two blank lines; `stepIntoBlock` takes a drawn row the move would
+skip, shorter than a line of text, by number, keeps the goal column, and
+answers Shift too. Five mutations of `main.js`, all caught: **VM1** the
+mark never added -> *the line CodeMirror measures text by is a line of
+prose, not a heading*; **VM2** the short-row rule turned off, **VM3** the
+range dispatched bare (anchor and head read, the goal column dropped) and
+**VM4** the Shift binding removed -> *ArrowDown and ArrowUp stop on every
+blank row in the roman face*, by the walk, the column and the Shift
+assertion in turn; **VM5** `replacedLineAt` never finding a replacement ->
+*ArrowDown and ArrowUp walk past a rule*. The Markdown conformance rows and
+*a heading's line keeps its height* (look) were run green over the mark.
+
+The picture that arrives late, the same day. A picture loading after
+CodeMirror measured its line left the height map at one row of text, and
+a click under it landed lines lower than the word; the widget now asks for
+the heights to be read again on `load` and on `error`, and since the
+content box is stretched to the scroller (2365 px before and after a
+256 px picture) a plain `requestMeasure` reads nothing, so CodeMirror's
+own `mustMeasureContent` is set by hand. Two mutations, both caught by
+*a picture that arrives after its line was measured is measured again*:
+**IM1** the flag left unset, `requestMeasure` alone (the map stayed at
+28 px against a 256 px picture, which is the measurement behind the
+flag); **IM2** the listeners never attached.
+
 Enter, the same day. CodeMirror's two commands for it read whitespace with
 `\s`, which takes U+00A0 along with the space, so one press of Enter beside
 a no-break space deleted it or wrote it back as an ASCII space through the
@@ -3479,6 +3510,17 @@ widgets it would be given stand inside the link's hidden tail, which draws
 none of them; it stays a leaf so that none are made; **SM21** a paragraph
 left out -> *SP01*.
 
+The same day, the row that grew a pixel (G103), made pressing by the above:
+CodeMirror sets a buffer beside every widget and hidden mark, 1em tall and
+aligned `text-top`, and in the roman it rose over the row, 28.19px where a
+plain row is 27.19, so the document below moved a pixel when the caret
+entered such a row and back when it left; with the punctuation drawn as
+widgets that was nearly every row. The rule that put a heading's buffers at
+the top of the line is now every line's. Two mutations in `style.css`, both
+caught by *a row of prose keeps its height*: **GB1** the rule back on
+headings alone (the roman's bold row 28.19 against 27.19); **GB2** the rule
+gone, which the heading's test catches too.
+
 Differences left on the record: an image inside a table's cell keeps its alt
 as written; a setext heading's attributes are still drawn as text (only an
 ATX heading's are hidden, P6-b); and Pandoc reads `*b 'c* d'` as a quoted run
@@ -3664,6 +3706,70 @@ on screen. *a caption drawn again when its marks go, though the words are
 the same* (`webview-editing.test.js`) was written for it, and the mutation
 is caught.
 
+### The numbers of a list (2026-09-19)
+
+A list item's number stood 10px left of the prose's column while the item
+was closed and 7px right of it once the caret opened it, so it jumped as
+the caret came in. Two causes: the number inherited the item's
+`text-indent: -1.5em`, and the item's `--mdm-inset: 1.5em` went into the
+number's margin as tokens and was resolved against the number's 11px. The
+number now sets `text-indent: 0`, and `--mdm-inset` is registered with
+`@property` as a `<length>`, so it is computed on the line that sets it.
+*the numbers of a list stay in the prose's column, with the caret in an item
+or not* (`webview-look.test.js`) reads the right edge of the digits' ink in
+a screenshot of the margin, since the model the column test computes sees
+neither cause. Its first version clipped from 60px left of the text, which
+is off the page in this harness (the text starts at 50), and passed both
+mutations; clipped from the pane's edge it catches both. **LN1** the
+number's `text-indent: 0` removed -> caught, a closed item's number
+-17.5px from the prose's; **LN2** the `@property` renamed so the inset is a
+plain custom property again -> caught, +7.5px.
+
+### The number of a rule, and of a block in a frame (2026-09-19)
+
+Reported with a picture: around a rule between blank lines the margin read
+69 drawn over 70. A rule is a block of its own with no line of words, and
+its number took its box from the line height like any other: the box began
+at the rule's content box and was a line of prose tall, so the digits stood
+3px under the stroke and 2.9px into the number of the blank line after it.
+The stroke itself stood on the bottom edge of the rule's row, a bottom
+border after both paddings since the CodeMirror port, where the page's rule
+has 0.6em of margin on either side, so no place for the number worked: in
+the middle of the row the digits were 10.1px over the stroke, and level
+with it they came within 0.6px of the next number (measured with each
+variant injected). The stroke is the content box now, 2px in the middle of
+a row as tall as before; the number's box is the rule's row with the digits
+centred in it, and the marker of `- ***` is centred the same way. Found
+beside it: the number of a block drawn in a frame (a rule or an empty card
+in a quote or an item) rides on the block, inside the wrapper the frame
+sets in, and stood a level's inset right of the column. *the number of a
+rule stands level with its stroke and in the column, and no number is drawn
+over another* (`webview-look.test.js`) draws each number alone, the others
+hidden, and reads its ink: a rule's digits against its stroke, every
+number's right edge against the prose's, and the gap between neighbours
+(-2.9px before, 10.1 or more now), in both faces. **HR1** the number's box
+left to the line height -> caught, lines 3 and 4 -2.9px apart; **HR2** the
+stroke back to the bottom border -> caught, the number 11.1px off its
+stroke; **HR3** the framed block's number without the inset back -> caught,
+line 12 14.0px right of the prose's (as far as the clip reads, since it
+ends at the text's edge); **HR4** the marker left at the top of the row ->
+caught, 6.3px under the stroke in the roman. With the marker centred the
+roman still sets its bullet 3.3px under the stroke, low in the line as it
+sets its words, so the test allows 4px there and 1.5 in the sans.
+
+Reported next with another picture: the numbers of three tasks stood over
+their words. A task's row was 33.4px against the prose's 27.2 (roman; 35.4
+in the sans): the space after the box (`.mdm-li-gap`) is an inline-block
+that clips, so its baseline is its bottom edge and its whole line stood
+over the row's baseline, which went down 6 to 8px with the words while the
+number kept to the first 27.2. Taking the box out changed nothing; the gap
+now hangs from the top (`vertical-align: top`, keeping its 0.28em, which
+`display: inline` would lose). *a task's row is as tall as a line of prose,
+so its words stand beside its number* (`webview-look.test.js`) reads the
+rows as boxes, since the middle-of-the-row test measures against the line
+height and a taller row does not move the number there. **TG1** the
+`vertical-align` removed -> caught, line 3 33.38px against 27.19.
+
 ### The blank lines under a hidden header (2026-09-19)
 
 With the header hidden the host kept the header and every blank line under
@@ -3740,6 +3846,26 @@ The focused field's ring went from 2px (its border and a 1px box-shadow)
 to its 1px border alone, at the owner's asking; the same test reads the
 width, the brass and that there is no shadow. **SR7** the shadow back ->
 caught.
+
+### The caret on a blank line (2026-09-19)
+
+On a blank line under a list, with a `##` after it, the caret came out
+31.8px, a heading's, where the prose's is 23.1 (roman). `fitCaret` looked
+the caret's row up under the foot of the box CodeMirror drew it in, and on
+a blank line that box is a text row's, 28px, centred on a line of 16: the
+foot stood 6px into the next line and the caret was cut to its face. The
+row is looked up under the middle of the box now, which is inside the
+caret's own row on every kind of row measured. *a blank line takes the
+prose's caret, whatever line comes after it* (`webview-look.test.js`)
+compares the caret on four blank lines, before a `##`, a `#`, a fence and
+prose, with the prose's, in both faces. **CF1** the lookup back on the foot
+-> caught, and only this test of the nine caret tests fails.
+
+Seen on the way and left as it is: a caret on a blank line of a code block
+is not fitted (19px against the 18 of a line of code) when no line of code
+with text on it has had a caret yet, because the face's scale `k` is read
+off a row's text box and a blank row has none. Once any line of code has
+been visited, the blank one is fitted too.
 
 ### The code block button and Ctrl+Shift+8 (2026-09-19)
 

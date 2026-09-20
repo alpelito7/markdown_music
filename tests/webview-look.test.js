@@ -2843,6 +2843,58 @@ test("a caret the fit has drawn is not drawn again", { skip }, async () => {
   }
 });
 
+// A blank line takes the prose's caret, whatever the line after it is. The
+// box CodeMirror draws a caret in on a blank line is a text row's, 28px in the
+// roman, centred on a line of 16, and the fit used to find the caret's row
+// under the foot of that box: 6px into the next line, so the caret was cut to
+// that line's face. Under a list with a `##` after the blank it came out
+// 31.8px, a heading's caret (seen 2026-09-19). The row is found under the
+// middle of the box now. Each blank is compared with the caret on a line of
+// prose in the same face, and the next line is a `#`, a `##`, a fence and
+// prose in turn.
+test("a blank line takes the prose's caret, whatever line comes after it", { skip }, async () => {
+  const text = [
+    "A line of prose.",
+    "- an item",
+    "",
+    "## A section",
+    "",
+    "# A chapter",
+    "",
+    "```python",
+    "x = 1",
+    "```",
+    "",
+    "Prose again.",
+    "",
+  ].join("\n");
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { textFont: face, frontMatter: "hidden" } } });
+    const caretAt = async (pos) => {
+      await setSelection(h.page, pos);
+      await sleep(200);
+      return h.page.evaluate(() => Math.round(document.querySelector("#app .cm-cursor").getBoundingClientRect().height * 10) / 10);
+    };
+    const prose = await caretAt(3);
+    // The blank lines, by what follows each.
+    const blanks = [
+      ["a `##`", text.indexOf("\n\n## ") + 1],
+      ["a `#`", text.indexOf("\n\n# ") + 1],
+      ["a fence", text.indexOf("\n\n```python") + 1],
+      ["prose", text.indexOf("\n\nProse") + 1],
+    ];
+    for (const [next, pos] of blanks) {
+      const height = await caretAt(pos);
+      assert.ok(
+        Math.abs(height - prose) <= 0.2,
+        `${face}: the caret on the blank line before ${next} is ${height}px, and the prose's is ${prose}px`
+      );
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
 // ---------- The delimiters of code and of maths ----------
 
 // The backticks of a fence and of a run of inline code, and the $ and $$
@@ -4143,6 +4195,321 @@ test("a number stands in the middle of the row it counts, in either face", { ski
   }
 });
 
+// The numbers of a list stand in the prose's column, and stay there as the
+// caret comes into an item. Two things used to move them, and neither shows
+// in the model the column test above computes, so this reads the digits'
+// ink: the first row of an item hangs back by 1.5em (text-indent), which the
+// number inherited; and the item's 1.5em inset, handed to the number's margin
+// as tokens, was resolved against the number's 11px. Together they put a
+// closed item's number 10px left of the prose's and an open one's 7px right,
+// so it jumped as the caret came in; each alone is -17.5 and +7.5 (roman). The inset is a
+// registered length now (@property --mdm-inset in style.css), computed on
+// the line that sets it.
+test("the numbers of a list stay in the prose's column, with the caret in an item or not", { skip }, async () => {
+  const text = [
+    "A line of prose.",
+    "",
+    "- text, one",
+    "- music, two",
+    "  - nested, three",
+    "- [ ] a task",
+    "",
+    "1. first",
+    "2. second",
+    "",
+    "> - quoted item",
+    "",
+    "Prose after.",
+    "",
+  ].join("\n");
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { frontMatter: "hidden", textFont: face } } });
+    await h.page.setViewport({ width: 900, height: 1200, deviceScaleFactor: 2 });
+    await h.page.evaluate(() => document.fonts.ready);
+    // The right edge of the ink of every number, in CSS pixels.
+    const edges = async () => {
+      await sleep(300);
+      const rows = await h.page.evaluate(() => {
+        const content = document.querySelector("#app .cm-content").getBoundingClientRect();
+        return [...document.querySelectorAll("#app .cm-content .cm-line[data-mdm-line]")]
+          .filter((l) => !l.classList.contains("mdm-blank"))
+          .map((l) => {
+            const r = l.getBoundingClientRect();
+            return {
+              n: l.getAttribute("data-mdm-line"),
+              cls: l.className,
+              // The whole margin, from the pane's edge to the text's.
+              clip: { x: 0, y: r.top, width: Math.floor(content.left) - 1, height: Math.min(r.height, 30) },
+            };
+          });
+      });
+      for (const row of rows) {
+        const png = await h.page.screenshot({ clip: row.clip, encoding: "base64" });
+        const right = await h.page.evaluate(async (b64, width) => {
+          const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+          const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+          const cv = new OffscreenCanvas(bmp.width, bmp.height);
+          const g = cv.getContext("2d");
+          g.drawImage(bmp, 0, 0);
+          const d = g.getImageData(0, 0, bmp.width, bmp.height).data;
+          const counts = new Map();
+          for (let i = 0; i < d.length; i += 4) {
+            const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+            counts.set(k, (counts.get(k) || 0) + 1);
+          }
+          const ground = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+          const far = (i) =>
+            Math.abs(d[i] - (ground >> 16)) +
+            Math.abs(d[i + 1] - ((ground >> 8) & 255)) +
+            Math.abs(d[i + 2] - (ground & 255));
+          let right = -1;
+          for (let y = 0; y < bmp.height; y++) {
+            for (let x = 0; x < bmp.width; x++) if (far((y * bmp.width + x) * 4) >= 60) right = Math.max(right, x);
+          }
+          return right < 0 ? null : (right + 1) / (bmp.width / width);
+        }, png, row.clip.width);
+        assert.ok(right !== null, `no number drawn beside line ${row.n} (${face})`);
+        row.right = row.clip.x + right;
+      }
+      return rows;
+    };
+    const check = (rows, when) => {
+      const prose = rows[0].right;
+      for (const row of rows) {
+        assert.ok(
+          Math.abs(row.right - prose) <= 1.5,
+          `with the caret ${when}, the number of line ${row.n} (${row.cls}, ${face}) ends ${(row.right - prose).toFixed(1)}px from the prose's: ` +
+            JSON.stringify(rows.map((r) => [r.n, +r.right.toFixed(1)]))
+        );
+      }
+    };
+    check(await edges(), "outside the lists");
+    for (const needle of ["music", "nested", "a task", "second", "quoted"]) {
+      await setSelection(h.page, await posOf(h.page, needle, 2));
+      const rows = await edges();
+      assert.ok(
+        rows.some((r) => r.cls.includes("mdm-li") && !r.cls.includes("mdm-li-first")),
+        `the caret in "${needle}" opened no item (${face})`
+      );
+      check(rows, `in "${needle}"`);
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// A rule is a block of its own (RuleWidget) with no line of words in it, and
+// its number took its box from the line height like every other: the box
+// began halfway down the rule's row and was a line of prose tall, so the
+// digits stood under the stroke and over the number of a blank line after
+// the rule, 69 drawn on 70 as it was reported. The stroke stood on the bottom
+// edge of the row as well, so no place for the number would have worked; it
+// is in the middle of the row now, where the page's rule has it, and the
+// number beside it. A block in a frame (a rule, an empty card) carries its
+// number inside the wrapper the frame sets in, and stood that inset right of
+// the column. And the marker of `- ***`, drawn in the wrapper's gap, stands
+// in the middle of the row with the number.
+// Read in the pixels, each number drawn alone with the others hidden, so
+// that two numbers drawn over each other are still told apart.
+test("the number of a rule stands level with its stroke and in the column, and no number is drawn over another", { skip }, async () => {
+  const text = [
+    "A line of prose.",
+    "",
+    "---",
+    "",
+    "### A heading",
+    "",
+    "***",
+    "Prose right under a rule.",
+    "",
+    "> A quote",
+    ">",
+    "> ---",
+    ">",
+    "> ```",
+    "> ```",
+    "",
+    "- ***",
+    "",
+    "The end.",
+    "",
+  ].join("\n");
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { frontMatter: "hidden", textFont: face } } });
+    await h.page.setViewport({ width: 900, height: 1200, deviceScaleFactor: 2 });
+    await h.page.evaluate(async () => {
+      await document.fonts.ready;
+      const view = window.__mdm.view;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      const hide = document.createElement("style");
+      hide.id = "mdm-test-hide";
+      document.head.appendChild(hide);
+    });
+    await sleep(400);
+    // The ink inside `clip`, in CSS pixels, with `hide` drawn hidden: the
+    // ground is the commonest colour, and ink whatever stands at least half
+    // as far from it as the farthest pixel does.
+    const ink = async (clip, hide) => {
+      await h.page.evaluate((css) => {
+        document.getElementById("mdm-test-hide").textContent = css;
+      }, hide);
+      const png = await h.page.screenshot({ clip, encoding: "base64" });
+      const box = await h.page.evaluate(async (b64) => {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+        const cv = new OffscreenCanvas(bmp.width, bmp.height);
+        const g = cv.getContext("2d");
+        g.drawImage(bmp, 0, 0);
+        const d = g.getImageData(0, 0, bmp.width, bmp.height).data;
+        const counts = new Map();
+        for (let i = 0; i < d.length; i += 4) {
+          const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+          counts.set(k, (counts.get(k) || 0) + 1);
+        }
+        const ground = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        const far = (i) =>
+          Math.abs(d[i] - (ground >> 16)) +
+          Math.abs(d[i + 1] - ((ground >> 8) & 255)) +
+          Math.abs(d[i + 2] - (ground & 255));
+        let max = 0;
+        for (let i = 0; i < d.length; i += 4) max = Math.max(max, far(i));
+        if (max < 30) return null;
+        let t = -1;
+        let b = -1;
+        let r = -1;
+        for (let y = 0; y < bmp.height; y++) {
+          for (let x = 0; x < bmp.width; x++) {
+            if (far((y * bmp.width + x) * 4) < max / 2) continue;
+            if (t < 0) t = y;
+            b = y + 1;
+            r = Math.max(r, x + 1);
+          }
+        }
+        return { t, b, r, height: bmp.height };
+      }, png);
+      if (!box) return null;
+      const s = box.height / clip.height;
+      return {
+        top: clip.y + box.t / s,
+        bottom: clip.y + box.b / s,
+        middle: clip.y + (box.t + box.b) / 2 / s,
+        right: clip.x + box.r / s,
+      };
+    };
+    const rows = await h.page.evaluate(() => {
+      const content = document.querySelector("#app .cm-content").getBoundingClientRect();
+      return [...document.querySelectorAll("#app .cm-content [data-mdm-line]")].map((l) => {
+        const r = l.getBoundingClientRect();
+        const marker = l.parentElement.querySelector(":scope > .mdm-li-marker--block");
+        const m = marker && marker.getBoundingClientRect();
+        return {
+          n: l.getAttribute("data-mdm-line"),
+          cls: l.className,
+          framed: l.parentElement.classList.contains("mdm-block-framed"),
+          // The whole margin beside the row and a line over and under it;
+          // the pane's edge is at 0 and the text starts at 50.
+          clip: { x: 0, y: r.top - 30, width: Math.floor(content.left) - 1, height: r.height + 60 },
+          // Inside the text column, past any bar of a frame.
+          stroke: { x: r.left + 40, y: r.top - 2, width: 200, height: r.height + 4 },
+          marker: m && { x: m.left, y: r.top - 10, width: m.width, height: r.height + 20 },
+        };
+      });
+    });
+    const rules = rows.filter((r) => r.cls.includes("mdm-hr"));
+    assert.equal(rules.length, 4, `not the four rules (${face}): ` + JSON.stringify(rows.map((r) => r.cls)));
+    assert.equal(rules.filter((r) => r.framed).length, 2, `not two rules in a frame (${face})`);
+    assert.ok(rows.some((r) => r.cls.includes("mdm-empty-card") && r.framed), `no empty card in a frame (${face})`);
+    for (const row of rows) {
+      row.ink = await ink(
+        row.clip,
+        `#app [data-mdm-line]::before { visibility: hidden !important; }
+         #app [data-mdm-line="${row.n}"]::before { visibility: visible !important; }`
+      );
+      assert.ok(row.ink, `no number drawn beside line ${row.n} (${row.cls}, ${face})`);
+    }
+    const seen = JSON.stringify(rows.map((r) => [r.n, +r.ink.top.toFixed(1), +r.ink.bottom.toFixed(1), +r.ink.right.toFixed(1)]));
+    // One column, framed blocks included.
+    for (const row of rows) {
+      const off = row.ink.right - rows[0].ink.right;
+      assert.ok(
+        Math.abs(off) <= 1.5,
+        `the number of line ${row.n} (${row.cls}, ${face}) ends ${off.toFixed(1)}px from the prose's: ${seen}`
+      );
+    }
+    // Clear of each other: the digits of two neighbours used to overlap by
+    // 2.9px around a rule, and stand 10px apart or more now.
+    for (let i = 1; i < rows.length; i++) {
+      const gap = rows[i].ink.top - rows[i - 1].ink.bottom;
+      assert.ok(
+        gap >= 4,
+        `the numbers of lines ${rows[i - 1].n} and ${rows[i].n} stand ${gap.toFixed(1)}px apart (${face}): ${seen}`
+      );
+    }
+    // Level with the stroke, and the marker of `- ***` with them.
+    for (const rule of rules) {
+      const stroke = await ink(
+        rule.stroke,
+        "#app [data-mdm-line]::before, #app .mdm-li-marker { visibility: hidden !important; }"
+      );
+      assert.ok(stroke, `no stroke drawn for the rule of line ${rule.n} (${face})`);
+      const off = rule.ink.middle - stroke.middle;
+      assert.ok(
+        Math.abs(off) <= 1.5,
+        `the number of the rule of line ${rule.n} (${face}) stands ${off.toFixed(1)}px from its stroke`
+      );
+      if (!rule.marker) continue;
+      const marker = await ink(rule.marker, "#app [data-mdm-line]::before, #app .mdm-hr { visibility: hidden !important; }");
+      assert.ok(marker, `no marker drawn for the rule of line ${rule.n} (${face})`);
+      // The roman sets its bullet low in the line, as it does its words
+      // (3.3px under the stroke, measured); the sans puts it level.
+      const markerOff = marker.middle - stroke.middle;
+      assert.ok(
+        Math.abs(markerOff) <= (face === "roman" ? 4 : 1.5),
+        `the marker of the rule of line ${rule.n} (${face}) stands ${markerOff.toFixed(1)}px from its stroke`
+      );
+    }
+    assert.equal(rules.filter((r) => r.marker).length, 1, `the item's rule has no marker (${face})`);
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// A task's row is a row of prose. The space after its box (.mdm-li-gap) is
+// an inline-block that clips, whose baseline is its bottom edge, and on the
+// baseline it stood a whole line over it: every task grew to 33.4px in the
+// roman and 35.4 in the sans, its words went down 6 to 8px and its number,
+// which stands in the first 27.2 of the row, read above them. The rows are
+// read as boxes, since the number's own test measures it against the line
+// height and a taller row does not move it there.
+test("a task's row is as tall as a line of prose, so its words stand beside its number", { skip }, async () => {
+  const text = ["A line of prose.", "", "- [ ] a task", "- [x] a task done", "1. [ ] a numbered task", "- an item", ""].join("\n");
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { frontMatter: "hidden", textFont: face } } });
+    const rows = await h.page.evaluate(async () => {
+      await document.fonts.ready;
+      const view = window.__mdm.view;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      await new Promise((r) => setTimeout(r, 300));
+      return [...document.querySelectorAll("#app .cm-content .cm-line[data-mdm-line]")]
+        .filter((l) => !l.classList.contains("mdm-blank"))
+        .map((l) => ({
+          n: l.getAttribute("data-mdm-line"),
+          task: !!l.querySelector("input.mdm-task"),
+          height: l.getBoundingClientRect().height,
+        }));
+    });
+    assert.equal(rows.filter((r) => r.task).length, 3, `not three tasks drawn (${face}): ` + JSON.stringify(rows));
+    for (const row of rows) {
+      assert.ok(
+        Math.abs(row.height - rows[0].height) < 0.5,
+        `line ${row.n} is ${row.height.toFixed(2)}px tall against the prose's ${rows[0].height.toFixed(2)} (${face})`
+      );
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
 test("with the header hidden the numbers are the file's lines, not the editor's", { skip }, async () => {
   const disk = ["---", "title: x", "author: y", "---", "", "First body line.", ""].join("\n");
   // Hidden is the default of mdm.frontMatter: the host keeps the header and
@@ -4743,6 +5110,53 @@ test("a heading's line keeps its height, with the caret away and in it", { skip 
         Math.abs(inside[n - 1].inner - away[n - 1].inner) < 0.5,
         face + ": h" + n + "'s line went from " + away[n - 1].inner + "px to " +
           inside[n - 1].inner + " with the caret in it"
+      );
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// A row of prose keeps the height its line-height gives it whatever is drawn
+// in it. CodeMirror sets a buffer beside every widget and every hidden mark
+// (img.cm-widgetBuffer, 1em tall, text-top in its base theme), and in the
+// roman, whose content area at the adjusted size stands over the line box,
+// the buffer's top rose over the row: 28.19px with a hidden `**` where a
+// plain row is 27.19, so everything below moved a pixel up when the caret
+// entered the row and back down when it left (G103). The punctuation the
+// page prints is drawn as widgets (G015), so nearly every row carries one.
+test("a row of prose keeps its height with a mark hidden or a glyph drawn in it, the caret away and in it (G103)", { skip }, async () => {
+  const text =
+    "A plain row of prose.\n\nA row with **bold** in it.\n\nA row with a [link](https://example.com) in it.\n\n" +
+    "It's a row with an apostrophe.\n\n\"Quoted\" -- and dashed...\n\nThe last row.\n";
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { textFont: face } } });
+    const measure = () =>
+      h.page.evaluate(() =>
+        Array.from(document.querySelectorAll("#app .cm-line:not(.mdm-blank)")).map((el) => {
+          const r = el.getBoundingClientRect();
+          return { text: el.textContent.slice(0, 14), height: +r.height.toFixed(2), top: +r.top.toFixed(2) };
+        })
+      );
+    const away = await measure();
+    assert.equal(away.length, 6, JSON.stringify(away));
+    away.forEach((row) => {
+      assert.ok(
+        Math.abs(row.height - away[0].height) < 0.5,
+        face + ": the row \"" + row.text + "\" is " + row.height + "px where a plain row is " + away[0].height
+      );
+    });
+    for (const word of ["bold", "link", "apostrophe", "Quoted"]) {
+      await h.page.evaluate((needle) => {
+        const { view } = window.__mdm;
+        view.focus();
+        view.dispatch({ selection: { anchor: view.state.doc.toString().indexOf(needle) } });
+      }, word);
+      await h.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      const inside = await measure();
+      assert.ok(
+        Math.abs(inside[5].top - away[5].top) < 0.5,
+        face + ": the last row went from " + away[5].top + "px to " + inside[5].top + " with the caret in \"" + word + "\""
       );
     }
     assert.deepEqual(h.errors, []);

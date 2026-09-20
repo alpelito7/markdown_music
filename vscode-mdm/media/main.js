@@ -4218,9 +4218,27 @@
     eq(other) {
       return other.src === this.src && other.alt === this.alt && other.width === this.width;
     }
-    toDOM() {
+    toDOM(view) {
       const img = document.createElement("img");
       img.className = "mdm-image";
+      if (this.width) img.style.width = this.width;
+      // The picture arrives after the line was measured, and CodeMirror
+      // has no way of knowing: its height map kept the line at one row of
+      // text, a click below the picture landed lines lower than the word
+      // it was on, and the caret went where the map said (G100). A load,
+      // or the broken-image glyph of a failure, asks for the line heights
+      // to be read again. requestMeasure alone reads nothing: the heights
+      // are re-read when the content's box changed height, and the box is
+      // stretched to the scroller (measured 2365 px before and after a
+      // 256 px picture), so the flag that forces the reading is set by
+      // hand. It is CodeMirror's own, not in its documented API; the test
+      // that reads the map after a load is what says the next bump kept it.
+      const remeasure = function () {
+        if (view.viewState) view.viewState.mustMeasureContent = true;
+        view.requestMeasure();
+      };
+      img.addEventListener("load", remeasure);
+      img.addEventListener("error", remeasure);
       img.src = this.src;
       img.alt = this.alt;
       img.title = this.alt;
@@ -5152,8 +5170,12 @@
 
         if (/^ATXHeading[1-6]$/.test(name)) {
           const level = name.slice(-1);
-          lines.add(n.from, n.to, "mdm-h mdm-h" + level);
-          if (!touched(n.from, n.to)) {
+          lines.add(n.from, n.to, "mdm-h mdm-h" + level + " mdm-h-first mdm-h-last");
+          sampleProof(n.from, n.to);
+          // From the head of the line: a caret in the spaces before the #
+          // opens the heading as one in its text does (G041).
+          if (!touched(doc.lineAt(n.from).from, n.to)) {
+            hideLead(doc.lineAt(n.from).number, n.from);
             node.getChildren("HeaderMark").forEach(function (m) {
               const r = markWithSpace(m);
               // The opening run: every space and tab after it goes with it,
@@ -5190,7 +5212,14 @@
           lines.add(lastText.from, lastText.from, "mdm-h-last");
           if (mark) {
             if (!touched(n.from, n.to)) hideLines(mark.from, mark.to);
-            else lines.add(mark.from, mark.to, "mdm-mark-line");
+            else {
+              lines.add(mark.from, mark.to, "mdm-mark-line");
+              sampleProof(mark.from, mark.to);
+            }
+          }
+          smartWidgets(node, n.to, text, doc, touched, decos);
+          for (let k = doc.lineAt(n.from).number; k <= lastText.number; k++) {
+            hideLead(k, k === doc.lineAt(n.from).number ? n.from : null);
           }
           return true;
         }
@@ -7218,29 +7247,841 @@
     });
     return found;
   }
-  function stepIntoBlock(dir) {
+  // A line drawn in place of its source (the rule): a block replacement
+  // that carries a drawing of its own.
+  function ruleLineAt(state, pos) {
+    const field = state.field(renderField, false);
+    if (!field) return false;
+    let found = false;
+    field.between(pos, pos, function (from, to, deco) {
+      if (deco.block && deco.isReplace && deco.widget && !(deco.widget instanceof BlockCoverWidget) && from <= pos && pos <= to) found = true;
+    });
+    return found;
+  }
+  // A line taken out of the flow by a block replacement, whether covered
+  // (hidden source) or drawn in its place (the rule): no row the caret can
+  // be put on by line number.
+  function replacedLineAt(state, pos) {
+    const field = state.field(renderField, false);
+    if (!field) return false;
+    let found = false;
+    field.between(pos, pos, function (from, to, deco) {
+      if (deco.block && deco.isReplace && from <= pos && pos <= to) found = true;
+    });
+    return found;
+  }
+
+  // ArrowDown and ArrowUp (with Shift, extending). CodeMirror's own move
+  // steps half a text height past the caret's box and reads what is there,
+  // which is right for rows of text and wrong for the 16 px blank rows
+  // between paragraphs once the caret's box is taller than its row: in the
+  // roman the box of an empty line is the text's line height and stands
+  // out of its 16 px, so the step cleared the blank row under a heading and
+  // the second of two blank lines, and the caret could never be put on
+  // them (G102). A drawn row that the move would skip, shorter than a line
+  // of text, is taken by line number instead, at the column the caret was
+  // at, and the goal column is kept for the move after it.
+  function stepIntoBlock(dir, extend) {
     return function (v) {
       const sel = v.state.selection;
-      if (sel.ranges.length !== 1 || !sel.main.empty) return false;
-      const line = v.state.doc.lineAt(sel.main.head);
+      if (sel.ranges.length !== 1) return false;
+      const main = sel.main;
+      const line = v.state.doc.lineAt(main.head);
       // A wrapped paragraph is one document line but several visual rows.
       // The hidden block may therefore be the next document line while an
       // ordinary vertical move still belongs inside the paragraph. Let
       // CodeMirror make that move; only take over at the paragraph's visual
       // edge, where its own move leaves this document line.
-      const natural = v.moveVertically(sel.main, dir > 0);
+      const natural = v.moveVertically(main, dir > 0);
       if (v.state.doc.lineAt(natural.head).number === line.number) return false;
       const n = line.number + dir;
       if (n < 1 || n > v.state.doc.lines) return false;
       const target = v.state.doc.line(n);
-      const block = hiddenBlockAt(v.state, dir > 0 ? target.from : target.to);
+      const col = main.head - line.from;
+      if (
+        v.state.doc.lineAt(natural.head).number !== n &&
+        !replacedLineAt(v.state, target.from) &&
+        v.lineBlockAt(target.from).height < v.defaultLineHeight
+      ) {
+        const pos = Math.min(target.from + col, target.to);
+        let goal = main.goalColumn;
+        if (goal === undefined) {
+          const at = v.coordsAtPos(main.head, main.assoc || -1);
+          if (at) goal = at.left - v.contentDOM.getBoundingClientRect().left;
+        }
+        const range = extend
+          ? CM.EditorSelection.range(main.anchor, pos, goal)
+          : CM.EditorSelection.cursor(pos, natural.assoc, undefined, goal);
+        // As a selection and not as a bare range: of a bare range the
+        // transaction reads anchor and head alone, and the goal goes.
+        v.dispatch({
+          selection: CM.EditorSelection.create([range]),
+          scrollIntoView: true,
+          userEvent: "select",
+        });
+        return true;
+      }
+      if (extend || !main.empty) return false;
+      // A rule drawn between the caret and the block is walked past, as the
+      // arrow keys always did, and the block beyond it is still stepped into
+      // (G101: the neighbouring line alone was asked, and a rule glued to a
+      // table or a score shielded the whole of it).
+      let beyond = target;
+      for (let m = n; ruleLineAt(v.state, beyond.from) && m + dir >= 1 && m + dir <= v.state.doc.lines; ) {
+        m += dir;
+        beyond = v.state.doc.line(m);
+      }
+      const block = hiddenBlockAt(v.state, dir > 0 ? beyond.from : beyond.to);
       if (!block) return false;
-      const col = sel.main.head - line.from;
       const into = dir > 0 ? v.state.doc.lineAt(block.from) : v.state.doc.lineAt(block.to);
       const pos = Math.min(into.from + col, into.to);
       v.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
       return true;
     };
+  }
+
+  // Ctrl+Alt+Up/Down: a caret on the line above or below every caret there
+  // is, in the same column, the way VS Code adds them. The new carets join
+  // the selection rather than replace it.
+  function addCaretVertically(dir) {
+    return function (v) {
+      const sel = v.state.selection;
+      const added = [];
+      sel.ranges.forEach(function (range) {
+        const moved = v.moveVertically(range, dir > 0);
+        if (moved.head !== range.head) added.push(CM.EditorSelection.cursor(moved.head));
+      });
+      if (!added.length) return true;
+      v.dispatch({
+        selection: CM.EditorSelection.create(sel.ranges.concat(added), sel.mainIndex),
+        scrollIntoView: true,
+      });
+      return true;
+    };
+  }
+
+  // ---------- Enter ----------
+
+  // Enter is the editor's own. CodeMirror's two commands for it, the markup
+  // continuation of @codemirror/lang-markdown (lists and quotes) and
+  // insertNewlineAndIndent, read whitespace with \s, which takes U+00A0,
+  // U+2003 and U+3000 along with the space: a no-break space beside the
+  // caret was deleted by one press of Enter, or written back as an ASCII
+  // space through the indent (G088), and both readers that matter print it
+  // (CommonMark 0.31.2 §2.1 counts only spaces and tabs as blank; Pandoc's
+  // markdown gives `<p>&nbsp;</p>`). Below is that continuation with
+  // `[ \t]` for its whitespace, and a plain newline with the same class, so
+  // nothing but a space or a tab is ever taken. The shape (a tight list of
+  // two made loose by an Enter on its second item, an empty item unnested
+  // one level) is lang-markdown's, kept as it was; the gestures of P4 of the
+  // branch change it on top of this.
+  function isBlank(s) {
+    return !/[^ \t]/.test(s);
+  }
+
+  // Columns up to `end`, a tab reaching the next multiple of four, which is
+  // how CommonMark counts the indentation a marker stands at.
+  function columnAt(s, end) {
+    let col = 0;
+    for (let i = 0; i < end && i < s.length; i++) {
+      col = s.charCodeAt(i) === 9 ? col + 4 - (col % 4) : col + 1;
+    }
+    return col;
+  }
+
+  // One level of container markup around a line: the node (BulletList,
+  // OrderedList or Blockquote), the columns its marker spans on the line the
+  // item starts on, the space either side of the marker, the marker itself
+  // and, for a list, the item.
+  function MarkupLevel(node, from, to, spaceBefore, spaceAfter, type, item) {
+    this.node = node;
+    this.from = from;
+    this.to = to;
+    this.spaceBefore = spaceBefore;
+    this.spaceAfter = spaceAfter;
+    this.type = type;
+    this.item = item;
+  }
+  // What a continuation line carries at this level: the quote's `>`, or
+  // the width of the list marker in spaces.
+  MarkupLevel.prototype.blank = function (maxWidth, trailing) {
+    let result = this.spaceBefore + (this.node.name === "Blockquote" ? ">" : "");
+    if (maxWidth != null) {
+      while (result.length < maxWidth) result += " ";
+      return result;
+    }
+    for (let i = this.to - this.from - result.length - this.spaceAfter.length; i > 0; i--) result += " ";
+    return result + (trailing !== false ? this.spaceAfter : "");
+  };
+  // The marker of a new item at this level, numbered on from the item
+  // before it in an ordered list.
+  MarkupLevel.prototype.marker = function (doc, add) {
+    const number = this.node.name === "OrderedList" ? String(+itemNumber(this.item, doc)[2] + add) : "";
+    return this.spaceBefore + number + this.type + this.spaceAfter;
+  };
+
+  function itemNumber(item, doc) {
+    return /^([ \t]*)(\d+)(?=[.)])/.exec(doc.sliceString(item.from, item.from + 10));
+  }
+
+  // The container levels around `node`, outermost first; none inside a
+  // fenced block, whose lines are not Markdown.
+  function markupLevels(node, doc) {
+    const nodes = [];
+    const levels = [];
+    for (let cur = node; cur; cur = cur.parent) {
+      if (cur.name === "FencedCode") return levels;
+      if (cur.name === "ListItem" || cur.name === "Blockquote") nodes.push(cur);
+    }
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i];
+      const line = doc.lineAt(n.from);
+      const startPos = n.from - line.from;
+      const rest = line.text.slice(startPos);
+      let match;
+      if (n.name === "Blockquote" && (match = /^ *>( ?)/.exec(rest))) {
+        levels.push(new MarkupLevel(n, startPos, startPos + match[0].length, "", match[1], ">", null));
+      } else if (
+        n.name === "ListItem" &&
+        n.parent.name === "OrderedList" &&
+        // A task box on an ordered item too, and a tab after the marker,
+        // both of which lang-markdown's own reading left out (G084).
+        (match = /^([ \t]*)\d+([.)])( {1,4}\[[ xX]\])?([ \t]*)/.exec(rest))
+      ) {
+        let after = match[4];
+        let len = match[0].length;
+        if (after.length >= 4) {
+          after = after.slice(0, after.length - 4);
+          len -= 4;
+        }
+        let type = match[2];
+        if (match[3]) type += match[3].replace(/[xX]/, " ");
+        levels.push(new MarkupLevel(n.parent, startPos, startPos + len, match[1], after, type, n));
+      } else if (
+        n.name === "ListItem" &&
+        n.parent.name === "BulletList" &&
+        (match = /^([ \t]*)([-+*])( {1,4}\[[ xX]\])?([ \t]+)/.exec(rest))
+      ) {
+        let after = match[4];
+        let len = match[0].length;
+        if (after.length > 4) {
+          after = after.slice(0, after.length - 4);
+          len -= 4;
+        }
+        let type = match[2];
+        if (match[3]) type += match[3].replace(/[xX]/, " ");
+        levels.push(new MarkupLevel(n.parent, startPos, startPos + len, match[1], after, type, n));
+      }
+    }
+    return levels;
+  }
+
+  // The items after `after` renumbered to follow it, as long as they were
+  // in sequence; `offset` shifts them.
+  function renumberList(after, doc, changes, offset) {
+    for (let prev = -1, node = after; ; ) {
+      if (node.name === "ListItem") {
+        const m = itemNumber(node, doc);
+        const number = +m[2];
+        if (prev >= 0) {
+          if (number !== prev + 1) return;
+          changes.push({
+            from: node.from + m[1].length,
+            to: node.from + m[0].length,
+            insert: String(prev + 2 + (offset || 0)),
+          });
+        }
+        prev = number;
+      }
+      const next = node.nextSibling;
+      if (!next) break;
+      node = next;
+    }
+  }
+
+  // A list whose first two items have a blank line between them is loose,
+  // and a new item gets a blank line of its own.
+  function nonTightList(node, doc) {
+    if (node.name !== "OrderedList" && node.name !== "BulletList") return false;
+    const first = node.firstChild;
+    const second = node.getChild("ListItem", "ListItem");
+    if (!second) return false;
+    const line1 = doc.lineAt(first.to);
+    const line2 = doc.lineAt(second.from);
+    const empty = /^[ \t>]*$/.test(line1.text);
+    return line1.number + (empty ? 0 : 1) < line2.number;
+  }
+
+  // The blank line a loose list puts between items, with the outer
+  // containers' own marks on it.
+  function blankLine(levels, line) {
+    let insert = "";
+    for (let i = 0, e = levels.length - 2; i <= e; i++) {
+      insert += levels[i].blank(i < e ? columnAt(line.text, levels[i + 1].from) - insert.length : null, i < e);
+    }
+    return insert;
+  }
+
+  // The fenced block around a position, or null.
+  function fenceAround(tree, pos) {
+    for (let n = tree.resolveInner(pos, -1); n; n = n.parent) {
+      if (n.name === "FencedCode") return n;
+    }
+    return null;
+  }
+
+  // The ATX heading around a position, or null, and where its text starts:
+  // past the opening marks and the spaces or tabs after them.
+  function headingAround(tree, pos) {
+    for (let n = tree.resolveInner(pos, -1); n; n = n.parent) {
+      if (/^ATXHeading[1-6]$/.test(n.name)) return n;
+    }
+    return null;
+  }
+  function headingTextStart(heading, doc) {
+    const mark = heading.getChild("HeaderMark");
+    if (!mark) return -1;
+    const line = doc.lineAt(mark.from);
+    let at = mark.to;
+    while (at < line.to && /[ \t]/.test(doc.sliceString(at, at + 1))) at++;
+    return at;
+  }
+
+  // The plain newline for one range: the line's own indentation carried on
+  // (CommonMark reads it, for an indented code block or a continuation),
+  // spaces and tabs after the caret taken, a prefix of spaces and tabs alone
+  // taken with them, and nothing else touched. CodeMirror's own also opens a
+  // pair of brackets onto three lines; in Markdown `[]` is a label, and that
+  // is not done here.
+  function plainNewline(state, range) {
+    let from = range.from;
+    let to = range.to;
+    const line = state.doc.lineAt(from);
+    const indent = /^[ \t]*/.exec(line.text)[0];
+    while (to < line.to && /[ \t]/.test(line.text[to - line.from])) to++;
+    if (from > line.from && from < line.from + 100 && isBlank(line.text.slice(0, from - line.from))) {
+      from = line.from;
+    }
+    const insert = state.lineBreak + indent;
+    return {
+      changes: { from: from, to: to, insert: insert },
+      range: CM.EditorSelection.cursor(from + insert.length),
+    };
+  }
+
+  // The marks a continuation line carries at the given levels: the `>` of
+  // each quote, the width of each list marker.
+  function continuationPrefix(levels, line) {
+    let prefix = "";
+    for (let i = 0, e = levels.length - 1; i <= e; i++) {
+      prefix += levels[i].blank(i < e ? columnAt(line.text, levels[i + 1].from) - prefix.length : null);
+    }
+    return prefix;
+  }
+
+  // Enter, range by range (G072: a caret outside any markup used to send
+  // every caret to the plain newline). Inside a list or a quote the next
+  // line carries the marks (a new item, numbered on; the `>`); an empty item
+  // is unnested one level when a list holds this one, and unmade otherwise,
+  // with a blank line put between it and the item before so that what is
+  // typed next is a paragraph and not a lazy continuation of that item
+  // (G068), and never made loose first (G069); an empty quoted line after
+  // another closes the quote. Enter at the head of a heading's text opens
+  // a line above it (G073). In a fence inside a quote or an item the new
+  // line carries the container's marks, which CodeMirror's own newline
+  // knew nothing of (G071). Anywhere else, the plain newline.
+  function continueMarkup(view) {
+    const state = view.state;
+    if (state.readOnly) return false;
+    const tree = CM.syntaxTree(state);
+    const doc = state.doc;
+    const changes = state.changeByRange(function (range) {
+      if (!range.empty) return plainNewline(state, range);
+      const pos = range.from;
+      const line = doc.lineAt(pos);
+      // The fence is asked before the language: inside a fence of
+      // JavaScript the language at the caret is JavaScript, and the quote's
+      // or the item's marks are still owed to the new line.
+      const fence = fenceAround(tree, pos);
+      if (fence) {
+        // An item's marks up to where its content starts and not past a
+        // task box: past it, a fence in a task wrote four spaces of its own
+        // into every line of its code, and a score's `X:1` stood indented.
+        const outer = markupLevels(fence.parent, doc);
+        const prefix = blockPrefix(outer, line);
+        const own = /^[ \t]*/.exec(line.text.slice(prefix.length))[0];
+        const insert = state.lineBreak + prefix + own;
+        return { changes: { from: pos, insert: insert }, range: CM.EditorSelection.cursor(pos + insert.length) };
+      }
+      if (
+        !CM.markdownLanguage.isActiveAt(state, pos, -1) &&
+        !CM.markdownLanguage.isActiveAt(state, pos, 1)
+      ) {
+        return plainNewline(state, range);
+      }
+      const heading = headingAround(tree, pos);
+      if (heading && pos === headingTextStart(heading, doc) && pos > line.from) {
+        return {
+          changes: { from: line.from, insert: state.lineBreak },
+          range: CM.EditorSelection.cursor(pos + state.lineBreak.length),
+        };
+      }
+      const levels = markupLevels(tree.resolveInner(pos, -1), doc);
+      while (levels.length && levels[levels.length - 1].from > pos - line.from) levels.pop();
+      if (!levels.length) return plainNewline(state, range);
+      const inner = levels[levels.length - 1];
+      if (inner.to - inner.spaceAfter.length > pos - line.from) return plainNewline(state, range);
+      const emptyLine = pos >= inner.to - inner.spaceAfter.length && isBlank(line.text.slice(inner.to));
+      if (inner.item && emptyLine) {
+        if (inner.item.from < line.from && !/^[ \t>]*$/.test(line.text.slice(0, inner.to))) {
+          return plainNewline(state, range);
+        }
+        const next = levels.length > 1 ? levels[levels.length - 2] : null;
+        const out = [];
+        let delTo;
+        let insert;
+        if (next && next.item) {
+          // Unnested: an item of the list one level out.
+          delTo = line.from + next.from;
+          insert = next.marker(doc, 1);
+        } else {
+          // Unmade: the marker goes, and the caret's line is parted from the
+          // item before by a blank line unless one is there already.
+          delTo = line.from + (next ? next.to : 0);
+          const prevBlank = line.from > 0 && !/[^ \t>]/.test(doc.lineAt(line.from - 1).text);
+          insert = prevBlank ? "" : state.lineBreak + (next ? next.blank(null, true) : "");
+        }
+        out.push({ from: delTo, to: pos, insert: insert });
+        if (inner.node.name === "OrderedList") renumberList(inner.item, doc, out, -2);
+        if (next && next.item && next.node.name === "OrderedList") renumberList(next.item, doc, out);
+        return { range: CM.EditorSelection.cursor(delTo + insert.length), changes: out };
+      }
+      if (inner.node.name === "Blockquote" && emptyLine && line.from) {
+        const prevLine = doc.lineAt(line.from - 1);
+        const quoted = />[ \t]*$/.exec(prevLine.text);
+        // Two empty quoted lines in a row, aligned: both go, the quote ends.
+        if (quoted && quoted.index === inner.from) {
+          const out = state.changes([
+            { from: prevLine.from + quoted.index, to: prevLine.to },
+            { from: line.from + inner.from, to: line.to },
+          ]);
+          return { range: range.map(out), changes: out };
+        }
+      }
+      const out = [];
+      if (inner.node.name === "OrderedList") renumberList(inner.item, doc, out);
+      const continued = inner.item && inner.item.from < line.from;
+      let insert = "";
+      // Not dedented: the marks again, the innermost as a new item.
+      if (!continued || /^[ \t\d.)\-+*>]*/.exec(line.text)[0].length >= inner.to) {
+        for (let i = 0, e = levels.length - 1; i <= e; i++) {
+          insert +=
+            i === e && !continued
+              ? levels[i].marker(doc, 1)
+              : levels[i].blank(i < e ? columnAt(line.text, levels[i + 1].from) - insert.length : null);
+        }
+      }
+      let from = pos;
+      while (from > line.from && /[ \t]/.test(line.text.charAt(from - line.from - 1))) from--;
+      if (nonTightList(inner.node, doc)) insert = blankLine(levels, line) + state.lineBreak + insert;
+      out.push({ from: from, to: pos, insert: state.lineBreak + insert });
+      return { range: CM.EditorSelection.cursor(from + insert.length + 1), changes: out };
+    });
+    view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: "input" }));
+    return true;
+  }
+
+  // Inside a fence that no quote or item holds, the code's own language may
+  // have an indentation to offer (a fence of JavaScript), and the whitespace
+  // there is ASCII, so CodeMirror's own command keeps that job; a fence
+  // inside a container needs the container's marks on the new line, which
+  // continueMarkup writes.
+  function mdmEnter(view) {
+    const state = view.state;
+    const tree = CM.syntaxTree(state);
+    const bare = state.selection.ranges.every(function (r) {
+      const fence = fenceAround(tree, r.from);
+      return fence && !markupLevels(fence.parent, state.doc).length;
+    });
+    if (bare) return CM.insertNewlineAndIndent(view);
+    return continueMarkup(view);
+  }
+
+  // ---------- Backspace and Delete ----------
+
+  // The node the markup context of a deletion is read from: lang-markdown's
+  // own reading, ported (a caret right after a mark reads the mark's
+  // parent; a list before the position reads its last item).
+  function isMark(node) {
+    return node.name === "QuoteMark" || node.name === "ListMark";
+  }
+  function contextNodeForDelete(tree, pos) {
+    let node = tree.resolveInner(pos, -1);
+    let scan = pos;
+    if (isMark(node)) {
+      scan = node.from;
+      node = node.parent;
+    }
+    for (let prev; (prev = node.childBefore(scan)); ) {
+      if (isMark(prev)) {
+        scan = prev.from;
+      } else if (prev.name === "OrderedList" || prev.name === "BulletList") {
+        node = prev.lastChild;
+        scan = node.to;
+      } else {
+        break;
+      }
+    }
+    return node;
+  }
+
+  // What rides on an emoji and is deleted with it by a text control (the
+  // same Chrome's textarea takes the whole cluster): a skin tone, a keycap,
+  // the variation selector, the joiner, a tag character (G056). A combining
+  // accent is not among them: CodeMirror, the textarea and VS Code all take
+  // the accent alone off an `e`.
+  function emojiExtender(cp) {
+    return (
+      (cp >= 0x1f3fb && cp <= 0x1f3ff) ||
+      cp === 0x20e3 ||
+      cp === 0xfe0f ||
+      cp === 0x200d ||
+      (cp >= 0xe0020 && cp <= 0xe007f)
+    );
+  }
+  function codePointBefore(text, col) {
+    if (col <= 0) return -1;
+    const low = text.charCodeAt(col - 1);
+    if (col >= 2 && low >= 0xdc00 && low <= 0xdfff) {
+      const high = text.charCodeAt(col - 2);
+      if (high >= 0xd800 && high <= 0xdbff) return text.codePointAt(col - 2);
+    }
+    return low;
+  }
+
+  // Backspace, the editor's own. At the head of the line under a hidden
+  // block (a fence, a score, an equation, a table, a figure) the block
+  // opens and nothing is deleted, where the line break used to go into the
+  // hidden fence and break the block (G062). After the marks of a heading
+  // the whole run goes and the heading is a paragraph, as a list item loses
+  // its whole marker (G077, decided for P4 of the branch). After the marker
+  // of a list item or the `>` of a quote the marker goes whole, and when
+  // the line before holds text a blank line parts them, so that the text
+  // left is a paragraph, after the list or inside the item around it, and
+  // not a lazy continuation of the item before, which the readers join into
+  // that item's line (G078; lang-markdown blanked the marker with spaces
+  // instead). An emoji with a skin tone or a keycap goes whole (G056).
+  // Anything else is CodeMirror's own deletion.
+  function mdmBackspace(view) {
+    const state = view.state;
+    if (state.readOnly) return false;
+    const tree = CM.syntaxTree(state);
+    const doc = state.doc;
+    let special = false;
+    const changes = state.changeByRange(function (range) {
+      const plain = function () {
+        // CodeMirror's own step back for this range, for a mixed selection.
+        if (!range.empty) return { range: CM.EditorSelection.cursor(range.from), changes: { from: range.from, to: range.to } };
+        const pos = range.from;
+        if (pos === 0) return { range: range };
+        const line = doc.lineAt(pos);
+        const from = pos === line.from ? pos - state.lineBreak.length : line.from + CM.findClusterBreak(line.text, pos - line.from, false);
+        return { range: CM.EditorSelection.cursor(from), changes: { from: from, to: pos } };
+      };
+      if (!range.empty) return plain();
+      const pos = range.from;
+      const line = doc.lineAt(pos);
+      if (pos === line.from && pos > 0) {
+        const block = hiddenBlockAt(state, pos - 1);
+        if (block) {
+          special = true;
+          return { range: CM.EditorSelection.cursor(doc.lineAt(block.to).to) };
+        }
+      }
+      const heading = headingAround(tree, pos);
+      if (heading) {
+        const mark = heading.getChild("HeaderMark");
+        if (mark && pos === headingTextStart(heading, doc) && pos > mark.from) {
+          special = true;
+          return { range: CM.EditorSelection.cursor(mark.from), changes: { from: mark.from, to: pos } };
+        }
+      }
+      if (CM.markdownLanguage.isActiveAt(state, pos)) {
+        const levels = markupLevels(contextNodeForDelete(tree, pos), doc);
+        if (levels.length) {
+          const inner = levels[levels.length - 1];
+          const spaceEnd = inner.to - inner.spaceAfter.length + (inner.spaceAfter ? 1 : 0);
+          const col = pos - line.from;
+          // Extra space after the markup: back to the one space.
+          if (col > spaceEnd && !/\S/.test(line.text.slice(spaceEnd, col))) {
+            special = true;
+            return { range: CM.EditorSelection.cursor(line.from + spaceEnd), changes: { from: line.from + spaceEnd, to: pos } };
+          }
+          if (
+            col === spaceEnd &&
+            ((inner.item && line.from <= inner.item.from) || /^[ \t>]*$/.test(line.text.slice(0, inner.to)))
+          ) {
+            special = true;
+            const prefix = line.text.slice(0, inner.from);
+            const prevText = line.from > 0 && /[^ \t>]/.test(doc.lineAt(line.from - 1).text);
+            const insert = prevText ? prefix.replace(/[ \t]+$/, "") + state.lineBreak + prefix : prefix;
+            const out = [{ from: line.from, to: pos, insert: insert }];
+            if (inner.item && inner.node.name === "OrderedList") renumberList(inner.item, doc, out, -2);
+            return { range: CM.EditorSelection.cursor(line.from + insert.length), changes: out };
+          }
+        }
+      }
+      if (pos > line.from && emojiExtender(codePointBefore(line.text, pos - line.from))) {
+        special = true;
+        const from = line.from + CM.findClusterBreak(line.text, pos - line.from, false, true);
+        return { range: CM.EditorSelection.cursor(from), changes: { from: from, to: pos } };
+      }
+      return plain();
+    });
+    if (!special) return false;
+    view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: "delete" }));
+    return true;
+  }
+
+  // Delete at the end of the line over a hidden block: the block opens and
+  // nothing is deleted (G062). Anything else is CodeMirror's own.
+  function mdmDelete(view) {
+    const state = view.state;
+    const sel = state.selection;
+    if (sel.ranges.length !== 1 || !sel.main.empty) return false;
+    const pos = sel.main.head;
+    const line = state.doc.lineAt(pos);
+    if (pos !== line.to || pos >= state.doc.length) return false;
+    const block = hiddenBlockAt(state, pos + 1);
+    if (!block) return false;
+    view.dispatch({ selection: { anchor: state.doc.lineAt(block.from).from }, scrollIntoView: true });
+    return true;
+  }
+
+  // ---------- Tab and Shift+Tab ----------
+
+  // The innermost list item around a position, when the position's own
+  // container is that item and not a quote inside it; read from the left
+  // of the position and, at the head of the marker's line, from its right.
+  function itemAround(tree, doc, pos) {
+    for (const side of [-1, 1]) {
+      const levels = markupLevels(tree.resolveInner(pos, side), doc);
+      const inner = levels.length ? levels[levels.length - 1] : null;
+      if (inner && inner.item) return inner.item;
+    }
+    return null;
+  }
+
+  // The content column of an item: past its marker and the one to four
+  // spaces after it, or one past the marker when five or more follow (an
+  // indented code block) or none (the content on the next line). A child
+  // block of the item stands at that column (CommonMark 5.2), which is
+  // 2 for `- ` and 3 for `1. `.
+  function contentColumn(item, doc) {
+    const line = doc.lineAt(item.from);
+    const mark = item.getChild("ListMark");
+    const end = (mark ? mark.to : item.from + 1) - line.from;
+    let sp = end;
+    while (sp < line.text.length && /[ \t]/.test(line.text[sp])) sp++;
+    const column = columnAt(line.text, end);
+    if (sp === end || sp === line.text.length || columnAt(line.text, sp) - column >= 5) return column + 1;
+    return columnAt(line.text, sp);
+  }
+
+  // The index in `text` at which `column` is reached, or the text's length.
+  function indexAtColumn(text, column) {
+    let i = 0;
+    while (i < text.length && columnAt(text, i) < column) i++;
+    return i;
+  }
+
+  // The items a range takes along: the one at its head and, when the range
+  // reaches into later siblings, those too; their lines run from the first
+  // marker to the end of the last item, children included.
+  function itemBlock(tree, doc, range) {
+    const first = itemAround(tree, doc, range.from);
+    if (!first) return null;
+    let last = first;
+    for (let n = first.nextSibling; n && n.from < range.to; n = n.nextSibling) {
+      if (n.name === "ListItem") last = n;
+    }
+    let endLine = doc.lineAt(last.to);
+    if (endLine.from === last.to && last.to > last.from) endLine = doc.lineAt(last.to - 1);
+    return { first: first, last: last, fromLine: doc.lineAt(first.from), endLine: endLine };
+  }
+
+  // The marker of `item` and the items after it in their list rewritten:
+  // numbered from `start` on in an ordered list, `bullet` when given (the
+  // items joining a list of the other kind), as far as the list was
+  // numbered in steps of one (a list written all `1.` keeps its ones), and
+  // no further than `last` when given.
+  function remarkItems(item, doc, changes, start, bullet, last) {
+    let prev = null;
+    for (let n = item, k = start; n; n = n.nextSibling) {
+      if (n.name !== "ListItem") continue;
+      const mark = n.getChild("ListMark");
+      if (!mark) return;
+      const m = itemNumber(n, doc);
+      if (bullet) {
+        changes.push({ from: n.from, to: mark.to, insert: bullet });
+      } else {
+        if (!m) return;
+        if (prev !== null && +m[2] !== prev + 1) return;
+        prev = +m[2];
+        if (+m[2] !== k) changes.push({ from: n.from + m[1].length, to: n.from + m[0].length, insert: String(k) });
+        k++;
+      }
+      if (n === last) return;
+    }
+  }
+
+  // The marker an item takes when it joins `list`: its own kind kept, or
+  // the bullet of `list` when that is a bullet list and the item is not.
+  function bulletOf(list, item, doc) {
+    if (list.name !== "BulletList" || item.parent.name === "BulletList") return null;
+    const mark = list.firstChild && list.firstChild.getChild("ListMark");
+    return mark ? doc.sliceString(mark.from, mark.to) : "-";
+  }
+
+  // The nested list an item ends with, at its content column, or null.
+  function nestedListOf(item, doc) {
+    const tail = item.lastChild;
+    if (!tail || (tail.name !== "OrderedList" && tail.name !== "BulletList")) return null;
+    const line = doc.lineAt(tail.from);
+    return columnAt(line.text, tail.from - line.from) === contentColumn(item, doc) ? tail : null;
+  }
+
+  // Whether a line of an item's block can move: not blank (a line of
+  // spaces would be left behind), and holding nothing but marks and space
+  // before the column the marker stands at (a lazy continuation at the
+  // margin stays where it is, and stays a continuation).
+  function movable(line, at, column) {
+    return !/^[ \t>]*$/.test(line.text) && /^[ \t>]*$/.test(line.text.slice(0, at)) && columnAt(line.text, at) === column;
+  }
+
+  // Tab on an item: the item, its children and the selected siblings after
+  // it move under the item above, at that item's content column (G070:
+  // the plain indent put two spaces under `1. `, which no reader nests,
+  // and left the children behind). In an ordered list the block is
+  // numbered from one, or on from the nested list the item above ends
+  // with, and the items left behind close up.
+  function nestItems(state, tree, range, taken) {
+    const doc = state.doc;
+    const block = itemBlock(tree, doc, range);
+    if (!block || taken.has(block.first.from)) return null;
+    taken.add(block.first.from);
+    let prev = block.first.prevSibling;
+    while (prev && prev.name !== "ListItem") prev = prev.prevSibling;
+    if (!prev) return null;
+    const column = columnAt(block.fromLine.text, block.first.from - block.fromLine.from);
+    const delta = contentColumn(prev, doc) - column;
+    if (delta <= 0) return null;
+    const pad = " ".repeat(delta);
+    const changes = [];
+    for (let n = block.fromLine.number; n <= block.endLine.number; n++) {
+      const line = doc.line(n);
+      const at = indexAtColumn(line.text, column);
+      if (movable(line, at, column)) changes.push({ from: line.from + at, insert: pad });
+    }
+    const nested = nestedListOf(prev, doc);
+    const ordered = block.first.parent.name === "OrderedList";
+    if (nested && nested.name === "OrderedList") {
+      remarkItems(block.first, doc, changes, +itemNumber(nested.lastChild, doc)[2] + 1, null, block.last);
+    } else if (nested) {
+      remarkItems(block.first, doc, changes, 1, bulletOf(nested, block.first, doc), block.last);
+    } else if (ordered) {
+      remarkItems(block.first, doc, changes, 1, null, block.last);
+    }
+    if (ordered && block.last.nextSibling) {
+      remarkItems(block.last.nextSibling, doc, changes, +itemNumber(block.first, doc)[2], null);
+    }
+    const set = state.changes(changes);
+    return { changes: set, range: range.map(set) };
+  }
+
+  // Shift+Tab on a nested item: the block moves out to the column of the
+  // item that held it, right after that item; the siblings it leaves
+  // behind stay where they are, so those after it become its children. In
+  // an ordered list the numbers follow.
+  function unnestItems(state, tree, range, taken) {
+    const doc = state.doc;
+    const block = itemBlock(tree, doc, range);
+    if (!block || taken.has(block.first.from)) return null;
+    taken.add(block.first.from);
+    const list = block.first.parent;
+    const parent = list.parent;
+    if (!parent || parent.name !== "ListItem") return null;
+    const column = columnAt(block.fromLine.text, block.first.from - block.fromLine.from);
+    const parentLine = doc.lineAt(parent.from);
+    const target = columnAt(parentLine.text, parent.from - parentLine.from);
+    if (column <= target) return null;
+    const changes = [];
+    for (let n = block.fromLine.number; n <= block.endLine.number; n++) {
+      const line = doc.line(n);
+      const to = indexAtColumn(line.text, column);
+      const from = indexAtColumn(line.text, target);
+      if (movable(line, to, column) && isBlank(line.text.slice(from, to))) changes.push({ from: line.from + from, to: line.from + to });
+    }
+    const outer = parent.parent;
+    let count = 0;
+    for (let n = block.first; n; n = n.nextSibling) {
+      if (n.name === "ListItem") count++;
+      if (n === block.last) break;
+    }
+    if (outer.name === "OrderedList") {
+      const number = +itemNumber(parent, doc)[2];
+      remarkItems(block.first, doc, changes, number + 1, null, block.last);
+      if (parent.nextSibling) remarkItems(parent.nextSibling, doc, changes, number + 1 + count, null);
+    } else {
+      remarkItems(block.first, doc, changes, 1, bulletOf(outer, block.first, doc), block.last);
+    }
+    if (list.name === "OrderedList" && block.last.nextSibling) remarkItems(block.last.nextSibling, doc, changes, 1, null);
+    const set = state.changes(changes);
+    return { changes: set, range: range.map(set) };
+  }
+
+  // Tab, the editor's own. In a fence, the code's indentation: the unit at
+  // the caret, or at the head of each selected line. In an item, the
+  // nesting above. In prose, a tab at the caret in the middle of a line,
+  // and nothing at the head of the line's text, where four columns of
+  // indentation would make an indented code block of the paragraph (G070);
+  // nothing either on a selection, or on an item that has nothing to nest
+  // under. The key is always taken: an unhandled Tab moves the focus out
+  // of the editor.
+  function mdmTab(view) {
+    const state = view.state;
+    if (state.readOnly) return false;
+    const tree = CM.syntaxTree(state);
+    const doc = state.doc;
+    const unit = state.facet(CM.indentUnit);
+    const taken = new Set();
+    let changed = false;
+    const changes = state.changeByRange(function (range) {
+      if (fenceAround(tree, range.from)) {
+        const out = [];
+        if (range.empty) {
+          out.push({ from: range.from, insert: unit });
+        } else {
+          const last = doc.lineAt(range.to);
+          for (let n = doc.lineAt(range.from).number; n <= last.number; n++) out.push({ from: doc.line(n).from, insert: unit });
+        }
+        const set = state.changes(out);
+        changed = true;
+        return { changes: set, range: range.map(set, 1) };
+      }
+      const nested = nestItems(state, tree, range, taken);
+      if (nested) {
+        changed = true;
+        return nested;
+      }
+      if (itemAround(tree, doc, range.from)) return { range: range };
+      const line = doc.lineAt(range.from);
+      if (!range.empty || /^[ \t>]*$/.test(line.text.slice(0, range.from - line.from))) return { range: range };
+      changed = true;
+      return { changes: { from: range.from, insert: "\t" }, range: CM.EditorSelection.cursor(range.from + 1) };
+    });
+    if (changed) view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: "input.indent" }));
+    return true;
   }
 
   // Shift+Tab: in a fence, one unit of indentation off each line of the
@@ -7828,9 +8669,15 @@
   // size; `k` below is that ratio, and it is kept per face because a row with
   // no text on it has no box to read it from.
   //
-  // The row is looked for under the caret's own foot rather than taken from
+  // The row is looked for under the caret's own box rather than taken from
   // the selection, so several carets need no bookkeeping and one CodeMirror
-  // has not drawn is not there to be found.
+  // has not drawn is not there to be found. Under the middle of the box and
+  // not its foot: on a blank line the box is a text row's, 28px in the
+  // roman, centred on a line of 16, so its foot stood 6px into the next line
+  // and the caret was cut to that line's face. Under a list, with a `##`
+  // after the blank, it came out 31.8px, a heading's caret, where 23.1 is the
+  // prose's (seen 2026-09-19). The middle is inside the caret's own row on
+  // every kind of row measured: blank, prose, a wrapped row, `#`, `##`, code.
   const CARET_ASCENDERS = "bdfhkltÁÉ";
   const CARET_DESCENDERS = "gjpqy";
   const caretFaces = Object.create(null);
@@ -7886,7 +8733,7 @@
     if (done && done.height === caret.style.height && done.top === caret.style.top) return;
     const box = caret.getBoundingClientRect();
     if (!box.height) return;
-    const under = document.elementFromPoint(box.left + 1, box.bottom - 2);
+    const under = document.elementFromPoint(box.left + 1, (box.top + box.bottom) / 2);
     const row = under && under.closest ? under.closest("#app .cm-line") : null;
     if (!row) return;
     const text = rowTextBox(row);
@@ -8941,12 +9788,64 @@
       { key: "Delete", run: mdmDelete },
       { key: "Tab", run: mdmTab, shift: mdmShiftTab },
       { key: "Mod-Enter", run: leaveBlock },
-      { key: "Mod-b", run: toggleInline("**") },
-      { key: "Mod-i", run: toggleInline("*") },
-      { key: "Mod-e", run: toggleInline("`") },
-      { key: "Mod-k", run: insertLink },
-      { key: "ArrowDown", run: stepIntoBlock(1) },
-      { key: "ArrowUp", run: stepIntoBlock(-1) },
+      // The formatting keys stop where they are answered. VS Code's webview
+      // host listens for keydown on the page's window, in the bubble phase
+      // and whether or not the page prevented the default, and hands every
+      // key to the workbench as well (did-keydown, read in the host page of
+      // VS Code 1.133.0): Ctrl+B set bold and hid the Explorer at once, and
+      // Ctrl+K left the workbench waiting for the second key of a chord.
+      // Stopped, the key is the text's while the caret is in it; with the
+      // focus anywhere else CodeMirror does not hear it and it goes on to
+      // VS Code as before. Not Ctrl+S nor Ctrl+Z: VS Code saves and undoes
+      // the file on its side from that same message.
+      { key: "Mod-b", run: toggleInline("**"), stopPropagation: true },
+      { key: "Mod-i", run: toggleInline("*"), stopPropagation: true },
+      { key: "Mod-e", run: toggleInline("`"), stopPropagation: true },
+      { key: "Mod-k", run: insertLink, stopPropagation: true },
+      // The block keys, all on one second modifier (BLOCK_MOD, Shift on a
+      // PC and Option on a Mac): a digit for a line that has a level, the
+      // digit being the level, with 0 for the paragraph, and a letter for
+      // the blocks that have none. The code block was Notion's Ctrl+Shift+8
+      // for a day and is C now (2026-09-19, the owner's call, for the
+      // symmetry): with it there is no exception left to the rule, every
+      // digit is a level and every block without one is a letter. Notion's
+      // row is where the 0 comes from; it spends 4 to 7 on its blocks
+      // because its headings stop at 3, and the six levels of a .mdm want
+      // the whole row.
+      // The letters: C for the code block and not E, the letter of its
+      // inline twin, since Ctrl+Shift+E is Show Explorer and is wanted far
+      // more often than the external terminal C takes. (Typora's
+      // Ctrl+Shift+K for a code block is Delete Line here, as it is in VS
+      // Code's own editor.)
+      // The bullets, the numbers and the quote had U, O and Q for a day and
+      // have no key now (2026-09-19, the owner's call): `- `, `1. ` and
+      // `> ` are so little to type at the head of a line that the chord
+      // bought nothing, and one of the three cost: on Linux the desktop
+      // takes Ctrl+Shift+U before any editor sees it, fcitx5's unicode
+      // addon opening its `U+` prompt on it (the default of
+      // libunicode.so's "Type unicode in Hex number"). VS Code leaves that
+      // chord alone on Linux as well: Toggle Output is Ctrl+Shift+U on the
+      // other platforms and the chord Ctrl+K Ctrl+H there (1.133.0,
+      // primary 3123 with a linux override).
+      // Their buttons name no key now, and the three chords go to VS Code
+      // from the text like any key the page does not bind.
+      // What the set takes from the workbench, read in VS Code 1.133.0 and
+      // only while the caret is in the text (the stopPropagation): of
+      // Ctrl+Shift+0 to 9 it binds 1 (replace, inside the search view) and 5
+      // (split, with the terminal focused), neither of which a .mdm can be
+      // in; of the letters, T is Reopen Closed Editor and C opens an
+      // external terminal.
+      { key: "Mod-Shift-0", mac: "Mod-Alt-0", run: applyHeading(0), stopPropagation: true },
+      { key: "Mod-Shift-1", mac: "Mod-Alt-1", run: applyHeading(1), stopPropagation: true },
+      { key: "Mod-Shift-2", mac: "Mod-Alt-2", run: applyHeading(2), stopPropagation: true },
+      { key: "Mod-Shift-3", mac: "Mod-Alt-3", run: applyHeading(3), stopPropagation: true },
+      { key: "Mod-Shift-4", mac: "Mod-Alt-4", run: applyHeading(4), stopPropagation: true },
+      { key: "Mod-Shift-5", mac: "Mod-Alt-5", run: applyHeading(5), stopPropagation: true },
+      { key: "Mod-Shift-6", mac: "Mod-Alt-6", run: applyHeading(6), stopPropagation: true },
+      { key: "Mod-Shift-c", mac: "Mod-Alt-c", run: toggleCodeBlock, stopPropagation: true },
+      { key: "Mod-Shift-t", mac: "Mod-Alt-t", run: toggleTask, stopPropagation: true },
+      { key: "ArrowDown", run: stepIntoBlock(1), shift: stepIntoBlock(1, true) },
+      { key: "ArrowUp", run: stepIntoBlock(-1), shift: stepIntoBlock(-1, true) },
       { key: "Ctrl-Alt-ArrowDown", mac: "Cmd-Alt-ArrowDown", run: addCaretVertically(1) },
       { key: "Ctrl-Alt-ArrowUp", mac: "Cmd-Alt-ArrowUp", run: addCaretVertically(-1) },
       // Before searchKeymap's own Mod-d, so the substring toggle is honoured.

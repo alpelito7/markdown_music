@@ -675,6 +675,11 @@ body {
      was broken over two rows. Held on one line it takes the width it needs
      and grows leftwards, into the margin the scroller carries. */
   white-space: nowrap;
+  /* text-indent is inherited, and the first line of a list item hangs its
+     row back by 1.5em (.mdm-li-first below): the number took that too, and
+     with this alone undone it stands 17.5px left of the prose's (roman,
+     measured in the test harness). */
+  text-indent: 0;
   user-select: none;
   pointer-events: none;
 }
@@ -684,13 +689,46 @@ body {
   position: relative;
   height: 0;
 }
-/* The two lines that draw a bar of their own, the quote and the callout, are
-   the two whose numbers would come out of column: an absolute box is placed
-   against the padding box, which starts inside that 3px border. Three more of
-   margin puts them back in line with the rest. */
-#app .cm-line.mdm-quote[data-mdm-line]::before,
-#app .cm-line.mdm-co-line[data-mdm-line]::before {
-  margin-right: 17px;
+/* A rule has no line of words for its number to stand on, so the box is
+   the rule's row, top to bottom, and the digits stand in the middle of it,
+   which is where the stroke is (.mdm-hr below). Taken from the line height
+   as every other number's is, the box began at the content box, which is
+   the stroke, and was a line of prose tall: the digits stood 12px under
+   the stroke and 2.9px into the number of a blank line after the rule.
+   With the stroke on the bottom edge of the row, where it used to be drawn,
+   they stood 3px under it and into the same number, which is how it was
+   seen, one number drawn over the other (measured in the test harness). */
+#app .mdm-hr[data-mdm-line]::before {
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+}
+/* A line in a frame (a quote, a callout; .mdm-framed below) is set in by a
+   transparent border, and an absolute box is placed against the padding
+   box, which starts inside that border: the inset goes back on as margin so
+   the number stays in the column with the rest.
+
+   The inset is registered as a length so that it is computed on the line
+   that sets it: a list's is 1.5em, and as a plain custom property it went
+   into the number's margin as tokens and was resolved against the number's
+   11px, so an item's number stood 7.5px right of the prose's. With the
+   text-indent above it read 10px left while the item was closed and 7 right
+   once the caret opened it, which is how it was seen.
+
+   A block drawn in a frame (a rule, an empty card) carries its number on
+   the block and not on the wrapper framed() in main.js puts around it, and
+   the wrapper is set in by the same border, so the block's number takes
+   the inset back the same way. Without it the number of a rule in a quote
+   stood a level's inset right of the column, in the gap before the text. */
+@property --mdm-inset {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+#app .cm-line.mdm-framed[data-mdm-line]::before,
+#app .mdm-block-framed > [data-mdm-line]::before {
+  margin-right: calc(14px + var(--mdm-inset, 0px));
 }
 /* The caret and the selection. Under "Follow VS Code" and the themes
    installed in it the selection is in the colours of the VS Code theme, so
@@ -1174,8 +1212,14 @@ body {
    caret came in and the buffers went (55.17 to 50.17px for an h2,
    measured), and stood that much lower than the exported page draws it.
    Aligned with the top of the line they sit inside it at every level, and
-   the sans, whose content area is inside the line anyway, does not move. */
-#app .cm-line.mdm-h .cm-widgetBuffer {
+   the sans, whose content area is inside the line anyway, does not move.
+   A row of prose had the same fault a pixel deep (G103): 28.19px with a
+   hidden `**`, a link's tail or any widget in it where a plain row is 27.19,
+   so everything below went up a pixel when the caret entered the row and the
+   marks came back, and down again when it left. The rule is every line's
+   since the punctuation the page prints is drawn as widgets (G015) and
+   nearly every row of prose carries one. */
+#app .cm-line .cm-widgetBuffer {
   vertical-align: top;
 }
 /* Paragraph spacing, taken from the Office Viewer preview: a line stands at
@@ -1413,10 +1457,19 @@ body {
   cursor: pointer;
 }
 /* The space between a task's box and its text, the 0.28em the page gives
+   its box as a margin (mdm-look.css).
+
+   Hung from the top of the row: an inline-block that clips has its
+   baseline at its bottom edge, so on the baseline its whole box of a line
+   stood over it and the row of every task grew, 33.4px against the prose's
+   27.2 in the roman and 35.4 in the sans. The words went down with the
+   baseline and the number in the margin stayed in the first 27.2, 6 to 8px
+   over them (measured in the test harness). */
 #app .mdm-li-gap {
   display: inline-block;
   width: 0.28em;
   overflow: hidden;
+  vertical-align: top;
 }
 #app .mdm-block-framed {
   position: relative;
@@ -1428,11 +1481,36 @@ body {
   top: 0;
   left: -1.5em;
 }
+/* On a rule the marker stands in the middle of the row, level with the
+   stroke, as the rule's number does (the number's rule above). At the top
+   of the row, where a block's marker stands beside its first line, the
+   bullet stood 6.3px under the stroke in the roman; in the middle it is
+   level in the sans and 3.3px low in the roman, which sets a bullet low in
+   the line as it does its words (measured in the test harness). */
+#app .mdm-block-framed:has(> .mdm-hr) > .mdm-li-marker--block {
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
 #app .mdm-hr {
-  height: 0;
+  /* The stroke is the content box, 2px in the middle of the row, with the
+     0.6em of air the page's rule has over and under it (`body hr` in
+     mdm-look.css, a margin there; padding here, since CodeMirror measures
+     a block by its border box and a margin stands outside it). Drawn as the
+     bottom border, the stroke came after both paddings, on the bottom edge
+     of the row, and no place for the rule's number worked: in the middle of
+     the row the digits stood 10px over the stroke, and level with it they
+     came within 0.6px of the number of a blank line under it (measured in
+     the test harness). The row is as tall as it was, so nothing around it
+     moves. */
+  height: 2px;
   margin: 0;
   padding: 0.6em 0;
-  border-bottom: 2px solid color-mix(in srgb, var(--mdm-ink) 16%, transparent);
+  background: color-mix(in srgb, var(--mdm-ink) 16%, transparent) content-box;
+  /* What its number in the margin is placed against (it carries
+     data-mdm-line, like a block cover). */
+  position: relative;
 }
 /* A click on a figure puts the caret in its source, the way it does on a
    score or an equation, so the pointer says so. */

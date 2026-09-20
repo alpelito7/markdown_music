@@ -13,6 +13,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const path = require("node:path");
 
 const {
   open,
@@ -340,6 +341,146 @@ test("a triple click selects the line under the pointer, line break included", {
     return [l.from, l.to];
   }, word);
   assert.deepEqual(await selectionRanges(h.page), [[line[0], line[1] + 1]]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// ---- Vertical motion, and the sample it depends on ----
+
+// The number of the line the main caret is on.
+function caretLine(page) {
+  return page.evaluate(() => {
+    const s = window.__mdm.view.state;
+    return s.doc.lineAt(s.selection.main.head).number;
+  });
+}
+
+test("the line CodeMirror measures text by is a line of prose, not a heading", { skip }, async () => {
+  // measureTextSize takes the first line in view of twenty characters or
+  // fewer whose children are plain text. A setext heading's text carries
+  // no mark of its own, so a short one first in the document was the
+  // sample, at 62 px, and every line not yet measured was estimated at
+  // that: the view jumped when the map was put right and ArrowDown stepped
+  // over blank rows. The text of a heading is under an unstyled mark now.
+  const prose = await open({ text: "A line of prose.\n\nAnother.\n", scores: 0 });
+  const ref = await prose.page.evaluate(() => window.__mdm.view.defaultLineHeight);
+  await prose.close();
+  const h = await open({ text: "Setext one\n==========\n\nA line of prose.\n", scores: 0 });
+  const got = await h.page.evaluate(() => window.__mdm.view.defaultLineHeight);
+  assert.ok(Math.abs(got - ref) < 1, "setext first: " + got + " against " + ref);
+  // And a heading made at the top while its marks are in view (a new row
+  // height makes CodeMirror sample again): the revealed `# ` is plain text
+  // as well, and the line is still not taken.
+  await setSelection(h.page, 0);
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  await h.page.keyboard.type("# ");
+  await sleep(300);
+  const typed = await h.page.evaluate(() => window.__mdm.view.defaultLineHeight);
+  assert.ok(Math.abs(typed - ref) < 1, "ATX typed at the top: " + typed + " against " + ref);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("ArrowDown and ArrowUp stop on every blank row in the roman face", { skip }, async () => {
+  // A blank row is 16 px and the roman's caret box on an empty line is
+  // the text's line height, taller than the row, so CodeMirror's step
+  // (half a text height past the box) cleared the blank row under a
+  // heading and the second of two blank lines, and the caret could never
+  // be put on them. A drawn row the move would skip is taken by number.
+  const text = "### H3 heading\n\nPara three.\n\n\nPara four.\n";
+  const h = await open({ text, scores: 0, seed: { settings: { textFont: "roman" } } });
+  await setSelection(h.page, 0);
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  const down = [];
+  for (let i = 0; i < 6; i++) {
+    await h.page.keyboard.press("ArrowDown");
+    down.push(await caretLine(h.page));
+  }
+  assert.deepEqual(down, [2, 3, 4, 5, 6, 7]);
+  const up = [];
+  for (let i = 0; i < 6; i++) {
+    await h.page.keyboard.press("ArrowUp");
+    up.push(await caretLine(h.page));
+  }
+  assert.deepEqual(up, [6, 5, 4, 3, 2, 1]);
+  // The column survives the blank rows: from the end of "Para three." two
+  // rows down is the end of "Para four.", not its start.
+  await setSelection(h.page, text.indexOf("three.") + 6);
+  await h.page.keyboard.press("ArrowDown");
+  await h.page.keyboard.press("ArrowDown");
+  await h.page.keyboard.press("ArrowDown");
+  assert.deepEqual(await selectionRanges(h.page), [[text.indexOf("four.") + 5, text.indexOf("four.") + 5]]);
+  // Shift extends the same way.
+  await setSelection(h.page, 0);
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.press("ArrowDown");
+  await h.page.keyboard.up("Shift");
+  assert.deepEqual(await selectionRanges(h.page), [[0, 15]]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("ArrowDown and ArrowUp walk past a rule, whose line is drawn and not a row", { skip }, async () => {
+  // The rule replaces its line with a drawing; the caret goes over it, as
+  // it always has, and the short-row rule above does not put the caret
+  // on the `---` by number.
+  for (const font of ["roman", "sans"]) {
+    const h = await open({ text: "Para.\n\n---\n\nAfter.\n", scores: 0, seed: { settings: { textFont: font } } });
+    await setSelection(h.page, 0);
+    await h.page.evaluate(() => window.__mdm.view.focus());
+    const down = [];
+    for (let i = 0; i < 3; i++) {
+      await h.page.keyboard.press("ArrowDown");
+      down.push(await caretLine(h.page));
+    }
+    assert.deepEqual(down, [2, 4, 5], font);
+    const up = [];
+    for (let i = 0; i < 3; i++) {
+      await h.page.keyboard.press("ArrowUp");
+      up.push(await caretLine(h.page));
+    }
+    assert.deepEqual(up, [4, 2, 1], font);
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+test("a picture that arrives after its line was measured is measured again", { skip }, async () => {
+  // The height map kept a line at one row of text once its picture loaded
+  // after the measure, and a click under the picture landed lines lower
+  // than the word. The widget asks for the heights to be read again when
+  // the picture is in; the extension's own icon (256 px) is the picture,
+  // from the folder the harness is told is the document's. Alone in its
+  // paragraph the picture is a figure, a block with the alt text under it
+  // as its caption: the map is held to the figure's box.
+  const base = "file://" + path.resolve(__dirname, "../vscode-mdm/media") + "/";
+  const before = "Intro.\n\nPlaceholder.\n\nText below the figure, click on the word target here.\n\nZed.\n";
+  const after = "Intro.\n\n![Icon](icon.png)\n\nText below the figure, click on the word target here.\n\nZed.\n";
+  const h = await open({ text: before, scores: 0, seed: { docBase: base } });
+  await update(h.page, after, true, 0);
+  await h.page.waitForFunction(() => {
+    const img = document.querySelector("#app img.mdm-image");
+    return img && img.complete && img.naturalWidth > 0;
+  });
+  await sleep(300);
+  const line = await h.page.evaluate(() => {
+    const v = window.__mdm.view;
+    const b = v.lineBlockAt(v.state.doc.line(3).from);
+    const img = document.querySelector("#app img.mdm-image");
+    const figure = document.querySelector("#app .mdm-figure");
+    return {
+      map: Math.round(b.height),
+      picture: Math.round(img.getBoundingClientRect().height),
+      figure: Math.round(figure.getBoundingClientRect().height),
+    };
+  });
+  assert.ok(line.picture >= 200, "the picture is drawn: " + JSON.stringify(line));
+  assert.ok(line.figure > line.picture, "the caption stands under the picture: " + JSON.stringify(line));
+  assert.ok(Math.abs(line.map - line.figure) <= 1, "map against figure: " + JSON.stringify(line));
+  const target = await posOf(h.page, "target");
+  await clickAt(h.page, target + 2);
+  const [[head]] = await selectionRanges(h.page);
+  assert.ok(head >= target && head <= target + 6, "the caret is on the word clicked: " + head + " for " + target);
   assert.deepEqual(h.errors, []);
   await h.close();
 });
