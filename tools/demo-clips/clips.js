@@ -217,6 +217,20 @@ async function warmPiano(rig) {
   await sleep(800);
 }
 
+// The toolbar's font button, pressed. It is a toggle, and the take opens on
+// the sans (mdm.textFont in the tour's settings), so the first press sets the
+// document in Latin Modern. frame() uses it off camera to measure the page on
+// the face the scroll will land in.
+async function pressTextFont(rig) {
+  const btn = await rig.at('#app button[data-type="mdm-text-font"]');
+  await rig.warp(btn.x, btn.y);
+  await rig.click();
+  // CodeMirror re-measures the width of a character and the height of a line
+  // on a face swap (applyTextFont in main.js); the prose is not at its new
+  // height until that has been through.
+  await sleep(700);
+}
+
 // The score's top below the top of the pane, in CSS px.
 async function scoreTop(rig) {
   return rig.evalFrame(() =>
@@ -230,12 +244,20 @@ async function scoreTop(rig) {
 // ---------------------------------------------------------------- the clips
 
 // Several of the editor's features in one take, in the order a reader meets
-// them: the theme, the staff lines, the multicursor setting, the source under
-// a click, four notes edited at once (two of them inside chords), and the
-// tune played with the playhead on the staff.
+// them: the face, the theme, the staff lines, the multicursor setting, the
+// source under a click, four notes edited at once (two of them inside
+// chords), and the tune played with the playhead on the staff.
 //
-// It opens on MDM Dark whichever window it is shot in (settings) and ends away
-// from where it began, in MDM Light with the tune edited and playing. Walking
+// The face goes first, before the theme, by the owner's order (2026-09-19;
+// asked the other way round the same evening and put back). It is in the take
+// for what it says about the editor: it opens in the font Markdown is usually
+// written in, the sans the rest of VS Code is set in, so the press that puts
+// the document in Latin Modern is the difference between the two faces and
+// not a face the reader is given no measure of.
+//
+// It opens on the sans and on MDM Dark whichever window it is shot in
+// (settings) and ends away from where it began, in Latin Modern on MDM Light
+// with the tune edited and playing. Walking
 // all of that back on camera would add seconds that show nothing new, so the
 // take is put back off camera (after) and its last stretch dissolves into its
 // first frame (dissolve, rig.js dissolveHome), which is what closes its loop.
@@ -247,10 +269,13 @@ const tour = {
   id: "tour",
   title: "The editor in one take",
   alt:
-    "The document opens at its top in MDM Dark. The theme menu switches it to MDM Light, one toolbar button draws the staff lines in ink and another turns on multicursor matches inside words. The page scrolls to the score, and a click on the engraved score opens its ABC above the drawing. A click on a bare E, then Ctrl+D four times, selects the four E's of the tune, two of them inside chords; typing e moves all four up an octave, and a flat typed in front of them makes them E flats, each step showing at once in the drawing underneath. The headphones open the player, and play moves a brass playhead across the edited staff, each note turning brass as it sounds.",
+    "The document opens at its top in MDM Dark, set in the font Markdown is usually written in. The toolbar's font button sets the text in Latin Modern, the face of a LaTeX document, and every word of the page is redrawn in it. The theme menu then switches to MDM Light, another button draws the staff lines in ink and a third turns on multicursor matches inside words. The page scrolls to the score, and a click on the engraved score opens its ABC above the drawing. A click on a bare E, then Ctrl+D four times, selects the four E's of the tune, two of them inside chords; typing e moves all four up an octave, and a flat typed in front of them makes them E flats, each step showing at once in the drawing underneath. The headphones open the player, and play moves a brass playhead across the edited staff, each note turning brass as it sounds.",
   frameRate: 16,
   needsPiano: true,
-  settings: { "mdm.theme": "dark" },
+  // The sans, so the first press has somewhere to come from: every other
+  // mdm.* is put back to its shipped default by writeSettings, and the roman
+  // is the shipped default of this one.
+  settings: { "mdm.theme": "dark", "mdm.textFont": "sans" },
   dissolve: 0.6,
   // The edit made in the tune: every E, the first of them bare, becomes the E
   // flat an octave up. demo.mdm's tune is written round it, in C: every E is
@@ -271,10 +296,17 @@ const tour = {
     // sounding staff whole (2026-09-10). At 100 (88 once clearTopEdge has
     // taken the cut row off the top) the open source leaves the drawing's
     // foot at 443 of the pane's 504, 478 with the row (2026-09-11).
+    //
+    // Measured with the roman already on, because beats() presses the face
+    // before it scrolls and the two faces set the prose to different heights:
+    // a scrollTop measured on the sans lands somewhere else once the button
+    // has been pressed, and the check in beats() stops the take.
+    await pressTextFont(rig);
     await rig.frameAt("#app .mdm-score", 100);
     scoreView.scrollTop = await rig.atScrollTop();
     scoreView.top = await scoreTop(rig);
     await rig.scrollTop(0);
+    await pressTextFont(rig);
   },
   async beats(rig) {
     const edit = tour.edit;
@@ -282,9 +314,19 @@ const tour = {
     const row = (label) => rig.atLabel("#app .mdm-menu__item", label);
     await sleep(800);
 
-    // The three toolbar settings. Each dwell is long enough for the button's
+    // The face, first of the four. Its tooltip reads "LaTeX font" here and
+    // not "Usual Markdown font": textFontTip (main.js) names the press and
+    // not the state, so on the sans it says where the press goes. It is held
+    // 1300 ms after the press, longer than the theme and the staff lines are,
+    // because what changes is every word on the page and not one button.
+    await rig.moveTo(await button("mdm-text-font"), 600);
+    await sleep(520);
+    await rig.click();
+    await sleep(1300);
+
+    // The three settings after it. Each dwell is long enough for the button's
     // own tooltip to name it, so no caption has to.
-    await rig.moveTo(await button("mdm-theme"), 600);
+    await rig.moveTo(await button("mdm-theme"), 480);
     await sleep(420);
     await rig.click();
     await sleep(520);

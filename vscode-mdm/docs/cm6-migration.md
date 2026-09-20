@@ -1,7 +1,7 @@
 # Moving the MDM editor to CodeMirror 6
 
 Status: implemented (2026-08-20) and merged into `main`, tagged
-`v0.2.0-cm6-editor` (2026-08-24). The nine
+`v0.2.0-cm6-editor` (2026-08-24). The nineteen
 decisions below lean towards Obsidian's live preview and towards what the
 MDM editor already did; each says what was chosen, and each is open to
 revision. Everything under "Measured" was observed on 2026-08-20 on this
@@ -171,7 +171,19 @@ D3. Code highlighting: **CodeMirror language packages**, highlight.js gone.
 
 D4. Toolbar: **the MDM buttons plus bold, italic, inline code, link,
   heading cycle, bulleted and numbered lists**; export, undo and redo lead.
-  Outline, insert-before/after and the table button are gone.
+  Outline, insert-before/after and the table button are gone. A code block
+  button joined inline code on 2026-09-19, at the owner's request, its
+  glyph the owner's pick of design-code-block.html (B, the chevrons
+  between two rules).
+
+  Revisited later: almost none of the shape above survives. The outline
+  leads the bar again and export follows it; the heading cycle is a menu of
+  Paragraph and the six levels (D19); the table came back inside a group of
+  six Insert buttons, with the equation, the equation block, the picture,
+  the footnote and the rule; strikethrough, superscript, subscript, small
+  caps and the highlight joined the word marks, and the task list and the
+  quote the blocks. The bar stands in two rows since it grew that far: what
+  a reader writes above, what the document is set in below.
 
 D5. Tables: **(a)**, the source as a monospace grid, editable with
   multicursor; no widget. Revisited later: a table is drawn now, a block
@@ -200,6 +212,198 @@ D8. Vendor build: **`vscode-mdm/vendor-src/`** (esbuild, lockfile, `npm run
 
 D9. Migration: **in place on the branch**, Vditor removed, the suite
   rebuilt (`tests/webview-editing`, `-look`, `-player`).
+
+The decisions below were taken on `feat/markdown-editor` (September 2026),
+after a bench of 215 Markdown cases was run against the editor and each
+finding verified on a minimal case. The mutations that pin them are in
+`tests/README.md`.
+
+D10. The drawing does not change under a pressed button. While a mouse
+  button is down the render field neither rebuilds for the selection nor for
+  the focus, only follows the text; the release rebuilds. Revealing a block
+  at the press moved the text under the pointer, so a click into an unfocused
+  document selected a range, three pixels of wobble selected a line, and a
+  double click chose the wrong word.
+
+D11. Enter, Backspace, Delete, Tab and Shift+Tab are the editor's own.
+  `markdown({addKeymap: false})`: lang-markdown's keymap was installed twice,
+  the second time at high precedence, and CodeMirror's newline takes
+  whitespace with `\s`, which deleted no-break spaces. The editor's commands
+  call lang-markdown's where those do what a Markdown editor does, and decide
+  per range, so two carets are answered each on its own. Backspace after the
+  `## ` of a heading takes the whole mark, as it does after a list marker;
+  the bench had this as a change of D2's spirit to be made with the owner
+  watching, and it was made as the plan had it, open to being taken back.
+
+D12. A link is a link when its label is defined. `links.js` replaces
+  Lezer's LinkEnd alone: a shortcut, collapsed or full reference is a link
+  only if the document defines its label, the definitions read off the whole
+  input once per parse. The language sits in a Compartment and is taken up
+  again when the set of definitions changes, since a reused fragment is never
+  reparsed and a definition typed at the bottom makes links at the top.
+  Emoji shortcodes are out of the parser: the export has no such extension.
+
+D13. Containers are a frame on the line, not a class. The walk gathers, per
+  line, the levels it stands in (quotes and callouts a bar and 17 px each,
+  list items 1.5em of hanging indent), and emits one gradient of bars and one
+  inset; a block drawn instead of its source takes the frame on a wrapper.
+  The marker of an item is a widget in the hanging gap, its number computed.
+  The same measures are in the page's stylesheet.
+
+D14. The dialect: where Pandoc has a switch, or the copy that is rendered
+  can be normalized, the export follows the editor; where not, the editor
+  follows Pandoc. `commonmark_x` was ruled out as the export's reader: it has
+  no citations, inline notes, grid tables or raw TeX. So the copy is given
+  its blank lines and margins (`withBreaks`, with a twin in the awk of
+  `bin/mdm`, tested on the same cases), the reader gains
+  `autolink_bare_uris`, and the editor's parser gains Pandoc's footnotes,
+  citations, attributes, spans and raw TeX (`pandoc.js`, `footnote.js`).
+
+D15. Smart punctuation is drawn, not written. Widgets over the ASCII while
+  a line is untouched, the source back under the caret, and the glyphs taken
+  into the string for what is drawn from a string (a cell, a caption, an
+  outline row). The rules of the quotes are those of Pandoc's reader, read
+  off pandoc 3.8.3 on the test texts and not supposed: a tree-aware matcher,
+  since an emphasis, a link's text, a span and a note are each one inline to
+  Pandoc and a pair does not close across their edge.
+
+D16. Two writers of one document are reconciled, not raced. Updates carry
+  the document's version and edits the version they were based on; the host
+  does not write an edit based on a version an outside change has moved past,
+  it sends the document back, and the webview maps what is unconfirmed over
+  the host's change and sends again. What the host writes is kept out of the
+  webview's undo history. A save waits for the edit held back. The host
+  writes the stretch that changed, never the whole document, and tells the
+  webview where an outside change was made, which the two texts alone cannot
+  say when a line goes in among lines like it.
+
+D17. The decorations are rebuilt in part. They are a function of each
+  top-level block's own text and nodes, the carets that touch it, the count
+  of lines the host keeps back and the link definitions; so the set is kept,
+  mapped through the changes, and only the blocks are rebuilt that a caret
+  left or entered, that a change fell in, or over which the two trees
+  differ. The whole is rebuilt when the number of lines changes (drawn rules,
+  tables and empty cards carry their line's number), when the hidden count
+  changes, when a definition is in what changed or the language is taken up
+  again, and when the stretch is over half the document. A decoration belongs
+  to a region by where it starts: the marker of an item whose text starts on
+  the next line ends on that next line. `window.__mdm.checkDecorations`
+  compares the set on screen with a whole rebuild, and
+  `tests/webview-scale.test.js` asks it after every step.
+
+D18. Characters that draw nothing are named under the caret only. Not
+  CodeMirror's highlightSpecialChars, which marks the reading state too: a
+  soft hyphen put in a word on purpose would stand as a dot in the prose and
+  the row would part from the page's.
+
+D19. **The digit is the level, and a letter names the block that has none**
+  (2026-09-19, the owner's call, after a day with none). The rule: a letter
+  changes words inside a line (`Ctrl+B`, `Ctrl+I`, `Ctrl+E`, `Ctrl+K`), and
+  the second modifier of the code block changes what a line is. The digit is
+  the heading's level, `Ctrl+Shift+1` to `6`, with `Ctrl+Shift+0` for the
+  paragraph; a letter names the block that has no level. What is bound at
+  the end of the day is `Ctrl+Shift+C` for the code block and `Ctrl+Shift+T`
+  for the task list: the bulleted and numbered lists and the quote held `U`,
+  `O` and `Q` for a day and gave them back, for the reason at the foot of
+  this decision. Strikethrough keeps none, as in Word and Obsidian. `Cmd+Option` on a Mac,
+  as the code block already was: macOS takes `Cmd+Shift+3`, `4` and `5` for
+  its screenshots and `Cmd+Shift+Q` logs the account out. Notion's row was
+  the other candidate and is where the 0 comes from; it spends 4 to 7 on the
+  blocks because its headings stop at 3, and the six levels of a .mdm want
+  the whole row. The bullets are on U and not L because `Ctrl+Shift+L` is
+  `selectSelectionMatches` in CodeMirror's own search keymap.
+
+  The code block held Notion's `Ctrl+Shift+8` for a day and lost it the same
+  day, at the owner's word, for the symmetry: with C there is no exception
+  left, every digit is a level and every block without one is a letter. Not
+  E, the letter of its inline twin, because `Ctrl+Shift+E` is Show Explorer
+  and is wanted far more often than the external terminal C takes; it never
+  shipped on the digit, so nothing had to be migrated. Its button moved with
+  it, out of the marks and to the head of the blocks, so that inline code
+  and the code block stand on either side of the toolbar's separator: the
+  cut the separator makes is the cut between a mark on words inside a line
+  and what makes the line a block, which is the cut the keys make too. Weighed and not taken: `Ctrl+1`..`6`
+  (Typora's, which is go to editor group N), a `Ctrl+M` prefix for
+  everything (VS Code's own idiom, two strokes each), and the four classics
+  alone. `Ctrl+Alt+<digit>` is out on any layout where AltGr is Ctrl+Alt: on
+  the Spanish one `Ctrl+Alt+2` is the at sign, and brackets go the same way.
+
+  **They are bound in the page's keymap, not as contributed commands**, and
+  that is the whole mechanism. VS Code's webview host (its `pre/index.html`
+  in 1.133.0) listens for keydown on the page's window in the bubble phase,
+  does not look at `defaultPrevented`, and posts every key to the workbench
+  as `did-keydown`, which is why `Ctrl+B` set bold and hid the Explorer at
+  once. Each of these bindings carries CodeMirror's `stopPropagation`, so a
+  key answered in the text never reaches that listener, and with the focus
+  out of the text CodeMirror does not hear it and VS Code does. That is the
+  owner's own proposal (a key is the editor's while the caret shows, VS
+  Code's after a click in the dead margin) with nothing to keep in step: the
+  command road would put the same rule in a `when` over a context key the
+  page posts to the host, and a key pressed right after a click could be
+  resolved against the old value. What that road still buys, if it is ever
+  wanted: the commands in the Command Palette, and keys the reader can
+  rebind. A second switch to disarm the whole set while a score is being
+  edited (the Guitar Pro plan) is an `if` in the page here, and every one of
+  these already leaves a score alone, since `setHeading` and the list
+  commands skip the lines no mark belongs on.
+
+  What the set takes from the workbench, read in 1.133.0's
+  `workbench.desktop.main.js` and only while the caret is in the text: of
+  `Ctrl+Shift+0` to `9` it binds 1 (replace, inside the search view) and 5
+  (split, with the terminal focused), neither of which a .mdm can be in; of
+  the letters, `Ctrl+Shift+T` is Reopen Closed Editor and `Ctrl+Shift+C`
+  opens an external terminal. No built-in extension binds
+  `ctrl+shift+<digit>`.
+
+  The Paragraph row is back in the heading menu with the keys, after a day
+  without it: at the keyboard there is no tick to read, so a hand that
+  cannot see what level the line is needs one key that says paragraph
+  whatever it was. The toggle a row and a key share (the level a line
+  already is takes the heading off) is `applyHeading`, written once, and the
+  name of a key is `shortcutLabel`, written once for the tip of a button and
+  the right-hand column of a menu row.
+
+  The highlight button that came after them (Pandoc's `[x]{.mark}`) takes
+  no key: the letters that read as its own are spent or taken and the owner
+  has not asked for one. An underline button stood beside it for a day,
+  written the same way, and was taken off on the owner's call: a bracketed
+  span leaks its class into any reader that is not Pandoc, and an underline
+  is the typewriter's italic, which this editor does not need. The reading
+  stayed (`.mdm-underline`), because the page underlines the span whether or
+  not a button writes it. That also settles the one key either of them had a
+  claim to: `Ctrl+U`, which Word, Docs and Notion spend on underline and
+  CodeMirror's history keymap spends on `undoSelection`.
+
+  The four that came in with the Insert menu take no key either: small
+  caps, superscript, subscript and the menu itself. The pair has the one
+  claim to a standard among them, and it is a divided one: Google Docs
+  spends `Ctrl+.` and `Ctrl+,` on the two and Word spends `Ctrl+Shift+=`
+  and `Ctrl+=`, both remembered and neither checked against a running copy,
+  so nothing was spent on them. Neither do the six of the Insert group, which
+  stood in a menu for a day and are buttons of the first row since the bar
+  went to two.
+
+  U, O and Q lasted a day. The owner took them off on 2026-09-19, and the
+  reason he gave is that `- `, `1. ` and `> ` are so little to type at the
+  head of a line that the chord bought nothing; what raised it is that
+  `Ctrl+Shift+U` opened a `U+` prompt on his own desktop instead of the
+  bullets. What was read out of the running copies while deciding: fcitx5's
+  `libunicode.so` carries `Control+Shift+U` as the default of its "Type
+  unicode in Hex number", beside `Control+Alt+Shift+U` for the search by
+  character name, and no override sits in `~/.config/fcitx5/conf/`; and VS
+  Code 1.133.0 binds that chord to nothing on Linux (Toggle Output is
+  `primary: 3123` with a `linux` override to the chord `Ctrl+K Ctrl+H`),
+  binds nothing anywhere to `Ctrl+Shift+Q` (3119), and keeps `Ctrl+Shift+O`
+  for Go to Symbol in Editor (3117). So the three go to VS Code from the
+  text now like any chord the page does not bind, which is what the tests
+  press them for, and their buttons name no key: a tip that names a key the
+  editor no longer answers is a tip that lies.
+
+  Still open: a key has not been pressed on the owner's own keyboard inside
+  a real VS Code window. The harness presses the whole set on the Spanish
+  layout through CDP, which is where it matters (`Ctrl+Shift+2` arrives as
+  `"` there and not as a 2; CodeMirror falls back to the key's base
+  name by keyCode, so the binding is the digit and not the character).
 
 Found on the way and settled:
 inside VS Code the workbench replays Ctrl+Z into the page as

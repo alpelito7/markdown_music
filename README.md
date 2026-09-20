@@ -108,12 +108,46 @@ under the closing fence of a score is a heading on screen and a heading in the
 output. A document that declares a `from:` of its own is rendered in the
 dialect it names.
 
-One difference is left standing, and no Pandoc option governs it: Pandoc wants
-the `#` in the first column, while CommonMark allows up to three spaces before
-it. A heading written with a space in front of it is a heading in the editor
-and a paragraph of text in the HTML and the PDF. Rendering a `.qmd` with
-`filters: [mdm]` straight from Quarto, rather than through `bin/mdm` or the
-editor, gets Pandoc's own dialect and its blank lines.
+The rule between the two is this: where Pandoc has a switch, or where the
+copy that is rendered can be written the way Pandoc wants it, the export
+follows the editor; where neither is possible, the editor follows Pandoc. The
+document itself is never changed, only the temporary copy Quarto is handed.
+That copy is given a blank line before a list, a table, a `***` or a spaced
+rule written straight under a line of text, and after a line of dashes under
+a list item; a heading set in one to three spaces is brought to the margin,
+and so is the underline of a setext heading; a `#` that ends a heading with
+no space before it (`## Sonata in F#`) is escaped so that Pandoc keeps it;
+and the reader is asked for `autolink_bare_uris`, so an address written bare
+is a link on the page as it is in the editor. The YAML header is read as
+Pandoc reads it: closed by `---` or `...`, and a `---` over a blank line at
+the top of the file is a rule and not a header.
+
+Going the other way, the editor reads what Pandoc reads and CommonMark does
+not: footnotes (`[^1]`, `^[inline]` and `[^1]: text`), citations and Quarto's
+cross-references (`[@key, p. 3]`, `@fig-x`), attributes (`{#id .class
+key=val}` after a heading, an image, a link, a code span or a bracketed span,
+an image's `width` applied), bracketed spans (`[text]{.smallcaps}`), raw TeX
+(`\command{...}` and `\begin{env}` to `\end{env}`, drawn as the source it is,
+since the HTML page leaves it out and the PDF sets it), sub and superscript,
+and the punctuation of Pandoc's `smart` extension: curly quotes, an
+apostrophe, an en dash for `--`, an em dash for `---` and an ellipsis for
+`...`, drawn while a line is untouched with the rules of Pandoc's own reader,
+and never inside code, maths, an address, a tag or an escape. A `[text]`
+whose label has no definition is text, as Pandoc has it, and `:tada:` is
+text too, the export having no emoji extension.
+
+Differences that are left standing, each on the record in `tests/README.md`:
+the page's callouts are Quarto's, with a heading and an icon; a numbered list
+written `3)` keeps its delimiter in the editor where Pandoc prints a point; a
+setext heading written over several lines is a heading in the editor and a
+paragraph to Pandoc; Pandoc reads the inside of a `<div>` as Markdown and the
+editor draws it as raw lines; a `www.` address with no scheme is text on both
+surfaces; and the ways Pandoc's emphasis parts from CommonMark's
+(`**Tempo:**Allegro`) are not replicated. Definition lists, line blocks,
+lists lettered `a.` or `i.`, grid and simple tables, raw `{=latex}` blocks
+and shortcodes are not drawn yet. Rendering a `.qmd` with `filters: [mdm]`
+straight from Quarto, rather than through `bin/mdm` or the editor, gets
+Pandoc's own dialect and none of the copy's corrections.
 
 ## How it works
 
@@ -189,12 +223,13 @@ Metadata is whatever the command line carried, and these values reach a
 `<style>` block, so the filter lets nothing through that is not one of the
 words above or six hex digits.
 
-Two things are as close as they get rather than identical, and in both cases
-the reason is the engine underneath. The code is tokenized by skylighting
-here and by Lezer in the editor, so the palette is shared but the cut into
-tokens is not, and a line the two read differently comes out coloured
-differently. The equations are set by MathJax here, Quarto's own, against
-KaTeX in the editor.
+One thing is as close as it gets rather than identical, and the reason is
+the engine underneath. The code is tokenized by skylighting here and by
+Lezer in the editor, so the palette is shared but the cut into tokens is
+not, and a line the two read differently comes out coloured differently.
+The equations are the same on both sides: the filter puts the vendored
+KaTeX on the page (`ensure_katex_dep` in `mdm.lua`), which is the editor's
+own copy.
 
 The PDF is dressed from the same metadata, by a LaTeX preamble the filter
 writes (`look_tex` in `mdm.lua`, the other half of the stylesheet): the page
@@ -311,20 +346,148 @@ What it does:
   selection, `Ctrl+Shift+L` every occurrence, `Ctrl+Alt+Up/Down` a caret on
   the line above or below, `Escape` goes back to one. Typing, the formatting
   commands and undo act at every caret at once.
-- **Formatting**: `Ctrl+B`, `Ctrl+I` and `Ctrl+E` wrap (or unwrap) each
-  selection in `**`, `*` or backticks; `Ctrl+K` makes a link with the caret
-  in the address. The toolbar has the same three, a link, a heading button
-  that takes each selected line one level up, and bulleted and numbered
-  lists. The bar leads with export, then undo and redo, and ends with the
-  editor's own buttons: theme, score fill, staff lines, score alignment and
-  the YAML header.
-- **Export from the toolbar**: HTML / PDF / HTML + PDF. Each entry saves the
-  document first, so what reaches the output is always what is on screen, and
-  renders it with the Lua filter the extension carries, which is what lets a
-  document export from wherever it lives with no clone of this repository
-  anywhere. The look of the editor goes with the call (see [The output looks
-  like the editor](#the-output-looks-like-the-editor)). `Ctrl+S` still saves
-  as in any VS Code editor.
+- **Formatting**: `Ctrl+B`, `Ctrl+I` and `Ctrl+E` read what the caret is
+  in: inside bold they take the bold off, with no selection they wrap the
+  word, beside the closing mark of a pair just typed they step out of it, and
+  a selection that crosses paragraphs or list items is wrapped line by line,
+  code, equations and raw HTML left alone. `Ctrl+K` makes a link with the
+  caret in the address, edits the link the caret is in instead of nesting
+  another, and puts a selected address where the address goes. These keys
+  and the block keys below are the text's while the caret is in it and do
+  not reach VS Code (`Ctrl+B` hid the side bar as well); after a click in
+  the margin, with no caret, they are VS Code's. The toolbar
+  has the same three, a link, a heading menu that makes every selected line
+  a heading of any of the six levels, the caret's level ticked and a
+  paragraph again when it is picked twice (it writes no `#` over a list
+  marker or a `>`, and turns a setext
+  heading into an ATX one), and unordered and ordered lists, which
+  turn one kind into the other, come off at a second press, skip blank lines
+  and keep a quote's `>`. A task list button puts a box behind the marker a
+  line has (a numbered item keeps its number) or makes a bulleted task of a
+  line with none, and takes only the box off again; a quote button quotes
+  the whole of every block the selection touches (a line left out of a
+  paragraph would stay in the quote as a lazy line, a fence or a score would
+  be cut in two), with the blank lines between them, and takes one level of
+  quote off when every line is quoted already. On an empty line the four of
+  them write their marker for the caret to type after, and under a line of
+  a paragraph they leave a blank line first, since Pandoc lets neither a list
+  nor a quote break into a paragraph. A strikethrough button writes Pandoc's `~~` by
+  the rules of bold. After it a pair raises and lowers words, Pandoc's
+  `x^2^` and `H~2~O`, and then a highlight writes Pandoc's bracketed span,
+  `[word]{.mark}`, which the page writes as `<mark>`: the selection or the
+  word at the caret, off again at a second press, and its class joins the
+  attribute of a span the words are already in rather than nesting a second
+  one (GitHub's `==word==` is a different spelling, which Pandoc does not
+  read). A highlight is drawn in a wash of the document's own, the same
+  colour in the editor, on the page and on paper, and not in the browser's
+  yellow with black letters, which is what `<mark>` is left to itself. An underline button beside it wrote `[word]{.underline}` for a day
+  and was taken off again: a bracketed span shows its own class as text in
+  any reader that is not Pandoc, and an underline is the typewriter's italic,
+  which a document set in Latin Modern has no use for. What the span means is
+  still read and drawn here, as the page draws it. A small caps button beside
+  the highlight writes the third of those spans, `[word]{.smallcaps}`, its
+  two letters of two sizes stacked rather than set in a row, which is what
+  keeps the button off the heading button's shape. Neither of the two scripts carries a bare space, so a space inside one is written as
+  Pandoc's escaped space (`x^a\ b^`, a no-break space on the page), and
+  neither carries a bracket at the head of its content, since `x^[b]^` is an
+  inline footnote there. Two tildes are the strikethrough and one is the
+  subscript, and the subscript button never writes a pair: over the whole of
+  a struck word, which Pandoc would read as the subscript alone, it leaves
+  the word as it stands. The bar stands in two rows, and the first
+  closes with six buttons for what a document holds beside its words: an
+  equation, an equation block, a table, a picture, a footnote and a
+  horizontal rule. The second row begins under the outline button, with
+  everything that switches the document as a whole. The
+  equation button wraps the selection in `$…$` and takes the dollars off again;
+  the equation block, the table (two columns and three rows) and the rule
+  (`***`, the one form that may stand under a line of text) are written
+  where the code block button writes its block; the picture button is the link
+  gesture with a `!` in front, so a selected file name goes where the
+  address goes; and the footnote button writes the reference after the words
+  the caret is in, numbered with the lowest number the document has not
+  used, and opens its note at the end of the document, the only place Pandoc
+  reads one from. Across the bar's
+  separator from inline code, a code block button, also
+  `Ctrl+Shift+C` (`⌥⌘C` on a Mac): on an empty line it opens a block with
+  the caret after the opening backticks, where the language is typed (`abc`
+  makes it a score), under the paragraph the caret is in otherwise, around
+  the lines selected, and from inside a block it takes the fences off. A
+  button that acts on the selection leaves the caret in the block it was in.
+  What is worth a key has one, on one modifier: `Ctrl+Shift+0` to
+  `Ctrl+Shift+6` for a paragraph and the six heading levels, the digit being
+  the level, and `Ctrl+Shift+C` and `Ctrl+Shift+T` for the code block and
+  the task list (`Cmd+Option` on a Mac, where the system takes `Cmd+Shift`
+  with a digit for its screenshots). The bullets, the numbers and the quote
+  had `U`, `O` and `Q` for a day and have no key: `- `, `1. ` and `> ` are
+  so little to type at the head of a line that the chord bought nothing, and
+  `Ctrl+Shift+U` is the desktop's on Linux before it is any editor's, where
+  fcitx5's unicode addon opens its `U+` prompt on it. Strikethrough, small
+  caps, the superscript and subscript pair and the six of the Insert group
+  have none either. The bar leads with the outline, then export, then undo
+  and redo, and the second row is the editor's own: multicursor, theme,
+  font, alignment, hyphenation and the YAML header, then score fill, staff
+  lines and score alignment, and the playhead toggle last.
+- **The keys of a Markdown editor.** `Enter` continues a list, a task (left
+  unchecked) or a quote, ends the list at an empty item with a blank line
+  under it so that the next line is a paragraph, unnests an empty nested
+  item, opens a line above a heading when pressed at the head of its text,
+  keeps the `>` inside a fence that stands in a quote, and answers each of
+  several carets on its own; it takes no no-break space with it. `Backspace`
+  after the `## ` of a heading or after a list marker takes the whole mark,
+  beside a rendered block it opens the block instead of eating its line
+  break, and an emoji with a skin tone goes as one glyph. `Tab` and
+  `Shift+Tab` nest and unnest a list item with its children, by the width of
+  the marker above it, the numbers following; in prose `Tab` writes a tab in
+  the middle of a line and nothing at its head, where it would make the line
+  code.
+- **Clicks.** A click on a bullet or a number puts the caret after the
+  marker; a task's box is ticked by a click, in a quote and after `1)` as
+  well; `Ctrl+click` on a link follows it (`Alt+click` where
+  `editor.multiCursorModifier` gives `Ctrl+click` to the carets): an address
+  opens outside, a relative path opens in VS Code, and `#heading` moves the
+  caret to that heading. A click into a document that did not have the focus
+  places a caret and selects nothing, and a double click selects the word.
+- **Lists, quotes and callouts are drawn as the page draws them**: an item's
+  text hangs under itself with the marker in the gap, numbers are the ones
+  the list counts, a quote inside a quote and a callout inside a quote wear
+  one bar per level, and a table, an equation, a rule or a score inside any
+  of them stands inside the frame. Whitespace a reader drops is not drawn: a
+  paragraph or a heading set in a space or three, the columns of indented
+  code, the indent a fence shares with its body.
+- **Links and images by reference** (`[text][label]`, `[label]`) know their
+  definition, which is drawn faint; an image alone in its paragraph is a
+  figure with its alt as the caption, as on the page; entities are drawn as
+  the character they stand for and an escape without its backslash; a hard
+  line break is marked at the end of its row. A soft break stays a row of
+  its own while editing, as in Typora and Obsidian, where the page runs the
+  lines on.
+- **Characters that draw nothing** (a bidi override, a zero-width space, a
+  soft hyphen) are left to the page's own drawing while a line is read, and
+  named by a mark with a tooltip on the line the caret is on.
+- **Search** opens with `Ctrl+F` wherever the focus is, and a match inside a
+  rendered block opens the block. A YAML header that is hidden is not in the
+  editor's text, so it is not searched.
+- **Two writers of one file.** A change made by the text editor beside this
+  one, or by the host, is merged with what is being typed here instead of
+  one overwriting the other, lands where it was made, and stays out of this
+  editor's undo; `Ctrl+S` waits for the keystrokes still held back; and the
+  file is written over the stretch that changed, not rewritten whole.
+- **Long documents.** A caret move or a keystroke rebuilds the drawing of the
+  blocks it reaches and keeps the rest: on a file of 22 800 lines that is
+  about 25 ms where it was over 100. A line added or taken out still redraws
+  the whole, since every number below it moves.
+- **Export from the toolbar**: one button with two branches, named in the
+  panel. *Document* is HTML / PDF / HTML + PDF: each entry saves the document
+  first, so what reaches the output is always what is on screen, and renders
+  it with the Lua filter the extension carries, which is what lets a document
+  export from wherever it lives with no clone of this repository anywhere. The
+  look of the editor goes with the call (see [The output looks like the
+  editor](#the-output-looks-like-the-editor)). *Audio* is MIDI / WAV, one file
+  per score: it writes every score of the document at once, beside it, which
+  is what a score's own button does for the one score it stands by (below). It
+  saves nothing first, because what it writes is the music on screen, and in a
+  document with no score its two rows are greyed out and take no press.
+  `Ctrl+S` still saves as in any VS Code editor.
 - **Nothing but the export needs anything installed.** The editor carries
   everything it draws and plays, so it opens and works on a machine with no
   Quarto, no TeX, no Chrome and no abcm2ps. Those are looked for the moment
@@ -461,12 +624,16 @@ What it does:
   source at that cell, and the page is held where it was instead of sliding
   down by the height the source took.
 - **Outline panel**: the button leading the bar opens a column down the left
-  edge with the headings of the document, indented by level, the section the
-  caret is in marked and every row a jump to it. The grip on its edge sets
-  how wide it is (`mdm.outline`, `mdm.outlineWidth`).
-- **YAML header, shown and editable**: the last toolbar button shows and
-  hides it (`mdm.frontMatter`, hidden by default; disabled if the file has no
-  header). Shown, it is the first lines of the text, `---` fences included,
+  edge with the headings of the whole document, however long, indented by
+  level, the section the caret is in marked and every row a jump to it. A row
+  reads as the editor draws the heading: marks off, a link as its label,
+  maths set, a closing sharp kept (`Sonata in F#`), attributes left out.
+  Headings inside quotes and list items are listed, as VS Code's own outline
+  lists them and Pandoc's contents do not. The grip on its edge sets how wide
+  it is (`mdm.outline`, `mdm.outlineWidth`).
+- **YAML header, shown and editable**: the YAML button on the second row,
+  after the hyphenation menu, shows and hides it (`mdm.frontMatter`, hidden
+  by default; disabled if the file has no header). Shown, it is the first lines of the text, `---` fences included,
   on a card and highlighted as YAML. Hidden, the header and the blank lines
   under it are kept outside the editor's text and spliced back on every save
   (`transforms.js`), so the file is byte-identical around whatever was
@@ -530,9 +697,13 @@ differs, carets and undo history kept.
 MDM is MIT (`LICENSE`). What it vendors is credited one by one in
 `THIRD-PARTY-NOTICES.md`, with the version of each copy actually in the tree:
 abcjs 6.7.0, CodeMirror 6 with its Lezer packages, and KaTeX 0.18.4 are all
-MIT; the piano the editor plays with is the Musyng Kite soundfont, which is
-CC BY-SA 3.0 and is included unmodified, so the notice is the attribution the
-licence asks for.
+MIT. Three things are not. The piano the editor plays with is the Musyng
+Kite soundfont, CC BY-SA 3.0, included unmodified, so the notice is the
+attribution the licence asks for. The roman the prose and the scores are set
+in is Latin Modern Roman 2.004, four woff2 files under the GUST Font
+Licence, which is LPPL 1.3c with a renaming clause the notice names. The
+words a document is divided at come from the hyph-utf8 patterns, which are
+MIT but for Portuguese (BSD-3-Clause) and Russian (LPPL 1.3c).
 
 The one program that is not vendored is abcm2ps, which engraves the scores
 of a PDF on a machine without a Chrome: somebody else's work
@@ -541,7 +712,8 @@ Methfessel's abc2ps), called as a separate process and never linked into
 anything here. Neither the repository nor the `.vsix` carries the binary;
 the search order and the source are in `THIRD-PARTY-NOTICES.md`, and the
 LGPL and GPL texts are kept in `licenses/`
-for reference. So the `.vsix` is MIT throughout except for the soundfont.
+for reference. So the `.vsix` is MIT but for the three above: the soundfont,
+the Latin Modern faces and the hyphenation patterns.
 
 ## Known limitations (prototype)
 
@@ -550,12 +722,11 @@ for reference. So the `.vsix` is MIT throughout except for the soundfont.
   (the VS Code editor does not: it carries the piano vendored).
 - No LilyPond support yet for typographically demanding scores; the natural
   route would be a `lilypond` block the filter compiles the way it does ABC.
-- The exported HTML matches the editor as far as two different engines let
-  it: the code is highlighted by skylighting rather than by Lezer and the
-  equations are set by MathJax rather than by KaTeX, so the palette and the
-  spacing are shared while the tokenizing and the glyphs are not. Callouts
-  are left to Quarto as well, which draws them with a heading and an icon
-  where the editor draws an accent bar over the source.
+- The exported HTML matches the editor as far as two different tokenizers
+  let it: the code is highlighted by skylighting rather than by Lezer, so
+  the palette is shared while the cut into tokens is not. Callouts are left
+  to Quarto as well, which draws them with a heading and an icon where the
+  editor draws an accent bar over the source.
 - `bin/mdm` renders single files; for a whole book (a Quarto `book`
   project) the chapters would go as `.qmd` with the filter.
 
