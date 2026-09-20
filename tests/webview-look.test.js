@@ -3538,6 +3538,57 @@ test("clicking a drawn table opens its source at the cell that was clicked", { s
   await h.close();
 });
 
+// Fourteen columns of prose at a 600px pane: the columns squeeze to their
+// longest word and the box scrolls the rest, and no word is broken in the
+// middle. CodeMirror sets `overflow-wrap: anywhere` on the content, which
+// reached the cells and cut "another" into "anot" and "her" (G045); the
+// page's cells wrap between words only. Every word of every cell is read as
+// a Range and asked how many boxes it takes: one, or it was broken.
+test("a wide table squeezes its columns to their longest word and scrolls the rest, breaking no word", { skip }, async () => {
+  const cols = Array.from({ length: 14 }, (_, i) => "c" + String(i + 1).padStart(2, "0"));
+  const text = [
+    "Before.",
+    "",
+    "| " + cols.join(" | ") + " |",
+    "|" + cols.map(() => "-----").join("|") + "|",
+    "| a long cell value | another long cell value | yet another | and another | still going | " +
+      Array.from({ length: 8 }, () => "more text").join(" | ") +
+      " | the end |",
+    "",
+    "After.",
+    "",
+  ].join("\n");
+  const h = await open({ text, scores: 0, withFrontMatter: false });
+  await h.page.setViewport({ width: 600, height: 800 });
+  await h.page.evaluate(() => {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  });
+  await h.page.mouse.click(2, 2);
+  await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+  const out = await h.page.evaluate(() => {
+    const box = document.querySelector("#app .mdm-table");
+    const broken = [];
+    for (const cell of box.querySelectorAll("th, td")) {
+      for (const node of cell.childNodes) {
+        if (node.nodeType !== 3) continue;
+        const re = /\S+/g;
+        let m;
+        while ((m = re.exec(node.textContent))) {
+          const range = document.createRange();
+          range.setStart(node, m.index);
+          range.setEnd(node, m.index + m[0].length);
+          if (range.getClientRects().length !== 1) broken.push(m[0]);
+        }
+      }
+    }
+    return { box: box.clientWidth, ink: box.scrollWidth, broken };
+  });
+  assert.deepEqual(out.broken, [], "words broken inside a cell");
+  assert.ok(out.ink > out.box, "the table did not scroll inside its box: " + JSON.stringify(out));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // A table too tall for the pane, with prose above and below it, for the
 // scroll the reveal used to cause.
 const TALL_TABLE = [

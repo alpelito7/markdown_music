@@ -525,6 +525,63 @@ test("atx heading: a tab after the marks is a heading (CM 4.2, G042)", () => {
   assert.equal(parse("# Space\n").toString(), "Document(ATXHeading1(HeaderMark))")
 })
 
+// ---------- pipe tables whose cells hold code and maths ----------
+
+// The cells of every row of a parse, as "TableCell[text]" with the inline
+// nodes the bench cares about.
+function cells(text, p = gfm) {
+  return nodes(parse(text, p), /^(TableHeader|TableRow|TableCell|InlineMath|InlineCode)$/, text)
+}
+
+test("table: a pipe inside inline maths or a code span is the cell's, as Pandoc reads it (G011)", () => {
+  const a = "| name | formula |\n|------|---------|\n| magnitude | $|x|$ |\n"
+  assert.deepEqual(cells(a), [
+    "TableHeader[| name | formula |]", "TableCell[name]", "TableCell[formula]",
+    "TableRow[| magnitude | $|x|$ |]", "TableCell[magnitude]", "TableCell[$|x|$]", "InlineMath[$|x|$]"
+  ])
+  const b = "| e | m |\n|---|---|\n| `a \\| b` | c |\n| `x || y` | d |\n| $$a|b$$ | e |\n"
+  assert.deepEqual(cells(b).filter(c => /^TableCell/.test(c)), [
+    "TableCell[e]", "TableCell[m]",
+    "TableCell[`a \\| b`]", "TableCell[c]",
+    "TableCell[`x || y`]", "TableCell[d]",
+    "TableCell[$$a|b$$]", "TableCell[e]"
+  ])
+  // GFM's own parser, for the record, splits them.
+  assert.equal(nodes(parse(a, parser.configure(GFM)), /^TableCell$/).length, 6)
+})
+
+test("table: an escaped pipe is text, a run of backticks that does not close shields nothing, and `$5|$6` is no maths", () => {
+  // `$5|$6`: the closing `$` is followed by a digit, so Pandoc reads no
+  // maths there and the pipe splits (three cells, the third dropped by
+  // the editor's fit to the header); `$5 | $6` fails on the space before
+  // the closer already.
+  const a = "| a | b |\n|---|---|\n| x \\| y | z |\n| `open | w |\n| $5 | $6 |\n| $5|$6 | pair |\n"
+  assert.deepEqual(cells(a).filter(c => /^TableCell/.test(c)), [
+    "TableCell[a]", "TableCell[b]",
+    "TableCell[x \\| y]", "TableCell[z]",
+    "TableCell[`open]", "TableCell[w]",
+    "TableCell[$5]", "TableCell[$6]",
+    "TableCell[$5]", "TableCell[$6]", "TableCell[pair]"
+  ])
+})
+
+test("table: the header's count against the delimiter's, and a table interrupting a paragraph, as GFM has them", () => {
+  // A header of two cells over a delimiter of three is no table.
+  assert.deepEqual(nodes(parse("| a | b |\n|---|---|---|\n| 1 | 2 |\n", gfm), /^Table$/), [])
+  // A pipe line straight under a paragraph line starts a table when a
+  // delimiter line follows it with the same count.
+  assert.equal(parse("para\n| a | b |\n|---|---|\n| 1 | 2 |\n", gfm).toString(),
+    "Document(Paragraph,Table(TableHeader(TableDelimiter,TableCell,TableDelimiter,TableCell,TableDelimiter),TableDelimiter,TableRow(TableDelimiter,TableCell,TableDelimiter,TableCell,TableDelimiter)))")
+  // With a shielded pipe in the header, this parser and GFM's count alike
+  // when the maths holds no pipe.
+  assert.deepEqual(nodes(parse("| $x$ | b |\n|---|---|\n", gfm), /^TableCell$/).length, 2)
+})
+
+test("table: the parser stands aside on a language without GFM's table nodes", () => {
+  assert.equal(parse("| a | b |\n|---|---|\n| 1 | 2 |\n").toString(), "Document(Paragraph)")
+  assert.equal(parse("| a | b |\n|---|---|\n", parser.configure(mdmTable)).toString(), "Document(Paragraph)")
+})
+
 // ---------- Pandoc syntax ----------
 
 test("raw TeX: a backslash before letters, with its groups, is a raw inline; the block form runs to its \\end", () => {

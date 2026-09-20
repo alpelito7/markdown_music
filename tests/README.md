@@ -2890,6 +2890,29 @@ the rows and the page is not compared; and a link's tooltip is its
 destination, where a browser shows the Markdown title, since the address
 is what a reader hovering a link in an editor is asking for.
 
+Tables, the same day. Lezer gives no node for an empty cell, so a row read
+off its `TableCell` nodes lost its columns and every value after a gap slid
+left; `tableModel` reads the cells between the pipes instead (a stretch
+between two pipes is a cell whatever it holds, the stretch before the first
+and after the last only when it holds something), fits every row to the
+header as GFM and Pandoc do (a short row given empty cells, a long one
+losing the excess) and points a cell it added at the end of its row for the
+click. A `<br>` in a cell is a `br` part painted as a break, as the page
+writes it; any other raw tag stays as written, as in the prose. And the
+cells take `overflow-wrap: normal` back from CodeMirror's `anywhere`, so a
+squeezed column breaks between words and never inside one. Four mutations,
+all caught: **TB1** a blank stretch between pipes dropped -> *TB10*;
+**TB2** the rows not fitted to the header -> *TB05*; **TB3** the `<br>`
+pushed as text -> *TB04*; **TB4** the cells' wrapping rule dropped from
+`style.css` -> the look's *a wide table squeezes its columns to their
+longest word and scrolls the rest, breaking no word*. One difference
+stands, and it follows from the rule of 2026-09-12 (intact, and then a
+scroll): for a table wider than Pandoc's column Pandoc writes relative
+widths (`width:100%` with fourteen columns of 7%), so the page wraps the
+words of every cell into its share of the measure, where the editor keeps
+the table at its content width and scrolls it inside its box (measured
+2026-09-17 on the fourteen-column table of the bench, TB08).
+
 Links by definition (the parser, the same day). Lezer closes every `[...]`
 into a Link, so `[sic]`, `[Ctrl]`, `[^1]` and `[@key]` were blue links with
 their brackets hidden and `[Sonata [K. 331]](url)` was no link at all, the
@@ -2959,6 +2982,26 @@ no node -> the look's *a click on an equation whose closer carries a label
 opens its source at the head of the maths*. What stands: the label of an
 equation is drawn as the text it is on the page, `{#eq-mass}` under the
 maths, until the attributes package draws it as a reference.
+
+The table parser, the same day. GFM's table parser splits a row at every
+unescaped pipe, inside `$|x|$` and inside `` `x || y` `` too, and the
+drawn table had four cells under a two-column header (G011); `table.js`
+takes its place by name, Lezer's parser ported with a `|` inside inline
+maths (Pandoc's rules, the ones `math.js` reads by) or a code span (a run
+of backticks closed by a run of the same length) left to the cell. Lezer
+keeps every `endLeaf` ever registered, so GFM's own still helps decide
+whether a pipe line under a paragraph starts a table; the two count alike
+unless a pipe sits inside code or maths on that very line, which the bench
+has not met. Four mutations, all caught: **TP1** no span shielding its
+pipes -> the vendor's *a pipe inside inline maths or a code span is the
+cell's* and *TB11*, *TB03*; **TP2** the escaped pipe read as a pipe -> the
+vendor's *an escaped pipe is text* and *TB03*; **TP3** the digit rule
+dropped from the maths closer (`$5|$6` shielded) -> the vendor test, by
+the `$5|$6` row put in for it, the `$5 | $6` row failing on the space
+before the closer already; **TP4** the parser left out of the extensions
+-> the vendor test and *TB11*. What stands: a table straight under a
+paragraph line starts a table in the editor (GFM) and not on the page
+(Pandoc), until the export's copy puts the blank line in (P6, `withBreaks`).
 
 The dialect, second part (P6-b), the same day: the Pandoc syntax the
 export reads and the editor had no node for, in `pandoc.js`. Raw TeX
@@ -3122,6 +3165,28 @@ nothing* pins that the keys take it as any other character; it passes with
 and without the marks, CodeMirror treating a replaced character as one step
 either way, and is there for what a later change to the marks might break.
 
+The inside of a table cell (2026-09-18), found by re-probing the bench at the
+close of the branch: four of the groups the branch had fixed in the prose were
+still unfixed inside a cell, because `cellParts` is a second reader of the
+inline tree and the fixes had gone into the first one. It now asks the same
+questions: `linkTarget` and `decodeEntity` moved out of `buildDecorations` to
+where both readers can call them, the cell is given the document's definitions
+(`definitionsOf`), and `LINK_SKIP` learned that the `[ref]` of a full
+reference is not part of the text. Five mutations against TB12 and TB12b, all caught:
+**CL1** the label of a full reference back in the drawn text -> *a cell reads
+its links, its entities and its pictures as the prose does*; **CL2** the
+entity branch removed -> the same; **CL3** `unbracket` giving the destination
+back with its angle brackets -> the same; **CL4** a cell link taking the first
+URL it finds instead of its target -> the same; **CL5** the Markdown title
+dropped in a cell -> the same. Then the same reading of the two readers found
+three more of the branch's own inlines missing from the cell, and Pandoc was
+asked what it gives for each (`<sup>1</sup>` for the note, a `span.citation`
+for the citation, and an empty cell for the raw TeX, which its HTML writer
+drops): five more mutations against TB12c, all caught. **CL6** the note back
+to plain text -> *a note, a citation and raw TeX in a cell are drawn as the
+prose draws them*; **CL7** the citation back to plain text -> the same;
+**CL8** the raw TeX back to plain text -> the same; **CL9** a mark's own
+class dropped when it is painted -> the same; **CL10** a mark's tooltip
 dropped when it is painted -> the same. The same reading carried to the
 figure: its caption was the alt as a string, where the page sets it as
 inline content (`![A *fine* photo &copy; 1741]` gives `<figcaption>A
@@ -3136,6 +3201,7 @@ widget that says it is equal, so an emphasis deleted from the file stayed
 on screen. *a caption drawn again when its marks go, though the words are
 the same* (`webview-editing.test.js`) was written for it, and the mutation
 is caught.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

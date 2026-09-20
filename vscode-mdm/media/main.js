@@ -4078,14 +4078,19 @@
   };
 
   // The parts of a link that are not its label: skipped when the label is
-  // read, so `[text](url "title")` draws as its text alone.
-  const LINK_SKIP = /^(URL|LinkTitle)$/;
+  // read, so `[text](url "title")` draws as its text alone and a reference
+  // (`[text][ref]`) draws as its text without the `[ref]` after it (G002).
+  const LINK_SKIP = /^(URL|LinkTitle|LinkLabel)$/;
 
   // The inline content of a cell, read off the syntax tree once and kept as
   // plain data: the widget is built while the tree is at hand and drawn
   // later, when it is not. `skip` names the children that carry no text of
-  // their own (the URL of a link, its title).
-  function cellParts(node, text, skip) {
+  // their own (the URL of a link, its title). `marks` is the punctuation of
+  // the block as the page prints it (smartMarks), drawn into the text; a
+  // caller that wants the source as written leaves it out. `refs` are the
+  // document's link definitions (definitionsOf), so a link or an image
+  // written by reference finds where it goes here as it does in the prose.
+  function cellParts(node, text, skip, marks, refs) {
     const parts = [];
     const push = function (s) {
       if (s) parts.push({ kind: "text", text: s });
@@ -4098,7 +4103,11 @@
       push(slice(at, child.from));
       at = child.to;
       const name = child.name;
-      if (/Mark$/.test(name) || (skip && skip.test(name))) continue;
+      if (/Mark$/.test(name) || name === "Attribute" || (skip && skip.test(name))) continue;
+      if (name === "Span") {
+        parts.push({ kind: "mark", tag: "span", parts: cellParts(child, text, skip, marks, refs) });
+        continue;
+      }
       if (name === "InlineMath" || name === "InlineBlockMath") {
         const display = name === "InlineBlockMath";
         const content = child.getChild(
@@ -4112,24 +4121,76 @@
         });
       } else if (name === "Escape") {
         push(text(child.from + 1, child.to));
+      } else if (name === "Entity") {
+        // `&copy;` is © here as it is in the prose; one that stands for
+        // nothing stays as written (G009).
+        push(decodeEntity(text(child.from, child.to)));
       } else if (name === "Image") {
-        const url = child.getChild("URL");
-        const marks = child.getChildren("LinkMark");
+        // `ends` and not `marks`: the outer `marks` are the block's smart
+        // punctuation, which the alt is drawn with like any other text.
+        const target = linkTarget(child, text, refs);
+        const ends = child.getChildren("LinkMark");
         parts.push({
           kind: "image",
-          src: url ? imageSource(text(url.from, url.to)) : null,
-          alt: marks.length > 1 ? text(marks[0].to, marks[1].from) : "",
+          src: target && target.url ? imageSource(target.url) : null,
+          alt: ends.length > 1 ? slice(ends[0].to, ends[1].from) : "",
         });
       } else if (name === "Link" || name === "Autolink" || name === "URL") {
+        const target = name === "Link" ? linkTarget(child, text, refs) : null;
         const url = child.getChild("URL");
-        const inner = cellParts(child, text, LINK_SKIP);
+        const inner = cellParts(child, text, LINK_SKIP, marks, refs);
         parts.push({
           kind: "link",
-          href: url ? text(url.from, url.to) : partsText(inner),
+          href: target && target.url ? target.url : url ? unbracket(text(url.from, url.to)) : partsText(inner),
+          title: target ? target.title : "",
           parts: inner,
         });
+      } else if (name === "HTMLTag" && /^<br\s*\/?>$/i.test(text(child.from, child.to))) {
+        // A `<br>` is a line break in the cell, as the page writes it (G020);
+        // any other raw tag stays as written, as it does in the prose.
+        parts.push({ kind: "br" });
+      } else if (name === "FootnoteRef") {
+        // The label raised, the marks off, as the prose raises it and as the
+        // page raises the number it gives the note (<sup>1</sup> in a cell).
+        const ends = child.getChildren("FootnoteMark");
+        const label = ends.length > 1 ? text(ends[0].to, ends[1].from) : text(child.from, child.to);
+        parts.push({
+          kind: "mark",
+          tag: "span",
+          cls: "mdm-note-ref mdm-sup",
+          title: "Footnote " + label,
+          parts: [{ kind: "text", text: label }],
+        });
+      } else if (name === "FootnoteInline") {
+        parts.push({
+          kind: "mark",
+          tag: "span",
+          cls: "mdm-note-inline",
+          title: "Footnote, written inline",
+          parts: cellParts(child, text, skip, marks, refs),
+        });
+      } else if (name === "Citation") {
+        const raw = text(child.from, child.to);
+        parts.push({
+          kind: "mark",
+          tag: "span",
+          cls: "mdm-cite",
+          title: (raw.charAt(0) === "[" ? "Citation " : "Reference ") + raw,
+          parts: [{ kind: "text", text: raw }],
+        });
+      } else if (name === "RawTeX") {
+        // The HTML page leaves raw TeX out altogether (measured: a cell
+        // holding `\emph{x}` comes back as <td></td>), so a cell says what
+        // it is instead of drawing it as words, as the prose does (G013).
+        parts.push({
+          kind: "mark",
+          tag: "span",
+          cls: "mdm-rawtex",
+          title: "Raw TeX: set in the PDF, left out of the HTML page",
+          parts: [{ kind: "text", text: text(child.from, child.to) }],
+        });
       } else if (CELL_TAGS[name]) {
-        parts.push({ kind: "mark", tag: CELL_TAGS[name], parts: cellParts(child, text, skip) });
+        parts.push({ kind: "mark", tag: CELL_TAGS[name], parts: cellParts(child, text, skip, marks, refs) });
       } else {
         push(slice(child.from, child.to));
       }
@@ -4169,6 +4230,10 @@
         el.appendChild(span);
         return;
       }
+      if (p.kind === "br") {
+        el.appendChild(document.createElement("br"));
+        return;
+      }
       if (p.kind === "image") {
         if (!p.src) {
           el.appendChild(document.createTextNode(p.alt));
@@ -4187,13 +4252,18 @@
         // puts the caret in the source, as it does everywhere else.
         const link = document.createElement("span");
         link.className = "mdm-link";
+        // The tooltip is the destination and the Markdown title rides
+        // beside it, the pair a link in the prose carries.
         if (p.href) link.title = p.href;
+        if (p.title) link.setAttribute("data-mdm-title", p.title);
         paintParts(link, p.parts);
         el.appendChild(link);
         return;
       }
       const mark = document.createElement(p.tag);
-      if (p.tag === "code") mark.className = "mdm-inline-code";
+      if (p.cls) mark.className = p.cls;
+      else if (p.tag === "code") mark.className = "mdm-inline-code";
+      if (p.title) mark.title = p.title;
       paintParts(mark, p.parts);
       el.appendChild(mark);
     });
@@ -4202,7 +4272,7 @@
   // The rows of a pipe table and the alignment of its columns. The alignment
   // row (`| ---: | :--- |`) is the one TableDelimiter that is a child of the
   // table itself; the delimiters inside a row are the pipes between cells.
-  function tableModel(node, text) {
+  function tableModel(node, text, refs) {
     const rule = node.getChildren("TableDelimiter")[0];
     const align = (rule ? text(rule.from, rule.to) : "")
       .replace(/^\s*\|/, "")
@@ -4217,22 +4287,56 @@
         if (left) return "left";
         return null;
       });
-    // Where each cell starts, counted from the head of the table and not from
-    // the head of the document: the drawing outlives the edits made above it
-    // (it compares equal while its own source is the same), and an absolute
-    // position kept in the DOM would be stale by the time it is clicked. The
-    // head of the table is the node's own start, which is what revealBlock
-    // counts from when the click comes back.
+    // The cells of a row, read between its pipes and not off the TableCell
+    // nodes alone: Lezer gives no node for an empty cell (`|   |`), so a row
+    // read that way lost its columns and every value after a gap slid left
+    // (G036). A stretch between two pipes is a cell whatever it holds; the
+    // stretch before the first pipe and the one after the last are cells
+    // only when they hold something, since a row may leave its outer pipes
+    // off (GFM 4.10). Where each cell starts is counted from the head of
+    // the table and not from the head of the document: the drawing outlives
+    // the edits made above it (it compares equal while its own source is
+    // the same), and an absolute position kept in the DOM would be stale by
+    // the time it is clicked. The head of the table is the node's own start,
+    // which is what revealBlock counts from when the click comes back.
     const cells = function (row) {
-      return row.getChildren("TableCell").map(function (c) {
-        return { at: c.from - node.from, parts: cellParts(c, text, null) };
+      const out = [];
+      const nodes = row.getChildren("TableCell");
+      const stretch = function (from, to, outer) {
+        const inner = text(from, to);
+        if (outer && !inner.trim()) return;
+        const content = nodes.filter(function (c) {
+          return c.from >= from && c.to <= to;
+        })[0];
+        const lead = inner.length - inner.replace(/^[ \t]+/, "").length;
+        out.push({
+          at: (content ? content.from : from + lead) - node.from,
+          parts: content ? cellParts(content, text, null, smartMarks(content, content.to, text), refs) : [],
+        });
+      };
+      let at = row.from;
+      row.getChildren("TableDelimiter").forEach(function (pipe, i) {
+        stretch(at, pipe.from, i === 0);
+        at = pipe.to;
       });
+      stretch(at, row.to, true);
+      return out;
     };
+    // The header says how many columns there are, and every row is fitted
+    // to it the way GFM and Pandoc fit it: a short row is given empty cells
+    // and a long one loses the excess (G036). A cell added this way points
+    // at the end of its row, so a click on it opens the source there.
     const head = node.getChild("TableHeader");
+    const headCells = head ? cells(head) : [];
+    const fit = function (row) {
+      const out = cells(row).slice(0, headCells.length);
+      while (out.length < headCells.length) out.push({ at: row.to - node.from, parts: [] });
+      return out;
+    };
     return {
       align: align,
-      head: head ? cells(head) : [],
-      body: node.getChildren("TableRow").map(cells),
+      head: headCells,
+      body: node.getChildren("TableRow").map(fit),
     };
   }
 
@@ -4685,6 +4789,15 @@
           const out = renderTex(tex, true);
           const open = touched(blockFrom, blockTo);
           const active = open && holdsMainHead(state, blockFrom, blockTo);
+          // The rest of the closing line past its `$$`, a paragraph of its
+          // own on that line (math.js), drawn under the equation by the
+          // widget while the block is hidden (see MathWidget).
+          const next = node.nextSibling;
+          const tailNode = next && next.name === "Paragraph" && next.from < blockTo ? next : null;
+          let tail = tailNode ? { key: text(tailNode.from, tailNode.to), parts: cellParts(tailNode, text, null, smartMarks(tailNode, tailNode.to, text), refs) } : null;
+          // A label alone after the closer (`$$ {#eq-mass}`) is an attribute
+          // the page prints none of: nothing is drawn under the equation.
+          if (tail && !partsText(tail.parts).trim()) tail = null;
           if (open || out.html) {
             decos.push(
               Decoration.widget({
@@ -4904,7 +5017,11 @@
           const blockTo = doc.lineAt(n.to).to;
           decos.push(
             Decoration.widget({
-              widget: new TableWidget(text(blockFrom, blockTo), tableModel(node, text)),
+              widget: new TableWidget(
+                text(blockFrom, blockTo),
+                tableModel(node, text, refs),
+                frameOf(doc.lineAt(blockFrom).number)
+              ),
               block: true,
               side: 1,
             }).range(blockTo)
@@ -4935,7 +5052,12 @@
         }
 
         if (name === "Link") {
-          const url = node.getChild("URL");
+          const target = linkTarget(node, text, refs);
+          const attributes = {};
+          // The tooltip is the destination, what a hover shows anywhere;
+          // the Markdown title, when there is one, rides beside it.
+          if (target && target.url) attributes.title = target.url;
+          if (target && target.title) attributes["data-mdm-title"] = target.title;
           decos.push(
             Decoration.mark({
               class: "mdm-link",
@@ -4965,8 +5087,12 @@
         }
 
         if (name === "Image") {
-          const url = node.getChild("URL");
-          const src = url ? imageSource(text(url.from, url.to)) : null;
+          const target = linkTarget(node, text, refs);
+          const src = target && target.url ? imageSource(target.url) : null;
+          // The attribute block after the image, `{#fig-x width=30%}`: its
+          // width is the picture's, and it is part of the figure's paragraph.
+          const attr = node.nextSibling && node.nextSibling.name === "Attribute" ? node.nextSibling : null;
+          const width = attr ? cssLength(attributeValue(text(attr.from, attr.to), "width")) : null;
           if (src && !touched(n.from, n.to)) {
             const marks = node.getChildren("LinkMark");
             // The alt is the figure's caption and the picture's own text,
@@ -7052,7 +7178,9 @@
   function outlineHeadings(state) {
     const tree = CM.syntaxTree(state);
     const out = [];
-    tree.iterate({
+    const walked = tree || CM.syntaxTree(state);
+    const refs = definitionsOf(state, walked);
+    walked.iterate({
       enter: function (node) {
         let level = 0;
         const m = /^ATXHeading([1-6])$/.exec(node.name);

@@ -15,6 +15,7 @@ import {mdmFrontMatter} from "./frontmatter.js"
 import {mdmCallout} from "./callout.js"
 import {mdmLinks} from "./links.js"
 import {mdmTabHeading} from "./heading.js"
+import {mdmTable} from "./table.js"
 import {mdmPandoc} from "./pandoc.js"
 import {mdmFootnotes} from "./footnote.js"
 

@@ -1183,6 +1183,12 @@ body {
   text-align: left;
   vertical-align: top;
   border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+  /* CodeMirror's `overflow-wrap: anywhere` on the content reached the
+     cells, and a squeezed column broke its words in the middle (G045);
+     the page's cells wrap between words and never inside one, a column
+     squeezes to its longest word and the box scrolls the rest. */
+  overflow-wrap: normal;
+  word-break: normal;
 }
 #app .mdm-table th:first-child,
 #app .mdm-table td:first-child {

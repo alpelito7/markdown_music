@@ -113,4 +113,13 @@ async function linkInk(page) {
   });
 }
 
+// The text of every body cell of the drawn table, row by row.
+async function tableCells(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-table tbody tr")).map((tr) =>
+      Array.from(tr.children).map((td) => td.textContent)
+    )
+  );
+}
+
 
