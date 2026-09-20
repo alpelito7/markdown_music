@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 - The editor reads Markdown the way the page prints it. Lists, quotes and
   callouts are drawn as the page draws them: an item's text hangs under
