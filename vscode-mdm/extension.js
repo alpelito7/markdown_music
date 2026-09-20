@@ -11,6 +11,7 @@ const {
   toLf,
   withLang,
   langOf,
+  splitFrontMatter,
 } = require("./transforms");
 const { syntaxPalette, listThemes } = require("./theme");
 
@@ -1257,7 +1258,12 @@ function withFilter(text, lua) {
 // wants the `#` in the first column, while CommonMark lets up to three spaces
 // stand before it. A heading written with a space in front of it is a heading
 // in the editor and a paragraph in the export.
-const READER = "markdown-blank_before_header-blank_before_blockquote";
+// Plus the bare addresses the editor draws as links (GFM's autolinks, which
+// Pandoc's Markdown reads as text unless told: G017). An address with a
+// scheme and a bare mail address (measured on Pandoc 3.8.3); a `www.` one is
+// text on the page, and the editor draws it as text too, since Pandoc has no
+// switch for it.
+const READER = "markdown-blank_before_header-blank_before_blockquote+autolink_bare_uris";
 
 // The dialect goes in the header of the copy rather than in a `--from` on the
 // command line, which Quarto 1.9.37 does not survive: it dies in its own
@@ -1268,12 +1274,17 @@ const READER = "markdown-blank_before_header-blank_before_blockquote";
 // code that opens with `from:` is not mistaken for that.
 function withReader(text, from) {
   const line = "from: " + from;
-  const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
-  if (!header) return "---\n" + line + "\n---\n\n" + text;
-  if (/^[ \t]*from[ \t]*:/m.test(header[1])) return text;
-  return (
-    "---\n" + line + "\n" + header[1] + "\n---\n" + text.slice(header[0].length)
-  );
+  // The header as Pandoc reads it (transforms.js), so that a `...` closer, a
+  // closer with a space after it and an empty header are the header and a
+  // leading rule is not one (G040).
+  const fm = splitFrontMatter(text)[0];
+  if (!fm) return "---\n" + line + "\n---\n\n" + text;
+  const inner = fm
+    .replace(/^---[ \t]*\r?\n/, "")
+    .replace(/(?:---|\.\.\.)[ \t]*(?:\r?\n|$)$/, "")
+    .replace(/\r?\n$/, "");
+  if (/^[ \t]*from[ \t]*:/m.test(inner)) return text;
+  return "---\n" + line + (inner ? "\n" + inner : "") + "\n---\n" + text.slice(fm.length);
 }
 
 // The name the page goes by, when the document itself gives it none: the
@@ -1316,6 +1327,18 @@ const LIST_START = /^ {0,3}(?:[-*+]|1[.)])[ \t]+\S/;
 const LIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
 // A thematic break drawn with spaces, `* * *` or `- - -`, which is not a list.
 const SPACED_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+// A thematic break that is not a line of bare dashes: `***`, `___`, and any
+// spaced one. Under a line of text CommonMark reads the break and Pandoc
+// reads more of the paragraph (G039); a line of bare dashes there is a setext
+// underline to both, and is left to the rule below.
+const OTHER_BREAK = /^ {0,3}(?:([*_])(?:[ \t]*\1){2,}|-(?:[ \t]+-){2,})[ \t]*$/;
+// A heading indented one to three spaces, which CommonMark reads as a heading
+// and Pandoc as a paragraph of text with the hashes on it (G027).
+const INDENTED_HEADING = /^ {1,3}(#{1,6}(?:[ \t]|$))/;
+// A heading whose text ends in a `#` run with no space before it, `## Sonata
+// in F#`: CommonMark keeps the sharp (a closing sequence needs a space before
+// it, 4.2) and Pandoc takes it off (G027, G112).
+const TRAILING_SHARP = /^( {0,3}#{1,6}[ \t]+.*?[^ \t#\\])(#+)[ \t]*$/;
 // The line a `$$` block opens on, as the editor's grammar reads it
 // (vendor-src/src/markdown/math.js, isBlockMathStart).
 const MATH_OPEN = /^ {0,3}\$\$/;
@@ -1362,9 +1385,8 @@ const HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
 // LaTeX and a blank line would end the formula, so the block is stepped over
 // whole as a fence is.
 function withBreaks(text) {
-  const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
-  const head = header ? text.slice(0, header[0].length) : "";
-  const lines = (header ? text.slice(header[0].length) : text).split(/\r?\n/);
+  const head = splitFrontMatter(text)[0];
+  const lines = text.slice(head.length).split(/\r?\n/);
   // The document's own line ending, so a copy of a CRLF file stays CRLF.
   const eol = /\r\n/.test(text) ? "\r\n" : "\n";
   const out = [];
@@ -1391,8 +1413,8 @@ function withBreaks(text) {
       continue;
     }
     // Unless a blank line is there already, the one the rule above put in.
-    if (interruptsText(lines, i) && out[out.length - 1].trim()) out.push("");
-    out.push(line);
+    if (needsBlankAbove(lines, i) && out[out.length - 1].trim()) out.push("");
+    out.push(copyLine(lines, i));
     if (fence) {
       open = fence[1];
       continue;
@@ -1408,6 +1430,147 @@ function withBreaks(text) {
     out.push("");
   }
   return head + out.join(eol);
+}
+
+// The changes an outside edit made, in the editor's own lines. The text the
+// editor holds is the file's from `hidden` lines down, line endings apart, so
+// a range below the header is the same range `hidden` lines up. With them the
+// webview puts a change where it was made: from the two texts alone it can
+// only tell where they start to differ, and a line inserted among lines like
+// it was put at the end of the run, every caret of the run left on the copy
+// above its own (G090). Nothing when a change reaches into the lines the
+// editor does not hold, or when the event names none: the webview compares
+// the texts then, as it always did.
+function editorChanges(contentChanges, hidden) {
+  if (!contentChanges || !contentChanges.length) return undefined;
+  const out = [];
+  for (const change of contentChanges) {
+    if (!change.range || change.range.start.line < hidden) return undefined;
+    out.push({
+      from: { line: change.range.start.line - hidden, ch: change.range.start.character },
+      to: { line: change.range.end.line - hidden, ch: change.range.end.character },
+      text: toLf(change.text),
+    });
+  }
+  return out;
+}
+
+// The stretch two texts differ over: what stands between their common head
+// and their common tail, as offsets into the first and the text the second
+// holds there. Neither edge parts a CR from its LF, which a position cannot
+// name (the workbench reads an offset between the two as the end of the
+// line), nor the halves of a surrogate pair.
+function changedSpan(before, after) {
+  const max = Math.min(before.length, after.length);
+  let head = 0;
+  while (head < max && before.charCodeAt(head) === after.charCodeAt(head)) head++;
+  let tail = 0;
+  while (
+    tail < max - head &&
+    before.charCodeAt(before.length - 1 - tail) === after.charCodeAt(after.length - 1 - tail)
+  ) {
+    tail++;
+  }
+  const inPair = function (text, at) {
+    if (at <= 0 || at >= text.length) return false;
+    const a = text.charCodeAt(at - 1);
+    const b = text.charCodeAt(at);
+    return (a === 13 && b === 10) || (a >= 0xd800 && a <= 0xdbff && b >= 0xdc00 && b <= 0xdfff);
+  };
+  while (head > 0 && (inPair(before, head) || inPair(after, head))) head--;
+  while (tail > 0 && (inPair(before, before.length - tail) || inPair(after, after.length - tail))) tail--;
+  return { from: head, to: before.length - tail, insert: after.slice(head, after.length - tail) };
+}
+
+// Whether lines[i] needs a blank line over it in the copy: a list that
+// interrupts text (below); a table whose header row stands straight under a
+// line of text, which CommonMark and GitHub draw and Pandoc reads as more of
+// the paragraph, pipes and all; a `***` or a spaced rule under a line of
+// text, read the same way; and a line of dashes under an item, which is a
+// rule to CommonMark (the paragraph it would underline is inside the item)
+// and a second-level heading inside the item to Pandoc (G039, all four
+// measured on Pandoc 3.8.3 through Quarto 1.9.37).
+function needsBlankAbove(lines, i) {
+  if (i === 0 || !lines[i - 1].trim()) return false;
+  if (interruptsText(lines, i)) return true;
+  if (OTHER_BREAK.test(lines[i])) return true;
+  if (DASH_BREAK.test(lines[i]) && inList(lines, i - 1)) return true;
+  return tableStartsAt(lines, i) && !LIST_ITEM.test(lines[i - 1]);
+}
+
+// The line as the copy carries it: a heading indented up to three spaces is
+// brought to the margin, unless it stands inside a list, where the indent is
+// the item's (G027); and a heading ending in a `#` run with no space before
+// it gets a backslash before the run, so that Pandoc keeps the sharp
+// CommonMark keeps (G027, G112).
+function copyLine(lines, i) {
+  let line = lines[i];
+  const indented = INDENTED_HEADING.exec(line);
+  if (indented && !listContext(lines, i)) line = line.slice(line.length - line.trimStart().length);
+  if (INDENTED_UNDERLINE.test(line) && underlines(lines, i)) line = line.trimStart();
+  const sharp = TRAILING_SHARP.exec(line);
+  if (sharp) line = sharp[1] + "\\" + sharp[2];
+  return line;
+}
+
+// A setext underline set in one to three spaces. CommonMark reads the
+// heading and Pandoc a paragraph with the `=====` in it (`Title` over
+// `  =====`, measured on pandoc 3.8.3; the text's own indentation it takes),
+// so the copy brings the underline to the margin (G041).
+const INDENTED_UNDERLINE = /^ {1,3}(?:=+|-+)[ \t]*$/;
+
+// Whether lines[i], a run of = or -, stands under a line of a paragraph's
+// text outside a list, which is what makes it an underline: not under a
+// blank line, code, a heading, a fence, an item, a quote or a rule.
+function underlines(lines, i) {
+  if (i === 0) return false;
+  const above = lines[i - 1];
+  if (!above.trim() || /^(?: {4}|\t)/.test(above)) return false;
+  if (HEADING.test(above) || FENCE.test(above) || LIST_ITEM.test(above) || /^ {0,3}>/.test(above)) return false;
+  if (OTHER_BREAK.test(above) || DASH_BREAK.test(above)) return false;
+  return !listContext(lines, i);
+}
+
+// Whether the paragraph lines[i] ends belongs to a list item: read back over
+// the lines of the paragraph to the item's marker, stopping at a heading or
+// a fence.
+function inList(lines, i) {
+  for (let j = i; j >= 0 && lines[j].trim(); j--) {
+    if (LIST_ITEM.test(lines[j])) return true;
+    if (HEADING.test(lines[j]) || FENCE.test(lines[j])) return false;
+  }
+  return false;
+}
+
+// Whether lines[i] stands inside a list: the nearest line above that is
+// neither blank nor a continuation indented two or more is an item.
+function listContext(lines, i) {
+  for (let j = i - 1; j >= 0; j--) {
+    if (!lines[j].trim()) continue;
+    if (LIST_ITEM.test(lines[j])) return true;
+    if (/^ {2}|^\t/.test(lines[j])) continue;
+    return false;
+  }
+  return false;
+}
+
+// The cells of a pipe-table row: the outer pipes off, the row split at every
+// pipe not escaped with a backslash.
+function tableCells(line) {
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|") && !t.endsWith("\\|")) t = t.slice(0, -1);
+  return t.split(/(?<!\\)\|/);
+}
+
+// Whether lines[i] is the header row of a pipe table: a row with a pipe in
+// it, over a delimiter row of as many cells (GFM's rule for a table).
+function tableStartsAt(lines, i) {
+  if (i + 1 >= lines.length || lines[i].indexOf("|") === -1) return false;
+  const delims = tableCells(lines[i + 1]);
+  if (!delims.every((c) => /^[ \t]*:?-+:?[ \t]*$/.test(c))) return false;
+  if (!/[|-]/.test(lines[i + 1]) || lines[i + 1].indexOf("|") === -1 && delims.length < 2) return false;
+  return tableCells(lines[i]).length === delims.length;
 }
 
 // Whether lines[i] opens a list that CommonMark starts there and Pandoc reads
@@ -2648,6 +2811,13 @@ function audioRunSkip(run, webview, msg) {
   });
 }
 
+// How long a save is held for the webview to post the edit it was holding
+// back. VS Code gives a save participant a short while and then writes the
+// file regardless, and the edit is one message and one write away, so a
+// second is far more than it takes and short enough for a webview that never
+// answers (one being torn down) not to be felt.
+const FLUSH_WAIT_MS = 1000;
+
 class MdmEditorProvider {
   constructor(context) {
     this.context = context;
@@ -2696,8 +2866,20 @@ class MdmEditorProvider {
     // how many lines of the file are not in that text, which is what the
     // numbers the editor draws in its margin count from: the host is the only
     // side that has both texts to compare.
+    // A header the editor typed into a file that had none, while the setting
+    // keeps headers out of the editor. The edit is written as it came, and
+    // the file now has a header; mapping the text back under the setting
+    // would strip it and the echo would take the typed lines off the screen
+    // (the caret went to line 1 and the margin jumped to 4). The text stays
+    // in the editor with its header, as though the setting were "shown", for
+    // this document and until the setting is touched: the button then offers
+    // to hide it, and a press does.
+    let headerFromEditor = false;
+
+    // `version` is the document's, which the webview hands back as the `base`
+    // of every edit it sends (see "Synchronization" in media/main.js).
     const updateMsg = () => {
-      const withFrontMatter = readSettings().frontMatter === "shown";
+      const withFrontMatter = readSettings().frontMatter === "shown" || headerFromEditor;
       const text = document.getText();
       return {
         type: "update",
@@ -2705,8 +2887,20 @@ class MdmEditorProvider {
         frontMatter: toLf(frontMatter(text)),
         withFrontMatter: withFrontMatter,
         hiddenLines: hiddenLines(text, withFrontMatter),
+        version: document.version,
       };
     };
+
+    // The version of the document after the last change that was not the
+    // webview's own (the text editor beside it, a formatter, the language the
+    // menu writes). An edit the webview based on a version before it was
+    // written without knowing of that change, and its whole text would put
+    // the document back the way the webview last saw it: such an edit is not
+    // applied, the document is sent instead, and the webview merges the two
+    // and sends again. An edit based on a version the webview's own earlier
+    // edits produced is fine to apply, since each edit carries the whole
+    // text and the later one supersedes the earlier.
+    let externalVersion = document.version;
 
     // The line ending of the file, the one every text written back to it
     // carries. Everything that travels to the webview is LF (see
@@ -2719,7 +2913,11 @@ class MdmEditorProvider {
         e.document.uri.toString() === document.uri.toString() &&
         applyingFromWebview === 0
       ) {
-        webview.postMessage(updateMsg());
+        externalVersion = document.version;
+        const msg = updateMsg();
+        const changes = editorChanges(e.contentChanges, msg.hiddenLines);
+        if (changes) msg.changes = changes;
+        webview.postMessage(msg);
       }
     });
     const paletteMsg = () =>
@@ -2739,6 +2937,8 @@ class MdmEditorProvider {
     };
 
     const configSub = vscode.workspace.onDidChangeConfiguration((e) => {
+      // The setting speaks for the header again once it is touched.
+      if (e.affectsConfiguration("mdm.frontMatter")) headerFromEditor = false;
       if (
         e.affectsConfiguration("mdm") ||
         e.affectsConfiguration("editor.multiCursorModifier")
@@ -2765,10 +2965,37 @@ class MdmEditorProvider {
     const themeSub = vscode.window.onDidChangeActiveColorTheme(() => {
       webview.postMessage(paletteMsg());
     });
+
+    // The file is about to be written. The webview holds a keystroke back
+    // for 300 ms before it posts it, and a save made inside that window
+    // wrote the file without it, the late edit dirtying the tab again. The
+    // save is held until the webview has posted what it was holding and
+    // this side has written it (the edit travels ahead of the answer on the
+    // same ordered wire, and lands in the writing turn before the answer is
+    // read), or for FLUSH_WAIT_MS at most.
+    let flushId = 0;
+    const flushes = new Map();
+    const saveSub = vscode.workspace.onWillSaveTextDocument((e) => {
+      if (e.document.uri.toString() !== document.uri.toString()) return;
+      const id = ++flushId;
+      e.waitUntil(
+        new Promise((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            flushes.delete(id);
+            resolve();
+          };
+          const timer = setTimeout(done, FLUSH_WAIT_MS);
+          flushes.set(id, done);
+          webview.postMessage({ type: "flush", id: id });
+        })
+      );
+    });
     webviewPanel.onDidDispose(() => {
       changeSub.dispose();
       configSub.dispose();
       themeSub.dispose();
+      saveSub.dispose();
       // The page that was rendering the audio has gone with the panel and
       // nothing will answer, so the lock and the notification are let go here.
       // Added to this block rather than registered as a second onDidDispose:
@@ -2831,6 +3058,15 @@ class MdmEditorProvider {
         endAudioRun(document.uri.toString(), "the editor reloaded");
         webview.postMessage(updateMsg());
       } else if (msg.type === "setSetting") {
+        // A press on the header button while a typed header is being kept
+        // on screen over the setting: the setting takes over again, and it
+        // is re-sent even where the stored value does not change, since no
+        // configuration event says anything then.
+        let headerHanded = false;
+        if (msg.key === "frontMatter" && headerFromEditor) {
+          headerFromEditor = false;
+          headerHanded = true;
+        }
         let own = false;
         try {
           own = await writeSetting(document, msg.key, msg.value);
@@ -2842,7 +3078,12 @@ class MdmEditorProvider {
         // A setting written to settings.json reaches this editor and every
         // other through onDidChangeConfiguration below; a division kept for
         // this document alone is this editor's to be told of.
-        if (own) sendSettings();
+        if (own || headerHanded) sendSettings();
+      } else if (msg.type === "flushed") {
+        // The edit it may have posted ahead of this is in the writing turn
+        // already; the save goes on once that turn is over.
+        const done = flushes.get(msg.id);
+        if (done) writing.then(done, done);
       } else if (msg.type === "export") {
         try {
           await exportDocument(document, msg.to);
@@ -2853,21 +3094,50 @@ class MdmEditorProvider {
         exportAudioStep(document, webview, msg);
       } else if (msg.type === "edit") {
         await inTurn(async () => {
+          // Written without knowing of a change made here since: the
+          // document goes back to the webview instead (see externalVersion).
+          if (msg.base !== undefined && msg.base < externalVersion) {
+            webview.postMessage(updateMsg());
+            return;
+          }
           const newText = fromEditor(
             msg.text,
             document.getText(),
             !!msg.withFrontMatter,
             eol()
           );
-          if (newText === document.getText()) return;
-          applyingFromWebview++;
-          try {
-            const edit = new vscode.WorkspaceEdit();
-            const fullRange = new vscode.Range(0, 0, document.lineCount, 0);
-            edit.replace(document.uri, fullRange, newText);
-            await vscode.workspace.applyEdit(edit);
-          } finally {
-            applyingFromWebview--;
+          // A header typed into a file that had none, with the setting
+          // keeping headers out: the file gains it as typed, and the text
+          // stays on screen with it (headerFromEditor).
+          const typedHeader =
+            !msg.withFrontMatter &&
+            frontMatter(document.getText()) === "" &&
+            frontMatter(newText) !== "";
+          if (typedHeader) headerFromEditor = true;
+          if (newText !== document.getText()) {
+            applyingFromWebview++;
+            try {
+              // Over the stretch that changed and not over the whole
+              // document: every keystroke used to be written as one replace
+              // of all the text, which is what the workbench then hands its
+              // model, its undo stack and whoever else has the file open
+              // (G092).
+              const span = changedSpan(document.getText(), newText);
+              const edit = new vscode.WorkspaceEdit();
+              edit.replace(
+                document.uri,
+                new vscode.Range(document.positionAt(span.from), document.positionAt(span.to)),
+                span.insert
+              );
+              await vscode.workspace.applyEdit(edit);
+            } finally {
+              applyingFromWebview--;
+            }
+          }
+          // The text is in the document: the webview takes it as what the
+          // two sides agree on from here.
+          if (msg.seq !== undefined) {
+            webview.postMessage({ type: "applied", seq: msg.seq, version: document.version });
           }
           // Convergence echo, ONLY when the document ended up differing from
           // what the webview sent (an external update crossed in flight, or a
@@ -2876,8 +3146,10 @@ class MdmEditorProvider {
           // destroying the fresh empty paragraph a lone Enter creates (empty
           // paragraphs do not serialize), which read as "my Enter got
           // reverted".
+          // And once more when the text is the same but its mode is not: the
+          // editor learns that the header it typed is part of its text now.
           const echo = updateMsg();
-          if (echo.text !== msg.text) {
+          if (echo.text !== msg.text || typedHeader) {
             webview.postMessage(echo);
           }
         });
@@ -2948,7 +3220,12 @@ function deactivate() {}
 // and where its reader is sent on each system; chromeInstalls does the same
 // for Chrome, and a test can only run on one system. The key and the bound of
 // the divisions kept go out for the tests as
-// well, which seed and read VS Code's globalState through them.
+// well, which seed and read VS Code's globalState through them. changedSpan
+// is what an edit is written over and editorChanges what an outside change
+// is told to the webview as, both pure. audioFileName
+// is pure in the same way and is the half of the audio export that decides
+// what lands on the disk: what a score's title may put in a file name, and
+// what a document whose own name is too long gets instead.
 module.exports = {
   audioFileName,
   activate,
@@ -2956,6 +3233,8 @@ module.exports = {
   withFilter,
   withReader,
   withBreaks,
+  changedSpan,
+  editorChanges,
   withPageTitle,
   hasScores,
   renderArgs,

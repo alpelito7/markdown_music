@@ -28,8 +28,8 @@ a browser of its own and in parallel they trip over each other's waits.
 
 | File | What it pins down | Requires |
 |---|---|---|
-| `transforms.test.js` | 24 tests of `vscode-mdm/transforms.js`: the editor text is the file text save for two things, and both are pinned here, the YAML header hidden and spliced back (the blank lines under it taken from the file, one put in when the file has none, a header-only file, a header without its trailing newline), the line endings (the editor text is LF whatever the file uses, since CodeMirror holds no CR, and the ending of the file goes back on whatever is written to it, with a lone CR counted as a line ending on the way in, though VS Code only ever calls a file LF or CRLF), byte-identical round trips of `example.mdm` in both modes, fence info strings untouched in both directions, `toEditor` idempotent, and the count of the lines the editor is not sent (the header plus the blank lines under it, zero whenever the two texts already agree, and the first line of the editor landing on the file's line of the same text in `example.mdm`), which is what the numbers the editor draws in its margin count from. | Node |
-| `extension-host.test.js` | 97 tests of `vscode-mdm/extension.js` against a mock of the API (`mocks/vscode.js`): the settings allowlist against injection from `settings.json` (and the clamp of `mdm.outlineWidth`, the one setting that is a number), what a document keeps of its own word division (kept in `globalState` under the document's URI and never written to `settings.json`; one document's division not another's, and coming back with it across a restart; a press answered in its own editor, while a look pressed beside it goes to `settings.json` and reaches both editors, each with its own division over it; `mdm.hyphenation` as where a document starts, with what the document was left on outranking it; a kept value held to the same allowlist on its way into the page; the 500 documents used last kept and the rest forgotten oldest first; and an export dividing as the document it is exported from), the ready/update/edit protocol, the conditional echo (the first-Enter regression), the `withFrontMatter` flag travelling with the text and the count of the lines the editor is not being sent travelling with it (four for a document whose header is hidden, zero shown and zero for a file with no header), a CRLF document (the caret jump on Windows: it reaches the editor in LF, is written back with its CRLFs read raw out of the mock's store, and neither grows nor echoes however much is typed into it, which needs the mock to report the document's EOL the way VS Code does, a vote and not the first line break it finds), external and configuration changes, the syntax palette in the HTML and in the `palette` messages, dispose, and the audio wiring in the HTML (synth and soundfont URIs, the widget css, `unsafe-eval` and `connect-src` in the CSP). And export: it saves a dirty document before rendering (and leaves a clean one alone), runs `quarto render <doc>.qmd [--to html|pdf]` from the document's folder (a fake `quarto` on a PATH holding nothing else records arguments, cwd and the copy it was handed), makes that copy point at the filter the extension ships and leaves the `.mdm` untouched, drops the copy afterwards whether the render worked or not, keeps `format-links` when the document asks for them, names both formats on the command line when both were asked for (a header that declares none used to come back with the HTML alone), offers the Open HTML/PDF buttons that fit, and refuses a format that is not in the table before starting a process (the value comes from the webview). And the light half of it: with no `quarto` on the PATH the notification names Quarto and the log says where to get it, a PDF with scores stops only when no Chrome can print it and neither filter road is whole, prints the HTML page when Chrome exists but TeX's helpers do not, is waved through when the header names an `mdm.chrome` for the filter to resolve, while one without scores renders anyway; when Quarto reports no TeX, Chrome prints the HTML as PDF without overwriting an existing HTML, `.tex` or resource folder, a failed print falls back to the TeX notice, and a failed render puts Quarto's whole output in the MDM channel and the "Show log" button opens it, and a `.qmd` already in the way stops the export instead of being overwritten. The header rewrite is checked on its own (block list, flow list, a header with no `filters` key, no header at all, a quote in the path), and so is the dialect written beside it (a header gains it, a document that names a `from:` of its own at the top level or under a format keeps it, and a line of the body that opens with `from:` is prose); so is the fence test that decides whether a score is there, and the filter the extension carries is compared file by file with `_extensions/mdm`. And the look that rides with an export: the side of a named theme, of the three fixed values and of the workbench while on `auto`, the three score settings, the palette spelt without its `#`, and a palette from the other side left behind. And the rule the copy draws: a line of dashes with a line straight under it gets the blank line Pandoc needs, put in the copy and never in the document, with the fences it must not reach inside stepped over. And the two bases an image path hangs from: the folder of the document and the root of its filesystem in the HTML, with the resource roots that make them loadable, and neither of the two for a document that is not a file on disk. The export is named after the document's stem whatever its extension (a `.md` opened through "Open With" used to come out as `notes.md.qmd` and `notes.md.html`). And what it does when something goes wrong under it: the reader's own `.tex` put aside for the render that would write over it and put back after, a Chrome that never finishes printing stopped by a wall clock, a folder that cannot be written to named instead of a Quarto that never ran, a render error inside the print fallback kept apart from a missing TeX, one export of a document at a time with the second told so, and the page named after the document in the copy Quarto reads. | Node |
+| `transforms.test.js` | 31 tests of `vscode-mdm/transforms.js`: the editor text is the file text save for two things, and both are pinned here, the YAML header hidden and spliced back (the header read as Pandoc reads it: closed by `...` or by `---` with spaces after it, empty, opened by `---` with spaces after it, and never over a blank line, where the `---` is a rule and the body stays; the blank lines under it taken from the file, one put in when the file has none, a header-only file, a header without its trailing newline), the line endings (the editor text is LF whatever the file uses, since CodeMirror holds no CR, and the ending of the file goes back on whatever is written to it, with a lone CR counted as a line ending on the way in, though VS Code only ever calls a file LF or CRLF), byte-identical round trips of `example.mdm` in both modes, fence info strings untouched in both directions, `toEditor` idempotent, and the count of the lines the editor is not sent (the header plus the blank lines under it, zero whenever the two texts already agree, and the first line of the editor landing on the file's line of the same text in `example.mdm`), which is what the numbers the editor draws in its margin count from. | Node |
+| `extension-host.test.js` | 135 tests of `vscode-mdm/extension.js` against a mock of the API (`mocks/vscode.js`): the sync protocol (every update names the document's version, an edit that carries a `seq` is acknowledged with the version it produced, one based on a version an outside change has moved past is not written but answered with the document, and one with no base, as an older editor sends it, is written as before), a save held for the edit the webview was holding back and for no longer than a moment when nothing answers (a save of another document asks nothing), and a header typed into a header-less file while the setting keeps headers out kept on screen and in the file, the next edit read as carrying it and a press on the button hiding it though the stored setting does not change, the settings allowlist against injection from `settings.json` (and the clamp of `mdm.outlineWidth`, the one setting that is a number), what a document keeps of its own word division (kept in `globalState` under the document's URI and never written to `settings.json`; one document's division not another's, and coming back with it across a restart; a press answered in its own editor, while a look pressed beside it goes to `settings.json` and reaches both editors, each with its own division over it; `mdm.hyphenation` as where a document starts, with what the document was left on outranking it; a kept value held to the same allowlist on its way into the page; the 500 documents used last kept and the rest forgotten oldest first; and an export dividing as the document it is exported from), the ready/update/edit protocol, the conditional echo (the first-Enter regression), the `withFrontMatter` flag travelling with the text and the count of the lines the editor is not being sent travelling with it (four for a document whose header is hidden, zero shown and zero for a file with no header), a CRLF document (the caret jump on Windows: it reaches the editor in LF, is written back with its CRLFs read raw out of the mock's store, and neither grows nor echoes however much is typed into it, which needs the mock to report the document's EOL the way VS Code does, a vote and not the first line break it finds), external and configuration changes, the syntax palette in the HTML and in the `palette` messages, dispose, and the audio wiring in the HTML (synth and soundfont URIs, the widget css, `unsafe-eval` and `connect-src` in the CSP). And export: it saves a dirty document before rendering (and leaves a clean one alone), runs `quarto render <doc>.qmd [--to html|pdf]` from the document's folder (a fake `quarto` on a PATH holding nothing else records arguments, cwd and the copy it was handed), makes that copy point at the filter the extension ships and leaves the `.mdm` untouched, drops the copy afterwards whether the render worked or not, keeps `format-links` when the document asks for them, names both formats on the command line when both were asked for (a header that declares none used to come back with the HTML alone), offers the Open HTML/PDF buttons that fit, and refuses a format that is not in the table before starting a process (the value comes from the webview). And the light half of it: with no `quarto` on the PATH the notification names Quarto and the log says where to get it, a PDF with scores stops only when no Chrome can print it and neither filter road is whole, prints the HTML page when Chrome exists but TeX's helpers do not, is waved through when the header names an `mdm.chrome` for the filter to resolve, while one without scores renders anyway; when Quarto reports no TeX, Chrome prints the HTML as PDF without overwriting an existing HTML, `.tex` or resource folder, a failed print falls back to the TeX notice, and a failed render puts Quarto's whole output in the MDM channel and the "Show log" button opens it, and a `.qmd` already in the way stops the export instead of being overwritten. The header rewrite is checked on its own (block list, flow list, a header with no `filters` key, no header at all, a quote in the path), and so is the dialect written beside it (a header gains it, a document that names a `from:` of its own at the top level or under a format keeps it, and a line of the body that opens with `from:` is prose); so is the fence test that decides whether a score is there, and the filter the extension carries is compared file by file with `_extensions/mdm`. And the look that rides with an export: the side of a named theme, of the three fixed values and of the workbench while on `auto`, the three score settings, the palette spelt without its `#`, and a palette from the other side left behind. And the rule the copy draws: a line of dashes with a line straight under it gets the blank line Pandoc needs, put in the copy and never in the document, with the fences it must not reach inside stepped over. And the two bases an image path hangs from: the folder of the document and the root of its filesystem in the HTML, with the resource roots that make them loadable, and neither of the two for a document that is not a file on disk. The export is named after the document's stem whatever its extension (a `.md` opened through "Open With" used to come out as `notes.md.qmd` and `notes.md.html`). And what it does when something goes wrong under it: the reader's own `.tex` put aside for the render that would write over it and put back after, a Chrome that never finishes printing stopped by a wall clock, a folder that cannot be written to named instead of a Quarto that never ran, a render error inside the print fallback kept apart from a missing TeX, one export of a document at a time with the second told so, and the page named after the document in the copy Quarto reads. And a link followed from the editor: an address with a scheme or a `www.` one opened outside, a path beside the document (fragment dropped, escapes undone) and a `file:` address opened in VS Code through `vscode.open`, and nothing opened for a href without a name. | Node |
 | `audio-assets.test.js` | 4 tests of the player's vendored assets: the copies of abcjs 6.7.0 and abcjs-audio.css under `vscode-mdm/media` byte-identical to those in `_extensions` (so they cannot drift), the bundle whole (engraver and synth both exported), the 88 keys A0–C8 of the piano present and carrying a real mp3, and the harness loading the same audio assets the real webview page does (abcjs as a plain script, the soundfont path, the stylesheet, the CM6 bundle). | Node |
 | `packaging.test.js` | 5 tests of what the published package carries and claims, which using the editor cannot catch: the `LICENSE` of the repository and the copy of it inside `vscode-mdm/` (vsce reads the one in the package root) byte for byte and against the `license` field of the manifest, every package listed in the bundle's `VERSIONS.json` credited by name and version in both notices files (so a `npm run vendor` that pulls in a new dependency fails until somebody credits it), the licences the extension's notices have to name (abcjs, CodeMirror, KaTeX, and the share-alike of the Musyng Kite soundfont, which is an obligation and not a courtesy), the repository's notices covering a local abcm2ps build when one sits in `tools/bin/` (none is tracked; the check skips without one) with the LGPL and GPL texts present in `licenses/` and the upstream source named, and the note beside the samples agreeing with the notices on the licence. | Node |
 | `theme.test.js` | 26 tests of `vscode-mdm/theme.js`: JSON with comments and trailing commas, TextMate scope matching (prefix by dot, the most specific wins, a tie goes to the last, selectors with a space ignored), the `include` chain, finding a theme by id and by `%nls%` label, sanitizing down to hex colours (those values go into the HTML of the webview), `tokenColorCustomizations`, and VS Code's built-in Monokai read from disk when it is installed. | Node |
@@ -2769,6 +2769,41 @@ to six, hashes hidden*, with the setext case still green, since its underline
 goes through `hideLines`. The `todo` cases are the record of what the branch
 owes and are not mutated until their fix lands.
 
+The sync between the two sides was rebuilt on that branch on 2026-09-15 (a
+text from the host merged over the unconfirmed typing instead of dropped
+while an edit is debounced, an edit carrying the version it is based on and
+a `seq` the host acknowledges, a stale edit answered with the document
+instead of written, and the host's changes kept out of the undo history).
+Four mutations, all caught: **SY1** the `addToHistory` annotation dropped
+from `replaceText` -> *Ctrl+Z leaves what the host wrote in place*; **SY2**
+the old `if (pending) return` put back at the head of `replaceText` -> *an
+update that arrives while an edit is debounced is merged*; **SY3** the host's
+change applied without mapping it over the unconfirmed changes -> the same
+test and *a host change that crosses an edit in flight is merged*; **SY4**
+the host's stale-base guard turned off -> *an edit based on a version an
+outside change has moved past is not written*.
+
+Saving, and a header typed with headers hidden, the same day. The host
+holds a save (onWillSaveTextDocument) until the webview has posted the edit
+it was holding back and the writing turn is over, or for a second; Ctrl+S in
+the webview sends the edit ahead of the save; a header typed into a
+header-less file while the setting keeps headers out stays on screen and in
+the file, the button offering to hide it. Six mutations, all caught: **SV1**
+the `flush` never posted -> *a save waits for the edit the webview was
+holding back*; **SV2** `FLUSH_WAIT_MS` at 100 s -> *a save is held no longer
+than a moment* (seen to hang the full 100 s); **SV3** `headerFromEditor`
+never set -> *a header typed into a header-less file ... stays on screen and
+in the file*; **SV4** the webview answering a `flush` without sending ->
+*a flush from the host sends the held edit at once*; **SV5** the `Mod-s`
+binding not flushing -> *Ctrl+S sends the held edit ahead of the save*;
+**SV6** the header button reading the setting instead of the text -> *a
+header the host keeps on screen over the setting lights the button*. Two
+look tests read that lamp and were brought to what the host sends: *no
+toggle is lit until it is asked for* opens the document without its header,
+as hidden mode sends it, and *the header button asks the host to store the
+choice* posts the document with the header behind the settings, as
+`sendSettings` does.
+
 The pointer, on the same branch, 2026-09-16. While a button is down over
 the editor the drawing is held: `renderField` rebuilds for the text, the
 tree and the hidden lines, but not for a selection or a focus that moved
@@ -3295,6 +3330,47 @@ document-level Ctrl+F off -> *Ctrl+F opens the search from an unfocused
 document, and a match inside a hidden block opens the block*; **SR2** the
 document not entered ahead of the panel -> the same, by the block.
 
+The dialect, first part (P6-a), the same day. The four structures the
+editor drew and the page set otherwise (G039): a table whose header row
+stands straight under a line of text, a `***` or a spaced rule under a
+line of text or under an item, and a line of dashes under an item, which
+is a rule to CommonMark and a second-level heading inside the item to
+Pandoc. The copy Quarto renders gets the blank line in each place
+(`withBreaks`), the table told by GFM's rule, a header row over a
+delimiter row of as many cells, and never under an item; the same in the
+awk of `bin/mdm`, which the host test runs on every case. Two more lines
+the copy rewrites: a heading indented one to three spaces comes to the
+margin, unless it stands inside a list, and a heading ending in a `#`
+run with no space before it gets a backslash before the run, so that
+Pandoc keeps the sharp CommonMark keeps (G027, G112). The header is read
+as Pandoc reads it, in `transforms.js`, in the copy's own header
+(`withReader`, `withBreaks`), in `bin/mdm` and in the editor's parser
+(`frontmatter.js`): closed by `...` or by `---` with spaces after it,
+empty, opened by `---` with spaces after it, and never over a blank line,
+where the old pattern took the rule and everything down to the next one
+and the body vanished in hidden mode (G040). And the addresses (G017):
+the reader gains `+autolink_bare_uris`, so the page links an address with
+a scheme and a mail address, which the editor links; a `www.` address,
+which GFM links and Pandoc has no switch for, is text on both. The page
+is read against the editor on all of it in `html.test.js`. Fifteen
+mutations, all caught: **CP1** the `***` rule dropped -> *a list straight
+under a line of text gets the blank line the copy needs* and *the command
+line's copy is given the same blank lines as the export's*; **CP2** the
+dashes under an item dropped -> the same two; **CP3** the table dropped
+-> the same two; **CP4** the indented heading left -> the same two;
+**CP5** the sharp unescaped -> the same two; **CP6** the cell count
+skipped -> the same two, by `a | b | c` over `--|--` under text, which is
+no table; **CP7** the copy's header closed by `---` alone -> *the copy is
+read in the dialect of the editor, and a document that names one keeps
+it*; **CP8** the reader without the addresses -> the same; **AW1** the
+awk's `***` rule dropped -> the command line's test, by the two copies
+parting; **FM1** the blank line under the opener allowed -> *the header
+is read as Pandoc reads it*; **FM2** the `...` closer refused -> the same;
+**FM3** the header's lines taken greedily -> the same, by the empty
+header; **FM4** the parser's opener over a blank line kept as a header ->
+the vendor's *front matter: unterminated or not at position 0 gives no
+node* and *F03*; **UR1** every bare address a link -> *A04*.
+
 The dialect, second part (P6-b), the same day: the Pandoc syntax the
 export reads and the editor had no node for, in `pandoc.js`. Raw TeX
 (G013): a backslash before letters, with its brace and bracket groups, is
@@ -3409,6 +3485,17 @@ ATX heading's are hidden, P6-b); and Pandoc reads `*b 'c* d'` as a quoted run
 that swallows the emphasis closer where CommonMark, and the editor, read the
 emphasis first, one of the emphasis differences that are not replicated.
 
+The header-only file without a final newline (P7, G089), the same day:
+`fromEditor` gave the header the newline a body stands under before it asked
+whether there was a body, so an empty text over such a file wrote `---` and a
+newline where the file had `---`, and a keystroke taken back inside one
+debounce left the file modified. The two lines change places. What stays as
+decided: a keystroke that is written gives the header its newline, and the
+header keeps it afterwards, so the file as it was opened is not what undoing
+that keystroke writes; the test says so. One mutation, caught: **TR1** the
+lines back in their old order -> *an empty editor over a header-only file
+without a final newline writes the file's own bytes*.
+
 The small ones of the drawing (P7: G048, G046, and two found on the way),
 the same day. A processing instruction's block, `<?...?>`, is CommonMark's
 HTML block 3 and Lezer's ProcessingInstructionBlock, which no place in
@@ -3438,6 +3525,49 @@ Pandoc reads the inside of a `<div>` as Markdown (`markdown_in_html_blocks`)
 where the editor, with CommonMark, draws it as raw lines to the next blank
 line; the case in *HB01* holds HTML alone for that reason.
 
+The whitespace a reader drops (P7, G041), the same day. Measured on the
+verdict's case before the change, as the x of the first letter of a row: a
+paragraph set in three spaces at 19.6px where a flush one is at 0, an ATX
+heading set in three at 43.7, `>` and a tab at 43.1 where `> ` is at 17, the
+body of a fence set in two spaces at 29.3 where a flush fence's is at 12.7,
+and indented code at 45.9; after it, 0, 0, 17, 12.7 (the body's own two
+spaces kept) and 12.7. What goes while the line is untouched: the whitespace
+between the prefix of a line's containers and the text of a paragraph's line
+or a heading's (on a block's first line only when it runs up to the block,
+the indentation of an item's marker being the marker widget's); the tab after
+a `>`; the four columns, or the tab, that make a line indented code, for all
+the lines of the block at once and back when the caret is in the block, so
+the code never stands at two insets; and the columns a body line shares with
+its indented fence. A caret in the spaces before a `#` opens the heading as
+one in its text does. Found on the way, two. With the underline of a setext
+heading set in a space or two, the last line of the heading's text was read
+off the character before the mark, which is on the underline's own line, and
+the rule of the heading went to that hidden row. And Pandoc reads a setext
+underline at the margin only (`Title` over `  =====` is a paragraph to it,
+the text's own indentation it takes; measured on pandoc 3.8.3), so the copy
+brings such an underline to the margin, in `withBreaks` and in the awk of
+`bin/mdm` (written without an interval beside an alternation, which mawk
+1.3.4 cannot compile), outside a list and not under a quote's line, code, a
+heading, a fence or a rule. Fifteen mutations, thirteen caught: **WS1** the
+tab after a `>` left -> *WS01*; **WS2** the tab off the prefix `walkPrefix`
+reads for a quote -> not caught: the lead would then hide the tab a second
+time inside the hide the mark already has, which draws the same, and the
+regex keeps the two from overlapping; **WS3** the first-line guard off
+`hideLead` -> not caught, for the same reason: the indentation of an item's
+marker would be hidden inside the marker widget's own range; **WS4** a
+paragraph's lines left -> *WS01*; **WS5** an ATX heading's -> the same;
+**WS6** a setext heading's -> the same; **WS7** the columns of indented code
+left -> the same; **WS8** those columns never back under the caret -> the
+same (its DOM half); **WS9** the fence's indent left on its body -> the same;
+**WS10** all the whitespace of a code line taken and not its columns -> the
+same (the body's own two spaces); **WS11** the last text line read off the
+character before the mark -> the same (`mdm-h-last`); **WS12** the lead
+hidden under the caret too -> the same (its DOM half); **CU1** an indented
+underline brought to the margin wherever it stands -> the host's copy cases;
+**CU2** never brought -> the same; **CU3** never brought by the awk -> *the
+command line's copy* and the page test (G041) of `html.test.js`, which
+renders through `bin/mdm`.
+
 The characters that draw nothing (P7, G058), the same day: a bidi override,
 a zero-width space, a soft hyphen or a control character had no mark
 anywhere, a line opened as source included. CodeMirror's
@@ -3456,6 +3586,46 @@ text. The editing test *Backspace and Delete beside a character that draws
 nothing* pins that the keys take it as any other character; it passes with
 and without the marks, CodeMirror treating a replaced character as one step
 either way, and is there for what a later change to the marks might break.
+
+What an edit is written over (P7, G092), the same day: the host wrote every
+debounced edit as one replace of the whole document, which is what the
+workbench then hands its model, its undo stack and whoever else has the file
+open. It is written now over the stretch the two texts differ over, between
+their common head and their common tail, the edges kept off the middle of a
+CR LF (a position cannot name the place between the two: the workbench reads
+such an offset as the end of the line) and of a surrogate pair. The mock's
+`applyEdit` applied every replace as a whole-document one and now applies it
+over its range, with `offsetAt` and `positionAt` on its documents and a
+`Range` made of two positions as well as of four numbers; the 132 tests
+written against the old mock pass on the new one. Not seen in a real VS Code
+window, which the verdict could not reach either: what the undo stack of a
+text editor open beside this one makes of the smaller edits is unverified.
+Four mutations, all caught: **HS1** the whole document written again -> *an
+edit is written over the stretch that changed*; **HS2** the CR LF guard off
+-> *the stretch two texts differ over never parts a CR from its LF nor a
+surrogate pair*; **HS3** the surrogate guard off -> the same; **HS4** the
+tail allowed to run into the head -> the same two and *a CRLF document typed
+into over and over neither grows nor echoes*.
+
+Where an outside change was made (P7, G090), the same day: the host sent the
+whole text after a change made by the text editor beside this one, and the
+webview, comparing the two texts, could only tell where they start to
+differ: a line put in among lines like it was placed at the end of the run,
+and every caret of the run stayed on the copy above its own. The change
+event names its ranges, in the file as it stood, and the host now passes them
+on in the editor's own lines (the file's, less the lines the editor does not
+hold; nothing when a change reaches into those, or when the event names none).
+The webview takes that account only when it leads from the text the two
+sides agree on to the text that came with it, and compares the texts as
+before otherwise, so a wrong account costs nothing. The mock's change event
+carries `contentChanges`, as VS Code's does. Five mutations, all caught:
+**XC1** the account left aside -> the editing test *a line put in from
+outside among lines like it goes where it was put*; **XC2** an account taken
+without being checked -> the same (its second half, an account that leads
+elsewhere); **XC3** the lines not brought up by the ones held back -> the
+host test *an outside change is told to the webview with its range*; **XC4**
+a change inside the header passed on -> the same; **XC5** the text passed
+with the file's line endings -> the same.
 
 The inside of a table cell (2026-09-18), found by re-probing the bench at the
 close of the branch: four of the groups the branch had fixed in the prose were
@@ -3493,6 +3663,25 @@ widget that says it is equal, so an emphasis deleted from the file stayed
 on screen. *a caption drawn again when its marks go, though the words are
 the same* (`webview-editing.test.js`) was written for it, and the mutation
 is caught.
+
+### The blank lines under a hidden header (2026-09-19)
+
+With the header hidden the host kept the header and every blank line under
+it, so an Enter at the head of the body went to the file, joined that gap
+and came back as nothing: the editor always opened on the first line of
+text. The host keeps one blank line now, the one Pandoc wants there, and a
+blank line past it is the body's (`gapAfter` in `transforms.js`, which
+`toEditor`, `fromEditor` and `hiddenLines` share). The host test *an edit
+that the host canonicalizes is echoed back once* held the old behaviour as
+its case and is now *blank lines typed at the head of the body stay in the
+editor, with no echo*; *the host keeps one blank line under the header, and
+a blank line past it is the body's* (`transforms.test.js`) replaces the one
+that put two blank lines back into the gap, and `hiddenLines` counts 4 and
+not 5 for a file with two. The echo after an edit the host rewrites has
+no case left in `extension-host.test.js` (its other `update` assertions are
+outside changes and stale edits), since this was the text it was shown
+with. **HG1** the
+gap taken whole again (`/^(?:\r?\n)+/`) -> caught by all three.
 
 ### The shortcut in the tip (2026-09-19)
 
@@ -3590,6 +3779,47 @@ opens in, and Enter after the language goes on inside it*; *Enter in a fence
 inside a task keeps to the item's column, not past its box (G071)*;
 *Ctrl+Shift+8 does what the code block button does, the tip names it, and
 abc typed after the backticks makes a score*; and `code-block` in `BAR`.
+
+### Ctrl+Z answered twice (2026-09-19)
+
+Reported from VS Code: the code block button on the blank line 31 of
+example.mdm, then Ctrl+Z, and line 31 went, on screen and in the file.
+Inside VS Code Ctrl+Z is undone twice, by CodeMirror in the page and by the
+workbench on the text model under the custom editor, whose text the host
+then sends (inferred from the report and not read in the workbench's code;
+emulating that undo in the harness reproduces the lost line exactly). The
+two undos take out one change at two places: the host writes an edit over
+the stretch a comparison of the texts finds, and a line put in among blank
+lines is found at the end of the run where CodeMirror put it at the head.
+`replaceText` mapped the host's undo over the page's as two writers'
+changes, and one line break more came out. A plain Enter on a blank line
+did the same, and Ctrl+Y wrote the line, or the block, twice. A text from
+the host that is the one on screen is taken as agreement now. *Ctrl+Z and
+Ctrl+Y answered by the workbench as well as here leave the text they come
+to, no line short and no block twice* (`webview-editing.test.js`) has the
+host confirm the button's edit and Enter's with `applied`, presses Ctrl+Z,
+sends the workbench's undo with the host's own range, and the same for
+Ctrl+Y.
+
+The mutations of both ran on a copy of `tests/` and `vscode-mdm/` in the
+session's scratchpad, so the `main.js` other sessions' suites load was never
+broken, against the eleven tests the names pick (the eight above, the order
+of the bar, the tips of the four marks and a code block's copy button; the
+baseline green): **CB1** no blank line above a block made on a blank line ->
+caught (3 tests); **CB2** the block through the paragraph, under the caret's
+line -> caught; **CB3** a fence of three whatever the lines hold -> caught;
+**CB4** a block cut into not taken whole -> caught; **CB5** a task's box
+counted in the item's width -> caught (2); **CB6** Enter in a fence back to
+the continuation that counts the box -> caught (2); **CB7** no Ctrl+Shift+8
+-> caught; **CB8** the Mac tip without its ⌥ -> caught; **CB9** a blank line
+above the block in a list too -> caught; **CB10** the caret left at the head
+of the blank line -> caught (3); **CB11** the space after a quote's `>` kept
+when an empty block goes -> caught; **CB12** no agreement taken from a host
+text that is the one on screen -> caught, by the double-undo test alone;
+**CB13** the button left out of the bar -> caught (8); **CB14** the closing
+fence left behind -> caught; **CB15** an item's marker not kept on the line
+the block opens on -> caught (2); **CB16** a new block's lines without the
+container's marks -> caught.
 
 ### Strikethrough, task list and quote buttons (2026-09-19)
 

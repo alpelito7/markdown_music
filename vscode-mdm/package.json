@@ -87,7 +87,7 @@
           "type": "string",
           "enum": ["hidden", "shown"],
           "enumDescriptions": [
-            "The YAML header is not shown. It stays on the file and is spliced back on every save.",
+            "The YAML header is not shown. It stays on the file and is spliced back on every edit.",
             "The YAML header is the first block of the document and is edited in place."
           ],
           "default": "hidden",

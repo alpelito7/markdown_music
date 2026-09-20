@@ -496,6 +496,11 @@ test("the header button asks the host to store the choice", { skip }, async () =
   assert.equal((await fm()).lit, false, "the button moved before the host answered");
 
   await postSettings(h.page, { frontMatter: "shown" });
+  // The host answers a setting with the settings and then the document
+  // again, in the mode now in force (sendSettings in extension.js). The
+  // lamp reads the document and not the setting, so it lights once the
+  // header is back in the text.
+  await update(h.page, EXAMPLE, true);
   await sleep(300);
   assert.deepEqual(await fm(), {
     lit: true,
@@ -4805,8 +4810,15 @@ const lampOf = (page, name) =>
 
 test("no toggle is lit until it is asked for", { skip }, async () => {
   // Every setting at the value the extension ships, front matter included:
-  // the helper seeds that one shown, and the default is hidden.
-  const h = await open({ seed: { settings: { frontMatter: "hidden" } } });
+  // the helper seeds that one shown, and the default is hidden, under which
+  // the host sends the document without its header. The lamp reads the
+  // text, so the header has to be out of it here: a header the host keeps
+  // on screen over the setting lights the lamp on purpose (see
+  // webview-editing.test.js).
+  const h = await open({
+    seed: { settings: { frontMatter: "hidden" } },
+    withFrontMatter: false,
+  });
   for (const t of TOGGLES) {
     assert.equal(await lampOf(h.page, t.name), false, t.name + " is lit on its own default");
   }

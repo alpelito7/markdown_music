@@ -317,6 +317,10 @@ test("front matter: closed by --- or ..., with trailing spaces", () => {
 
 test("front matter: unterminated or not at position 0 gives no node", () => {
   assert.deepEqual(nodes(parse("---\ntitle: x\n\nbody"), /FrontMatter/), [])
+  // A `---` over a blank line is a rule, whatever closes later (Pandoc's
+  // reading, G040): the paragraph and the second rule stay in the body.
+  assert.deepEqual(nodes(parse("---\n\nFirst para.\n\n---\n\nAfter.\n"), /FrontMatter/), [])
+  assert.equal(parse("---\n\nFirst para.\n\n---\n\nAfter.\n").toString(), "Document(HorizontalRule,Paragraph,HorizontalRule,Paragraph)")
   assert.equal(parse("---\ntitle: x\n\nbody").topNode.firstChild.name, "HorizontalRule")
   assert.deepEqual(nodes(parse("\n---\ntitle: x\n---\n"), /FrontMatter/), [])
   assert.deepEqual(nodes(parse("a\n---\nb\n---\n"), /FrontMatter/), [])

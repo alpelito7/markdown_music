@@ -6,8 +6,10 @@
 // FrontMatterMark (both fence lines) and FrontMatterContent (the YAML,
 // which parseMixed hands to the YAML parser so that it highlights and
 // behaves as YAML in the editor). An unterminated header produces no node:
-// the `---` is then the thematic break it would be for CommonMark. A `---`
-// anywhere else is never front matter.
+// the `---` is then the thematic break it would be for CommonMark, and so
+// does a `---` over a blank line, which Pandoc reads as a rule and not as
+// the opening of a header (G040; the host splits the file by the same
+// rule, transforms.js). A `---` anywhere else is never front matter.
 
 import {parseMixed} from "@lezer/common"
 import {tags} from "@lezer/highlight"
@@ -19,8 +21,17 @@ const CLOSE = /^(?:---|\.\.\.)[ \t]*$/
 
 function parseFrontMatter(cx, line) {
   if (cx.lineStart != 0 || cx.depth != 1 || !OPEN.test(line.text)) return false
-  // Commit only when the closer exists; nextLine() cannot be undone.
-  let found = forEachLineAfter(cx, line, text => CLOSE.test(text) ? true : undefined)
+  // Commit only when the closer exists; nextLine() cannot be undone. The
+  // line under the opener has to hold something: over a blank line the
+  // opener is a rule.
+  let first = true
+  let found = forEachLineAfter(cx, line, text => {
+    if (first) {
+      first = false
+      if (!/\S/.test(text)) return false
+    }
+    return CLOSE.test(text) ? true : undefined
+  })
   if (!found) return false
   let openTo = line.text.length
   let contentFrom = -1, contentTo = -1

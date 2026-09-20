@@ -10,7 +10,9 @@ const state = {
   updates: [], // {key, value, target} written through config.update
   documents: new Map(), // uri -> text
   documentEol: new Map(), // uri -> the EOL of the model, fixed when it is opened
+  documentVersion: new Map(), // uri -> TextDocument.version, one more per change
   textDocumentListeners: [],
+  willSaveListeners: [],
   configurationListeners: [],
   colorThemeListeners: [],
   errorMessages: [], // {message, buttons}
@@ -25,6 +27,7 @@ const state = {
   progressRuns: [], // one per withProgress call: its reports, and cancel()
   progressEnded: 0, // how many of them the extension let finish
   savedUris: [],
+  appliedEdits: [],
   openedExternal: [],
   executed: [], // {command, args} of every commands.executeCommand
   dirtyDocuments: new Set(), // uris whose mock document reports isDirty
@@ -40,7 +43,9 @@ function reset() {
   state.updates = [];
   state.documents = new Map();
   state.documentEol = new Map();
+  state.documentVersion = new Map();
   state.textDocumentListeners = [];
+  state.willSaveListeners = [];
   state.configurationListeners = [];
   state.colorThemeListeners = [];
   state.errorMessages = [];
@@ -55,6 +60,7 @@ function reset() {
   state.progressRuns = [];
   state.progressEnded = 0;
   state.savedUris = [];
+  state.appliedEdits = [];
   state.openedExternal = [];
   state.executed = [];
   state.dirtyDocuments = new Set();
@@ -117,16 +123,61 @@ const workspace = {
     return uri;
   },
   async applyEdit(edit) {
-    // Apply every replace as a full-document replace (which is how
-    // extension.js uses it) and fire the change event the way VS Code does.
-    edit._replacements.forEach(({ uri, newText }) => {
-      state.documents.set(uri.toString(), newText);
+    // Each replace over its own range, as VS Code applies it, and the change
+    // event fired the way VS Code fires it. What was replaced is kept for the
+    // tests that read what the host wrote over (state.appliedEdits).
+    edit._replacements.forEach(({ uri, range, newText }) => {
       const doc = makeDocument(uri.toString());
-      state.textDocumentListeners.forEach((l) => l({ document: doc }));
+      const text = doc.getText();
+      const from = doc.offsetAt(range.start);
+      const to = doc.offsetAt(range.end);
+      state.appliedEdits.push({ from, to, replaced: text.slice(from, to), newText });
+      setText(uri.toString(), text.slice(0, from) + newText + text.slice(to));
     });
     return true;
   },
+  onWillSaveTextDocument(listener) {
+    state.willSaveListeners.push(listener);
+    return {
+      dispose() {
+        const i = state.willSaveListeners.indexOf(listener);
+        if (i !== -1) state.willSaveListeners.splice(i, 1);
+      },
+    };
+  },
 };
+
+// A change of the document's text, from an edit or from outside: the
+// version moves with it, as VS Code's TextDocument.version does, and the
+// change listeners hear of it. A test that stands for the text editor
+// beside the MDM editor changes the text through this and not by writing
+// the store, so the version tells the host the change was not its own.
+function setText(uriString, text, contentChanges) {
+  state.documents.set(uriString, text);
+  state.documentVersion.set(uriString, (state.documentVersion.get(uriString) || 1) + 1);
+  const doc = makeDocument(uriString);
+  // The ranges of the change, in the document as it stood before it, when the
+  // test names them; VS Code always does.
+  state.textDocumentListeners.forEach((l) => l({ document: doc, contentChanges: contentChanges || [] }));
+}
+
+// What VS Code does before it writes a file: every participant is told and
+// may hold the save with waitUntil; the save goes on once all of them are
+// done (VS Code gives them a moment and then saves regardless). Returns
+// when the participants have had their turn.
+async function willSave(uriString, reason) {
+  const doc = makeDocument(uriString);
+  const waits = [];
+  const e = {
+    document: doc,
+    reason: reason || 1,
+    waitUntil(p) {
+      waits.push(p);
+    },
+  };
+  state.willSaveListeners.forEach((l) => l(e));
+  await Promise.all(waits.map((p) => p.catch(() => {})));
+}
 
 // The EOL VS Code gives a file it opens: a vote, not the first line break it
 // finds. Every CR counts for CRLF and every lone LF against it, so a file with
@@ -172,6 +223,10 @@ function makeDocument(uriString) {
     get eol() {
       return eolOf(uriString) === "\r\n" ? EndOfLine.CRLF : EndOfLine.LF;
     },
+    // Counts the changes of the text, as VS Code's does (from 1 on open).
+    get version() {
+      return state.documentVersion.get(uriString) || 1;
+    },
     // What the extension host really hands an extension is a mirror of the
     // buffer, not the buffer itself: its getText() is `lines.join(eol)`. A
     // text written into a CRLF document therefore comes back CRLF, whatever
@@ -183,6 +238,31 @@ function makeDocument(uriString) {
         .join(eolOf(uriString)),
     get lineCount() {
       return (state.documents.get(uriString) || "").split(/\r\n|\r|\n/).length;
+    },
+    // A position names a place on a line, never one between a CR and its LF,
+    // and one past the end of a line or of the document is brought back to
+    // it, as VS Code's are.
+    offsetAt(position) {
+      const eol = eolOf(uriString);
+      const lines = this.getText().split(eol);
+      const line = Math.min(Math.max(position.line, 0), lines.length - 1);
+      if (position.line > lines.length - 1) return this.getText().length;
+      let offset = 0;
+      for (let i = 0; i < line; i++) offset += lines[i].length + eol.length;
+      return offset + Math.min(Math.max(position.character, 0), lines[line].length);
+    },
+    positionAt(offset) {
+      const eol = eolOf(uriString);
+      const lines = this.getText().split(eol);
+      let rest = Math.max(offset, 0);
+      for (let i = 0; i < lines.length; i++) {
+        if (rest <= lines[i].length) return { line: i, character: rest };
+        // Between the CR and the LF: the end of the line.
+        if (rest < lines[i].length + eol.length) return { line: i, character: lines[i].length };
+        rest -= lines[i].length + eol.length;
+      }
+      const last = lines.length - 1;
+      return { line: last, character: lines[last].length };
     },
   };
 }
@@ -197,9 +277,15 @@ class WorkspaceEdit {
 }
 
 class Range {
+  // Four numbers, or two positions, as VS Code's takes either.
   constructor(a, b, c, d) {
-    this.start = { line: a, character: b };
-    this.end = { line: c, character: d };
+    if (typeof a === "object") {
+      this.start = { line: a.line, character: a.character };
+      this.end = { line: b.line, character: b.character };
+    } else {
+      this.start = { line: a, character: b };
+      this.end = { line: c, character: d };
+    }
   }
 }
 
@@ -420,4 +506,6 @@ module.exports = {
   _reset: reset,
   _makeDocument: makeDocument,
   _memento: memento,
+  _setText: setText,
+  _willSave: willSave,
 };

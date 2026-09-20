@@ -119,6 +119,32 @@ test("an LF file is left alone, and an absent eol means LF", () => {
 
 // ---------- Front matter handling ----------
 
+test("the header is read as Pandoc reads it: `...` and spaced closers, an empty header, and a rule over a blank line (G040)", () => {
+  // A: a `---` over a blank line is a rule; nothing is a header, and the
+  // editor gets the whole file in hidden mode (the old pattern took the
+  // rule and everything down to the next one, and the body vanished).
+  const a = "---\n\nFirst para.\n\n---\n\nAfter.\n";
+  assert.equal(frontMatter(a), "");
+  assert.equal(toEditor(a, false), a);
+  // B: closed by `...`; C: closed by `---  `; D: empty; E: opened by `---  `.
+  const cases = [
+    ["---\ntitle: t\n...\n\nBody one.\n\n---\n\nAfter.\n", "---\ntitle: t\n...\n", "Body one.\n\n---\n\nAfter.\n"],
+    ["---\ntitle: t\n---  \n\nBody one.\n\n---\n\nAfter.\n", "---\ntitle: t\n---  \n", "Body one.\n\n---\n\nAfter.\n"],
+    ["---\n---\n\nBody one.\n\n---\n\nAfter.\n", "---\n---\n", "Body one.\n\n---\n\nAfter.\n"],
+    ["---  \ntitle: t\n---\n\nBody.\n", "---  \ntitle: t\n---\n", "Body.\n"],
+    ["---\r\ntitle: t\r\n...\r\n\r\nBody.\r\n", "---\r\ntitle: t\r\n...\r\n", "Body.\n"],
+  ];
+  for (const [disk, header, body] of cases) {
+    assert.equal(frontMatter(disk), header, "the header of " + JSON.stringify(disk));
+    assert.equal(toEditor(disk, false), body, "the editor text of " + JSON.stringify(disk));
+    assert.equal(roundTrip(disk, false, /\r\n/.test(disk) ? "\r\n" : "\n"), disk, "the round trip of " + JSON.stringify(disk));
+  }
+  // The line under the opener has to be there: `---` alone, or at the end,
+  // is a rule too.
+  assert.equal(frontMatter("---\n"), "");
+  assert.equal(frontMatter("---"), "");
+});
+
 test("frontMatter() returns the header, or empty when there is none", () => {
   assert.equal(
     frontMatter("---\ntitle: t\n---\n\nBody\n"),
@@ -137,10 +163,16 @@ test("hidden header is spliced back from disk on save", () => {
   assert.equal(fromEditor("Body\n", disk, false), disk);
 });
 
-test("the blank lines the file keeps under the header are the ones put back", () => {
+test("the host keeps one blank line under the header, and a blank line past it is the body's", () => {
+  // The second blank line is the editor's, so an Enter typed at the head of
+  // the body with the header hidden stays on screen; it used to join the
+  // gap on disk and come back as nothing.
   const two = "---\ntitle: t\n---\n\n\nBody\n";
-  assert.equal(toEditor(two, false), "Body\n");
-  assert.equal(fromEditor("Body\n", two, false), two);
+  assert.equal(toEditor(two, false), "\nBody\n");
+  assert.equal(fromEditor("\nBody\n", two, false), two);
+  const one = "---\ntitle: t\n---\n\nBody\n";
+  assert.equal(fromEditor("\n\nBody\n", one, false), "---\ntitle: t\n---\n\n\n\nBody\n");
+  assert.equal(toEditor("---\ntitle: t\n---\n\n\n\nBody\n", false), "\n\nBody\n");
   const none = "---\ntitle: t\n---\nBody\n";
   assert.equal(toEditor(none, false), "Body\n");
   // A file with no blank line under its header gets the one Pandoc wants.
@@ -194,6 +226,20 @@ test("a header missing its trailing newline gains one before the body", () => {
   assert.equal(out, "---\ntitle: t\n---\n\nBody\n");
 });
 
+test("an empty editor over a header-only file without a final newline writes the file's own bytes (G089)", () => {
+  for (const [disk, eol] of [["---\ntitle: t\n---", "\n"], ["---\r\ntitle: t\r\n---", "\r\n"]]) {
+    // A keystroke taken back inside one debounce sends an empty text over
+    // the file as it was opened: nothing to write, where "---" used to gain
+    // a newline and the file came out modified.
+    assert.equal(fromEditor("", disk, false, eol), disk);
+    // A keystroke that was written gives the header its newline for the
+    // text to stand under, as decided, and the header keeps it afterwards.
+    const typed = fromEditor("x", disk, false, eol);
+    assert.equal(typed, disk + eol + eol + "x");
+    assert.equal(fromEditor("", typed, false, eol), disk + eol);
+  }
+});
+
 test("toEditor is stable (mapping twice changes nothing)", () => {
   const once = toEditor(EXAMPLE, false);
   assert.equal(toEditor(once, false), once);
@@ -204,7 +250,7 @@ test("toEditor is stable (mapping twice changes nothing)", () => {
 
 // The editor draws the file's line numbers in its margin, so it has to be told
 // how many lines the mapping kept back. Everything here counts the newlines of
-// the prefix toEditor takes off, which is the header plus the blank lines the
+// the prefix toEditor takes off, which is the header plus the blank line the
 // file has under it.
 
 test("hiddenLines counts the header and the gap the editor never receives", () => {
@@ -213,8 +259,9 @@ test("hiddenLines counts the header and the gap the editor never receives", () =
   // Which is to say: the editor's first line is the file's fifth.
   assert.equal(toEditor(disk, false), "Body\n");
   assert.equal(disk.split("\n")[4], "Body");
-  // Two blank lines under the header are two lines of the file.
-  assert.equal(hiddenLines("---\na\n---\n\n\nBody\n", false), 5);
+  // Of two blank lines under the header the host keeps one; the other is
+  // the editor's first line.
+  assert.equal(hiddenLines("---\na\n---\n\n\nBody\n", false), 4);
   // A CRLF file counts its lines, not its characters.
   assert.equal(hiddenLines("---\r\na\r\n---\r\n\r\nBody\r\n", false), 4);
 });

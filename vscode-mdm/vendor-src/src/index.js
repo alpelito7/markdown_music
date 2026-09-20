@@ -4,7 +4,7 @@
 export {
   EditorState, EditorSelection, StateField, StateEffect, Facet, Compartment,
   Transaction, Text, Prec, RangeSet, RangeSetBuilder, Annotation,
-  CharCategory, findClusterBreak,
+  CharCategory, findClusterBreak, ChangeSet,
 } from "@codemirror/state";
 export {
   EditorView, Decoration, WidgetType, ViewPlugin, ViewUpdate, keymap,

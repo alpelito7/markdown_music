@@ -748,9 +748,13 @@
 
   let headerText = "";
 
+  // The button reads the text and not the setting: a header typed into a
+  // document while the setting keeps headers out stays in the text (the host
+  // says so with the update that follows the edit), and the button then
+  // offers to hide it, which is what a press does.
   function fmTip() {
     if (headerText === "") return "No YAML header in this file";
-    return frontMatter === "shown" ? "Hide YAML header" : "Show YAML header";
+    return editorFrontMatter ? "Hide YAML header" : "Show YAML header";
   }
 
   function updateFrontMatter() {
@@ -761,7 +765,7 @@
     btn.setAttribute("aria-label", fmTip());
     btn.classList.toggle(
       "mdm-btn--on",
-      frontMatter === "shown" && headerText !== ""
+      editorFrontMatter && headerText !== ""
     );
     // Nothing to show for a file without a header, so the button greys out.
     btn.classList.toggle("mdm-btn--off", headerText === "");
@@ -812,23 +816,89 @@
   // changed in between (see transforms.js).
   let editorFrontMatter = false;
 
+  // The two sides hold one document and both write to it: this editor with
+  // every keystroke, the host with whatever changes the file under it (the
+  // text editor open beside this one, a formatter, the header button, the
+  // language the hyphenation menu writes). Each side sends the other the
+  // whole text, and what keeps the two from writing over each other is a
+  // record of what they last agreed on:
+  //
+  // - `synced` is the text the host has acknowledged holding, and
+  //   `unconfirmed` the changes made here since, as one ChangeSet from that
+  //   text to the document on screen. A text that arrives from the host is
+  //   measured against `synced`, never against the screen: the difference is
+  //   the host's own change, and it is mapped over `unconfirmed` before it is
+  //   applied, so an edit typed here while the host was writing survives on
+  //   both sides instead of being dropped (an update that arrived inside the
+  //   300 ms debounce used to be thrown away, and the debounced edit then
+  //   wrote the stale text over the host's change, silently).
+  // - Every edit sent carries `base`, the version of the document the host
+  //   last reported, and a `seq` of its own. The host answers with `applied`
+  //   and that seq once the text is in the document, which is when `synced`
+  //   moves to it; the sends still waiting are kept (`outstanding`) with the
+  //   changes made after each, so an acknowledgement for any of them, in any
+  //   order, leaves `unconfirmed` right. An edit based on a version the host
+  //   has moved past through a change of its own is not applied there: the
+  //   host sends the document instead, this side merges and sends again.
+  let synced = "";
+  let unconfirmed = null;
+  let seq = 0;
+  let base = undefined;
+  let outstanding = [];
+
   function editorText() {
     return view ? view.state.doc.toString() : "";
   }
 
-  function sendEdit(value) {
-    vscode.postMessage({
-      type: "edit",
-      text: value,
-      withFrontMatter: editorFrontMatter,
+  // The document the editor was built on is what both sides hold.
+  function startSync(text) {
+    synced = text;
+    unconfirmed = CM.ChangeSet.empty(text.length);
+    outstanding = [];
+  }
+
+  // A change made in this editor, on its way to the host.
+  function noteLocalChange(changes) {
+    unconfirmed = unconfirmed.compose(changes);
+    outstanding.forEach(function (sent) {
+      sent.since = sent.since.compose(changes);
     });
   }
 
-  function queueEdit(value) {
+  function sendEdit() {
+    const text = editorText();
+    seq++;
+    outstanding.push({ seq: seq, text: text, since: CM.ChangeSet.empty(text.length) });
+    vscode.postMessage({
+      type: "edit",
+      text: text,
+      withFrontMatter: editorFrontMatter,
+      seq: seq,
+      base: base,
+    });
+  }
+
+  // The host has written the text sent as `seq`: that text is what the two
+  // sides now agree on, and what was typed after sending it is what is left
+  // to confirm. Sends older than it were superseded by it (each carries the
+  // whole text) and are let go with it.
+  function editApplied(msg) {
+    const at = outstanding.findIndex(function (sent) {
+      return sent.seq === msg.seq;
+    });
+    if (at === -1) return;
+    const sent = outstanding[at];
+    synced = sent.text;
+    unconfirmed = sent.since;
+    outstanding = outstanding.slice(at + 1);
+    if (msg.version !== undefined) base = msg.version;
+  }
+
+  function queueEdit() {
     if (pending) clearTimeout(pending);
     pending = setTimeout(function () {
       pending = null;
-      sendEdit(value);
+      sendEdit();
     }, 300);
   }
 
@@ -839,50 +909,116 @@
     if (!pending || !view) return;
     clearTimeout(pending);
     pending = null;
-    sendEdit(editorText());
+    sendEdit();
   }
   window.addEventListener("blur", flushEdit);
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") flushEdit();
   });
 
-  // An incoming text replaces only the stretch that differs: the common head
-  // and tail are left alone, so the carets, the undo history and the rendered
-  // widgets outside the change all survive an external edit (the text editor
-  // open beside this one, a formatter, the header button).
-  function replaceText(incoming) {
+  // The stretch that differs between two texts, as a ChangeSet over the
+  // first: the common head and tail are left alone, so the carets, the undo
+  // history and the rendered widgets outside the change all survive an
+  // external edit.
+  function textDiff(from, to) {
+    let head = 0;
+    const max = Math.min(from.length, to.length);
+    while (head < max && from.charCodeAt(head) === to.charCodeAt(head)) head++;
+    let tail = 0;
+    while (
+      tail < max - head &&
+      from.charCodeAt(from.length - 1 - tail) === to.charCodeAt(to.length - 1 - tail)
+    ) {
+      tail++;
+    }
+    return CM.ChangeSet.of(
+      { from: head, to: from.length - tail, insert: to.slice(head, to.length - tail) },
+      from.length
+    );
+  }
+
+  // A text from the host, merged into the document on screen: its change
+  // against the last agreed text is mapped over what was typed here since,
+  // and what was typed here is mapped over it, the way two writers of one
+  // document are reconciled (@codemirror/collab does the same, with the same
+  // tie-break: the host's insertion goes after a local one at the same
+  // spot). Whatever is left unconfirmed is sent again on the new base.
+  //
+  // The change is kept out of the undo history: it is the host's, and
+  // undoing it here put the file back the way the host had just changed it
+  // (Ctrl+Z after the header button deleted the header from the file, or
+  // wrote it twice). The history maps its own events over it instead.
+  // The host's own account of an outside change, as a change over the agreed
+  // text, or null when it does not lead from that text to the one that came
+  // with it (the two sides may have parted over an edit in flight, or the
+  // change touched lines this editor does not hold): the texts are compared
+  // then. It says where a change was made, which the texts alone do not when
+  // a line goes in among lines like it (G090).
+  function explicitChanges(from, to, changes) {
+    try {
+      const text = CM.Text.of(from.split("\n"));
+      const at = function (p) {
+        return text.line(p.line + 1).from + p.ch;
+      };
+      const set = CM.ChangeSet.of(
+        changes.map(function (c) {
+          return { from: at(c.from), to: at(c.to), insert: c.text };
+        }),
+        text.length
+      );
+      return set.apply(text).toString() === to ? set : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function replaceText(incoming, version, changes) {
     // The text of this editor is LF (the host sends it that way, see
     // transforms.js). A CR that got through would not survive the dispatch
     // either: CodeMirror splits an inserted string on /\r\n?|\n/, so the lone
     // CR left at the end of the replacement below would come out as one more
     // line break, and the document would gain a blank line per update.
     const next = incoming.replace(/\r\n?/g, "\n");
-    const current = editorText();
-    if (next === current) return;
-    let head = 0;
-    const max = Math.min(current.length, next.length);
-    while (head < max && current.charCodeAt(head) === next.charCodeAt(head)) head++;
-    let tail = 0;
-    while (
-      tail < max - head &&
-      current.charCodeAt(current.length - 1 - tail) ===
-        next.charCodeAt(next.length - 1 - tail)
-    ) {
-      tail++;
+    if (version !== undefined) base = version;
+    // Every send still out is either already acknowledged (the answer came
+    // before this text) or based on a version this text has moved past, and
+    // the host will not write it: what it carried is still in `unconfirmed`
+    // and goes out again below.
+    outstanding = [];
+    // The text on screen already: the two sides have come to one text by two
+    // roads, and there is nothing to merge. Inside VS Code Ctrl+Z is undone
+    // twice, here by CodeMirror's history and in the workbench, which undoes
+    // the text model under this editor and sends the text that leaves. The
+    // two undos take out one change, but not always at one place: the host
+    // writes an edit over the stretch a comparison of the texts finds, and a
+    // line put in among blank lines is found at the end of the run where
+    // CodeMirror put it at the head. Mapped over each other as two writers'
+    // changes, they took out one line break more than had gone in (reported
+    // from VS Code: the code block button on a blank line and then Ctrl+Z
+    // lost the line, on screen and in the file; a plain Enter there as well).
+    if (next === view.state.doc.toString()) {
+      synced = next;
+      unconfirmed = CM.ChangeSet.empty(next.length);
+      return;
     }
-    applying = true;
-    try {
-      view.dispatch({
-        changes: {
-          from: head,
-          to: current.length - tail,
-          insert: next.slice(head, next.length - tail),
-        },
-        annotations: CM.Transaction.remote.of(true),
-      });
-    } finally {
-      applying = false;
+    const hostChanges = (changes && explicitChanges(synced, next, changes)) || textDiff(synced, next);
+    synced = next;
+    if (!hostChanges.empty) {
+      const mapped = hostChanges.map(unconfirmed);
+      unconfirmed = unconfirmed.map(hostChanges, true);
+      if (!mapped.empty) {
+        applying = true;
+        try {
+          view.dispatch({
+            changes: mapped,
+            annotations: [CM.Transaction.remote.of(true), CM.Transaction.addToHistory.of(false)],
+          });
+        } finally {
+          applying = false;
+        }
+      }
     }
+    if (!unconfirmed.empty) queueEdit();
   }
 
   // abcjs sizes its SVG with width/height attributes and leaves out the
@@ -4706,16 +4842,68 @@
       cover(from, to, new BlockCoverWidget(doc.lineAt(from).number + hidden));
     };
     // The mark plus the single space after it, the way `# `, `> ` and `- `
-    // are written.
+    // are written, or the tab that stands for it (`>\tquote`, G041).
     const markWithSpace = function (node) {
-      const to = node.to < doc.length && text(node.to, node.to + 1) === " " ? node.to + 1 : node.to;
+      const to = node.to < doc.length && /[ \t]/.test(text(node.to, node.to + 1)) ? node.to + 1 : node.to;
       return { from: node.from, to: to };
     };
+    // The whitespace a reader drops from the head of a line of prose or of a
+    // heading: what stands between the prefix of the line's containers and
+    // its text (CommonMark 4.8, a paragraph's lines are stripped of their
+    // initial whitespace; 4.2, up to three spaces before a heading's #).
+    // Drawn, it set the text in where the page sets it flush (G041). Hidden
+    // while the line is untouched, and on the first line of a block only
+    // when it runs up to `first`, the block's first character: the
+    // indentation of an item's marker is the marker widget's, and is never
+    // hidden twice.
+    const hideLead = function (n, first) {
+      const line = doc.line(n);
+      if (touched(line.from, line.to)) return;
+      const from = line.from + walkPrefix(n, line, null);
+      let to = from;
+      while (to < line.to && /[ \t]/.test(text(to, to + 1))) to++;
+      if (to > from && (first == null || to === first)) hide(from, to);
+    };
+    // The columns of indentation that make a line code (four, or a tab), and
+    // the ones a body line shares with its indented fence: the page prints
+    // the code without them. `cols` of them go, past the containers' prefix.
+    const hideIndent = function (n, cols) {
+      const line = doc.line(n);
+      const from = line.from + walkPrefix(n, line, null);
+      let to = from;
+      let taken = 0;
+      while (to < line.to && taken < cols) {
+        const ch = text(to, to + 1);
+        if (ch === " ") taken++;
+        else if (ch === "\t") taken = cols;
+        else break;
+        to++;
+      }
+      if (to > from) hide(from, to);
+    };
+
+    // The tail paragraphs of hidden maths blocks (see BlockMath below).
+    const hiddenTails = new Set();
 
     tree.iterate({
       enter: function (n) {
         const name = n.name;
         const node = n.node;
+
+        if (name === "Paragraph" && hiddenTails.has(n.from)) return false;
+
+        // A paragraph, and the paragraph of a task item, drawn with the
+        // punctuation the page prints (G015, above).
+        if (name === "Paragraph" || name === "Task") {
+          smartWidgets(node, n.to, text, doc, touched, decos);
+          // A note's paragraphs have their indentation hidden by the note.
+          if (!node.parent || node.parent.name !== "FootnoteDef") {
+            const head = doc.lineAt(n.from).number;
+            const tail = doc.lineAt(n.to).number;
+            for (let k = head; k <= tail; k++) hideLead(k, k === head ? n.from : null);
+          }
+          return true;
+        }
 
         if (name === "FrontMatter") {
           lines.add(n.from, n.to, "mdm-fm-line");
@@ -4817,9 +5005,32 @@
           } else {
             hideLines(openLine.from, openLine.to);
             if (closeLine) hideLines(closeLine.from, closeLine.to);
-            if (body) {
-              lines.add(body.from, body.from, "mdm-code-first");
-              lines.add(body.to, body.to, "mdm-code-last");
+            lines.add(body.from, body.from, "mdm-code-first");
+            lines.add(body.to, body.to, "mdm-code-last");
+            // A fence set in one to three spaces takes as many off each line
+            // of its body (CommonMark 4.5), and so does the page (G041). The
+            // fence's own indentation: past the containers' prefix, and past
+            // the marker of an item the fence opens on the line of.
+            let inset = walkPrefix(openLine.number, openLine, null);
+            (frames.get(openLine.number) || []).forEach(function (level) {
+              if (level.kind === "list" && level.first === openLine.number) inset = Math.max(inset, level.col);
+            });
+            const fenceIndent = n.from - openLine.from - inset;
+            if (fenceIndent > 0) {
+              const lastBody = doc.lineAt(body.to).number;
+              for (let k = doc.lineAt(body.from).number; k <= lastBody; k++) hideIndent(k, fenceIndent);
+            }
+            // A fence opened on the line of a list item: the line goes with
+            // the fence, and the item's marker is drawn in the gap beside
+            // the card's first line instead (G029).
+            const frame = frameOf(openLine.number);
+            if (frame && frame.marker) {
+              decos.push(
+                Decoration.widget({
+                  widget: new MarkerWidget(frame.marker.kind, frame.marker.text, frame.marker.checked, true),
+                  side: -1,
+                }).range(body.from)
+              );
             }
           }
           return false;
@@ -4831,6 +5042,12 @@
           lines.card(n.from, n.to);
           lines.add(n.from, n.from, "mdm-code-first");
           lines.add(n.to, n.to, "mdm-code-last");
+          // The four columns that make the lines code, put away while the
+          // caret is out of the block and back for all its lines at once
+          // when it comes in, so the code never stands at two insets (G041).
+          if (!touched(doc.lineAt(n.from).from, n.to)) {
+            for (let k = doc.lineAt(n.from).number; k <= doc.lineAt(n.to).number; k++) hideIndent(k, 4);
+          }
           return false;
         }
 
@@ -4959,7 +5176,18 @@
         if (/^SetextHeading[12]$/.test(name)) {
           const level = name.slice(-1);
           const mark = node.getChild("HeaderMark");
-          lines.add(n.from, mark ? mark.from - 1 : n.to, "mdm-h mdm-h" + level);
+          // The last line of the text is the one over the underline's line,
+          // not the one holding the character before the mark: an underline
+          // set in a space or two has them before it on its own line, and the
+          // rule of the heading went to that hidden row.
+          const lastText = mark ? doc.line(doc.lineAt(mark.from).number - 1) : doc.lineAt(n.to);
+          lines.add(n.from, lastText.to, "mdm-h mdm-h" + level);
+          sampleProof(n.from, lastText.to);
+          // A heading written over several lines is one heading: the air
+          // above goes on the first line and the rule under the last, where
+          // every line of it used to draw both (G049).
+          lines.add(n.from, n.from, "mdm-h-first");
+          lines.add(lastText.from, lastText.from, "mdm-h-last");
           if (mark) {
             if (!touched(n.from, n.to)) hideLines(mark.from, mark.to);
             else lines.add(mark.from, mark.to, "mdm-mark-line");
@@ -5130,6 +5358,13 @@
         }
 
         if (name === "Autolink" || name === "URL") {
+          // A bare address is a link when it has a scheme or is a mail
+          // address, which is what the page links (Pandoc's
+          // autolink_bare_uris, the export's reader, measured on 3.8.3); a
+          // `www.` address, which GFM links too, is text on the page and so
+          // is text here (G017). An address in angle brackets is a link
+          // either way.
+          if (name === "URL" && !/^[a-z][a-z0-9+.-]*:|@/i.test(text(n.from, n.to))) return false;
           decos.push(Decoration.mark({ class: "mdm-link" }).range(n.from, n.to));
           if (name === "Autolink" && !touched(n.from, n.to)) {
             node.getChildren("LinkMark").forEach(function (m) {
@@ -8690,6 +8925,21 @@
 
   function buildEditor(text) {
     const mdmKeymap = [
+      // Ctrl+S goes on to the workbench, which saves the file: what is held
+      // back by the debounce is sent ahead of it, and the host holds the save
+      // for it besides (onWillSaveTextDocument in extension.js). Not handled,
+      // so the key is not eaten here.
+      {
+        key: "Mod-s",
+        run: function () {
+          flushEdit();
+          return false;
+        },
+      },
+      { key: "Enter", run: mdmEnter },
+      { key: "Backspace", run: mdmBackspace },
+      { key: "Delete", run: mdmDelete },
+      { key: "Tab", run: mdmTab, shift: mdmShiftTab },
       { key: "Mod-Enter", run: leaveBlock },
       { key: "Mod-b", run: toggleInline("**") },
       { key: "Mod-i", run: toggleInline("*") },
@@ -8762,7 +9012,16 @@
         EditorView.lineWrapping,
         EditorView.updateListener.of(function (update) {
           if (update.docChanged) {
-            if (!applying) queueEdit(update.state.doc.toString());
+            if (!applying) {
+              noteLocalChange(update.changes);
+              queueEdit();
+            }
+            // A definition added, removed or renamed: the links it decides
+            // may be anywhere in the document, so the parse starts over
+            // (see `language`). Listeners run once the update is applied,
+            // so this dispatch is a transaction of its own, one that
+            // changes no text and comes back through here without it.
+            if (definitionsChanged(update)) view.dispatch({ effects: language.reconfigure(markdownLanguage()) });
             if (player) player.pos = update.changes.mapPos(player.pos, 1);
             // A `lang:` typed into the header on screen lights or darkens
             // the hyphenation button at once, as it moves the cuts.
@@ -8783,6 +9042,7 @@
       state: state,
       parent: document.querySelector("#app .mdm-editor"),
     });
+    startSync(text);
     // applyHyphenation ran above with no view to read the header from.
     updateHyphenationButton();
     // For the test harness and for poking at a live editor: the view itself,
@@ -9641,7 +9901,7 @@
         tip: fmTip(),
         click: function () {
           if (headerText === "") return;
-          askSetting("frontMatter", frontMatter === "shown" ? "hidden" : "shown");
+          askSetting("frontMatter", editorFrontMatter ? "hidden" : "shown");
         },
       },
       "|",
@@ -9876,6 +10136,17 @@
       applyTheme();
       return;
     }
+    if (msg.type === "applied") {
+      editApplied(msg);
+      return;
+    }
+    if (msg.type === "flush") {
+      // The host is about to write the file and asks for what is held back:
+      // the edit goes first, the answer after it, on the same ordered wire.
+      flushEdit();
+      vscode.postMessage({ type: "flushed", id: msg.id });
+      return;
+    }
     if (msg.type !== "update") return;
     const previousHeader = headerText;
     headerText = msg.frontMatter || "";
@@ -9895,11 +10166,11 @@
       view.dispatch({ effects: setHiddenLines.of(hiddenLines) });
     }
     if (!view) {
+      if (msg.version !== undefined) base = msg.version;
       init(msg.text);
       return;
     }
-    if (pending) return;
-    replaceText(msg.text);
+    replaceText(msg.text, msg.version, msg.changes);
     if (scrollToTop) {
       scrollToTop = false;
       const s = scroller();

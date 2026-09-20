@@ -1,7 +1,7 @@
 // transforms.js: the mapping between the .mdm file on disk and the text the
 // editor holds. The editor text is the file text, save for two things. The
 // YAML header, which the mdm.frontMatter setting can keep out of the editor:
-// hidden, the host strips it (and the blank lines under it) on the way in and
+// hidden, the host strips it (and the blank line under it) on the way in and
 // splices it back from the file on the way out; shown, nothing is touched.
 // And the line endings, which are LF in the editor whatever the file uses.
 
@@ -25,22 +25,38 @@ function toEol(text, eol) {
   return eol === "\r\n" ? toLf(text).replace(/\n/g, "\r\n") : toLf(text);
 }
 
-// The leading YAML header, if any: a `---` line at the very start, closed by
-// the next `---` line. CRLF files are recognised.
+// The leading YAML header, if any, as Pandoc reads it: a `---` line at the
+// very start (trailing spaces allowed), closed by the next `---` or `...`
+// line (trailing spaces allowed), and never opening onto a blank line: a
+// `---` followed by one is the rule it is anywhere else. A header of no
+// lines at all, `---` straight over `---`, is a header. The old pattern took
+// only a bare `---` as the closer and did not look at the line under the
+// opener, so a `...` closer, a closer with a space after it, an empty header
+// and a leading rule all ran on to the next `---` in the body, which vanished
+// with them in hidden mode (G040, measured against Pandoc 3.8.3). CRLF files
+// are recognised.
+// The lines between are optional and taken as few as close it, so that an
+// empty header closes at once and a `---` in the body is never reached.
+const HEADER = /^---[ \t]*\r?\n(?!\r?\n)(?:[\s\S]*?\r?\n)??(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 function splitFrontMatter(text) {
-  const m = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text);
+  const m = HEADER.exec(text);
   return m ? [m[0], text.slice(m[0].length)] : ["", text];
 }
 
-// The blank lines between the header and the body, as the file has them.
+// The blank line between the header and the body, the one Pandoc wants there,
+// if the file has it. One and no more: any blank line past it is the body's
+// and goes to the editor. The host used to keep every blank line under the
+// header, so an Enter at the head of the body with the header hidden went to
+// the file and came back as nothing, the editor showing the body from its
+// first line of text however many blank lines were typed over it.
 function gapAfter(text, fm) {
-  const m = /^(?:\r?\n)+/.exec(text.slice(fm.length));
+  const m = /^\r?\n/.exec(text.slice(fm.length));
   return m ? m[0] : "";
 }
 
 // File on disk -> text for the editor. withFrontMatter (the mdm.frontMatter
 // setting) decides whether the YAML header is part of the editor text: shown,
-// the editor gets the file as it is; hidden, the header and the blank lines
+// the editor gets the file as it is; hidden, the header and the blank line
 // under it stay with the host. Either way the text comes out in LF.
 function toEditor(text, withFrontMatter) {
   if (withFrontMatter) return toLf(text);
@@ -58,16 +74,22 @@ function toEditor(text, withFrontMatter) {
 // the editor text is LF and the file keeps the endings it had.
 //
 // With the header out of the editor, diskText supplies it, with the blank
-// lines the file kept under it (one is put in when the file had none, which
-// is what Pandoc wants). If the user types a new `---` header there while the
-// file already has one, the typed block joins the body: accepted edge case.
+// line the file kept under it (one is put in when the file had none, which
+// is what Pandoc wants); any blank line past that one is in the editor
+// text. If the user types a new `---` header there while the file already
+// has one, the typed block joins the body: accepted edge case.
 function fromEditor(editorText, diskText, withFrontMatter, eol) {
   if (withFrontMatter) return toEol(editorText, eol);
   const disk = diskText || "";
   let fm = splitFrontMatter(disk)[0];
   if (!fm) return toEol(editorText, eol);
-  if (!/\n$/.test(fm)) fm += "\n";
+  // An empty editor writes the header as the file holds it. The newline a
+  // header ending at the end of the file is given below is for the body to
+  // stand under; given before this line, an empty text over a header-only
+  // file without a final newline wrote "---\n" where the file had "---",
+  // and a keystroke taken back left the file modified (G089).
   if (editorText === "") return toEol(fm, eol);
+  if (!/\n$/.test(fm)) fm += "\n";
   const gap = gapAfter(disk, splitFrontMatter(disk)[0]) || "\n";
   return toEol(fm + gap + editorText, eol);
 }
@@ -81,7 +103,7 @@ function frontMatter(text) {
 }
 
 // The lines of the file the editor never sees: with the header hidden, the
-// header and the blank lines under it, which is exactly the prefix toEditor
+// header and the blank line under it, which is exactly the prefix toEditor
 // takes off. The editor's first line is the (n+1)th line of the file, and the
 // numbers the editor draws in its margin count from there, so that a line has
 // the number the text editor beside it gives the same line. Zero with the
@@ -140,4 +162,4 @@ function withLang(text, lang, eol) {
   return toEol(header + lf.slice(fm.length), eol);
 }
 
-module.exports = { toEditor, fromEditor, frontMatter, hiddenLines, toLf, toEol, withLang, langOf };
+module.exports = { toEditor, fromEditor, frontMatter, splitFrontMatter, hiddenLines, toLf, toEol, withLang, langOf };

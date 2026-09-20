@@ -390,24 +390,199 @@ test("an identical edit does not touch the document at all", async () => {
   assert.equal(changes.length, 0);
 });
 
-test("an edit that the host canonicalizes is echoed back once", async () => {
+test("blank lines typed at the head of the body stay in the editor, with no echo", async () => {
   const h = boot(DOC, {});
   await h.receive({ type: "ready" });
   const before = h.posted.length;
-  // With the header hidden, blank lines typed at the very top of the body
-  // join the gap under the header on disk, and the host's view of that text
-  // (the body without them) differs from what was sent, so an echo must
-  // follow: it hands the editor the converged text.
+  // With the header hidden the host keeps one blank line under it and no
+  // more, so the two typed at the very top of the body are the editor's and
+  // the file carries them past its own. They used to join the gap on disk,
+  // and the host echoed back the body without them, so the editor went on
+  // showing the body from its first line of text whatever was typed.
   await h.receive({
     type: "edit",
     text: "\n\nBody\n",
     withFrontMatter: false,
   });
   assert.equal(h.document.getText(), "---\ntitle: t\n---\n\n\n\nBody\n");
+  assert.equal(h.posted.length, before, "the host answered an edit it holds as sent");
+});
+
+test("an edit carrying its seq is acknowledged with the version it produced", async () => {
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  assert.equal(h.posted[0].version, 1, "the update names the document's version");
+  const editorText = h.posted[0].text.replace("Intro", "Edited");
+  await h.receive({ type: "edit", text: editorText, withFrontMatter: false, seq: 5, base: 1 });
+  assert.equal(h.document.getText(), DOC.replace("Intro", "Edited"));
+  const ack = h.posted[h.posted.length - 1];
+  assert.deepEqual(ack, { type: "applied", seq: 5, version: 2 });
+  // The next edit is based on the version its own edit made: applied.
+  await h.receive({ type: "edit", text: editorText + "More\n", withFrontMatter: false, seq: 6, base: 2 });
+  assert.equal(h.document.getText(), DOC.replace("Intro", "Edited") + "More\n");
+  assert.deepEqual(h.posted[h.posted.length - 1], { type: "applied", seq: 6, version: 3 });
+});
+
+test("an edit is written over the stretch that changed and not over the whole document (G092)", async () => {
+  for (const eol of ["\n", "\r\n"]) {
+    const disk = DOC.replace(/\n/g, eol);
+    const h = boot(disk, {});
+    await h.receive({ type: "ready" });
+    const editorText = h.posted[0].text.replace("Intro", "Edited");
+    await h.receive({ type: "edit", text: editorText, withFrontMatter: false, seq: 1, base: 1 });
+    assert.equal(h.document.getText(), disk.replace("Intro", "Edited"));
+    const written = vscode._state.appliedEdits;
+    assert.equal(written.length, 1);
+    // "Intro" and "Edited" share no head and no tail but the word's place.
+    assert.deepEqual([written[0].replaced, written[0].newText], ["Intro", "Edited"], JSON.stringify(eol));
+    // A line added at the end goes in with the file's own line ending.
+    await h.receive({ type: "edit", text: editorText + "Last\n", withFrontMatter: false, seq: 2, base: 2 });
+    assert.equal(h.document.getText(), disk.replace("Intro", "Edited") + "Last" + eol);
+    assert.equal(vscode._state.appliedEdits[1].newText, "Last" + eol);
+  }
+});
+
+test("the stretch two texts differ over never parts a CR from its LF nor a surrogate pair", () => {
+  const span = ext.changedSpan;
+  assert.deepEqual(span("abc", "abc"), { from: 3, to: 3, insert: "" });
+  assert.deepEqual(span("one two", "one 2 two"), { from: 4, to: 4, insert: "2 " });
+  assert.deepEqual(span("a\r\nb", "a\r\n\r\nb"), { from: 3, to: 3, insert: "\r\n" });
+  assert.deepEqual(span("a\r\nb", "a\rb"), { from: 1, to: 3, insert: "\r" });
+  assert.deepEqual(span("x\ud83c\udfb5y", "x\ud83c\udfb6y"), { from: 1, to: 3, insert: "\ud83c\udfb6" });
+  // Rows alike: the change is one row, wherever in the run it is read.
+  assert.deepEqual(span("row\nrow\n", "row\nrow\nrow\n"), { from: 8, to: 8, insert: "row\n" });
+});
+
+test("an outside change is told to the webview with its range, in the editor's own lines (G090)", async () => {
+  // DOC keeps four lines back: the header and the blank line under it.
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  assert.equal(h.posted[0].hiddenLines, 4);
+  // A line put in above "Intro", which is line 4 of the file and line 0 of
+  // the editor. The range is the one VS Code names: in the file as it was.
+  const range = { start: { line: 4, character: 0 }, end: { line: 4, character: 0 } };
+  vscode._setText("file:///doc.mdm", DOC.replace("Intro", "Intro\nIntro"), [{ range, text: "Intro\r\n" }]);
+  let update = h.posted[h.posted.length - 1];
+  assert.equal(update.type, "update");
+  assert.deepEqual(update.changes, [{ from: { line: 0, ch: 0 }, to: { line: 0, ch: 0 }, text: "Intro\n" }]);
+  // One that reaches into the lines the editor does not hold names no
+  // range, and neither does an event without any: the texts are compared.
+  const inHeader = { start: { line: 1, character: 7 }, end: { line: 1, character: 8 } };
+  vscode._setText("file:///doc.mdm", DOC.replace("title: t", "title: T"), [{ range: inHeader, text: "T" }]);
+  update = h.posted[h.posted.length - 1];
+  assert.equal(update.changes, undefined);
+  vscode._setText("file:///doc.mdm", DOC + "Outside.\n");
+  assert.equal(h.posted[h.posted.length - 1].changes, undefined);
+  assert.equal(ext.editorChanges([], 0), undefined);
+});
+
+test("an edit based on a version an outside change has moved past is not written", async () => {
+  // The text editor beside this one changed the file; an edit the webview
+  // wrote without knowing would put the file back the way the webview saw
+  // it. The document goes back instead, and the merge the webview sends on
+  // that version lands.
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  vscode._setText("file:///doc.mdm", DOC + "Outside.\n");
+  const update = h.posted[h.posted.length - 1];
+  assert.equal(update.type, "update");
+  assert.equal(update.version, 2);
+  const before = h.posted.length;
+  const stale = h.posted[0].text.replace("Intro", "Edited");
+  await h.receive({ type: "edit", text: stale, withFrontMatter: false, seq: 1, base: 1 });
+  assert.equal(h.document.getText(), DOC + "Outside.\n", "the stale text is not written");
   assert.equal(h.posted.length, before + 1);
-  const echo = h.posted[h.posted.length - 1];
-  assert.equal(echo.type, "update");
-  assert.equal(echo.text, "Body\n");
+  assert.equal(h.posted[before].type, "update");
+  assert.equal(h.posted[before].version, 2);
+  assert.ok(h.posted[before].text.includes("Outside."));
+  const merged = update.text.replace("Intro", "Edited");
+  await h.receive({ type: "edit", text: merged, withFrontMatter: false, seq: 2, base: 2 });
+  assert.equal(h.document.getText(), DOC.replace("Intro", "Edited") + "Outside.\n");
+  assert.deepEqual(h.posted[h.posted.length - 1], { type: "applied", seq: 2, version: 3 });
+});
+
+test("an edit with no base, as an older editor sends it, is written as before", async () => {
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  vscode._setText("file:///doc.mdm", DOC + "Outside.\n");
+  const before = h.posted.length;
+  await h.receive({ type: "edit", text: "Body\n", withFrontMatter: false });
+  assert.equal(h.document.getText(), "---\ntitle: t\n---\n\nBody\n");
+  assert.equal(h.posted.length, before, "no acknowledgement for an edit that carries no seq");
+});
+
+test("a save waits for the edit the webview was holding back", async () => {
+  // The webview posts a keystroke 300 ms after it is made; a save inside
+  // that window used to write the file without it. The host asks for what
+  // is held, the webview posts the edit and then says it is done, and the
+  // save goes on once the edit is in the document.
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  const before = h.posted.length;
+  let saved = false;
+  const saving = vscode._willSave("file:///doc.mdm").then(() => {
+    saved = true;
+  });
+  const ask = h.posted[before];
+  assert.equal(ask.type, "flush");
+  assert.equal(typeof ask.id, "number");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(saved, false, "the save is held while nothing has answered");
+  const editorText = h.posted[0].text.replace("Intro", "Late");
+  const edit = h.receive({ type: "edit", text: editorText, withFrontMatter: false, seq: 1, base: 1 });
+  const answer = h.receive({ type: "flushed", id: ask.id });
+  await Promise.all([edit, answer]);
+  await saving;
+  assert.equal(h.document.getText(), DOC.replace("Intro", "Late"));
+});
+
+test("a save is held no longer than a moment for a webview that never answers", async () => {
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  const started = Date.now();
+  await vscode._willSave("file:///doc.mdm");
+  const held = Date.now() - started;
+  assert.ok(held >= 900 && held < 3000, "held for " + held + " ms");
+});
+
+test("a save of another document asks this webview for nothing", async () => {
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  const before = h.posted.length;
+  vscode._state.documents.set("file:///other.mdm", "Other\n");
+  await vscode._willSave("file:///other.mdm");
+  assert.equal(h.posted.length, before);
+});
+
+test("a header typed into a header-less file while headers are hidden stays on screen and in the file", async () => {
+  // The edit is written as it came, and the file has a header now. Mapping
+  // the text back under the setting would strip it and the echo would take
+  // the typed lines off the screen: instead the editor is told its text
+  // carries the header from here, until the setting is touched.
+  const h = boot("Body\n", {});
+  await h.receive({ type: "ready" });
+  assert.equal(h.posted[0].withFrontMatter, false);
+  const typed = "---\ntitle: typed\n---\n\nBody\n";
+  const before = h.posted.length;
+  await h.receive({ type: "edit", text: typed, withFrontMatter: false, seq: 1, base: 1 });
+  assert.equal(h.document.getText(), typed);
+  const after = h.posted.slice(before);
+  assert.deepEqual(after.map((m) => m.type), ["applied", "update"]);
+  assert.equal(after[1].text, typed, "the header stays in the editor's text");
+  assert.equal(after[1].withFrontMatter, true);
+  assert.equal(after[1].hiddenLines, 0);
+  // An edit made on that text is read as carrying the header, not doubled.
+  await h.receive({ type: "edit", text: typed + "More\n", withFrontMatter: true, seq: 2, base: 2 });
+  assert.equal(h.document.getText(), typed + "More\n");
+  // The button offers to hide it, and a press does, though the stored
+  // setting does not change.
+  const pressed = h.posted.length;
+  await h.receive({ type: "setSetting", key: "frontMatter", value: "hidden" });
+  const back = h.posted.slice(pressed);
+  assert.deepEqual(back.map((m) => m.type), ["settings", "update"]);
+  assert.equal(back[1].withFrontMatter, false);
+  assert.equal(back[1].text, "Body\nMore\n");
+  assert.equal(back[1].hiddenLines, 4);
 });
 
 // ---------- CRLF (the caret jump on Windows) ----------
@@ -1183,8 +1358,16 @@ test("the copy is read in the dialect of the editor, and a document that names o
   assert.ok(ext.withReader(prose, from).startsWith("---\nfrom: markdown-x\ntitle: T\n"));
 
   // What the export actually asks for: Pandoc's Markdown without the two
-  // rules that make it disagree with the CommonMark the editor reads.
-  assert.match(ext.READER, /^markdown-blank_before_header-blank_before_blockquote$/);
+  // rules that make it disagree with the CommonMark the editor reads, and
+  // with the bare addresses the editor draws as links (G017).
+  assert.match(ext.READER, /^markdown-blank_before_header-blank_before_blockquote\+autolink_bare_uris$/);
+
+  // The header as Pandoc reads it (G040): a `...` closer and an empty header
+  // are the header, and a `---` over a blank line is a rule, over which the
+  // copy gets a header of its own.
+  assert.equal(ext.withReader("---\ntitle: T\n...\nb\n", from), "---\nfrom: markdown-x\ntitle: T\n---\nb\n");
+  assert.equal(ext.withReader("---\n---\nb\n", from), "---\nfrom: markdown-x\n---\nb\n");
+  assert.equal(ext.withReader("---\n\nb\n", from), "---\nfrom: markdown-x\n---\n\n---\n\nb\n");
 });
 
 test("a rule with a line straight under it gets the blank line the copy needs", () => {
@@ -1267,7 +1450,6 @@ const COPY_BREAKS = [
   ["text\n- \n", "text\n- \n"],
   ["text\n    - item\n", "text\n    - item\n"],
   ["text\n\t- item\n", "text\n\t- item\n"],
-  ["a\n* * *\n", "a\n* * *\n"],
   ["---\ntitle: T\n---\n- item\n", "---\ntitle: T\n---\n- item\n"],
   // A line that looks like an item inside a fence is code, and inside a `$$`
   // block it is LaTeX, where a blank line would end the formula.
@@ -1278,6 +1460,59 @@ const COPY_BREAKS = [
   ["Intro\n\n---\n```abc\nX:1\n```\n", "Intro\n\n---\n\n```abc\nX:1\n```\n"],
   ["a\n---\n- item\n", "a\n---\n\n- item\n"],
   ["a\n\n---\n---\nb\n", "a\n\n---\n\n---\n\nb\n"],
+  // The header of the copy, as Pandoc reads it: closed by `...` too, or
+  // empty, and a `---` over a blank line is the rule it is anywhere else.
+  ["---\ntitle: T\n...\ntext\n- item\n", "---\ntitle: T\n...\ntext\n\n- item\n"],
+  ["---\n---\n- item\n", "---\n---\n- item\n"],
+  ["---\n\nrule\n- item\n", "---\n\nrule\n\n- item\n"],
+  // A table whose header row stands straight under a line of text: a table
+  // to CommonMark and to GitHub, one paragraph with the pipes in it to
+  // Pandoc (G039). Not a line with a pipe over a dash underline of another
+  // width, which is a setext heading to both, and not under an item.
+  ["Text above.\n| a | b |\n|---|---|\n| 1 | 2 |\n", "Text above.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"],
+  ["Text\na | b\n--|--\n", "Text\n\na | b\n--|--\n"],
+  ["a | b\n---\n", "a | b\n---\n"],
+  ["Text\na | b | c\n--|--\n", "Text\na | b | c\n--|--\n"],
+  ["- item\n| a |\n|---|\n", "- item\n| a |\n|---|\n"],
+  // A `***`, `___` or spaced rule under a line of text, or under an item,
+  // is a rule to CommonMark and more of the paragraph to Pandoc (G039).
+  ["Text above.\n***\n", "Text above.\n\n***\n"],
+  ["Text\n_ _ _\n", "Text\n\n_ _ _\n"],
+  ["Text\n- - -\n", "Text\n\n- - -\n"],
+  // Once held as a line no list rule touches (which is still true: the
+  // blank line is the rule's, not the list's).
+  ["a\n* * *\n", "a\n\n* * *\n"],
+  ["- foo\n* * *\n- bar\n", "- foo\n\n* * *\n- bar\n"],
+  // A line of dashes under an item is a rule to CommonMark and a heading
+  // inside the item to Pandoc; under a paragraph outside a list it is the
+  // setext underline it is to both (G039).
+  ["- item\n---\n\nSep end.\n", "- item\n\n---\n\nSep end.\n"],
+  ["- item\n  more\n---\n", "- item\n  more\n\n---\n"],
+  ["text\n---\n", "text\n---\n"],
+  // A heading indented up to three spaces comes to the margin, unless it
+  // stands inside a list, where the indent is the item's (G027).
+  ["   # Indented\n", "# Indented\n"],
+  ["text\n  ## Two\n", "text\n## Two\n"],
+  ["- a\n   # h\n", "- a\n   # h\n"],
+  ["- a\n\n   # h\n", "- a\n\n   # h\n"],
+  ["    # code\n", "    # code\n"],
+  // A setext underline set in one to three spaces comes to the margin, where
+  // Pandoc reads it (the text's own indentation it takes as it is); in a
+  // list, under a quote's line or under code it is no underline (G041).
+  ["Title\n  =====\n", "Title\n=====\n"],
+  ["  Title\n   ---\n\nText\n", "  Title\n---\n\nText\n"],
+  ["- item\n  ===\n", "- item\n  ===\n"],
+  ["> quote\n  ===\n", "> quote\n  ===\n"],
+  ["    code\n  ===\n", "    code\n  ===\n"],
+  ["Title\n\t=====\n", "Title\n\t=====\n"],
+  // A `#` ending a heading with no space before it is escaped, so that
+  // Pandoc keeps the sharp CommonMark keeps (G027, G112); a closing run
+  // with a space before it, or one escaped already, is left alone.
+  ["## Sonata in F#\n", "## Sonata in F\\#\n"],
+  ["# foo#\n", "# foo\\#\n"],
+  ["## Title ##\n", "## Title ##\n"],
+  ["### foo \\###\n", "### foo \\###\n"],
+  ["Key of C#\n", "Key of C#\n"],
 ];
 
 test("a list straight under a line of text gets the blank line the copy needs", () => {

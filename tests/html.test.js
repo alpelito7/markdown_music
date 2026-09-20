@@ -2139,6 +2139,73 @@ test("the page hangs a list under its text where the editor does, level by level
   );
 });
 
+// The blocks the two dialects part on, drawn as the editor draws them once
+// the copy has its blank lines (extension.js, withBreaks): a table straight
+// under a line of text, a `***` and a spaced rule under text or under an
+// item, a `---` under an item (G039); and the addresses: one with a scheme
+// and a mail address are links on both surfaces, a `www.` one is text on
+// both (G017). The page is read as the sequence of its blocks and the links
+// of its last paragraph, the editor as the sequence of its rows.
+test("the page shows the table, the rules, the lists and the address the editor shows (G039, G017)", { skip }, async () => {
+  const { open: openEditor, rows } = require("./webview/helpers.js");
+  const text =
+    "Text above.\n| a | b |\n|---|---|\n| 1 | 2 |\n\nText above two.\n***\n\n- foo\n* * *\n- bar\n\n- item\n---\n\n" +
+    "See https://example.com/path and www.example.org and someone@example.org.\n";
+  const name = "dialect-blocks";
+  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+  const exported = await page.evaluate(() => {
+    const main = document.querySelector("main.content");
+    const blocks = Array.from(main.querySelectorAll("p, table, hr, ul"))
+      .filter((el) => !el.parentElement.closest("li, td, th"))
+      .map((el) => el.tagName.toLowerCase());
+    const last = Array.from(main.querySelectorAll("p")).pop();
+    return {
+      blocks,
+      links: Array.from(last.querySelectorAll("a")).map((a) => a.textContent),
+      cells: Array.from(main.querySelectorAll("td")).map((td) => td.textContent.trim()),
+    };
+  });
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+  // `- bar` and `- item` with a blank line between them are one loose list
+  // to both dialects, two items long.
+  assert.deepEqual(exported.blocks, ["p", "table", "p", "hr", "ul", "hr", "ul", "hr", "p"]);
+  assert.deepEqual(exported.cells, ["1", "2"]);
+  assert.deepEqual(exported.links, ["https://example.com/path", "someone@example.org"]);
+
+  const h = await openEditor({ text, scores: 0 });
+  let editor;
+  try {
+    const drawn = await rows(h.page);
+    editor = {
+      blocks: drawn
+        .filter((row) => !/mdm-blank/.test(row.roles))
+        .map((row) =>
+          /mdm-table/.test(row.roles) ? "table" : /mdm-hr/.test(row.roles) ? "hr" : /mdm-li/.test(row.roles) ? "li" : "p"
+        ),
+      links: await h.page.evaluate(() => {
+        const line = Array.from(document.querySelectorAll("#app .cm-line")).find((l) => l.textContent.startsWith("See "));
+        return Array.from(line.querySelectorAll(".mdm-link")).map((a) => a.textContent);
+      }),
+    };
+  } finally {
+    await h.close();
+  }
+  // The editor draws an item per row where the page draws a list per run.
+  assert.deepEqual(editor.blocks, ["p", "table", "p", "hr", "li", "hr", "li", "li", "hr", "p"]);
+  assert.deepEqual(editor.links, exported.links);
+});
+
 // The punctuation Pandoc's `smart` extension prints, which the editor draws
 // while a line is untouched (G015): the first paragraph of the page reads as
 // the first row of the editor, glyph for glyph. The page's own line wrapping
@@ -2176,6 +2243,44 @@ test("the page prints the quotes, dashes and ellipsis the editor draws (G015)", 
     await h.close();
   }
   assert.equal(editor, exported);
+});
+
+// A setext underline set in a space or two is CommonMark's, and the editor's,
+// and a paragraph with the `=====` in it to Pandoc; the copy brings it to the
+// margin (withBreaks), so the page heads the section the editor heads (G041).
+test("the page reads a setext heading with an indented underline as the editor does (G041)", { skip }, async () => {
+  const { open: openEditor, rows } = require("./webview/helpers.js");
+  const text = "Title\n  =====\n\n   Indented text.\n";
+  const name = "indented-underline";
+  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+  const exported = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("main.content h1, main.content p")).map(
+      (el) => el.tagName.toLowerCase() + ":" + el.textContent.trim()
+    )
+  );
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+  assert.deepEqual(exported, ["h1:Title", "p:Indented text."]);
+
+  const h = await openEditor({ text, scores: 0 });
+  let editor;
+  try {
+    editor = (await rows(h.page))
+      .filter((row) => row.text)
+      .map((row) => (/mdm-h1/.test(row.roles) ? "h1:" : "p:") + row.text);
+  } finally {
+    await h.close();
+  }
+  assert.deepEqual(editor, exported);
 });
 
 // The measures of a subscript, a superscript and a figure, read the same way

@@ -207,8 +207,18 @@ inside VS Code the workbench replays Ctrl+Z into the page as
 editor, which would run the browser's native undo over CodeMirror's DOM on
 top of CodeMirror's own (measured in Chrome by emulating the replay: it ate
 the end of the line), so undo and redo are taken off `execCommand` in the
-page; CodeMirror renders only the lines in view, so the player is carried
-across its widget being rebuilt (by source, and by document position while
+page; Ctrl+Z is answered in the text model under the custom editor as
+well, and the host sends the text that undo left: the two undos agree on
+the text but not always on where the change stood (the host writes an edit
+over the stretch a comparison of the texts finds, and a line put in among
+blank lines is found at the end of the run, where CodeMirror put it at the
+head), and merging one over the other as two writers' changes took a line
+more, on screen and in the file, so a text from the host that is the one
+on screen is taken as agreement (2026-09-19, reported from VS Code with
+the code block button on a blank line; the workbench's side is inferred
+from that report and not read in its code, and emulating it in the harness
+reproduces the lost line exactly); CodeMirror renders only the lines in
+view, so the player is carried across its widget being rebuilt (by source, and by document position while
 the block is off screen); widgets carry no CSS margin, since CodeMirror's
 height map does not see it and vertical caret motion landed a line off; the
 `$`-deleted state of a `$$` block is a plain paragraph (the Lezer extension

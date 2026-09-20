@@ -65,12 +65,16 @@ function edits(page) {
 
 // The host's update, as it arrives in VS Code: only the stretch that differs
 // is replaced in the editor.
-function hostUpdate(page, text, withFrontMatter) {
+function hostUpdate(page, text, withFrontMatter, version) {
   return page.evaluate(
-    (text, fm) =>
-      window.postMessage({ type: "update", text: text, frontMatter: "x", withFrontMatter: fm }, "*"),
+    (text, fm, version) =>
+      window.postMessage(
+        { type: "update", text: text, frontMatter: "x", withFrontMatter: fm, version: version },
+        "*"
+      ),
     text,
-    withFrontMatter !== false
+    withFrontMatter !== false,
+    version
   );
 }
 
@@ -2434,6 +2438,225 @@ test("an update carrying CRs gains no line and moves no caret", { skip }, async 
   assert.deepEqual(await selectionRanges(h.page), [[8, 8]]);
   await sleep(500);
   assert.deepEqual(await edits(h.page), []);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("an update that arrives while an edit is debounced is merged, not dropped", { skip }, async () => {
+  // A keystroke waits 300 ms before it is posted, and a change the host
+  // makes in that window used to be thrown away: the debounced edit then
+  // wrote the stale text over it, and nothing said so. Both must survive,
+  // and what goes out is the merged text, based on the host's version.
+  const h = await open({ text: "alpha\nbeta\ngamma\n", scores: 0 });
+  await setSelection(h.page, 5); // after "alpha"
+  await h.page.keyboard.type("X");
+  // Inside the debounce: a change the host made elsewhere in the document.
+  await hostUpdate(h.page, "alpha\nbeta\ngammaZ\n", true, 7);
+  assert.equal(await lastEdit(h.page), "alphaX\nbeta\ngammaZ\n");
+  assert.equal(await docText(h.page), "alphaX\nbeta\ngammaZ\n");
+  const last = (await edits(h.page)).pop();
+  assert.equal(last.base, 7);
+  assert.equal(typeof last.seq, "number");
+  // The caret stayed on its word through the merge.
+  assert.deepEqual(await selectionRanges(h.page), [[6, 6]]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a line put in from outside among lines like it goes where it was put, and the carets stay on their rows (G090)", { skip }, async () => {
+  // From the two texts alone the new row can only be told to stand at the
+  // end of the run, and a caret on the second row was left on the first
+  // copy. The host says where the change was made.
+  const h = await open({ text: "row\nrow\nrow\nend\n", scores: 0 });
+  await setSelection(h.page, 6); // in the second row, after "ro"
+  const update = (changes, text, version) =>
+    h.page.evaluate(
+      (changes, text, version) =>
+        window.postMessage(
+          { type: "update", text, frontMatter: "x", withFrontMatter: true, version, changes },
+          "*"
+        ),
+      changes,
+      text,
+      version
+    );
+  // A row put in at the head of the document.
+  await update([{ from: { line: 0, ch: 0 }, to: { line: 0, ch: 0 }, text: "row\n" }], "row\nrow\nrow\nrow\nend\n", 2);
+  await sleep(150);
+  assert.equal(await docText(h.page), "row\nrow\nrow\nrow\nend\n");
+  assert.deepEqual(await selectionRanges(h.page), [[10, 10]], "the caret went down with its row");
+  // An account that does not lead to the text that came with it is left
+  // aside, and the texts are compared as before: the change still lands.
+  await update([{ from: { line: 0, ch: 0 }, to: { line: 0, ch: 0 }, text: "x" }], "row\nrow\nrow\nrow\nEND\n", 3);
+  await sleep(150);
+  assert.equal(await docText(h.page), "row\nrow\nrow\nrow\nEND\n");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a host change that crosses an edit in flight is merged when the document comes back", { skip }, async () => {
+  // The edit was posted, and before the host wrote it the file changed under
+  // it: the host answers with the document instead of writing, the editor
+  // folds its unconfirmed typing into that text and sends again on the new
+  // base. Nothing typed is lost and nothing the host changed is undone.
+  const h = await open({ text: "alpha\nbeta\ngamma\n", scores: 0 });
+  await setSelection(h.page, 5);
+  await h.page.keyboard.type("X");
+  assert.equal(await lastEdit(h.page), "alphaX\nbeta\ngamma\n");
+  // The host's answer to a stale edit: the document as it stands, without
+  // the X, at a later version.
+  await hostUpdate(h.page, "alpha\nbeta\ngammaZ\n", true, 3);
+  await sleep(500);
+  const sent = await edits(h.page);
+  assert.equal(sent.length, 2, "the merge is sent again");
+  assert.equal(sent[1].text, "alphaX\nbeta\ngammaZ\n");
+  assert.equal(sent[1].base, 3);
+  assert.equal(await docText(h.page), "alphaX\nbeta\ngammaZ\n");
+  // And the host writing it settles the two sides: nothing more goes out.
+  await h.page.evaluate(
+    (seq) => window.postMessage({ type: "applied", seq: seq, version: 4 }, "*"),
+    sent[1].seq
+  );
+  await hostUpdate(h.page, "alphaX\nbeta\ngammaZ\n", true, 4);
+  await sleep(500);
+  assert.equal((await edits(h.page)).length, 2);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("Ctrl+Z leaves what the host wrote in place and undoes what was typed here", { skip }, async () => {
+  // A change that came from the host (the header button, the language the
+  // menu writes, the text editor beside this one) is not this editor's to
+  // undo: Ctrl+Z after the header button used to delete the header from the
+  // file, or write it twice.
+  const h = await open({ text: "one\ntwo\n", scores: 0 });
+  await setSelection(h.page, 3);
+  await h.page.keyboard.type("A");
+  assert.equal(await lastEdit(h.page), "oneA\ntwo\n");
+  await h.page.evaluate(() => window.postMessage({ type: "applied", seq: 1, version: 2 }, "*"));
+  await hostUpdate(h.page, "oneA\ntwo\nthree\n", true, 3);
+  await sleep(100);
+  assert.equal(await docText(h.page), "oneA\ntwo\nthree\n");
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await docText(h.page), "one\ntwo\nthree\n");
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await docText(h.page), "one\ntwo\nthree\n", "nothing of the host's is undone");
+  await chord(h.page, ["Control"], "y");
+  assert.equal(await docText(h.page), "oneA\ntwo\nthree\n");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Inside VS Code Ctrl+Z is undone twice: here, by CodeMirror's history, and
+// by the workbench, which undoes the text model under the editor and sends
+// the text that leaves. The host writes an edit over the stretch a
+// comparison of the texts finds, and a line put in among blank lines is
+// found at the end of the run where CodeMirror put it at the head: mapped
+// over each other as two writers' changes, the two undos took out one line
+// break more than had gone in, on screen and in the file. Reported from VS
+// Code with the code block button on a blank line; a plain Enter there did
+// the same, and Ctrl+Y wrote the block twice.
+test("Ctrl+Z and Ctrl+Y answered by the workbench as well as here leave the text they come to, no line short and no block twice", { skip }, async () => {
+  const before = "Before.\n\nAfter.\n";
+  const cases = [
+    {
+      act: (page) => page.click('#app button[data-type="code-block"]'),
+      after: "Before.\n\n```\n```\n\nAfter.\n",
+      // What the host wrote: "```\n```\n\n" at the head of the third line.
+      undo: [{ from: { line: 2, ch: 0 }, to: { line: 5, ch: 0 }, text: "" }],
+      redo: [{ from: { line: 2, ch: 0 }, to: { line: 2, ch: 0 }, text: "```\n```\n\n" }],
+    },
+    {
+      act: (page) => page.keyboard.press("Enter"),
+      after: "Before.\n\n\nAfter.\n",
+      undo: [{ from: { line: 2, ch: 0 }, to: { line: 3, ch: 0 }, text: "" }],
+      redo: [{ from: { line: 2, ch: 0 }, to: { line: 2, ch: 0 }, text: "\n" }],
+    },
+  ];
+  for (const c of cases) {
+    const h = await open({ text: before, scores: 0 });
+    const workbench = (changes, text, version) =>
+      h.page.evaluate(
+        (changes, text, version) =>
+          window.postMessage({ type: "update", text, frontMatter: "x", withFrontMatter: true, version, changes }, "*"),
+        changes,
+        text,
+        version
+      );
+    await setSelection(h.page, 8);
+    await c.act(h.page);
+    assert.equal(await lastEdit(h.page), c.after);
+    const sent = (await edits(h.page)).pop();
+    await h.page.evaluate((seq) => window.postMessage({ type: "applied", seq: seq, version: 2 }, "*"), sent.seq);
+    await chord(h.page, ["Control"], "z");
+    await workbench(c.undo, before, 3);
+    await sleep(500);
+    assert.equal(await docText(h.page), before, "the undo took a line more than went in");
+    assert.equal((await edits(h.page)).pop().text, before, "the file was sent a line short");
+    await chord(h.page, ["Control"], "y");
+    await workbench(c.redo, c.after, 4);
+    await sleep(500);
+    assert.equal(await docText(h.page), c.after, "the redo wrote it twice");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+test("a flush from the host sends the held edit at once and answers behind it", { skip }, async () => {
+  const h = await open({ text: "Hello\n", scores: 0 });
+  await setSelection(h.page, 5);
+  await h.page.keyboard.type("!");
+  await h.page.evaluate(() => window.postMessage({ type: "flush", id: 4 }, "*"));
+  await sleep(50); // well inside the 300 ms the keystroke would have waited
+  const posts = await h.page.evaluate(() =>
+    window.__posts.filter((m) => m.type === "edit" || m.type === "flushed")
+  );
+  assert.deepEqual(posts.map((m) => m.type), ["edit", "flushed"]);
+  assert.equal(posts[0].text, "Hello!\n");
+  assert.equal(posts[1].id, 4);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("Ctrl+S sends the held edit ahead of the save", { skip }, async () => {
+  const h = await open({ text: "Hello\n", scores: 0 });
+  await setSelection(h.page, 5);
+  await h.page.keyboard.type("!");
+  await chord(h.page, ["Control"], "s");
+  await sleep(50);
+  const sent = await edits(h.page);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].text, "Hello!\n");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a header the host keeps on screen over the setting lights the button and offers to hide it", { skip }, async () => {
+  const h = await open({
+    text: "Body\n",
+    scores: 0,
+    withFrontMatter: false,
+    frontMatter: "",
+    seed: { settings: { frontMatter: "hidden" } },
+  });
+  const label = () =>
+    h.page.evaluate(() => {
+      const b = document.querySelector('#app button[data-type="mdm-front-matter"]');
+      return [b.getAttribute("aria-label"), b.classList.contains("mdm-btn--on"), b.classList.contains("mdm-btn--off")];
+    });
+  assert.deepEqual(await label(), ["No YAML header in this file", false, true]);
+  // The host's answer to a header typed here: the same text, carrying it.
+  await h.page.evaluate(() =>
+    window.postMessage(
+      { type: "update", text: "---\ntitle: t\n---\n\nBody\n", frontMatter: "---\ntitle: t\n---\n", withFrontMatter: true, hiddenLines: 0 },
+      "*"
+    )
+  );
+  await sleep(100);
+  assert.deepEqual(await label(), ["Hide YAML header", true, false]);
+  await h.page.click('#app button[data-type="mdm-front-matter"]');
+  const asked = (await setSettingPosts(h.page)).pop();
+  assert.deepEqual(asked, { type: "setSetting", key: "frontMatter", value: "hidden" });
   assert.deepEqual(h.errors, []);
   await h.close();
 });
