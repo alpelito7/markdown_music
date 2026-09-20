@@ -37,7 +37,7 @@ While a tune plays, a brass playhead walks the staff and the page scrolls to kee
 
 ### Export
 
-The export button writes the document as HTML or PDF, with the font, the justification and the hyphenation the editor is using. It needs [Quarto](https://quarto.org) 1.4 or later. With Chrome or Chromium it can print a PDF from the HTML page without TeX, including scores and equations; installing TeX adds its typeset line breaking and page layout. The first kind of PDF says which road it took. Its **Don't show again** button hides that notice, and `mdm.showPdfFallbackNotice` in Settings turns it back on. The editor itself needs none of them.
+The export button has two branches. **Document** writes the document as HTML or PDF, with the font, the justification and the hyphenation the editor is using, and needs [Quarto](https://quarto.org) 1.4 or later. With Chrome or Chromium it can print a PDF from the HTML page without TeX, including scores and equations; installing TeX adds its typeset line breaking and page layout. The first kind of PDF says which road it took. Its **Don't show again** button hides that notice, and `mdm.showPdfFallbackNotice` in Settings turns it back on. The editor itself needs none of them. **Audio** writes every score of the document as MIDI or as WAV beside it, one file per score, which is what a score's own button above does for the one score it stands by; it needs nothing installed at all, and in a document with no score its rows are greyed out.
 
 ## Documentation and licence
 

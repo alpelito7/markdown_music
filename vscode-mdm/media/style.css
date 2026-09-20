@@ -649,8 +649,11 @@ body {
   background: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
 }
 /* Nothing to do: undo with no history, the header button of a file without
-   one. */
-#app .mdm-btn--off {
+   one, the Audio rows of the export panel in a document with no score. One
+   declaration for the three of them, so that a row of a menu greys out at
+   exactly the weight a button of the bar does. */
+#app .mdm-btn--off,
+#app .mdm-menu__item--off {
   opacity: 0.35;
   pointer-events: none;
 }
@@ -711,6 +714,25 @@ body {
 }
 #app .mdm-menu__item:hover {
   background: color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+}
+/* The export panel names its two branches, Document and Audio, and the Audio
+   header carries one quiet line saying what a row under it writes: the rail
+   of every score wears this same icon, so the panel has to say that here it
+   writes them all. Neither is a row, and neither takes the pointer: the hover
+   wash belongs to what can be pressed. */
+#app .mdm-menu__head {
+  padding: 6px 14px 2px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#app .mdm-menu__note {
+  padding: 0 14px 6px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font-size: 11.5px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 /* An empty drop-down panel (currently only a placeholder; the outline is its
    own side panel now, see .mdm-outline above). */
@@ -1279,14 +1301,17 @@ body {
   width: 10px;
 }
 #app .mdm-chrome .mdm-copy,
-#app .mdm-chrome .mdm-audio-toggle {
+#app .mdm-chrome .mdm-audio-toggle,
+#app .mdm-chrome .mdm-audio-export {
   visibility: hidden;
   opacity: 0;
 }
 #app .mdm-chrome.mdm-chrome--hover .mdm-copy,
 #app .mdm-chrome.mdm-chrome--hover .mdm-audio-toggle,
+#app .mdm-chrome.mdm-chrome--hover .mdm-audio-export,
 #app .mdm-chrome.mdm-chrome--open .mdm-copy,
 #app .mdm-chrome.mdm-chrome--open .mdm-audio-toggle,
+#app .mdm-chrome.mdm-chrome--open .mdm-audio-export,
 #app .mdm-score[data-mdm-audio] > .mdm-chrome .mdm-audio-toggle {
   visibility: visible;
   opacity: 1;
@@ -1337,7 +1362,8 @@ body {
    used to do by hand. Stacked by the rail and not placed by hand; relative
    and not static, because a tooltip is placed against its button. */
 #app .mdm-chrome .mdm-copy,
-#app .mdm-chrome .mdm-audio-toggle {
+#app .mdm-chrome .mdm-audio-toggle,
+#app .mdm-chrome .mdm-audio-export {
   position: relative;
   flex: none;
   display: flex;
@@ -1367,6 +1393,74 @@ body {
 #app .mdm-chrome .mdm-copy:hover,
 #app .mdm-chrome .mdm-audio-toggle:hover {
   background-color: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
+}
+/* The same wash, except while the pointer is inside this button's own menu:
+   the panel is a child of the button (so that one class opens it and
+   closeMenus closes it), and a button washed under a pointer that is really
+   on a row of its panel says the button is about to be pressed. */
+#app .mdm-chrome .mdm-audio-export:hover:not(:has(.mdm-menu:hover)) {
+  background-color: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
+}
+
+/* The formats this score can be written as, hanging off the export button.
+   It opens to the LEFT of the rail and level with the button: the rail stands
+   in a 50px margin with 16px of it left over, so a panel to the right would be
+   off the pane, and a panel under the button would have to flip upwards at the
+   foot of the pane, where it would cover the copy and the lit headphones of a
+   sounding score. Beside the rail it is one shape everywhere.
+
+   The rows inherit from .cm-content, which is the prose: its face, its size
+   adjustment, its alignment and its word division would all reach them, so
+   the chrome's own sans is set here whole. */
+#app .mdm-chrome .mdm-menu {
+  top: 0;
+  right: calc(100% + 4px);
+  left: auto;
+  margin-top: 0;
+  min-width: 0;
+  /* Two rows never scroll, and a panel that cannot scroll keeps no room for a
+     scrollbar: the 60vh and the auto overflow of the toolbar's tall menus left
+     12px of empty panel down the side of this one (measured). */
+  max-height: none;
+  overflow: visible;
+  font: 13px/1.5 var(--mdm-sans);
+  font-size-adjust: none;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-align: left;
+  text-indent: 0;
+  text-transform: none;
+  hyphens: manual;
+  white-space: nowrap;
+  user-select: none;
+}
+/* The rows are spans here and buttons in the toolbar, and a span inside the
+   text takes the content-box the document's own boxes are drawn with: the row
+   was then its padding wider than the panel and its wash stood 17px past the
+   panel's rounded edge (measured). */
+#app .mdm-chrome .mdm-menu__item {
+  box-sizing: border-box;
+}
+/* A rail put away takes no pointer and draws none of its buttons, and an open
+   menu would go with them, so a rail with a menu open is held up until the
+   menu is closed. It also stands over the block below it, which reaches into
+   the column (z-index 5, the pointer's rail, stated after those rules so the
+   two do not merely tie). */
+#app .mdm-chrome:has(.mdm-toolbar__item--open) {
+  pointer-events: auto;
+  z-index: 5;
+}
+#app .mdm-chrome:has(.mdm-toolbar__item--open) .mdm-copy,
+#app .mdm-chrome:has(.mdm-toolbar__item--open) .mdm-audio-toggle,
+#app .mdm-chrome:has(.mdm-toolbar__item--open) .mdm-audio-export {
+  visibility: visible;
+  opacity: 1;
+}
+/* The tooltip of a button whose panel is open would be drawn over the panel.
+   The toolbar has this rule for a button INSIDE an open item; here the button
+   is the item. */
+#app .mdm-chrome .mdm-tip.mdm-toolbar__item--open::after {
+  display: none;
 }
 /* The lit disc under the headphones while this block's player is open: an
    open player is a held state, so the disc is the brass of the repeat and

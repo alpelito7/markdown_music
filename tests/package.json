@@ -5,7 +5,7 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 *.test.js",
     "test:quick": "node --test --test-concurrency=1 $(ls *.test.js | grep -vx render.test.js)",
-    "test:fast": "node --test transforms.test.js extension-host.test.js theme.test.js audio-assets.test.js packaging.test.js hyphenation.test.js",
+    "test:fast": "node --test transforms.test.js extension-host.test.js theme.test.js audio-assets.test.js audio-export.test.js packaging.test.js hyphenation.test.js",
     "test:render": "node --test render.test.js",
     "test:webview": "node --test --test-concurrency=1 webview-*.test.js",
     "test:hyphenation": "node --test --test-concurrency=1 hyphenation.test.js webview-hyphenation.test.js hyphenation-export.test.js",

@@ -2814,3 +2814,711 @@ test("an edit in flight and a language chosen beside it both land", async () => 
     vscode.workspace.applyEdit = apply;
   }
 });
+
+// ---------- The audio of a score, as files beside the document ----------
+//
+// The bytes are the webview's half (media/mdm-audio.js, tests/audio-export.js):
+// what is checked here is everything the host does with them, which is
+// everything that touches the disk. The protocol is a conversation, so a test
+// plays the webview's side of it message by message.
+
+// A document in a folder of its own. The file:///doc.mdm every other test
+// opens would put the audio at the root of the filesystem, which is neither
+// writable nor what a reader's document looks like.
+function audioBoot(name) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-audio-"));
+  const doc = path.join(tmp, name || "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  return Object.assign(h, { tmp: tmp, doc: doc });
+}
+
+// The run map is the extension's own and outlives a test, so every test lets
+// go of its run and takes its folder away.
+function audioDone(h) {
+  h.dispose();
+  fs.rmSync(h.tmp, { recursive: true, force: true });
+}
+
+// The fourteen bytes every standard MIDI file begins with, and a body the test
+// can find again. It is all the host reads (midiLooksRight).
+function midiFile(tail) {
+  const head = Buffer.from([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0, 0x60]);
+  return new Uint8Array(Buffer.concat([head, Buffer.from(tail || "MTrk", "latin1")]));
+}
+
+// A 16-bit PCM WAV of `frames` frames, headed as media/mdm-audio.js heads one
+// (wavBytes), which is what the host checks a .wav against.
+function wavFile(frames) {
+  const data = frames * 2;
+  const out = Buffer.alloc(44 + data);
+  out.write("RIFF", 0, "latin1");
+  out.writeUInt32LE(36 + data, 4);
+  out.write("WAVE", 8, "latin1");
+  out.write("fmt ", 12, "latin1");
+  out.writeUInt32LE(16, 16);
+  out.writeUInt16LE(1, 20); // PCM
+  out.writeUInt16LE(1, 22); // one channel
+  out.writeUInt32LE(44100, 24);
+  out.writeUInt32LE(44100 * 2, 28);
+  out.writeUInt16LE(2, 32);
+  out.writeUInt16LE(16, 34); // sixteen bits
+  out.write("data", 36, "latin1");
+  out.writeUInt32LE(data, 40);
+  for (let i = 0; i < frames; i++) out.writeInt16LE((i % 101) - 50, 44 + i * 2);
+  return new Uint8Array(out);
+}
+
+// The webview's side of the conversation, as the host reads it.
+function audioStart(id, format, count, total) {
+  return { type: "exportAudio", step: "start", id: id, format: format, count: count, total: total };
+}
+function audioFile(id, number, title, bytes) {
+  return { type: "exportAudio", step: "file", id: id, number: number, title: title, bytes: bytes };
+}
+
+// What the host answered, in order.
+function audioAnswers(h) {
+  return h.posted.filter((m) => m.type === "exportAudio");
+}
+
+// What is in the document's folder besides the document itself.
+function audioFiles(h) {
+  const own = path.basename(h.doc);
+  return fs.readdirSync(h.tmp).filter((n) => n !== own).sort();
+}
+
+test("a score's audio is named after the document, its place in it and its title", () => {
+  assert.equal(ext.audioFileName("tunes", 3, "The Kesh", "midi"), "tunes 3 - The Kesh.mid");
+  assert.equal(ext.audioFileName("tunes", 3, "The Kesh", "wav"), "tunes 3 - The Kesh.wav");
+  // No title, and the three that leave none: the number carries the name on
+  // its own rather than a file ending in a dash.
+  assert.equal(ext.audioFileName("tunes", 1, null, "midi"), "tunes 1.mid");
+  assert.equal(ext.audioFileName("tunes", 1, "", "midi"), "tunes 1.mid");
+  assert.equal(ext.audioFileName("tunes", 1, "   ", "midi"), "tunes 1.mid");
+  assert.equal(ext.audioFileName("tunes", 1, "...", "midi"), "tunes 1.mid");
+  assert.equal(ext.audioFileName("tunes", 9999, "Air", "wav"), "tunes 9999 - Air.wav");
+});
+
+test("a score's title cannot name a file outside the folder, or one a system would refuse", () => {
+  const name = (title) => ext.audioFileName("doc", 1, title, "midi");
+  // A path is a name and nothing more: the separators of both systems go, and
+  // so does the run of dots and spaces they leave at the front.
+  assert.equal(name("../../etc/passwd"), "doc 1 - etc passwd.mid");
+  assert.equal(name("a\\b"), "doc 1 - a b.mid");
+  assert.equal(name("C:\\x"), "doc 1 - C x.mid");
+  // Everything Windows forbids, together, leaves no title at all.
+  assert.equal(name('<>:"|?*'), "doc 1.mid");
+  assert.equal(name("Air\tand\nGigue"), "doc 1 - Air and Gigue.mid");
+  // A lone surrogate: vscode.Uri.toString() runs encodeURIComponent, which
+  // throws URIError on one.
+  assert.equal(name("Reel\ud800"), "doc 1 - Reel.mid");
+  assert.ok(!/[\ud800-\udfff]/.test(name("\ud800Air\udfff")));
+  // A bidi override can make a name read as ending in .mid on screen.
+  assert.equal(name("Air\u202Edim.wav"), "doc 1 - Airdim.wav.mid");
+  // Windows drops a trailing dot without saying so, which would make these
+  // two the same file.
+  assert.equal(name("Reel..."), "doc 1 - Reel.mid");
+  // Eighty code points of title, never a surrogate pair split in half, and
+  // never over the 255 bytes a name may weigh.
+  assert.equal(Array.from(name("a".repeat(300))).length, "doc 1 - .mid".length + 80);
+  const accented = name("\u00e9".repeat(200));
+  // Five bytes under, because the file is written as "<name>.part" and moved
+  // into place: at 255 exactly it was the part file that could not be written.
+  assert.ok(Buffer.byteLength(accented, "utf8") <= 250, accented);
+  assert.ok(Buffer.byteLength(accented + ".part", "utf8") <= 255, accented);
+  assert.equal(Array.from(accented).length, "doc 1 - .mid".length + 80);
+  // A document whose own name is long enough that the title has to give way:
+  // this is the case the bound is actually read on, and the part file is what
+  // decides where the bound sits.
+  const long = ext.audioFileName("d".repeat(200), 7, "\u00e9".repeat(60), "wav");
+  assert.ok(long, "no name was made for a long document name");
+  assert.ok(
+    Buffer.byteLength(long + ".part", "utf8") <= 255,
+    "the file written before the rename weighs " + Buffer.byteLength(long + ".part", "utf8") + " bytes"
+  );
+  assert.ok(Buffer.byteLength(long, "utf8") > 240, "the fixture never reached the bound: " + long.length);
+  // CON, PRN and LPT1 are reserved on Windows only as whole names; this one
+  // always begins with the document's stem and a number.
+  assert.equal(name("CON"), "doc 1 - CON.mid");
+});
+
+test("a document whose own name fills a file name is told so instead of hanging", () => {
+  // The loop that shortens the title had nothing left to take away and spun
+  // for ever on a stem of 251 bytes. It is called in a child of its own
+  // because node:test cannot time a loop out: its timeout is checked between
+  // ticks, and a loop that never yields never reaches one, so the mutation
+  // that takes the guard away hung the whole run rather than failing this
+  // test (measured 2026-09-15). A child that has to be killed is a failure.
+  const { execFileSync } = require("node:child_process");
+  const extPath = path.join(__dirname, "..", "vscode-mdm", "extension.js");
+  const script = [
+    "const Module = require('node:module');",
+    "const origResolve = Module._resolveFilename;",
+    "Module._resolveFilename = function (request, ...rest) {",
+    "  if (request === 'vscode') return " + JSON.stringify(MOCK) + ";",
+    "  return origResolve.call(this, request, ...rest);",
+    "};",
+    "const ext = require(" + JSON.stringify(extPath) + ");",
+    // The bound is 250 and not 255: the file is written as "<name>.part" and
+    // moved into place, so the name is held five bytes short of what a name
+    // may weigh.
+    "const long = 'x'.repeat(246);",
+    "const short = 'x'.repeat(244);",
+    "console.log(JSON.stringify([",
+    "  ext.audioFileName(long, 1, 'The Kesh', 'midi'),",
+    "  ext.audioFileName(long, 1, null, 'midi'),",
+    // One byte shorter and the name fits, with nothing of the title left.
+    "  ext.audioFileName(short, 1, 'The Kesh', 'midi'),",
+    "]));",
+  ].join("\n");
+  const said = execFileSync(process.execPath, ["-e", script], {
+    timeout: 10000,
+    encoding: "utf8",
+  });
+  assert.deepEqual(JSON.parse(said), [null, null, "x".repeat(244) + " 1.mid"]);
+});
+
+test("a number or a format nobody offers never names a file", () => {
+  [0, -1, 1.5, "1", NaN, null, 1e30].forEach((number) => {
+    assert.equal(ext.audioFileName("doc", number, "Air", "midi"), null, String(number));
+  });
+  // The format is a wire value too, and a plain object would answer three of
+  // these with something truthy off Object.prototype.
+  ["mp3", "constructor", "__proto__", "toString", "valueOf", "", null].forEach((format) => {
+    assert.equal(ext.audioFileName("doc", 1, "Air", format), null, String(format));
+  });
+});
+
+test("the export's format cannot be picked off Object.prototype either", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const h = boot("Body\n", {}, null, "file://" + doc);
+
+  // EXPORT_TARGETS[to] answered "constructor" with the Object function, and
+  // the export went on with it: it reached .outputs.indexOf on undefined and
+  // told the reader "MDM: export failed (...)" about a format nobody offers,
+  // where every other made-up name is dropped in silence.
+  for (const to of ["constructor", "__proto__", "toString", "valueOf"]) {
+    await h.receive({ type: "export", to: to });
+  }
+  await settle();
+  restore();
+
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.infoMessages, []);
+  assert.equal(vscode._state.progressTitles.length, 0);
+  assert.ok(!fs.existsSync(path.join(tmp, "args.txt")), "a made-up format reached Quarto");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a run writes every score beside the document, saving nothing and starting nothing", async () => {
+  const h = audioBoot();
+  // A Quarto on the PATH that writes down that it ran. Nothing about the
+  // audio may need Quarto, TeX or Chrome, and a run that started one would
+  // say so here. The fake lives in a folder of its own so that what the
+  // document's folder holds at the end is only what the audio put there.
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-audio-bin-"));
+  const restore = usePath(fakeBin(elsewhere));
+  vscode._state.dirtyDocuments.add(h.document.uri.toString());
+  // Something already at one of the two names. An export writes over what is
+  // there without asking, as the HTML and the PDF do.
+  fs.writeFileSync(path.join(h.tmp, "doc 2 - Air.mid"), "an older take");
+
+  const first = midiFile("one");
+  const second = midiFile("two");
+  await h.receive(audioStart("run-1", "midi", 2, 2));
+  await h.receive(audioFile("run-1", 1, "The Kesh", first));
+  await h.receive(audioFile("run-1", 2, "Air", second));
+  await h.receive({ type: "exportAudio", step: "done", id: "run-1" });
+  await settle();
+  restore();
+
+  assert.deepEqual(audioFiles(h), ["doc 1 - The Kesh.mid", "doc 2 - Air.mid"]);
+  assert.deepEqual(
+    new Uint8Array(fs.readFileSync(path.join(h.tmp, "doc 1 - The Kesh.mid"))),
+    first
+  );
+  assert.deepEqual(
+    new Uint8Array(fs.readFileSync(path.join(h.tmp, "doc 2 - Air.mid"))),
+    second,
+    "the file that was already there was not written over"
+  );
+  // The audio is rendered from the text on screen, which is ahead of the file
+  // on disk by every unsaved edit, so saving would change nothing about what
+  // comes out and would run format-on-save on the way past.
+  assert.deepEqual(vscode._state.savedUris, []);
+  assert.ok(!fs.existsSync(path.join(elsewhere, "args.txt")), "the audio started Quarto");
+  assert.equal(vscode._state.progressTitles.length, 1);
+  assert.match(vscode._state.progressTitles[0], /^MDM: exporting the audio of doc\.mdm/);
+  assert.ok(vscode._state.progressRuns[0].cancellable, "the notification cannot be cancelled");
+  assert.deepEqual(vscode._state.progressReports, [{ message: "1 of 2" }, { message: "2 of 2" }]);
+  assert.equal(vscode._state.progressEnded, 1, "the notification was left turning");
+  assert.deepEqual(vscode._state.warningMessages, []);
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(audioAnswers(h), [
+    { type: "exportAudio", id: "run-1", ok: true },
+    { type: "exportAudio", id: "run-1", number: 1, ok: true },
+    { type: "exportAudio", id: "run-1", number: 2, ok: true },
+  ]);
+  const lines = exportLog().lines;
+  assert.match(lines[0], /doc\.mdm .* MIDI audio \(2 of 2 scores\)$/);
+  assert.equal(lines[1], "  wrote doc 1 - The Kesh.mid (" + first.length + " bytes)");
+  assert.equal(lines[2], "  wrote doc 2 - Air.mid (" + second.length + " bytes)");
+  assert.equal(lines[3], "  done: 2 written, 0 skipped, of 2.");
+  fs.rmSync(elsewhere, { recursive: true, force: true });
+  audioDone(h);
+});
+
+test("one file offers to open it, several offer the folder they are in", async () => {
+  const h = audioBoot();
+  vscode._state.infoChoices = {
+    "exported doc 1 - The Kesh.mid": "Open MIDI",
+    "WAV files beside": "Open folder",
+  };
+
+  // One score, from the button of the score itself: the file is named and
+  // opened, since the reader knows which one they asked for.
+  await h.receive(audioStart("run-1", "midi", 3, 1));
+  await h.receive(audioFile("run-1", 1, "The Kesh", midiFile()));
+  await h.receive({ type: "exportAudio", step: "done", id: "run-1" });
+  await settle();
+  assert.equal(vscode._state.infoMessages.length, 1);
+  assert.equal(vscode._state.infoMessages[0].message, "MDM: exported doc 1 - The Kesh.mid");
+  assert.deepEqual(vscode._state.infoMessages[0].buttons, ["Open MIDI"]);
+  assert.deepEqual(vscode._state.openedExternal, ["file://" + path.join(h.tmp, "doc 1 - The Kesh.mid")]);
+
+  // The whole document, from the toolbar: a name for each would be a wall of
+  // text, so the folder they are all in is what is offered.
+  await h.receive(audioStart("run-2", "wav", 2, 2));
+  await h.receive(audioFile("run-2", 1, "The Kesh", wavFile(40)));
+  await h.receive(audioFile("run-2", 2, null, wavFile(40)));
+  await h.receive({ type: "exportAudio", step: "done", id: "run-2" });
+  await settle();
+  assert.equal(vscode._state.infoMessages.length, 2);
+  assert.equal(vscode._state.infoMessages[1].message, "MDM: exported 2 WAV files beside doc.mdm");
+  assert.deepEqual(vscode._state.infoMessages[1].buttons, ["Open folder"]);
+  assert.equal(vscode._state.openedExternal[1], "file://" + h.tmp);
+  assert.deepEqual(audioFiles(h), [
+    "doc 1 - The Kesh.mid",
+    "doc 1 - The Kesh.wav",
+    "doc 2.wav",
+  ]);
+  audioDone(h);
+});
+
+test("bytes that are not a file of the format asked for are never written", async () => {
+  const h = audioBoot();
+  const midi = midiFile();
+  const refused = [
+    // The right bytes in the wrong run: a .wav no player would open.
+    { what: "MIDI bytes in a WAV run", format: "wav", bytes: midi },
+    { what: "a plain array", format: "midi", bytes: Array.from(midi) },
+    // Buffer.from is glad to build a file out of this one.
+    { what: "an object with number keys", format: "midi", bytes: Object.assign({ length: midi.length }, midi) },
+    { what: "a string", format: "midi", bytes: Buffer.from(midi).toString("latin1") },
+    { what: "nothing at all", format: "midi", bytes: undefined },
+    // Cut in flight: the length the RIFF header claims is not the length that
+    // arrived, which is a .wav that opens and plays silence.
+    { what: "a WAV cut short", format: "wav", bytes: wavFile(40).slice(0, 60) },
+  ];
+  for (let i = 0; i < refused.length; i++) {
+    const bad = refused[i];
+    const id = "run-" + (i + 1);
+    await h.receive(audioStart(id, bad.format, 1, 1));
+    await h.receive(audioFile(id, 1, "The Kesh", bad.bytes));
+    await settle();
+    assert.deepEqual(audioFiles(h), [], bad.what + " was written");
+    const answers = audioAnswers(h);
+    assert.equal(answers[answers.length - 1].ok, false, bad.what + " was accepted");
+    assert.equal(vscode._state.errorMessages.length, i + 1, bad.what);
+  }
+  assert.equal(vscode._state.progressEnded, refused.length, "a notification was left turning");
+
+  // And the one shape that is not a mistake: a window into a larger buffer,
+  // which is what a view of the samples is. Buffer.from(view.buffer) alone
+  // would write the whole of the buffer under it.
+  const room = new Uint8Array(midi.length + 12);
+  room.set(midi, 8);
+  const view = new Uint8Array(room.buffer, 8, midi.length);
+  await h.receive(audioStart("run-9", "midi", 1, 1));
+  await h.receive(audioFile("run-9", 1, "The Kesh", view));
+  await h.receive({ type: "exportAudio", step: "done", id: "run-9" });
+  await settle();
+  assert.deepEqual(audioFiles(h), ["doc 1 - The Kesh.mid"]);
+  assert.deepEqual(
+    new Uint8Array(fs.readFileSync(path.join(h.tmp, "doc 1 - The Kesh.mid"))),
+    midi
+  );
+  audioDone(h);
+});
+
+test("a file of a run that never started is dropped", async () => {
+  const h = audioBoot();
+
+  await h.receive(audioFile("run-1", 1, "The Kesh", midiFile()));
+  await h.receive({ type: "exportAudio", step: "done", id: "run-1" });
+  // And a file of another run than the one that is open.
+  await h.receive(audioStart("run-2", "midi", 1, 1));
+  await h.receive(audioFile("run-3", 1, "The Kesh", midiFile()));
+  // And a number no document of one score could have, which does not end the
+  // run: the one file it is waiting for still lands.
+  await h.receive(audioFile("run-2", 2, "Air", midiFile()));
+  await h.receive(audioFile("run-2", 0, "Air", midiFile()));
+  await h.receive(audioFile("run-2", 1.5, "Air", midiFile()));
+  await h.receive(audioFile("run-2", "1", "Air", midiFile()));
+  await h.receive(audioFile("run-2", 1, "The Kesh", midiFile()));
+  // And the same score twice: the second one is not a second file.
+  await h.receive(audioFile("run-2", 1, "Another name", midiFile()));
+  await h.receive({ type: "exportAudio", step: "done", id: "run-2" });
+  await settle();
+
+  assert.deepEqual(audioFiles(h), ["doc 1 - The Kesh.mid"]);
+  assert.deepEqual(vscode._state.errorMessages, []);
+  assert.deepEqual(vscode._state.warningMessages, []);
+  assert.equal(vscode._state.progressTitles.length, 1, "a message outside a run put a notification up");
+  audioDone(h);
+});
+
+test("a second run of one document is turned away while the first keeps writing", async () => {
+  const h = audioBoot();
+
+  await h.receive(audioStart("run-1", "midi", 2, 2));
+  await h.receive(audioStart("run-2", "wav", 2, 2));
+  await h.receive(audioFile("run-1", 1, "The Kesh", midiFile()));
+  // The turned-away run's own files are not its document's to write.
+  await h.receive(audioFile("run-2", 2, "Air", wavFile(40)));
+  await h.receive(audioFile("run-1", 2, "Air", midiFile()));
+  await h.receive({ type: "exportAudio", step: "done", id: "run-1" });
+  await settle();
+
+  assert.deepEqual(audioFiles(h), ["doc 1 - The Kesh.mid", "doc 2 - Air.mid"]);
+  assert.equal(vscode._state.infoMessages.length, 2);
+  const said = vscode._state.infoMessages.map((m) => m.message).sort();
+  assert.equal(said[0], "MDM: exported 2 MIDI files beside doc.mdm");
+  assert.equal(
+    said[1],
+    "MDM: the audio of doc.mdm is already being exported. Wait for that one to finish."
+  );
+  assert.equal(vscode._state.progressTitles.length, 1, "the second run put a notification up");
+  assert.deepEqual(audioAnswers(h)[1], { type: "exportAudio", id: "run-2", ok: false });
+  audioDone(h);
+});
+
+test("the audio of a document and its export to a page run at the same time", async () => {
+  const h = audioBoot();
+  // The two runs are kept apart by maps of their own: the audio writes no
+  // .qmd, no mdm_cache and no _files, so there is nothing of the document
+  // export's for it to walk into.
+  const bin = path.join(h.tmp, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const quarto = path.join(bin, "quarto");
+  fs.writeFileSync(
+    quarto,
+    "#!/bin/sh\n" + SLEEP + " 1\necho \"$@\" > \"" + h.tmp + "/args.txt\"\nexit 0\n"
+  );
+  fs.chmodSync(quarto, 0o755);
+  const restore = usePath(bin);
+
+  const rendering = h.receive({ type: "export", to: "html" });
+  await h.receive(audioStart("run-1", "midi", 1, 1));
+  await h.receive(audioFile("run-1", 1, "The Kesh", midiFile()));
+  await h.receive({ type: "exportAudio", step: "done", id: "run-1" });
+  // Written while Quarto is still running, and not after it.
+  assert.ok(fs.existsSync(path.join(h.tmp, "doc 1 - The Kesh.mid")));
+  assert.ok(!fs.existsSync(path.join(h.tmp, "args.txt")), "Quarto had already finished");
+  await rendering;
+  await settle();
+  restore();
+
+  const said = vscode._state.infoMessages.map((m) => m.message).sort();
+  assert.deepEqual(said, ["MDM: exported doc 1 - The Kesh.mid", "MDM: exported doc.html"]);
+  assert.equal(vscode._state.progressTitles.length, 2);
+  assert.deepEqual(vscode._state.errorMessages, []);
+  audioDone(h);
+});
+
+test("a document that is not saved is told where the audio would go", async () => {
+  const h = boot("Body\n", {}, null, "untitled:Untitled-1");
+  // The folder of a document that is nowhere is the folder the editor happens
+  // to be running in, so that is where a file would land. The whole folder is
+  // read rather than one name: what the name would be depends on what
+  // uri.fsPath answers for a scheme that is not file, which is the mock's
+  // business and not the decision under test.
+  const before = fs.readdirSync(process.cwd());
+
+  await h.receive(audioStart("run-1", "midi", 1, 1));
+  await h.receive(audioFile("run-1", 1, "The Kesh", midiFile()));
+  await settle();
+
+  assert.equal(vscode._state.infoMessages.length, 1);
+  assert.equal(
+    vscode._state.infoMessages[0].message,
+    "MDM: save Untitled-1 first. The audio files are written in the folder the document is saved in."
+  );
+  assert.deepEqual(audioAnswers(h), [{ type: "exportAudio", id: "run-1", ok: false }]);
+  assert.equal(vscode._state.progressTitles.length, 0);
+  assert.deepEqual(
+    fs.readdirSync(process.cwd()).filter((n) => before.indexOf(n) === -1),
+    [],
+    "a file was written beside a document that is nowhere"
+  );
+  h.dispose();
+});
+
+test("a score that was skipped names the cause and the fix, and no title can carry a command", async () => {
+  const h = audioBoot();
+  vscode._state.warningChoices = { "asks for an instrument": "Open folder" };
+
+  await h.receive(audioStart("run-1", "wav", 6, 6));
+  await h.receive(audioFile("run-1", 1, "The Kesh", wavFile(40)));
+  await h.receive({
+    type: "exportAudio", step: "skip", id: "run-1", number: 2,
+    // A notification renders [text](command:...) as a link VS Code will run,
+    // and a T: line reaches the host exactly as it was typed.
+    title: "[x](command:workbench.action.terminal.new)",
+    reason: "instrument", program: 40, detail: "abcjs asked for violin",
+  });
+  await h.receive({ type: "exportAudio", step: "skip", id: "run-1", number: 3, title: "Air", reason: "range", pitch: 110 });
+  await h.receive({ type: "exportAudio", step: "skip", id: "run-1", number: 4, title: null, reason: "empty" });
+  await h.receive({ type: "exportAudio", step: "skip", id: "run-1", number: 5, title: "Gigue", reason: "unsupported" });
+  // A reason nobody offers is read as the one that sends the reader to the
+  // log, rather than being repeated into a notification.
+  await h.receive({ type: "exportAudio", step: "skip", id: "run-1", number: 6, title: "Jig", reason: "</b>boom", detail: "TypeError: x" });
+  await h.receive({ type: "exportAudio", step: "done", id: "run-1" });
+  await settle();
+
+  assert.equal(vscode._state.warningMessages.length, 1);
+  const warning = vscode._state.warningMessages[0];
+  assert.equal(
+    warning.message,
+    "MDM: score 2 ([x](command workbench.action.terminal.new)) asks for an " +
+      "instrument the editor does not have (violin). Only the piano comes " +
+      "with it: export that score as MIDI, or take its %%MIDI program line " +
+      "out. score 3 (Air) has a note above C8, the top key of the piano the " +
+      "editor carries. Move it down an octave, or export that score as MIDI. " +
+      "score 4 has no notes to play. score 5 (Gigue) could not be sounded: " +
+      "this window has no audio. Run Developer: Reload Window and export " +
+      "again. score 6 (Jig) could not be rendered. The log says what went " +
+      "wrong. The other score was written as WAV beside doc.mdm."
+  );
+  assert.deepEqual(warning.buttons, ["Open folder", "Show log"]);
+  assert.deepEqual(vscode._state.openedExternal, ["file://" + h.tmp]);
+  assert.deepEqual(vscode._state.infoMessages, [], "a run with a skip in it also said it went well");
+  // Nothing the webview sent reaches a notification as something VS Code
+  // would run: the colon that spells a scheme is taken out of a title.
+  vscode._state.warningMessages
+    .concat(vscode._state.infoMessages, vscode._state.errorMessages)
+    .forEach((m) => assert.doesNotMatch(m.message, /\]\(command:/));
+  assert.deepEqual(audioFiles(h), ["doc 1 - The Kesh.wav"]);
+  assert.deepEqual(vscode._state.progressReports, [
+    { message: "1 of 6" }, { message: "2 of 6" }, { message: "3 of 6" },
+    { message: "4 of 6" }, { message: "5 of 6" }, { message: "6 of 6" },
+  ]);
+  const log = exportLog().lines;
+  assert.equal(log[2], "  score 2 skipped (instrument): abcjs asked for violin");
+  assert.equal(log[3], "  score 3 skipped (range)");
+  assert.equal(log[6], "  score 6 skipped (failed): TypeError: x");
+  assert.equal(log[7], "  done: 1 written, 5 skipped, of 6.");
+  audioDone(h);
+});
+
+test("a document with no score is told what a score is", async () => {
+  const h = audioBoot();
+
+  await h.receive(audioStart("run-1", "midi", 0, 0));
+  await settle();
+
+  assert.deepEqual(vscode._state.infoMessages.map((m) => m.message), [
+    "MDM: doc.mdm has no score to export as audio. A score is a block fenced as ```abc.",
+  ]);
+  assert.deepEqual(audioAnswers(h), [{ type: "exportAudio", id: "run-1", ok: false }]);
+  // No notification for a run that has nothing to do: one that came up and
+  // went again would be the only sign of a button that did nothing.
+  assert.equal(vscode._state.progressTitles.length, 0);
+  assert.deepEqual(audioFiles(h), []);
+  audioDone(h);
+});
+
+test("a document the editor has not finished reading is asked for again, not called empty", async () => {
+  const h = audioBoot();
+
+  // `unread` is the editor saying its count is not the document's: the parser
+  // had not reached the end when the button was pressed (documentScores in
+  // main.js answers null there). A document with no score at all sends the
+  // same zeroes without it, and hears something else.
+  await h.receive(Object.assign(audioStart("run-1", "wav", 0, 0), { unread: true }));
+  await settle();
+
+  assert.deepEqual(vscode._state.infoMessages.map((m) => m.message), [
+    "MDM: doc.mdm is still being read. Try the export again in a moment.",
+  ]);
+  assert.deepEqual(audioAnswers(h), [{ type: "exportAudio", id: "run-1", ok: false }]);
+  assert.equal(vscode._state.progressTitles.length, 0);
+  assert.deepEqual(audioFiles(h), []);
+  audioDone(h);
+});
+
+test("a score that is no longer where it was is not read as a document without scores", async () => {
+  const h = audioBoot();
+
+  // What a rail press leaves when the score it belonged to has moved or gone:
+  // the document has its scores, and this run has no file to write.
+  await h.receive(audioStart("run-1", "midi", 30, 0));
+  await settle();
+
+  assert.deepEqual(vscode._state.infoMessages.map((m) => m.message), [
+    "MDM: that score is not where it was in doc.mdm. Press its button again.",
+  ]);
+  assert.deepEqual(audioAnswers(h), [{ type: "exportAudio", id: "run-1", ok: false }]);
+  assert.deepEqual(audioFiles(h), []);
+  audioDone(h);
+});
+
+test("the run and its notification end on done, on cancel, on a reload, on a close and on a throw", async () => {
+  const h = audioBoot();
+  let ended = 0;
+  // Every ending is the same test: the run is over, the notification is down,
+  // and the lock is free, which is the next run being let in rather than
+  // turned away as the second of its document.
+  const endsWith = async (id, how) => {
+    await h.receive(audioStart(id, "midi", 1, 1));
+    assert.equal(audioAnswers(h)[audioAnswers(h).length - 1].ok, true, id + " was turned away");
+    await how(id);
+    await settle();
+    ended++;
+    assert.equal(vscode._state.progressEnded, ended, id + " left its notification turning");
+  };
+
+  await endsWith("run-1", (id) => h.receive({ type: "exportAudio", step: "done", id: id }));
+  await endsWith("run-2", () => {
+    // The X of the notification. The webview is told so that it stops
+    // rendering what it was about to send.
+    vscode._state.progressRuns[1].cancel();
+    assert.deepEqual(h.posted[h.posted.length - 1], {
+      type: "exportAudio", id: "run-2", cancel: true,
+    });
+  });
+  // The page was built again and the run belonged to the one before it.
+  await endsWith("run-3", () => h.receive({ type: "ready" }));
+  await endsWith("run-4", () => {
+    h.dispose();
+    return Promise.resolve();
+  });
+  await endsWith("run-5", (id) => {
+    // Anything at all throwing inside the step, which a field of the message
+    // that is a getter is enough for.
+    const msg = audioFile(id, 1, null, midiFile());
+    Object.defineProperty(msg, "title", { get() { throw new Error("boom"); } });
+    return h.receive(msg);
+  });
+  assert.match(
+    vscode._state.errorMessages[0].message,
+    /^MDM: the audio of doc\.mdm could not be written\./
+  );
+  assert.equal(audioAnswers(h)[audioAnswers(h).length - 1].ok, false);
+  // The lock is free after all five: a sixth run is let in.
+  await h.receive(audioStart("run-6", "midi", 1, 1));
+  assert.equal(audioAnswers(h)[audioAnswers(h).length - 1].ok, true);
+  assert.deepEqual(
+    vscode._state.infoMessages.map((m) => m.message),
+    [],
+    "an ending that is not done told the reader it went well"
+  );
+  audioDone(h);
+});
+
+test("a write that fails says what to do about it and leaves no half-written file", async () => {
+  const h = audioBoot();
+  // Windows answers EBUSY when something else holds the file open, which is
+  // the case this message is for and the one that cannot be built on Linux:
+  // the rename is made to fail with the code the system would give.
+  const rename = fs.renameSync;
+  fs.renameSync = function () {
+    const e = new Error("EBUSY: resource busy or locked");
+    e.code = "EBUSY";
+    throw e;
+  };
+  try {
+    await h.receive(audioStart("run-1", "midi", 1, 1));
+    await h.receive(audioFile("run-1", 1, "The Kesh", midiFile()));
+    await settle();
+  } finally {
+    fs.renameSync = rename;
+  }
+
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.equal(
+    vscode._state.errorMessages[0].message,
+    "MDM: the audio of doc.mdm could not be written. Close doc 1 - The Kesh.mid " +
+      "in the program that has it open, and export again."
+  );
+  assert.deepEqual(vscode._state.errorMessages[0].buttons, ["Show log"]);
+  // The file is written under a name of its own and moved into place, so a
+  // reader watching the folder never finds a half-written .mid there.
+  assert.deepEqual(audioFiles(h), []);
+  assert.equal(audioAnswers(h)[1].ok, false, "the webview was left rendering the rest");
+  assert.equal(vscode._state.progressEnded, 1);
+  assert.match(exportLog().lines.join("\n"), /Writing .*doc 1 - The Kesh\.mid failed: EBUSY/);
+  audioDone(h);
+});
+
+test("a document whose own name is not a plain name is not written beside", async () => {
+  // Legal on Linux, and read by the Windows rules as the drive a: and a file b
+  // on it, so the name the audio would be written under is not a name at all
+  // on one of the two systems. The guard under audioFileName is what catches
+  // that, and it says what is wrong with the document rather than sending the
+  // reader to shorten a name that is already short.
+  const h = audioBoot("a:b.mdm");
+
+  await h.receive(audioStart("run-1", "midi", 1, 1));
+  await h.receive(audioFile("run-1", 1, "The Kesh", midiFile()));
+  await settle();
+
+  assert.deepEqual(audioFiles(h), []);
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.equal(
+    vscode._state.errorMessages[0].message,
+    "MDM: the audio of a:b.mdm could not be written. The name of the " +
+      "document cannot be made part of a file name beside it. Rename it and " +
+      "export again."
+  );
+  audioDone(h);
+});
+
+test("a folder the audio cannot write to names the folder", {
+  // Root writes into a read-only folder all the same, so the case cannot be
+  // built there.
+  skip: typeof process.getuid === "function" && process.getuid() === 0
+    ? "runs as root"
+    : false,
+}, async () => {
+  const h = audioBoot();
+  fs.chmodSync(h.tmp, 0o555);
+
+  await h.receive(audioStart("run-1", "midi", 1, 1));
+  await h.receive(audioFile("run-1", 1, "The Kesh", midiFile()));
+  await settle();
+  fs.chmodSync(h.tmp, 0o755);
+
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.equal(
+    vscode._state.errorMessages[0].message,
+    "MDM: the audio of doc.mdm could not be written. The folder " + h.tmp +
+      " cannot be written to. Save the document in a folder this computer can " +
+      "write to, and export again."
+  );
+  assert.deepEqual(audioFiles(h), []);
+  audioDone(h);
+});
+
+test("the page loads the audio module before the editor that calls it", () => {
+  const h = boot("Body\n");
+  const audio = h.html.indexOf("/mdm-audio.js");
+  const main = h.html.indexOf("/main.js");
+  assert.ok(audio !== -1, "mdm-audio.js is not on the page");
+  assert.ok(main !== -1);
+  assert.ok(audio < main, "main.js runs before the module it exports the audio with");
+});

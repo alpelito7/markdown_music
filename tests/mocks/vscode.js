@@ -18,8 +18,12 @@ const state = {
   warningMessages: [], // {message, buttons}
   warningChoices: {}, // message fragment -> button the user "presses"
   infoMessages: [], // {message, buttons}
+  infoChoices: {}, // message fragment -> button the user "presses"
   outputChannels: [], // {name, lines, shown}
   progressTitles: [],
+  progressReports: [], // every value reported, of every run
+  progressRuns: [], // one per withProgress call: its reports, and cancel()
+  progressEnded: 0, // how many of them the extension let finish
   savedUris: [],
   openedExternal: [],
   dirtyDocuments: new Set(), // uris whose mock document reports isDirty
@@ -43,8 +47,12 @@ function reset() {
   state.warningMessages = [];
   state.warningChoices = {};
   state.infoMessages = [];
+  state.infoChoices = {};
   state.outputChannels = [];
   state.progressTitles = [];
+  state.progressReports = [];
+  state.progressRuns = [];
+  state.progressEnded = 0;
   state.savedUris = [];
   state.openedExternal = [];
   state.dirtyDocuments = new Set();
@@ -268,13 +276,65 @@ const window = {
       dispose() {},
     };
   },
+  // The same again for what an export says when it went well, which offers a
+  // button to open what it wrote; seeded through _state.infoChoices.
   showInformationMessage(message, ...buttons) {
     state.infoMessages.push({ message, buttons });
-    return Promise.resolve(undefined);
+    const hit = Object.keys(state.infoChoices).find((k) => message.includes(k));
+    return Promise.resolve(hit ? state.infoChoices[hit] : undefined);
   },
+  // The real one hands the task a progress object and a cancellation token,
+  // and settles when what the task returned settles. Both halves matter here:
+  // the audio export reports one line per score and holds its notification
+  // open by keeping that promise, so a test reads _state.progressReports to
+  // see the count move, _state.progressEnded to see the notification taken
+  // down, and calls cancel() on the run to be the reader pressing the X.
   withProgress(options, task) {
     state.progressTitles.push(options && options.title);
-    return task();
+    const listeners = [];
+    const token = {
+      isCancellationRequested: false,
+      onCancellationRequested(listener) {
+        listeners.push(listener);
+        return {
+          dispose() {
+            const i = listeners.indexOf(listener);
+            if (i !== -1) listeners.splice(i, 1);
+          },
+        };
+      },
+    };
+    const run = {
+      title: options && options.title,
+      cancellable: !!(options && options.cancellable),
+      reports: [],
+      ended: false,
+      cancel() {
+        token.isCancellationRequested = true;
+        listeners.slice().forEach((listener) => listener());
+      },
+    };
+    state.progressRuns.push(run);
+    const progress = {
+      report(value) {
+        run.reports.push(value);
+        state.progressReports.push(value);
+      },
+    };
+    const ends = () => {
+      run.ended = true;
+      state.progressEnded++;
+    };
+    return Promise.resolve(task(progress, token)).then(
+      (value) => {
+        ends();
+        return value;
+      },
+      (e) => {
+        ends();
+        throw e;
+      }
+    );
   },
   // The theme VS Code itself is showing, which is what mdm.theme = "auto"
   // follows. Seeded through _state.activeColorThemeKind.

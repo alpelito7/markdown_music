@@ -1078,7 +1078,10 @@
   // not later when the engine has loaded: a context made inside a gesture is
   // allowed to run under any autoplay policy, and the first play then finds
   // the output already awake (see wakeAudio). Cheap to call again.
-  function ensureAudioGraph() {
+  // The graph alone, without waking the output: an export renders its notes
+  // into a buffer and sounds nothing, so it needs a context to render in and
+  // none of the pilot tone that keeps a speaker from dozing between notes.
+  function makeAudioGraph() {
     if (!audioCtx) {
       const Ctor = window.AudioContext || window.webkitAudioContext;
       if (!Ctor) return;
@@ -1092,6 +1095,10 @@
       audioMute = audioCtx.createGain();
       audioMute.connect(audioGain);
     }
+  }
+
+  function ensureAudioGraph() {
+    makeAudioGraph();
     wakeAudio();
   }
 
@@ -1225,7 +1232,18 @@
     if (!audioCtx || audioIdleTimer) return;
     audioIdleTimer = setTimeout(function () {
       audioIdleTimer = null;
-      if (!player) restAudio();
+      if (player) return;
+      // An export holds the context too: it renders through the same graph,
+      // and prime() waits on a resume() that a suspended context never gives
+      // back (audioExports, see the export section below). The minute begins
+      // again rather than being spent here: this timer is the only one there
+      // is, and swallowing it left the pilot sounding into an editor nobody
+      // was playing anything in.
+      if (audioExports) {
+        restAudioWhenIdle();
+        return;
+      }
+      restAudio();
     }, AUDIO_IDLE_MS);
   }
 
@@ -1244,7 +1262,10 @@
   document.addEventListener("visibilitychange", function () {
     if (!audioCtx) return;
     if (document.visibilityState === "hidden") {
-      if (!playerSounding()) restAudio();
+      // A tune sounding keeps the output, and so does an export in flight: a
+      // hidden panel goes on rendering, and a context suspended under it
+      // would leave prime() waiting for good.
+      if (!playerSounding() && !audioExports) restAudio();
     } else if (player) {
       wakeAudio();
     }
@@ -3282,6 +3303,12 @@
       chrome.className = chromeClass("mdm-chrome", this);
       chrome.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
       chrome.appendChild(chromeButton("mdm-audio-toggle", "Show player", HEADPHONES_ICON, "w"));
+      // The audio of this one score, drawn with the export glyph of the
+      // toolbar: one errand, one drawing, wherever it is asked for. The
+      // exported page has no rail of its own (mdm-look.css draws none), so it
+      // has no audio export either; the export rule is about the document the
+      // reader sees, and these buttons are not in it.
+      chrome.appendChild(exportButton());
       block.appendChild(chrome);
       const code = document.createElement("code");
       code.className = "language-abc";
@@ -3351,6 +3378,33 @@
     btn.className = cls + " mdm-tip mdm-tip--" + tipSide;
     btn.setAttribute("aria-label", label);
     btn.innerHTML = icon;
+    return btn;
+  }
+
+  // The rail's export button, with the formats it can write hanging off it.
+  // The panel is built once with the button and opened by a class, the same
+  // class the toolbar's menus use (mdm-toolbar__item--open), so that closing
+  // one closes the other and Escape closes both, with nothing of its own to
+  // keep in step. Spans and not buttons, like every other rail control: this
+  // stands inside CodeMirror's content, where a focusable element would take
+  // the caret with it.
+  function exportButton() {
+    const btn = chromeButton("mdm-audio-export", "Export audio", EXPORT_ICON, "w");
+    const menu = document.createElement("span");
+    menu.className = "mdm-menu";
+    menu.setAttribute("role", "menu");
+    AUDIO_FORMATS.forEach(function (format) {
+      const row = document.createElement("span");
+      row.className = "mdm-menu__item";
+      row.setAttribute("role", "menuitem");
+      // The name the stylesheet and the tests read, and the value the click
+      // reads: a row says which format it is in the vocabulary of each.
+      row.setAttribute("data-type", "mdm-audio-export-" + format.to);
+      row.setAttribute("data-mdm-format", format.to);
+      row.textContent = format.label;
+      menu.appendChild(row);
+    });
+    btn.appendChild(menu);
     return btn;
   }
 
@@ -3891,7 +3945,7 @@
           const openLine = doc.lineAt(n.from);
           const closeLine = marks.length > 1 ? doc.lineAt(marks[1].from) : null;
           const blockFrom = openLine.from;
-          const blockTo = closeLine ? closeLine.to : doc.lineAt(n.to).to;
+          const blockTo = scoreEnd(doc, node, n.to);
           const open = touched(blockFrom, blockTo);
           const active = open && holdsMainHead(state, blockFrom, blockTo);
           if (open) delim(node, "CodeMark");
@@ -5369,10 +5423,25 @@
   // CodeMirror leaves alone (ignoreEvent); their clicks are answered here.
   function handleChromeClick(e) {
     if (!e.target.closest) return;
+    const row = e.target.closest(".mdm-audio-export .mdm-menu__item");
+    if (row) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenus();
+      const block = row.closest(".mdm-score");
+      const number = block ? scoreNumber(block) : 0;
+      // Never zero into exportAudio: no number there means the whole
+      // document, and a rail button asks for its own score or for nothing.
+      exportAudio(row.getAttribute("data-mdm-format"), number || -1);
+      return;
+    }
     const copy = e.target.closest(".mdm-copy");
     if (copy) {
       e.preventDefault();
       e.stopPropagation();
+      // A press on the rail stops here, so a menu open anywhere (this rail's
+      // or the toolbar's) is left standing unless it is closed by hand.
+      closeMenus();
       copyBlock(copy);
       return;
     }
@@ -5382,6 +5451,7 @@
       e.stopPropagation();
       const block = toggle.closest(".mdm-score");
       if (!block) return;
+      closeMenus();
       if (player && playerBlock() === block) closePlayer();
       else {
         openPlayer(block);
@@ -5391,6 +5461,15 @@
         // mid-keystroke would stop the typing dead.
         if (player && player.bar) player.bar.focus({ preventScroll: true });
       }
+      return;
+    }
+    const exporter = e.target.closest(".mdm-audio-export");
+    if (exporter) {
+      e.preventDefault();
+      e.stopPropagation();
+      const open = exporter.classList.contains("mdm-toolbar__item--open");
+      closeMenus();
+      if (!open) exporter.classList.add("mdm-toolbar__item--open");
       return;
     }
     // The rail of a score between and around its buttons: still inside the
@@ -6153,9 +6232,39 @@
       const panel = document.createElement("div");
       panel.className = "mdm-menu";
       item.appendChild(panel);
+      // What each row can do is read again every time the panel opens, not
+      // once when it is filled: the Audio rows of the export panel grey out
+      // in a document with no score, and a document gains and loses scores as
+      // it is written. Only a panel being looked at is worth the reading.
+      const rows = new Map();
+      const refresh = function () {
+        rows.forEach(function (entry, row) {
+          const off = !!(entry.off && entry.off());
+          row.classList.toggle("mdm-menu__item--off", off);
+          row.disabled = off;
+        });
+      };
       const fill = function (entries) {
         panel.innerHTML = "";
+        rows.clear();
         (entries || []).forEach(function (entry) {
+          // A header, and the quiet line that may follow it, name the branch
+          // the rows under them belong to. Neither is a row: they take no
+          // press and carry no data-type, so nothing that reads the panel's
+          // buttons finds them.
+          if (entry.head) {
+            const head = document.createElement("div");
+            head.className = "mdm-menu__head";
+            head.textContent = entry.head;
+            panel.appendChild(head);
+            if (entry.note) {
+              const note = document.createElement("div");
+              note.className = "mdm-menu__note";
+              note.textContent = entry.note;
+              panel.appendChild(note);
+            }
+            return;
+          }
           const row = document.createElement("button");
           row.type = "button";
           row.className = "mdm-menu__item" + (entry.className ? " " + entry.className : "");
@@ -6166,8 +6275,10 @@
             closeMenus();
             entry.click();
           });
+          rows.set(row, entry);
           panel.appendChild(row);
         });
+        refresh();
         if (!panel.children.length && spec.empty) {
           const note = document.createElement("div");
           note.className = "mdm-menu__empty";
@@ -6185,6 +6296,7 @@
         closeMenus();
         if (!open) {
           if (spec.build) fill(spec.build());
+          else refresh();
           item.classList.add("mdm-toolbar__item--open");
         }
         // The bar is not somewhere to be: the focus goes back to the text, as
@@ -6242,22 +6354,49 @@
         click: toggleOutline,
       },
       "|",
-      // The export menu next: the one button that leaves the editor. Each
-      // entry saves the document first, then runs the same bin/mdm the command
-      // line uses (both on the host side).
+      // The export menu next: the one button that leaves the editor. It has
+      // two branches, and the headers are what tells them apart. Document is
+      // the page: the host saves the file first, then runs the same bin/mdm
+      // the command line uses. Audio is the music: the editor renders it
+      // itself, one file per score, and needs nothing installed.
+      //
+      // The line under the Audio header is there because the rail of every
+      // score carries this same icon: pressed there it writes that one score,
+      // pressed here it writes them all, and the panel is the cheapest place
+      // to say so.
       {
         name: "mdm-export",
         icon: EXPORT_ICON,
         tip: "Export",
-        menu: EXPORT_FORMATS.map(function (format) {
-          return {
-            name: "mdm-export-" + format.to,
-            label: format.label,
-            click: function () {
-              vscode.postMessage({ type: "export", to: format.to });
-            },
-          };
-        }),
+        menu: [{ head: "Document" }]
+          .concat(
+            EXPORT_FORMATS.map(function (format) {
+              return {
+                name: "mdm-export-" + format.to,
+                label: format.label,
+                click: function () {
+                  vscode.postMessage({ type: "export", to: format.to });
+                },
+              };
+            })
+          )
+          .concat([{ head: "Audio", note: "one file per score" }])
+          .concat(
+            AUDIO_FORMATS.map(function (format) {
+              return {
+                name: "mdm-export-" + format.to,
+                label: format.label,
+                // Nothing to write in a document with no score, said the way
+                // the header button of a file with no YAML says it.
+                off: function () {
+                  return scoreless(view && view.state);
+                },
+                click: function () {
+                  exportAudio(format.to);
+                },
+              };
+            })
+          ),
       },
       "|",
       { name: "undo", icon: UNDO_ICON, tip: "Undo", click: run(CM.undo) },
@@ -6441,6 +6580,27 @@
   window.addEventListener("message", function (e) {
     const msg = e.data;
     if (!msg) return;
+    if (msg.type === "exportAudio") {
+      // The host's side of a run: the answer to a start, the acknowledgement
+      // of a file, or the reader cancelling the progress notification. A
+      // message for a run that is over is nothing to answer.
+      const run = audioRuns.get(msg.id);
+      if (!run) return;
+      if (msg.cancel) {
+        run.cancelled = true;
+        // The run may be standing on an answer that is never coming: the host
+        // ends a cancelled run and drops what was already on its way, so the
+        // wait is ended here rather than left to the minute of AUDIO_ACK_MS.
+        const stopped = run.waiting;
+        run.waiting = null;
+        if (stopped) stopped({ ok: false, cancelled: true });
+        return;
+      }
+      const waiting = run.waiting;
+      run.waiting = null;
+      if (waiting) waiting(msg);
+      return;
+    }
     if (msg.type === "settings") {
       const next = msg.settings || {};
       themeSetting = next.theme || "auto";
