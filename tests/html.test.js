@@ -2138,3 +2138,172 @@ test("the page hangs a list under its text where the editor does, level by level
     "the task's box stands " + exported.box + "px into the column on the page and " + editor.box + " in the editor"
   );
 });
+
+// The punctuation Pandoc's `smart` extension prints, which the editor draws
+// while a line is untouched (G015): the first paragraph of the page reads as
+// the first row of the editor, glyph for glyph. The page's own line wrapping
+// inside the paragraph is folded to spaces first.
+test("the page prints the quotes, dashes and ellipsis the editor draws (G015)", { skip }, async () => {
+  const { open: openEditor, rows } = require("./webview/helpers.js");
+  const text = "\"Double quotes\", 'single quotes', the '90s, pages 3--5, a pause --- here, F\" and so on...\n";
+  const name = "smart-punctuation";
+  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+  const exported = await page.evaluate(() =>
+    document.querySelector("main.content p").textContent.replace(/\s+/g, " ").trim()
+  );
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+  // Read off pandoc 3.8.3 with the export's reader on 2026-09-17.
+  assert.equal(
+    exported,
+    "\u201cDouble quotes\u201d, \u2018single quotes\u2019, the \u201990s, pages 3\u20135, a pause \u2014 here, F\u201d and so on\u2026"
+  );
+
+  const h = await openEditor({ text, scores: 0 });
+  let editor;
+  try {
+    editor = (await rows(h.page))[0].text;
+  } finally {
+    await h.close();
+  }
+  assert.equal(editor, exported);
+});
+
+// The measures of a subscript, a superscript and a figure, read the same way
+// on both surfaces: the size the sub or sup is drawn at and how far its box
+// stands below or above the box of the prose beside it (a Range over the
+// word `Water`, so the line box's padding on either surface is left out);
+// the caption's size and colour, the gap between the picture and its
+// caption, the width the picture is drawn at, and the air on either side
+// of the figure, from the block of prose above it (the page's `p`, the
+// editor's line) to the picture and from the caption to the block below.
+function inlineMeasures(root, sel) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const holding = (word) => {
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const i = n.textContent.indexOf(word);
+      if (i < 0) continue;
+      const range = document.createRange();
+      range.setStart(n, i);
+      range.setEnd(n, i + word.length);
+      return { text: range.getBoundingClientRect(), block: n.parentElement.closest(sel.block).getBoundingClientRect() };
+    }
+    return null;
+  };
+  const above = holding("Water");
+  const below = holding("After");
+  const prose = above.text;
+  const sub = root.querySelector(sel.sub);
+  const sup = root.querySelector(sel.sup);
+  const img = root.querySelector(sel.img);
+  const caption = root.querySelector(sel.caption);
+  const box = (el) => el.getBoundingClientRect();
+  const size = (el) => +parseFloat(getComputedStyle(el).fontSize).toFixed(2);
+  return {
+    subSize: size(sub),
+    subDrop: Math.round(box(sub).bottom - prose.bottom),
+    supSize: size(sup),
+    supRise: Math.round(prose.top - box(sup).top),
+    captionSize: size(caption),
+    captionColor: getComputedStyle(caption).color,
+    gap: Math.round(box(caption).top - box(img).bottom),
+    picture: Math.round(box(img).width),
+    above: Math.round(box(img).top - above.block.bottom),
+    below: Math.round(below.block.top - box(caption).bottom),
+  };
+}
+
+test("the page lowers a subscript, raises a superscript and captions a figure as the editor does", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  // The extension's own icon (256 px) is the picture, beside the document
+  // on the page and in the folder the harness is told is the document's.
+  fs.copyFileSync(path.join(ROOT, "vscode-mdm", "media", "icon.png"), path.join(DIR, "icon.png"));
+  const text =
+    "Water is H~2~O and E = mc^2^ in prose.\n\n![A caption under the picture.](icon.png)\n\nAfter the figure.\n";
+  const name = "inline-figure";
+  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:roman"], {
+    cwd: DIR,
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+  await page.evaluate(() => document.fonts.ready);
+  const exported = await page.evaluate(
+    (fn) =>
+      new Function("root", "sel", fn)(document.querySelector("main.content"), {
+        block: "p",
+        sub: "sub",
+        sup: "sup",
+        img: "figure img",
+        caption: "figure figcaption",
+      }),
+    inlineMeasures.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
+  );
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+
+  const base = "file://" + DIR + "/";
+  const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: "roman" }, docBase: base } });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+    await h.page.evaluate(() => {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    });
+    await h.page.mouse.click(2, 2);
+    await h.page.waitForFunction(() => {
+      const img = document.querySelector("#app .mdm-figure img");
+      return img && img.complete && img.naturalWidth > 0;
+    });
+    await h.page.evaluate(() => document.fonts.ready);
+    await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+    editor = await h.page.evaluate(
+      (fn) =>
+        new Function("root", "sel", fn)(document.querySelector("#app .cm-content"), {
+          block: ".cm-line",
+          sub: "sub.mdm-sub",
+          sup: "sup.mdm-sup",
+          img: ".mdm-figure img",
+          caption: ".mdm-figcaption",
+        }),
+      inlineMeasures.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
+    );
+  } finally {
+    await h.close();
+  }
+  // Bootstrap's reboot on the page: three quarters of the size, a quarter
+  // em down and half an em up (12px, 3 and 6 at 16px); Quarto's caption at
+  // 0.9rem of its 17px root, 15.3px, in its grey (measured 2026-09-16);
+  // and the paragraph's 16px of margin on either side of the figure, which
+  // in the editor is the blank line and nothing else (measured 2026-09-17).
+  assert.equal(editor.subSize, 12, "the editor's subscript: " + JSON.stringify(editor));
+  assert.equal(editor.supSize, 12, "the editor's superscript: " + JSON.stringify(editor));
+  assert.equal(editor.captionSize, 15.3, "the editor's caption: " + JSON.stringify(editor));
+  assert.equal(editor.captionColor, "rgb(90, 101, 112)", "the editor's caption colour");
+  assert.equal(editor.above, 16, "the air over the figure in the editor: " + JSON.stringify(editor));
+  for (const key of ["subSize", "subDrop", "supSize", "supRise", "captionSize", "gap", "picture", "above", "below"]) {
+    assert.ok(
+      Math.abs(exported[key] - editor[key]) <= 1,
+      key + " is " + exported[key] + " on the page and " + editor[key] + " in the editor"
+    );
+  }
+  assert.equal(exported.captionColor, editor.captionColor, "the caption's colour");
+});

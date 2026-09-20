@@ -268,6 +268,29 @@ test("a multi-caret insert is one undo step", { skip }, async () => {
   await h.close();
 });
 
+test("a caption drawn again when its marks go, though the words are the same", { skip }, async () => {
+  // The caption is inline content now, so two figures can draw the same
+  // words from different sources (`![*a* b]` and `![a b]`). CodeMirror
+  // keeps the DOM of a widget that says it is equal to the new one, so the
+  // figure is told apart by the alt as written and not by the words it
+  // draws; comparing the words left the emphasis on screen after it was
+  // deleted from the file.
+  const base = "file://" + path.resolve(__dirname, "../vscode-mdm/media") + "/";
+  const h = await open({ text: "![*a* b](icon.png)\n", scores: 0, seed: { docBase: base } });
+  const caption = () =>
+    h.page.evaluate(() => {
+      const c = document.querySelector("#app .mdm-figcaption");
+      return c ? c.innerHTML : null;
+    });
+  await sleep(200);
+  assert.equal(await caption(), "<em>a</em> b");
+  await update(h.page, "![a b](icon.png)\n", true, 0);
+  await sleep(200);
+  assert.equal(await caption(), "a b", "the emphasis stayed on screen after it left the file");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---- Links by definition ----
 
 test("a definition typed below turns the brackets above into a link, and its loss turns them back", { skip }, async () => {
@@ -298,6 +321,27 @@ test("a definition typed below turns the brackets above into a link, and its los
   assert.deepEqual(await links(), [], "text again once the definition is gone");
   assert.deepEqual(h.errors, []);
   await h.close();
+});
+
+test("Backspace and Delete beside a character that draws nothing take that character alone (G058)", { skip }, async () => {
+  // Under the caret a soft hyphen is a mark over one character, and the keys
+  // take it as they take any other.
+  let out = await pressOn("soft\u00adhyphen\n", 5, ["Backspace"]);
+  assert.equal(out.text, "softhyphen\n");
+  assert.equal(out.head, 4);
+  out = await pressOn("soft\u00adhyphen\n", 4, ["Delete"]);
+  assert.equal(out.text, "softhyphen\n");
+  assert.equal(out.head, 4);
+});
+
+test("a comment and a processing instruction are raw HTML to the marks and to Ctrl+Enter (G048)", { skip }, async () => {
+  const text = "One.\n\n<!-- a\ncomment -->\n\n<?php echo 1; ?>\n\nTwo.\n";
+  // Ctrl+B over everything wraps the prose and leaves the raw lines alone.
+  let out = await pressOn(text, [{ anchor: 0, head: text.length - 1 }], [B]);
+  assert.equal(out.text, "**One.**\n\n<!-- a\ncomment -->\n\n<?php echo 1; ?>\n\n**Two.**\n");
+  // Ctrl+Enter on the first line of the comment leaves the comment whole.
+  out = await pressOn(text, text.indexOf("<!--") + 5, [{ chord: ["Control"], key: "Enter" }]);
+  assert.equal(out.text, "One.\n\n<!-- a\ncomment -->\n\n\n\n<?php echo 1; ?>\n\nTwo.\n");
 });
 
 // ---- Reveal semantics ----

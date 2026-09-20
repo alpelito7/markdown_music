@@ -923,12 +923,39 @@ body {
 #app .mdm-delim * {
   color: var(--mdm-line-ink);
 }
-#app .mdm-link {
+/* The inner selector as well: the highlighter wraps a bare URL, a label
+   and a title in spans of its own, each with a colour (url, labelName,
+   string), and the link's blue on the outer span never reached the glyphs
+   (G016). */
+#app .mdm-link,
+#app .mdm-link * {
   color: #0969da;
+}
+#app .mdm-link {
   text-decoration: none;
 }
-#app.mdm--dark .mdm-link {
+#app.mdm--dark .mdm-link,
+#app.mdm--dark .mdm-link * {
   color: #58a6ff;
+}
+/* An escaped character and an entity are text: the highlighter's grey and
+   string colour on their spans give way to the ink around them. */
+#app .mdm-escaped,
+#app .mdm-escaped *,
+#app .mdm-entity,
+#app .mdm-entity * {
+  color: inherit;
+}
+/* A character that draws nothing, named under the caret (G058): in the
+   brass of the marks a line shows there. */
+#app .mdm-special {
+  color: var(--mdm-line-ink);
+  user-select: none;
+}
+/* The mark of a hard break at the end of its row, faint. */
+#app .mdm-hard-break {
+  color: color-mix(in srgb, var(--mdm-ink) 40%, transparent);
+  user-select: none;
 }
 /* Raw TeX (G013): what Pandoc's reader takes as a raw inline or block, which
    the HTML page leaves out and the PDF sets. Drawn as the source it is,
@@ -972,6 +999,46 @@ body {
 }
 #app .cm-line.mdm-note-line {
   color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
+}
+/* A subscript and a superscript on the page's measures, Bootstrap's
+   reboot: three quarters of the size, no line height of their own (so the
+   row does not grow), moved off the baseline by a quarter and a half of
+   an em. Read off the exported page on 2026-09-16 (12px, bottom -3px and
+   top -6px at 16px), and held there by html.test.js. */
+#app .mdm-sub,
+#app .mdm-sup {
+  font-size: 0.75em;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+#app .mdm-sub {
+  bottom: -0.25em;
+}
+#app .mdm-sup {
+  top: -0.5em;
+}
+/* A figure: the picture over its caption, the caption on the page's
+   measures (Quarto's figcaption: 0.9rem of a 17px root, 15.3px, in its
+   grey; the picture's half rem of margin under it), read off the exported
+   page on 2026-09-16 and held there by html.test.js. */
+#app .mdm-figure {
+  margin: 0;
+  /* No padding of its own: the blank line on either side is the air, the
+     16px the page leaves between a paragraph and its figure (measured
+     2026-09-17, on both sides; a 0.2em here put the editor 3.2px past
+     it), and html.test.js holds the two gaps. */
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+}
+#app .mdm-figure .mdm-image {
+  display: block;
+  margin: 0 0 0.53em;
+}
+#app .mdm-figcaption {
+  font-size: 0.956em;
+  color: rgb(90, 101, 112);
 }
 #app .mdm-link:hover {
   text-decoration: underline;
@@ -1080,8 +1147,15 @@ body {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.88em;
 }
-#app .cm-line.mdm-html-line {
+#app .cm-line.mdm-html-line,
+#app .cm-line.mdm-linkref-line {
   color: color-mix(in srgb, var(--mdm-ink) 60%, transparent);
+}
+/* A link reference definition, `[label]: url "title"`, is not prose: set
+   like an HTML block, small and faint, and kept as written (G025). */
+#app .cm-line.mdm-linkref-line {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
 }
 
 /* A drawn table, the block widget the source lines give way to. Hairlines

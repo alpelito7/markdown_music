@@ -3772,36 +3772,201 @@
     eq() {
       return true;
     }
+  }
+  function markerDOM(marker) {
+    const el = document.createElement("span");
+    el.className =
+      "mdm-li-marker " +
+      (marker.kind === "bullet" ? "mdm-bullet" : marker.kind === "number" ? "mdm-li-number" : "mdm-li-task");
+    if (marker.kind === "task") {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.className = "mdm-task";
+      box.checked = marker.checked;
+      box.setAttribute("aria-label", marker.checked ? "Done" : "To do");
+      el.appendChild(box);
+      // The space after the box at a set width (style.css, .mdm-li-gap), the
+      // width the page gives its box's margin: a text space is the face's
+      // and the two surfaces would not agree.
+      const gap = document.createElement("span");
+      gap.className = "mdm-li-gap";
+      gap.textContent = " ";
+      el.appendChild(gap);
+    } else {
+      el.textContent = marker.text + " ";
+    }
+    return el;
+  }
+
+  // A block drawn instead of its source inside a quote or a callout stands
+  // in the frame of its first line (buildDecorations, frames): a wrapper
+  // carrying the frame's classes and style, so the bars run past the block
+  // and it is set in with the text around it, where until now it was drawn
+  // outside the container, bar and all (G030). The frame is part of what
+  // the widget is (eq), so a block that moves into or out of a container
+  // is drawn again.
+  function frameKey(frame) {
+    return frame ? frame.key : "";
+  }
+  function framed(el, frame) {
+    if (!frame) return el;
+    const wrap = document.createElement("div");
+    wrap.className = "mdm-block-framed " + frame.cls;
+    wrap.setAttribute("style", frame.style);
+    // A block on the first line of an item (`- ***`, an equation opened on
+    // the item's line) replaces that line, marker and all: the marker is
+    // drawn in the wrapper's gap instead (G029).
+    if (frame.marker) {
+      const marker = markerDOM(frame.marker);
+      marker.classList.add("mdm-li-marker--block");
+      wrap.appendChild(marker);
+    }
+    wrap.appendChild(el);
+    return wrap;
+  }
+  // The block itself, wrapper or no wrapper: what updateDOM is handed. The
+  // block is the wrapper's last child (a marker may stand before it).
+  function unframed(dom) {
+    return dom.classList.contains("mdm-block-framed") ? dom.lastElementChild : dom;
+  }
+
+  // A short run of text in place of a piece of source: the character an
+  // entity stands for (`&copy;` drawn as ©), the mark of a hard break.
+  class TextWidget extends WidgetType {
+    constructor(text, cls) {
+      super();
+      this.text = text;
+      this.cls = cls;
+    }
+    eq(other) {
+      return other.text === this.text && other.cls === this.cls;
+    }
     toDOM() {
       const el = document.createElement("span");
-      el.className = "mdm-bullet";
-      el.textContent = "•";
+      el.className = this.cls;
+      el.textContent = this.text;
       return el;
     }
     ignoreEvent() {
       return false;
     }
   }
-  const BULLET = new BulletWidget();
+  // ---- Characters that draw nothing (G058) ----
 
-  class CheckboxWidget extends WidgetType {
-    constructor(checked) {
+  // A bidi override, a zero-width space, a soft hyphen or a control character
+  // is part of the text, and the page prints it as the browser does: nothing
+  // to see, or a run of letters set backwards. The reading state draws what
+  // the page draws. Under the caret, where a line shows its source, each is
+  // drawn as a mark that names it, since a source that hides characters
+  // cannot be edited. CodeMirror's highlightSpecialChars would mark them
+  // everywhere, the reading state included, where a soft hyphen the author
+  // put in a word on purpose would stand as a dot in the prose. Its set, and
+  // the rest of the bidi embeddings and isolates (U+202A to U+202C, U+2068).
+  const SPECIAL_CHAR = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff\ufff9-\ufffc]/;
+  const SPECIAL_NAMES = {
+    0xad: "soft hyphen",
+    0x61c: "Arabic letter mark",
+    0x200b: "zero-width space",
+    0x200e: "left-to-right mark",
+    0x200f: "right-to-left mark",
+    0x2028: "line separator",
+    0x2029: "paragraph separator",
+    0x202a: "left-to-right embedding",
+    0x202b: "right-to-left embedding",
+    0x202c: "pop directional formatting",
+    0x202d: "left-to-right override",
+    0x202e: "right-to-left override",
+    0x2066: "left-to-right isolate",
+    0x2067: "right-to-left isolate",
+    0x2068: "first strong isolate",
+    0x2069: "pop directional isolate",
+    0xfeff: "zero-width no-break space",
+  };
+  class SpecialCharWidget extends WidgetType {
+    constructor(code) {
       super();
-      this.checked = checked;
+      this.code = code;
     }
     eq(other) {
-      return other.checked === this.checked;
+      return other.code === this.code;
     }
     toDOM() {
-      const el = document.createElement("input");
-      el.type = "checkbox";
-      el.className = "mdm-task";
-      el.checked = this.checked;
-      el.setAttribute("aria-label", this.checked ? "Done" : "To do");
+      const el = document.createElement("span");
+      el.className = "mdm-special";
+      // A control character as its picture (U+2400 on), the rest as a dot.
+      el.textContent = this.code < 32 ? String.fromCharCode(0x2400 + this.code) : "\u2022";
+      const hex = this.code.toString(16).toUpperCase().padStart(4, "0");
+      el.title = "U+" + hex + " " + (SPECIAL_NAMES[this.code] || "control character");
       return el;
     }
-    // The click is answered in the editor's own mousedown handler, which
-    // flips the text; CodeMirror must not move the caret for it.
+    ignoreEvent() {
+      return false;
+    }
+  }
+
+  // A hard line break's mark, the backslash or the two spaces before the
+  // line end, drawn faint at the end of the row: the break is the reader's
+  // (the page writes <br>) and the row was ending there already, so the
+  // mark says which row ends on purpose (G050). A soft break, one line
+  // ending inside a paragraph, is drawn as a row of its own, as Typora and
+  // Obsidian draw it while editing, where the page runs the lines on; that
+  // difference is by design and tests/README.md records it.
+  const HARD_BREAK = new TextWidget("↵", "mdm-hard-break");
+
+  // An image alone in its paragraph is a figure (Pandoc's implicit_figures,
+  // which the export runs): the page sets it with the alt text under it as
+  // a caption, so the editor draws the same, a block in place of the
+  // paragraph, the picture over its caption (G018). The source is covered
+  // the way a table's is, so the arrow keys step into it and its number is
+  // the cover's.
+  class FigureWidget extends WidgetType {
+    // `caption` is the alt read as inline content (cellParts), which is what
+    // the page sets under the picture (`<figcaption>A <em>fine</em> photo
+    // © 1741</figcaption>` for `![A *fine* photo &copy; 1741](…)`); `key` is
+    // the alt as written, which is what tells two figures apart, since two
+    // different sources can draw the same words.
+    constructor(src, caption, key, frame, width) {
+      super();
+      this.src = src;
+      this.caption = caption;
+      this.key = key;
+      this.frame = frame || null;
+      // The width the image's attribute asks for (`{width=30%}`), which the
+      // page gives the picture (G014).
+      this.width = width || null;
+    }
+    eq(other) {
+      return (
+        other.src === this.src &&
+        other.key === this.key &&
+        other.width === this.width &&
+        frameKey(other.frame) === frameKey(this.frame)
+      );
+    }
+    toDOM(view) {
+      const fig = document.createElement("div");
+      fig.className = "mdm-figure";
+      const img = document.createElement("img");
+      img.className = "mdm-image";
+      if (this.width) img.style.width = this.width;
+      const remeasure = function () {
+        if (view.viewState) view.viewState.mustMeasureContent = true;
+        view.requestMeasure();
+      };
+      img.addEventListener("load", remeasure);
+      img.addEventListener("error", remeasure);
+      img.src = this.src;
+      // The alt attribute is the caption's words without their marks, which
+      // is what the page writes into it.
+      img.alt = partsText(this.caption);
+      fig.appendChild(img);
+      const caption = document.createElement("div");
+      caption.className = "mdm-figcaption";
+      paintParts(caption, this.caption);
+      fig.appendChild(caption);
+      return framed(fig, this.frame);
+    }
+    // The click is the editor's (revealBlock), as on a table.
     ignoreEvent() {
       return true;
     }
@@ -3885,7 +4050,8 @@
   // folder of the document used to give a path with the document's own folder
   // glued in front of it, which no server would find.
   function imageSource(src) {
-    if (/^(https?:|data:|vscode-)/i.test(src)) return src;
+    // A file:// URL is a URL, not a path to hang from the folder (G023).
+    if (/^(https?:|file:|data:|vscode-)/i.test(src)) return src;
     const drive = /^[A-Za-z]:[/\\]/.exec(src); // C:\ and the like
     const absolute = !!drive || src.charAt(0) === "/" || src.charAt(0) === "\\";
     const base = absolute ? window.MDM_FILE_BASE || "" : window.MDM_DOC_BASE || "";
@@ -3924,9 +4090,12 @@
     const push = function (s) {
       if (s) parts.push({ kind: "text", text: s });
     };
+    const slice = function (from, to) {
+      return marks ? smartSlice(text, from, to, marks) : text(from, to);
+    };
     let at = node.from;
     for (let child = node.firstChild; child; child = child.nextSibling) {
-      push(text(at, child.from));
+      push(slice(at, child.from));
       at = child.to;
       const name = child.name;
       if (/Mark$/.test(name) || (skip && skip.test(name))) continue;
@@ -3962,10 +4131,10 @@
       } else if (CELL_TAGS[name]) {
         parts.push({ kind: "mark", tag: CELL_TAGS[name], parts: cellParts(child, text, skip) });
       } else {
-        push(text(child.from, child.to));
+        push(slice(child.from, child.to));
       }
     }
-    push(text(at, node.to));
+    push(slice(at, node.to));
     return parts;
   }
 
@@ -4613,6 +4782,10 @@
               const from = m.from > n.from && text(m.from - 1, m.from) === " " ? m.from - 1 : r.from;
               hide(from, to);
             });
+            // Pandoc's header attributes go, with the space before them.
+            const textEnd = headingTextEnd(n, text);
+            if (textEnd < n.to) hide(textEnd, n.to);
+            smartWidgets(node, textEnd, text, doc, touched, decos);
           }
           return true;
         }
@@ -4749,8 +4922,15 @@
           return false;
         }
 
-        if (name === "HTMLBlock" || name === "CommentBlock") {
+        if (RAW_HTML_BLOCK.test(name)) {
           lines.add(n.from, n.to, "mdm-html-line");
+          return false;
+        }
+
+        if (name === "LinkReference") {
+          // A definition is not prose: drawn like an HTML block, small and
+          // faint, and left as written (G025).
+          lines.add(n.from, n.to, "mdm-linkref-line");
           return false;
         }
 
@@ -4759,16 +4939,17 @@
           decos.push(
             Decoration.mark({
               class: "mdm-link",
-              attributes: url ? { title: text(url.from, url.to) } : undefined,
+              attributes: target ? attributes : undefined,
             }).range(n.from, n.to)
           );
           if (!touched(n.from, n.to)) {
-            node.getChildren("LinkMark").forEach(function (m) {
-              hide(m.from, m.to);
-            });
-            if (url) hide(url.from, url.to);
-            const title = node.getChild("LinkTitle");
-            if (title) hide(title.from - 1, title.to);
+            // The opening bracket, and everything from the closing bracket
+            // to the end of the link: the destination and title with the
+            // parentheses and whatever space was typed around them (G024),
+            // or the label in its brackets. The text between stays.
+            const marks = node.getChildren("LinkMark");
+            if (marks.length) hide(marks[0].from, marks[0].to);
+            if (marks.length > 1) hide(marks[1].from, n.to);
           }
           return true;
         }
@@ -4788,18 +4969,238 @@
           const src = url ? imageSource(text(url.from, url.to)) : null;
           if (src && !touched(n.from, n.to)) {
             const marks = node.getChildren("LinkMark");
-            const alt = marks.length > 1 ? text(marks[0].to, marks[1].from) : "";
-            decos.push(Decoration.replace({ widget: new ImageWidget(src, alt) }).range(n.from, n.to));
+            // The alt is the figure's caption and the picture's own text,
+            // and the page prints both with their punctuation set (G015)
+            // and with their marks read: it is inline content, drawn by the
+            // same reader a table's cell is drawn by. The source between
+            // the brackets is what tells two figures apart.
+            const caption = cellParts(node, text, LINK_SKIP, smartMarks(node, marks.length > 1 ? marks[1].from : n.to, text), refs);
+            const alt = partsText(caption);
+            const key = marks.length > 1 ? text(marks[0].to, marks[1].from) : "";
+            // Alone in its paragraph, the image is a figure with the alt as
+            // its caption, drawn in place of the paragraph.
+            const para = node.parent;
+            if (
+              para &&
+              para.name === "Paragraph" &&
+              para.from === doc.lineAt(para.from).from &&
+              isBlank(text(para.from, n.from)) &&
+              isBlank(text(attr ? attr.to : n.to, para.to)) &&
+              !touched(para.from, para.to)
+            ) {
+              const blockFrom = doc.lineAt(para.from).from;
+              const blockTo = doc.lineAt(para.to).to;
+              decos.push(
+                Decoration.widget({
+                  widget: new FigureWidget(src, caption, key, frameOf(doc.lineAt(blockFrom).number), width),
+                  block: true,
+                  side: 1,
+                }).range(blockTo)
+              );
+              hideBlock(blockFrom, blockTo);
+              return false;
+            }
+            decos.push(Decoration.replace({ widget: new ImageWidget(src, alt, width) }).range(n.from, n.to));
             return false;
           }
           return true;
+        }
+
+        if (name === "RawTeX" || name === "RawTeXBlock") {
+          // Raw TeX (G013): what Pandoc's reader takes as a raw inline or
+          // block, which the HTML page leaves out and the PDF sets. Drawn
+          // as the source it is, faint and in the code face, with what
+          // becomes of it in the tooltip, where the prose used to show it
+          // as words the page then lost.
+          if (name === "RawTeXBlock") lines.add(n.from, n.to, "mdm-rawtex-line");
+          decos.push(
+            Decoration.mark({
+              class: "mdm-rawtex",
+              attributes: { title: "Raw TeX: set in the PDF, left out of the HTML page" },
+            }).range(n.from, n.to)
+          );
+          return false;
+        }
+
+        if (name === "Attribute") {
+          // `{#id .class key=val}` after a link, an image, a code span or a
+          // `$$` closer (G014): hidden while untouched, since the page
+          // prints none of it, and small and faint under the caret.
+          if (!touched(n.from, n.to)) hide(n.from, n.to);
+          else decos.push(Decoration.mark({ class: "mdm-attr" }).range(n.from, n.to));
+          return false;
+        }
+
+        if (name === "Span") {
+          // `[text]{.smallcaps}`, Pandoc's bracketed span: the brackets and
+          // the attribute hidden, and the classes the page turns into a
+          // look drawn here the same way (small caps; a mark).
+          const attr = node.getChild("Attribute");
+          const classes = attr ? attributeClasses(text(attr.from, attr.to)) : [];
+          let cls = "mdm-span";
+          if (classes.indexOf("smallcaps") >= 0) cls += " mdm-smallcaps";
+          // The page writes `<u>`, which the browser underlines, so an
+          // underline the editor did not draw was a difference between the
+          // two surfaces and not a gap (measured on Pandoc 3.8.3). The button
+          // that wrote it was taken off again on 2026-09-19; this stays,
+          // because the span is still Pandoc's and a document that carries
+          // one has to read here as it reads on the page.
+          if (classes.indexOf("underline") >= 0) cls += " mdm-underline";
+          // Not `mdm-mark`, which is the class of a syntax mark.
+          if (classes.indexOf("mark") >= 0) cls += " mdm-highlight";
+          decos.push(
+            Decoration.mark({
+              class: cls,
+              attributes: attr ? { title: text(attr.from, attr.to) } : undefined,
+            }).range(n.from, n.to)
+          );
+          if (!touched(n.from, n.to)) {
+            node.getChildren("LinkMark").forEach(function (m) {
+              hide(m.from, m.to);
+            });
+          }
+          return true;
+        }
+
+        if (name === "FootnoteRef") {
+          // `[^1]` (PX01): the label raised, as the page raises the number
+          // it gives the note, the marks hidden.
+          const marks = node.getChildren("FootnoteMark");
+          const label = marks.length > 1 ? text(marks[0].to, marks[1].from) : text(n.from, n.to);
+          decos.push(
+            Decoration.mark({ class: "mdm-note-ref mdm-sup", attributes: { title: "Footnote " + label } }).range(n.from, n.to)
+          );
+          if (!touched(n.from, n.to)) {
+            marks.forEach(function (m) {
+              hide(m.from, m.to);
+            });
+          }
+          return false;
+        }
+
+        if (name === "FootnoteInline") {
+          // `^[text]`: the note's text drawn where it stands, in a small
+          // card, its marks hidden; the page numbers it and sets it at the
+          // foot.
+          decos.push(
+            Decoration.mark({ class: "mdm-note-inline", attributes: { title: "Footnote, written inline" } }).range(n.from, n.to)
+          );
+          if (!touched(n.from, n.to)) {
+            node.getChildren("FootnoteMark").forEach(function (m) {
+              hide(m.from, m.to);
+            });
+          }
+          return true;
+        }
+
+        if (name === "FootnoteDef") {
+          // `[^1]: text` and the paragraphs indented under it: the note
+          // itself, drawn faint under the prose face, its label raised in
+          // place of the `[^1]:` and the indentation of its later
+          // paragraphs hidden, while untouched.
+          // Line by line, the blank lines between its paragraphs left to
+          // the blank row they are.
+          for (let k = doc.lineAt(n.from).number, last = doc.lineAt(n.to).number; k <= last; k++) {
+            const line = doc.line(k);
+            if (!isBlank(line.text)) lines.add(line.from, line.from, "mdm-note-line");
+          }
+          const mark = node.getChild("FootnoteMark");
+          if (mark) {
+            if (!touched(n.from, n.to)) {
+              const label = text(mark.from + 2, mark.to - 2);
+              decos.push(Decoration.replace({ widget: new TextWidget(label, "mdm-note-ref mdm-sup") }).range(mark.from, mark.to));
+              node.getChildren("Paragraph").forEach(function (p, i) {
+                if (i === 0) return;
+                const last = doc.lineAt(p.to).number;
+                for (let k = doc.lineAt(p.from).number; k <= last; k++) {
+                  const line = doc.line(k);
+                  const indent = /^(?: {4}|\t)/.exec(line.text);
+                  if (indent) hide(line.from, line.from + indent[0].length);
+                }
+              });
+            } else {
+              decos.push(Decoration.mark({ class: "mdm-note-ref" }).range(mark.from, mark.to));
+            }
+          }
+          return true;
+        }
+
+        if (name === "Citation") {
+          // A citation or a Quarto cross-reference (PX04): the page
+          // resolves it into a reference or a link, which the editor cannot
+          // (the bibliography is not here); it is drawn in the link colour,
+          // as written, with what it is in the tooltip.
+          const raw = text(n.from, n.to);
+          decos.push(
+            Decoration.mark({
+              class: "mdm-cite",
+              attributes: { title: (raw.charAt(0) === "[" ? "Citation " : "Reference ") + raw },
+            }).range(n.from, n.to)
+          );
+          return false;
+        }
+
+        if (name === "Escape") {
+          // `\*`: the backslash is markup and the character is text (CM 2.4).
+          // The highlighter greys the pair (tags.escape); the character
+          // takes the ink back, and the backslash goes while the node is
+          // untouched (G008).
+          decos.push(Decoration.mark({ class: "mdm-escaped" }).range(n.from + 1, n.to));
+          if (!touched(n.from, n.to)) hide(n.from, n.from + 1);
+          return false;
+        }
+
+        if (name === "Entity") {
+          // `&copy;` drawn as ©, `&#35;` as #, while untouched; one that
+          // stands for nothing stays as written. Either way in the ink and
+          // not in the string colour the highlighter gives it (G009, G010).
+          const raw = text(n.from, n.to);
+          const decoded = decodeEntity(raw);
+          if (decoded !== raw && !touched(n.from, n.to)) {
+            decos.push(Decoration.replace({ widget: new TextWidget(decoded, "mdm-entity") }).range(n.from, n.to));
+          } else {
+            decos.push(Decoration.mark({ class: "mdm-entity" }).range(n.from, n.to));
+          }
+          return false;
+        }
+
+        if (name === "HardBreak") {
+          // The node runs to the line end, newline included; the mark before
+          // it (the backslash, the spaces) is what is drawn as ↵.
+          const line = doc.lineAt(n.from);
+          const to = Math.min(n.to, line.to);
+          if (!touched(line.from, line.to) && to > n.from) {
+            decos.push(Decoration.replace({ widget: HARD_BREAK }).range(n.from, to));
+          }
+          return false;
         }
 
         const marks = INLINE_MARKS[name];
         if (marks) {
           if (name === "InlineCode") {
             decos.push(Decoration.mark({ class: "mdm-inline-code" }).range(n.from, n.to));
-            if (touched(n.from, n.to)) delim(node, "CodeMark");
+            if (touched(n.from, n.to)) {
+              delim(node, "CodeMark");
+            } else {
+              // A code span that begins and ends with a space, and is not
+              // spaces alone, loses one from each end (CM 6.1): the chip is
+              // drawn as the reader sees it, `` ` `` no wider than it (G021).
+              const ticks = node.getChildren("CodeMark");
+              if (ticks.length > 1) {
+                const a = ticks[0].to;
+                const b = ticks[1].from;
+                const inner = text(a, b);
+                if (
+                  inner.length > 2 &&
+                  inner.charAt(0) === " " &&
+                  inner.charAt(inner.length - 1) === " " &&
+                  inner.trim().length
+                ) {
+                  hide(a, a + 1);
+                  hide(b - 1, b);
+                }
+              }
+            }
           }
           if (!touched(n.from, n.to)) {
             marks.forEach(function (kind) {
@@ -4807,6 +5208,20 @@
                 hide(m.from, m.to);
               });
             });
+            // Pandoc's H~2~O and 2^10^ are lowered and raised, as the page
+            // sets them (G001): the text between the marks in a sub or a
+            // sup, on Bootstrap's measures (style.css).
+            if (name === "Subscript" || name === "Superscript") {
+              const pair = node.getChildren(marks[0]);
+              if (pair.length > 1 && pair[1].from > pair[0].to) {
+                decos.push(
+                  Decoration.mark({
+                    tagName: name === "Subscript" ? "sub" : "sup",
+                    class: name === "Subscript" ? "mdm-sub" : "mdm-sup",
+                  }).range(pair[0].to, pair[1].from)
+                );
+              }
+            }
           }
           return true;
         }
@@ -4839,6 +5254,15 @@
       const blank = frames.has(n) ? /^[ \t>]*$/ : /^[ \t]*$/;
       if (lines.bare(n) && blank.test(line.text)) {
         lines.add(line.from, line.from, "mdm-blank");
+      }
+      // Under the caret, the characters that draw nothing are named (G058).
+      if (touched(line.from, line.to) && SPECIAL_CHAR.test(line.text)) {
+        for (let i = 0; i < line.text.length; i++) {
+          if (!SPECIAL_CHAR.test(line.text[i])) continue;
+          decos.push(
+            Decoration.replace({ widget: new SpecialCharWidget(line.text.charCodeAt(i)) }).range(line.from + i, line.from + i + 1)
+          );
+        }
       }
       decos.push(lineNumber(n + hidden).range(line.from));
     }
@@ -4874,15 +5298,25 @@
   // widget buffer, document character or atomic range intervenes, so normal
   // Backspace, Delete, selection, copy and undo all retain their text offsets.
   const refreshHyphenation = CM.StateEffect.define();
-  const HYPHEN_SKIP = /^(?:InlineCode|InlineMath|InlineBlockMath|Image|Autolink|URL|LinkTitle|HTMLTag|Comment|Escape|Entity)$/;
-  const HYPHEN_BLOCK_SKIP = /^(?:FrontMatter|FencedCode|CodeBlock|BlockMath|Table|HTMLBlock|CommentBlock)$/;
+  // Raw TeX, an attribute, a citation and a footnote's label are not words
+  // of the page either: it drops the first two and prints the others as
+  // something else.
+  const HYPHEN_SKIP = /^(?:InlineCode|InlineMath|InlineBlockMath|Image|Autolink|URL|LinkTitle|LinkLabel|HTMLTag|Comment|ProcessingInstruction|Escape|Entity|RawTeX|Attribute|Citation|FootnoteRef)$/;
+  const HYPHEN_BLOCK_SKIP = new RegExp("^(?:FrontMatter|FencedCode|CodeBlock|BlockMath|Table|" + RAW_HTML + ")$");
 
   function buildHyphens(state) {
     if (hyphenation !== "auto") return Decoration.none;
     const tree = CM.syntaxTree(state), doc = state.doc, decos = [];
     const lang = documentLanguage(state);
     function prose(from, to) {
-      window.MDM_HYPHENATION.segments(doc.sliceString(from, to), lang).forEach(function (span) {
+      // The page prints `--` and `---` as dashes (G015), which part the words
+      // beside them; as hyphens they joined the two into one the segmenter
+      // leaves whole, so `word---word` was divided on the page alone. Blanked
+      // at the same length, so the positions stand.
+      const text = doc.sliceString(from, to).replace(/-{2,3}/g, function (run) {
+        return " ".repeat(run.length);
+      });
+      window.MDM_HYPHENATION.segments(text, lang).forEach(function (span) {
         const at = from + span.to;
         decos.push(Decoration.mark({ class: "mdm-hyphen" }).range(at - 1, at));
       });
@@ -6038,7 +6472,7 @@
       e.preventDefault();
       return;
     }
-    const drawing = e.target.closest(".mdm-score, .mdm-math, .mdm-table");
+    const drawing = e.target.closest(".mdm-score, .mdm-math, .mdm-table, .mdm-figure");
     if (drawing) {
       e.preventDefault();
       // A table says where in its source the click was: the cell it landed
@@ -6067,9 +6501,21 @@
     const block =
       el.classList.contains("mdm-score") ||
       el.classList.contains("mdm-table") ||
+      el.classList.contains("mdm-figure") ||
       el.classList.contains("mdm-math--block");
     let node = tree.resolveInner(block ? Math.max(0, pos - 1) : pos, block ? -1 : 1);
-    while (node && !OPEN_NODES.test(node.name)) node = node.parent;
+    // A figure stands for the paragraph its image is alone in: the caret
+    // goes to the head of that paragraph, the `![` of the source.
+    const figure = el.classList.contains("mdm-figure");
+    while (node && !(figure ? node.name === "Paragraph" : OPEN_NODES.test(node.name))) node = node.parent;
+    if (!node && block) {
+      // The closing line of a maths block may end in a paragraph of its own
+      // (`$$ {#eq-mass}`): the block is the sibling before it.
+      let para = tree.resolveInner(Math.max(0, pos - 1), -1);
+      while (para && para.name !== "Paragraph") para = para.parent;
+      const before = para && para.prevSibling;
+      if (before && OPEN_NODES.test(before.name)) node = before;
+    }
     let at = pos;
     if (node) {
       const content = node.getChild("CodeText") || node.getChild("BlockMathContent") || node.getChild("InlineMathContent") || node.getChild("InlineBlockMathContent");

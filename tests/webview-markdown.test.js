@@ -64,4 +64,53 @@ function expectRows(actual, expected, id) {
 // rows too (an em-tall gap, class mdm-blank), so every file line is accounted
 // for in order, and a drawn block is a row of its own between them.
 
+// A picture small enough to write into a case, so that it really loads: a
+// 100x70 white PNG (the one webview-look.test.js draws).
+const PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABGCAYAAAAr1V1TAAAAKklEQVR4" +
+  "nO3BAQ0AAADCoPdPbQ8HFAAAAAAAAAAAAAAAAAAAAAAAAHwbLcQAAaHYVR0AAAAASUVORK5CYII=";
+
+// What each link of the document says on hover: its destination (the
+// `title` of its span) and the Markdown title beside it (`data-mdm-title`),
+// one entry per Link node of the syntax tree, read off the span drawn over
+// the first character of its text. Walking the tree rather than the spans
+// keeps one entry per link whatever the marks inside it split its span
+// into, and leaves out the address a GFM autolink finds inside a label.
+async function linkTips(page) {
+  return page.evaluate(() => {
+    const view = window.__mdm.view;
+    const out = [];
+    window.CM.syntaxTree(view.state).iterate({
+      enter(n) {
+        if (n.name !== "Link") return;
+        const marks = n.node.getChildren("LinkMark");
+        const at = view.domAtPos(marks.length ? marks[0].to : n.from);
+        // The outermost span of the link: an address inside the label is a
+        // link of its own, drawn inside it, and says nothing about where the
+        // link goes (K03).
+        let el = (at.node.nodeType === 3 ? at.node.parentElement : at.node).closest(".mdm-link");
+        while (el && el.parentElement.closest(".mdm-link")) el = el.parentElement.closest(".mdm-link");
+        out.push(el ? [el.getAttribute("title"), el.getAttribute("data-mdm-title")] : null);
+        return false;
+      },
+    });
+    return out;
+  });
+}
+
+// The colour the glyphs of each link are drawn in: the computed colour of
+// the innermost element holding its text, one per link.
+async function linkInk(page) {
+  return page.evaluate(() => {
+    const out = [];
+    for (const el of document.querySelectorAll("#app .cm-line .mdm-link")) {
+      if (el.parentElement.closest(".mdm-link")) continue; // an inner span of the same link
+      let deepest = el;
+      while (deepest.firstElementChild) deepest = deepest.firstElementChild;
+      out.push(getComputedStyle(deepest).color);
+    }
+    return out;
+  });
+}
+
 

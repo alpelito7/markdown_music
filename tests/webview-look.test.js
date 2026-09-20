@@ -3598,6 +3598,8 @@ const IMAGE_DOC = [
   "",
   "![One written by another project.](/data/runs/figures/far.svg)",
   "",
+  "![One named by a URL.](file:///data/runs/figures/url.svg)",
+  "",
 ].join("\n");
 
 test("a relative image hangs from the folder of the document, an absolute one from the root", { skip }, async () => {
@@ -3617,6 +3619,8 @@ test("a relative image hangs from the folder of the document, an absolute one fr
     "https://vsc.test/home/me/papers/figures/near.svg",
     // Not the folder of the document with the absolute path glued behind it.
     "https://vsc.test/data/runs/figures/far.svg",
+    // A file URL is an address already (G023).
+    "file:///data/runs/figures/url.svg",
   ]);
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -3629,11 +3633,8 @@ const PNG =
   "nO3BAQ0AAADCoPdPbQ8HFAAAAAAAAAAAAAAAAAAAAAAAAHwbLcQAAaHYVR0AAAAASUVORK5CYII=";
 
 test("a figure carries the pointer, and a click on it opens its source", { skip }, async () => {
-  const h = await open({
-    text: ["Above.", "", "![A figure.](" + PNG + ")", "", "Below.", ""].join("\n"),
-    withFrontMatter: false,
-    scores: 0,
-  });
+  const text = ["Above.", "", "![A figure.](" + PNG + ")", "", "Below.", ""].join("\n");
+  const h = await open({ text, withFrontMatter: false, scores: 0 });
   const cursor = await h.page.evaluate(
     () => getComputedStyle(document.querySelector("#app img.mdm-image")).cursor
   );
@@ -3648,12 +3649,16 @@ test("a figure carries the pointer, and a click on it opens its source", { skip 
   await sleep(300);
   const opened = await h.page.evaluate(() => ({
     drawn: !!document.querySelector("#app img.mdm-image"),
+    head: window.__mdm.view.state.selection.main.head,
     line: window.__mdm.view.state.doc
       .lineAt(window.__mdm.view.state.selection.main.head)
       .text.slice(0, 13),
   }));
   assert.equal(opened.drawn, false, "the figure stayed drawn with a caret in it");
   assert.equal(opened.line, "![A figure.](", "the caret is not in the source of the figure");
+  // At the head of the source, the `![`, as a click on a table lands at the
+  // head of its source; not at the end of the line the block stands after.
+  assert.equal(opened.head, text.indexOf("![A figure."), "the caret is not at the head of the source");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -4504,6 +4509,35 @@ test("a heading's line keeps its height, with the caret away and in it", { skip 
     assert.deepEqual(h.errors, []);
     await h.close();
   }
+});
+
+// The cuts of the division into syllables are the page's: there `---` is a
+// dash that parts two words, and raw TeX and a citation are not printed as
+// the words they are written with. `representation---internationalization`
+// was one word to the segmenter, left whole, where the page divided both.
+test("the words beside a closed dash are divided as the page divides them, and raw TeX and a citation are not (G015, G013)", { skip }, async () => {
+  const head = "\nlang: en\n";
+  const body = "representation---internationalization and \\representation{x} and [@representation]." + "\n";
+  const h = await open({
+    text: "---" + head + "---\n\n" + body,
+    scores: 0,
+    withFrontMatter: false,
+    seed: { settings: { frontMatter: "hidden", hyphenation: "auto" } },
+    frontMatter: head,
+  });
+  const marks = await h.page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-hyphen")).map((el) => ({
+      letter: el.textContent,
+      raw: !!el.closest(".mdm-rawtex"),
+      cite: !!el.closest(".mdm-cite"),
+    }))
+  );
+  // rep|re|sen|ta|tion and inter|na|tion|al|iza|tion: nine cuts, each marked
+  // on the letter before it.
+  assert.equal(marks.map((m) => m.letter).join(""), "penaranla", JSON.stringify(marks));
+  assert.deepEqual(marks.filter((m) => m.raw || m.cite), []);
+  assert.deepEqual(h.errors, []);
+  await h.close();
 });
 
 // ---------- What a lit button means ----------
