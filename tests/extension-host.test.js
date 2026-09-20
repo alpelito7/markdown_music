@@ -3522,3 +3522,42 @@ test("the page loads the audio module before the editor that calls it", () => {
   assert.ok(main !== -1);
   assert.ok(audio < main, "main.js runs before the module it exports the audio with");
 });
+
+// ---------- A link followed from the editor ----------
+
+// Ctrl+click on a link in the editor posts its destination, and the host
+// opens it the way VS Code's own Markdown editor does: an address outside,
+// a file in VS Code (G083). What it opens is read off the document's own
+// text, so a href without a name opens nothing.
+
+test("a link followed from the editor opens an address outside and a file in VS Code", async () => {
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  await h.receive({ type: "openLink", href: "https://abcnotation.com/wiki/abc:standard" });
+  await h.receive({ type: "openLink", href: "www.example.org/page" });
+  await h.receive({ type: "openLink", href: "mailto:someone@example.org" });
+  assert.deepEqual(vscode._state.openedExternal, [
+    "https://abcnotation.com/wiki/abc:standard",
+    "https://www.example.org/page",
+    "mailto:someone@example.org",
+  ]);
+  // A path beside the document, its fragment dropped and its escapes
+  // undone, and a file: address, both opened in VS Code.
+  await h.receive({ type: "openLink", href: "scores/tune.mdm#intro" });
+  await h.receive({ type: "openLink", href: "img/brass%20band.png" });
+  await h.receive({ type: "openLink", href: "file:///elsewhere/other.mdm" });
+  const dir = path.dirname(h.document.uri.fsPath);
+  assert.deepEqual(
+    vscode._state.executed.map((e) => [e.command, e.args[0].toString()]),
+    [
+      ["vscode.open", "file://" + path.join(dir, "scores", "tune.mdm")],
+      ["vscode.open", "file://" + path.join(dir, "img", "brass band.png")],
+      ["vscode.open", "file:///elsewhere/other.mdm"],
+    ]
+  );
+  // Nothing without a name.
+  await h.receive({ type: "openLink", href: "  " });
+  await h.receive({ type: "openLink" });
+  assert.equal(vscode._state.executed.length, 3);
+  assert.equal(vscode._state.openedExternal.length, 3);
+});

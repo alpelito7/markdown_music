@@ -2769,6 +2769,50 @@ to six, hashes hidden*, with the setext case still green, since its underline
 goes through `hideLines`. The `todo` cases are the record of what the branch
 owes and are not mutated until their fix lands.
 
+The pointer, on the same branch, 2026-09-16. While a button is down over
+the editor the drawing is held: `renderField` rebuilds for the text, the
+tree and the hidden lines, but not for a selection or a focus that moved
+under the button, and the release rebuilds once (`pointerReleased`). The
+second and third press of a double and a triple click are answered by the
+editor from the caret the first press placed (`repeatedPress`), since by
+then the reveal has moved the text under a pointer that has not moved (65 px
+on a heading). Five mutations of `main.js`, all caught: **PG1** the hold
+taken off (a gesture rebuilding at once) -> *a click into an unfocused
+document puts a caret where it lands, not a range*, *a wobble of the hand
+between press and release selects no more than it crosses* and *a double
+click selects the word under the pointer, hidden marks and all*; **PG2**
+`repeatedPress` never answering -> *a double click ...*; **PG3** the release
+never rebuilding -> *a click into an unfocused document ...* (the marks not
+revealed once the button is up) and *a double click ...*; **PG4** the triple
+click stopping short of the line break -> *a triple click selects the line
+under the pointer, line break included*; **PG5** the group not widened to
+the left of the caret -> *a double click ...*. The helper sends a double
+click as two presses, the second labelled as the second (puppeteer's
+`count: 2`): its `clickCount` option is overwritten inside `mouse.click`
+(puppeteer-core 25.8) and a press sent with it comes out as a first press,
+which kept the double-click test red until the helper was corrected.
+
+Enter, the same day. CodeMirror's two commands for it read whitespace with
+`\s`, which takes U+00A0 along with the space, so one press of Enter beside
+a no-break space deleted it or wrote it back as an ASCII space through the
+indent, and both readers print it. Enter is the editor's own now (`mdmEnter`
+in `main.js`): lang-markdown's continuation of lists and quotes ported with
+`[ \t]` for its whitespace and its shape kept, a plain newline with the same
+class, and CodeMirror's own command left the job inside a fence, where the
+code's language may have an indentation to offer. The language no longer
+installs its keymap (`addKeymap: false`, which went in at high precedence
+over the editor's), and its Backspace is bound on its own until P4. Five
+mutations of `main.js`, all caught: **EN1** the newline's forward trim
+back to `\s` -> *Enter beside a no-break space keeps it, on either side*
+and *Enter on a line of one no-break space keeps the line*; **EN2**
+`isBlank` back to `\S` -> the line of one no-break space and *Enter in a
+list item keeps a no-break space and carries the list on*; **EN3** the
+continuation's trailing trim back to `\s` -> the list item; **EN4**
+`addKeymap` back to true (lang-markdown's Enter over the editor's) -> the
+list item; **EN5** the Enter binding removed -> all three. Enter between
+`[]` or `{}` no longer opens three lines: that was CodeMirror's bracket
+"explode", and in Markdown `[]` is a label.
+
 The frame a line stands in (P2 of the branch, 2026-09-16). A line inside a
 quote or a callout is drawn inside every level around it: `buildDecorations`
 gathers the levels as it enters the container nodes and writes them on the
@@ -3002,6 +3046,148 @@ before the closer already; **TP4** the parser left out of the extensions
 -> the vendor test and *TB11*. What stands: a table straight under a
 paragraph line starts a table in the editor (GFM) and not on the page
 (Pandoc), until the export's copy puts the blank line in (P6, `withBreaks`).
+
+The editing drills of the bench (section 22), Enter and deletion, the same
+day (P4-a of the branch). Enter is decided range by range, where any caret
+outside markup used to send every caret to the plain newline (G072). An
+empty item is unmade with a blank line put between it and the item before,
+so that what is typed next is the paragraph it reads as and not a lazy
+continuation of that item, which every reader joins into the item's line
+(G068), and a list of one item is not made loose on the way (G069); an
+empty nested item is unnested one level, with no line of spaces left behind;
+a task carries on unchecked, on an ordered item too, and a tab after the
+marker is read, both of which lang-markdown's reading left out (G084);
+Enter at the head of a heading's text opens a line above it, where it used
+to leave an empty heading over a paragraph (G073); in a fence held by a
+quote or an item the new line carries the container's marks (G071), and
+the fence is asked before the language, since a fence of JavaScript has
+JavaScript active at the caret and the first run of the drill found that
+caret fall to the plain newline; a bare fence keeps CodeMirror's own
+newline, which indents by the code's language. Ctrl+Enter out of a
+paragraph of two source lines leaves it whole (a paragraph is leavable
+now; G084). Backspace and Delete are the editor's own, and lang-markdown's
+Backspace is unbound: at the head of the line under a hidden block, and at
+the end of the line over one, the block opens and nothing is deleted, where
+the line break used to go into the fence and break the block (G062); after
+the marks of a heading the whole run goes, as a list item loses its whole
+marker, which is the by-design verdict the plan changes for this branch
+(G077, on the record here for the owner); after the marker of a later item
+or the `>` of a quote the marker goes whole, and when the line before holds
+text a blank line parts them, so that the text left is the paragraph it
+reads as (G078; lang-markdown blanked the marker with spaces), an ordered
+list renumbered past it, a nested item's text kept in the item around it,
+and spaces beyond the one after the marker taken back to that space first;
+an emoji with a skin tone, a keycap, the variation selector, a joiner or a
+tag goes whole, as Chrome's textarea takes it, and a combining accent alone
+comes off its letter, as CodeMirror, the textarea and VS Code all have it
+(G056). Eighteen mutations of `main.js`, all caught: **EN1** the blank line
+under an unmade item dropped -> *Enter twice at the end of a list ends it
+with a blank line, so the next text is a paragraph*; **EN2** the unnesting
+branch off -> the same, by its nested item; **EN3** the heading branch off
+-> *Enter at the head of a heading's text opens a line above it*; **EN4**
+the container's marks left off the fence's new line -> *Enter in a fence
+inside a quote keeps the new line in the quote*; **EN5** the fence asked
+after the language -> the same; **EN6** the task box dropped from the
+reading of an ordered marker -> *Enter continues a task unchecked, an
+ordered task too, and a marker followed by a tab*; **EN7** a bare fence
+sent to the editor's newline -> the fence drill, by its bare fence;
+**EN8** a caret outside markup given nothing -> *Enter with two carets
+answers each on its own*; **EN9** a tab after a bullet marker refused ->
+the task drill; **BS1** the hidden block at the head of the line not looked
+for -> *Delete and Backspace at the edge of a hidden block open it and take
+nothing*; **BS2** the heading's marks taken from anywhere in the run ->
+*Backspace after the hashes of a heading takes them all*, by its step
+further in; **BS3** no blank line parting the unmarked line from the item
+above -> *Backspace after a later item's marker takes the marker and parts
+the line from the item above*; **BS4** the ordered list not renumbered
+past it -> the same; **BS5** the emoji rule off -> *Backspace after an
+emoji with a skin tone or a keycap takes the whole glyph*; **BS6** the
+extra-space rule off -> the marker drill; **BS7** the combining accent
+counted as an extender -> the emoji drill, by its accent; **DL1** Delete's
+look at the block off -> the edge drill; **KM1** Backspace and Delete
+unbound -> the four deletion drills.
+
+Tab and Shift+Tab, the same day (P4-b). CodeMirror's `indentWithTab` put
+two spaces at the head of every selected line, whatever the caret was in:
+under `1. parent` that left `2. child` beside it, since a child block of an
+item stands at the item's content column (three for `1. `, CommonMark
+5.2), a quoted item got its spaces before the `>`, a nested item's children
+stayed behind as its siblings, and two presses in the middle of a
+paragraph made an indented code block of it (G070). Tab is the editor's
+own now: on an item it moves the item, its children and the selected
+siblings after it under the item above, at that item's content column
+(read off its marker and the one to four spaces after it), and in an
+ordered list numbers the block from one, or on from the nested list the
+item above ends with, and closes up the items left behind; Shift+Tab moves
+a nested block out to the column of the item that held it, right after
+that item, numbered on from it, and the siblings it leaves behind become
+its children, numbered from one; a top-level item stays put. In a fence the
+unit of indentation goes in at the caret (at the head of each line of a
+selection), and Shift+Tab takes one unit off the line. In prose a tab
+goes in at the caret in the middle of a line and nothing at the head of
+its text, where four columns would make code of the paragraph; the key is
+taken either way, since an unhandled Tab moves the focus out of the
+editor. Blank lines and lazy continuations at the margin are left where
+they are, so no line of spaces is written. Sixteen mutations of `main.js`,
+all caught: **TA1** the width pinned to two -> *Tab nests an item under
+the one above at its content column, and Shift+Tab brings it back*; **TA2**
+the marker line moved alone -> *Tab and Shift+Tab take an item's children
+along and renumber the lists they cross*; **TA3** a nested ordered block
+not numbered from one -> the same; **TA4** the items left behind not
+closing up -> the same; **TA5** a block joining a nested list numbered from
+one instead of on -> the same; **TA6** the spaces put before the quote's
+mark -> the same; **TA7** the block brought out not numbered after its
+parent -> the same; **TA8** the siblings left behind not numbered from one
+-> the same; **TA9** the outer items after the parent not renumbered ->
+the same; **TA10** a selection taking its first item alone -> the same;
+**TA11** the head-of-line guard off -> *Tab in prose puts a tab at the
+caret and never makes code of the paragraph*; **TA12** the key handed back
+when nothing changes -> the same, by the focus; **TA13** the unit put at
+the head of the code line -> the same; **TA14** Shift+Tab taking nothing
+off a code line -> the same; **KM2** Shift+Tab bound to the nesting -> the
+two item drills; **KM3** Tab unbound -> the item drill and the prose drill.
+
+The clicks, the same day (P4-d). The bullet and the number an item is
+drawn with took the click as text: CodeMirror put the caret on one side of
+the hidden `- `, and the letter typed next made `x- Viola`, which no reader
+reads as an item (G066); the marker widget ignores events now and the
+editor's own mousedown handler puts the caret where the item's text starts,
+the editor focused first, since a selection put in place from inside an
+update pulls the focus in and `syncFocus` answers the focus event with a
+dispatch CodeMirror refuses there. The task box was re-read off the line
+with a regex that knew `- [ ]` and `1. [ ]` at the head of the line alone,
+so a box inside a quote or on a `2)` item was drawn and did nothing (G076):
+the marker is read off the tree. A link could not be followed at all
+(G083): Ctrl+click (Cmd on a Mac, or Alt+click when
+editor.multiCursorModifier is ctrlCmd and Ctrl adds a caret, the swap VS
+Code makes) posts the destination to the host, which opens an address
+outside and a file in VS Code, a link to a heading of the document moves
+the caret to the heading, and a plain click edits the link as VS Code's own
+editor does. A paste with no text on the clipboard, a picture or rich text
+alone, replaced the selection with the empty string CodeMirror was given
+and sent the emptied text to the host (G082): a paste with neither
+`text/plain` nor `text/uri-list` is taken and leaves the selection alone.
+And a rule glued to a table, a score or an equation shielded the block from
+Up and Down, which asked the neighbouring line alone (G101): a drawn rule
+is walked past and the block beyond it stepped into. Fourteen mutations,
+ten of `main.js` and four of `extension.js`, thirteen caught: **CK1** the
+marker widget taking events again -> not caught, and kept: the handler
+prevents the default, which CodeMirror's own mousedown honours, so the
+`ignoreEvent` is belt and braces and the caret is pinned by **CK2** the
+caret put at the widget's start -> *a click on the drawn bullet or number
+puts the caret at the item's text*; **CK3** the box read off the line's
+head again -> *a task box flips its own text inside a quote and on a `2)`
+item*; **CK4** the ctrlCmd swap dropped -> *Ctrl+click follows a link,
+Alt+click when Ctrl adds a caret, and a plain click edits it*; **CK5** mail
+not given its scheme -> the same; **CK6** a fragment sent to the host ->
+the same; **CK7** the heading's identifier without its hyphens -> the
+same; **PS1** the paste handed on -> *a paste that carries no text leaves
+the selection as it was*; **RL1** the rule not walked past -> *Up and Down
+step into a hidden block past a rule glued to it*; **RL2** a cover counted
+as a rule -> the same; **OL1** a `www.` address opened as a file -> *a link
+followed from the editor opens an address outside and a file in VS Code*;
+**OL2** the fragment kept on the path -> the same; **OL3** the escapes
+kept -> the same; **OL4** the message unanswered -> the same.
 
 The dialect, second part (P6-b), the same day: the Pandoc syntax the
 export reads and the editor had no node for, in `pandoc.js`. Raw TeX

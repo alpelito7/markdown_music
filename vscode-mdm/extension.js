@@ -24,6 +24,39 @@ function channel() {
   return output;
 }
 
+// A link followed from the editor (Ctrl+click on it, G083). An address with
+// a scheme, or a `www.` one, goes out through the desktop, to the browser or
+// the mail client, as VS Code's own Markdown editor sends it; a `file:` one
+// and a path beside the document open in VS Code, with whatever editor their
+// kind has (an .mdm in this one, a picture in the image preview). A fragment
+// on a file path is dropped: nothing here can scroll another editor to a
+// heading, and a fragment alone never gets this far, since the editor
+// answers it by moving its own caret. The href is the document's own text,
+// so there is nothing to open that the author did not write.
+function openLink(document, href) {
+  if (typeof href !== "string") return;
+  const target = href.trim();
+  if (!target) return;
+  if (/^file:/i.test(target)) {
+    return vscode.commands.executeCommand("vscode.open", vscode.Uri.parse(target));
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target) && !/^[a-z]:[\\/]/i.test(target)) {
+    return vscode.env.openExternal(vscode.Uri.parse(target));
+  }
+  if (/^www\./i.test(target)) {
+    return vscode.env.openExternal(vscode.Uri.parse("https://" + target));
+  }
+  let file = target.replace(/[#?].*$/, "");
+  try {
+    file = decodeURI(file);
+  } catch (e) {
+    // Left as written: a path with a stray percent sign is still a path.
+  }
+  if (!file) return;
+  const at = path.resolve(path.dirname(document.uri.fsPath), file);
+  return vscode.commands.executeCommand("vscode.open", vscode.Uri.file(at));
+}
+
 function activate(context) {
   globalState = context.globalState;
   context.subscriptions.push(channel());
@@ -2851,6 +2884,8 @@ class MdmEditorProvider {
       } else if (msg.type === "setLanguage") {
         if (LANGUAGES.indexOf(msg.lang) === -1) return;
         await inTurn(() => writeLanguage(msg.lang));
+      } else if (msg.type === "openLink") {
+        openLink(document, msg.href);
       }
     });
   }

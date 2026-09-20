@@ -26,6 +26,7 @@ const state = {
   progressEnded: 0, // how many of them the extension let finish
   savedUris: [],
   openedExternal: [],
+  executed: [], // {command, args} of every commands.executeCommand
   dirtyDocuments: new Set(), // uris whose mock document reports isDirty
   workspaceFolder: null, // fsPath served by getWorkspaceFolder
   registeredProviders: [],
@@ -55,6 +56,7 @@ function reset() {
   state.progressEnded = 0;
   state.savedUris = [];
   state.openedExternal = [];
+  state.executed = [];
   state.dirtyDocuments = new Set();
   state.workspaceFolder = null;
   state.registeredProviders = [];
@@ -370,6 +372,15 @@ const env = {
   },
 };
 
+// The commands the extension runs (vscode.open, for a link to a file), kept
+// as {command, args} for a test to read.
+const commands = {
+  executeCommand(command, ...args) {
+    state.executed.push({ command, args });
+    return Promise.resolve(undefined);
+  },
+};
+
 // The Memento VS Code hands an extension as context.globalState. Values go in
 // and come out as JSON, the way VS Code stores them, so what is kept is only
 // what went through update(): an object changed after get() changes nothing
@@ -397,6 +408,7 @@ module.exports = {
   window,
   extensions,
   env,
+  commands,
   ProgressLocation,
   WorkspaceEdit,
   Range,

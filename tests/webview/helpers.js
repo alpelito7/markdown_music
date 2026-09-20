@@ -648,7 +648,38 @@ async function spacedClick(page, x, y, options) {
 // answers it, reveal and all, which `setSelection` never exercises.
 // `opts.modifiers` holds keys (["Control"]) down around it, `opts.dx` shifts
 // the point sideways in pixels, `opts.move` drags the pointer that many
+// pixels between press and release, the wobble a hand makes on a click, and
+// `opts.count` makes it a double (2) or triple (3) click: every press of it
+// is sent, the second and third labelled as such (detail 2, 3), which is
+// what the editor reads. The option is puppeteer's `count`; its `clickCount`
+// is overwritten inside `mouse.click` and a press sent with it comes out as
+// a first press (seen with puppeteer-core 25.8).
+async function clickAt(page, pos, opts) {
+  const o = opts || {};
+  const at = await coordsAt(page, pos);
+  if (!at) throw new Error("clickAt: position " + pos + " is not on screen");
+  const x = at.x + (o.dx || 0);
+  const y = at.y;
+  for (const m of o.modifiers || []) await page.keyboard.down(m);
+  if (o.move) {
+    const last = LAST_CLICK.get(page) || 0;
+    const wait = 600 - (Date.now() - last);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + o.move, y, { steps: 2 });
+    await page.mouse.up();
+    LAST_CLICK.set(page, Date.now());
+  } else {
+    await spacedClick(page, x, y, { count: o.count || 1 });
+  }
+  for (const m of (o.modifiers || []).slice().reverse()) await page.keyboard.up(m);
+  await new Promise((r) => setTimeout(r, 120));
+  return { x: x, y: y };
+}
 
+// A double click at a document position: both presses, the second one
+// labelled as the second.
 function dblClickAt(page, pos, opts) {
   return clickAt(page, pos, Object.assign({}, opts || {}, { count: 2 }));
 }

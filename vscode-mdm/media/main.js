@@ -3366,6 +3366,21 @@
     },
   });
 
+  // While a mouse button is down, what is drawn does not change. A press
+  // puts the caret in a construct and CodeMirror reads the pointer twice in
+  // the same gesture, once when it lands and once when it is released (and
+  // on every move between): revealing the marks in between shifted the text
+  // under a pointer that had not moved (the `## ` of a heading is 65 px), so
+  // the two readings named different characters and a click came out as a
+  // selection of a few characters, a wobble of 3 px between press and
+  // release selected a word, and the first click into an unfocused document
+  // selected a range. The rendering holds its layout until the release, when
+  // the reveal is drawn in one go; the selection and the focus travel as
+  // they always did, only the drawing waits.
+  let pointerHeld = false;
+  let heldRebuild = false;
+  const pointerReleased = CM.StateEffect.define();
+
   // What the host kept back. With the YAML header hidden the editor's first
   // line is not the file's first line, and the numbers drawn in the margin
   // count the file's lines, so that a line has the number the VS Code text
@@ -3768,8 +3783,46 @@
 
   // ---- Small inline widgets ----
 
-  class BulletWidget extends WidgetType {
-    eq() {
+  // The marker of a list item, drawn in the hanging gap of the item (1.5em,
+  // style.css .mdm-li-marker) in place of the marker as typed, the
+  // indentation before it and the space after it: a bullet for any of `-`,
+  // `*` and `+`; the number the list gives an ordered item, its start plus
+  // the item's place, where the typed digits could say 1, 1, 1 and the page
+  // counts 1, 2, 3 (G047); or the box of a task, which stands in the gap
+  // alone, the way the page draws a task list. The bullet and the number
+  // end in a space, so a row reads "• item" as it did.
+  class MarkerWidget extends WidgetType {
+    constructor(kind, text, checked, floating) {
+      super();
+      this.kind = kind;
+      this.text = text;
+      this.checked = !!checked;
+      // Placed in the gap from the start of a line rather than in the flow:
+      // the first line of a card whose fence opened on the item's line, the
+      // fence being hidden with the marker on it.
+      this.floating = !!floating;
+    }
+    eq(other) {
+      return (
+        other.kind === this.kind &&
+        other.text === this.text &&
+        other.checked === this.checked &&
+        other.floating === this.floating
+      );
+    }
+    toDOM() {
+      const el = markerDOM(this);
+      if (this.floating) el.classList.add("mdm-li-marker--block");
+      return el;
+    }
+    // A click on the marker is answered in the editor's own mousedown
+    // handler: the box flips the text, and the bullet or the number puts
+    // the caret where the item's text starts (G066: left to CodeMirror, a
+    // click on the drawing landed the caret beside the hidden `-`, and the
+    // next letter unmade the item). That handler prevents the default,
+    // which CodeMirror's mousedown honours on its own; ignoring the events
+    // here besides says the same thing once more.
+    ignoreEvent() {
       return true;
     }
   }
@@ -5764,24 +5817,43 @@
     };
   }
 
-  // Ctrl+Alt+Up/Down: a caret on the line above or below every caret there
-  // is, in the same column, the way VS Code adds them. The new carets join
-  // the selection rather than replace it.
-  function addCaretVertically(dir) {
-    return function (v) {
-      const sel = v.state.selection;
-      const added = [];
-      sel.ranges.forEach(function (range) {
-        const moved = v.moveVertically(range, dir > 0);
-        if (moved.head !== range.head) added.push(CM.EditorSelection.cursor(moved.head));
-      });
-      if (!added.length) return true;
-      v.dispatch({
-        selection: CM.EditorSelection.create(sel.ranges.concat(added), sel.mainIndex),
-        scrollIntoView: true,
-      });
-      return true;
-    };
+  // Shift+Tab: in a fence, one unit of indentation off each line of the
+  // range; in a nested item, the unnesting above; nothing anywhere else.
+  function mdmShiftTab(view) {
+    const state = view.state;
+    if (state.readOnly) return false;
+    const tree = CM.syntaxTree(state);
+    const doc = state.doc;
+    const unit = state.facet(CM.indentUnit);
+    const taken = new Set();
+    let changed = false;
+    const changes = state.changeByRange(function (range) {
+      if (fenceAround(tree, range.from)) {
+        const out = [];
+        const last = doc.lineAt(range.to);
+        for (let n = doc.lineAt(range.from).number; n <= last.number; n++) {
+          const line = doc.line(n);
+          let i = 0;
+          let col = 0;
+          while (i < line.text.length && col < unit.length && /[ \t]/.test(line.text[i])) {
+            col += line.text[i] === "\t" ? state.tabSize - (col % state.tabSize) : 1;
+            i++;
+          }
+          if (i) out.push({ from: line.from, to: line.from + i });
+        }
+        const set = state.changes(out);
+        changed = changed || out.length > 0;
+        return { changes: set, range: range.map(set) };
+      }
+      const unnested = unnestItems(state, tree, range, taken);
+      if (unnested) {
+        changed = true;
+        return unnested;
+      }
+      return { range: range };
+    });
+    if (changed) view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: "delete.dedent" }));
+    return true;
   }
 
   // ---------- Ctrl+D: next occurrence ----------
@@ -5993,27 +6065,205 @@
     };
   }
 
-  // Mousedown on the chrome of a block (copy, player toggle) and on a task
-  // checkbox. Caught on the content DOM in the capture phase: CodeMirror
-  // ignores events inside these widgets (ignoreEvent), but the browser would
-  // still move the native selection to the click, which CodeMirror then
-  // reads back as a caret landing in the block; preventing the default keeps
-  // the caret where it was. The checkbox flips the text it stands for.
+  // The run of characters of one kind (word, spaces, punctuation) around a
+  // position, what CodeMirror's own double click selects: `wordAt` would
+  // give nothing on a space or a `*`. `assoc` says which side of the
+  // position the caret leans to, the side the press came from.
+  function groupAt(state, pos, assoc) {
+    const line = state.doc.lineAt(pos);
+    if (line.length === 0) return CM.EditorSelection.cursor(pos);
+    const text = line.text;
+    const categorize = state.charCategorizer(pos);
+    let at = pos - line.from;
+    let bias = at === 0 ? 1 : at === text.length ? -1 : assoc < 0 ? -1 : 1;
+    let from = at;
+    let to = at;
+    if (bias < 0) from = CM.findClusterBreak(text, at, false);
+    else to = CM.findClusterBreak(text, at);
+    const kind = categorize(text.slice(from, to));
+    while (from > 0) {
+      const prev = CM.findClusterBreak(text, from, false);
+      if (categorize(text.slice(prev, from)) !== kind) break;
+      from = prev;
+    }
+    while (to < text.length) {
+      const next = CM.findClusterBreak(text, to);
+      if (categorize(text.slice(to, next)) !== kind) break;
+      to = next;
+    }
+    return CM.EditorSelection.range(line.from + from, line.from + to);
+  }
+
+  // The second and third press of a double and a triple click, answered
+  // here rather than by CodeMirror. Its own reading takes the word under the
+  // pointer, and by the second press the first has revealed the marks of
+  // the construct it landed in and moved the text under a pointer that has
+  // not moved: on a heading the `## ` shifts the word 65 px right, so the
+  // word it read was the one before. The first press put the caret in the
+  // word that was pointed at, on the layout the pointer was aimed at, so the
+  // word (or the line, on the third press, with its line break as
+  // CodeMirror takes it) is taken from the caret. Only plain presses on the
+  // text: a modifier is a caret being added or a column drawn, and a widget
+  // answers its own presses.
+  function repeatedPress(e) {
+    if (e.detail < 2 || e.button !== 0 || !view) return false;
+    if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return false;
+    if (e.target.closest(".mdm-score, .mdm-math, .mdm-table, .mdm-image, input")) return false;
+    const state = view.state;
+    const main = state.selection.main;
+    let range;
+    if (e.detail === 2) {
+      range = groupAt(state, main.head, main.assoc);
+    } else {
+      const line = state.doc.lineAt(main.head);
+      const to = line.to < state.doc.length ? line.to + 1 : line.to;
+      range = CM.EditorSelection.range(line.from, to);
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    view.dispatch({ selection: range, userEvent: "select.pointer" });
+    return true;
+  }
+
+  // The end of the marker widget standing at `pos`: where the item's text
+  // starts, past the marker as typed and the space after it.
+  function markerEndAt(state, pos) {
+    const field = state.field(renderField, false);
+    if (!field) return null;
+    let found = null;
+    field.between(pos, pos, function (from, to, deco) {
+      if (deco.widget instanceof MarkerWidget && from <= pos && pos <= to) found = to;
+    });
+    return found;
+  }
+
+  // The task marker of the item whose marker widget stands at `pos`, read
+  // off the tree (G076: a regex knew `- [ ]` and `1. [ ]` at the head of
+  // the line alone, so a box inside a quote or on a `2)` item was drawn and
+  // did nothing when clicked).
+  function taskMarkerAt(state, pos) {
+    for (let n = CM.syntaxTree(state).resolveInner(pos, 1); n; n = n.parent) {
+      if (n.name === "ListItem") {
+        const task = n.getChild("Task");
+        return task ? task.getChild("TaskMarker") : null;
+      }
+    }
+    return null;
+  }
+
+  // The click that follows a link is the one VS Code's own editor takes:
+  // Ctrl+click (Cmd on a Mac), or Alt+click when editor.multiCursorModifier
+  // is ctrlCmd and Ctrl+click adds a caret instead (G083).
+  function followsLink(e) {
+    if (e.shiftKey) return false;
+    return multiCursorModifier === "ctrlCmd" ? e.altKey : e.ctrlKey || e.metaKey;
+  }
+
+  // The destination of the link drawn at `el`: the tooltip carries it for a
+  // link with one, and an autolink or a bare address is its own text, an
+  // address without a scheme that holds an `@` being mail.
+  function hrefOf(el) {
+    const title = el.getAttribute("title");
+    if (title) return title;
+    let node = CM.syntaxTree(view.state).resolveInner(view.posAtDOM(el), 1);
+    while (node && node.name !== "Autolink" && node.name !== "URL") node = node.parent;
+    if (!node) return null;
+    const text = view.state.sliceDoc(node.from, node.to).replace(/^<|>$/g, "");
+    return !/^[a-z][a-z0-9+.-]*:/i.test(text) && text.indexOf("@") !== -1 ? "mailto:" + text : text;
+  }
+
+  // Pandoc's identifier for a heading, near enough: lowercased, punctuation
+  // dropped, spaces to hyphens, and whatever leads before the first letter
+  // gone; an identifier written on the heading itself (`{#id}`) wins.
+  function headingSlug(text) {
+    const own = /\{#([^}\s]+)[^}]*\}\s*$/.exec(text);
+    if (own) return own[1].toLowerCase();
+    return text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s_.-]/gu, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/^[^\p{L}]+/u, "");
+  }
+
+  // A link to a heading of this document (`#scales`): the caret goes to the
+  // heading, which is what the page does with the fragment. Nothing found,
+  // nothing happens.
+  function jumpToHeading(fragment) {
+    let want;
+    try {
+      want = decodeURIComponent(fragment).toLowerCase();
+    } catch (e) {
+      want = fragment.toLowerCase();
+    }
+    const state = view.state;
+    let target = null;
+    CM.syntaxTree(state).iterate({
+      enter: function (n) {
+        if (target !== null) return false;
+        if (!/^(ATXHeading[1-6]|SetextHeading[12])$/.test(n.name)) return;
+        let from = n.from;
+        let to = n.to;
+        n.node.getChildren("HeaderMark").forEach(function (m) {
+          if (m.from === from) from = m.to;
+          else if (m.to === to || m.from >= from) to = Math.min(to, m.from);
+        });
+        if (headingSlug(state.sliceDoc(from, to).trim()) === want) target = from + /^[ \t]*/.exec(state.sliceDoc(from, to))[0].length;
+        return false;
+      },
+    });
+    if (target === null) return;
+    view.dispatch({ selection: { anchor: target }, scrollIntoView: true });
+    view.focus();
+  }
+
+  // Mousedown on the chrome of a block (copy, player toggle), on a list
+  // marker, and on a link with the follow modifier. Caught on the content
+  // DOM in the capture phase: CodeMirror ignores events inside the widgets
+  // (ignoreEvent), but the browser would still move the native selection to
+  // the click, which CodeMirror then reads back as a caret landing in the
+  // block; preventing the default keeps the caret where it was. The task
+  // box flips the text it stands for, the bullet and the number put the
+  // caret at the item's text (G066), and Ctrl+click on a link follows it: a
+  // heading of this document by the caret, anything else through the host
+  // (G083). A plain click on a link edits it, as in VS Code's own editor.
   function handleMouseDown(e) {
     if (!e.target.closest) return;
     if (e.target.closest(".mdm-chrome")) {
       e.preventDefault();
       return;
     }
-    const box = e.target.closest("input.mdm-task");
-    if (!box || !view) return;
+    if (repeatedPress(e) || !view) return;
+    const link = e.button === 0 && e.target.closest(".mdm-link");
+    if (link && followsLink(e)) {
+      e.preventDefault();
+      const href = hrefOf(link);
+      if (!href) return;
+      if (href.charAt(0) === "#") jumpToHeading(href.slice(1));
+      else vscode.postMessage({ type: "openLink", href: href });
+      return;
+    }
+    const marker = e.target.closest(".mdm-li-marker");
+    if (!marker) return;
     e.preventDefault();
-    const pos = view.posAtDOM(box);
-    const line = view.state.doc.lineAt(pos);
-    const m = /^(\s*(?:[-*+]|\d+\.)\s+)\[([ xX])\]/.exec(line.text);
-    if (!m) return;
-    const at = line.from + m[1].length + 1;
-    view.dispatch({ changes: { from: at, to: at + 1, insert: m[2] === " " ? "x" : " " } });
+    const pos = view.posAtDOM(marker);
+    const box = e.target.closest("input.mdm-task");
+    if (box) {
+      const task = taskMarkerAt(view.state, pos);
+      if (!task) return;
+      const at = task.from + 1;
+      const checked = /x/i.test(view.state.sliceDoc(at, at + 1));
+      view.dispatch({ changes: { from: at, to: at + 1, insert: checked ? " " : "x" } });
+      return;
+    }
+    const end = markerEndAt(view.state, pos);
+    if (end === null) return;
+    // The focus first: the default was prevented, so the browser gives the
+    // editor none of its own, and the selection put in place below would
+    // pull it in from inside the update, where syncFocus's dispatch on the
+    // focus event is a call CodeMirror refuses.
+    view.focus();
+    view.dispatch({ selection: { anchor: end }, userEvent: "select.pointer" });
   }
 
   // ---------- Scores in widgets ----------
@@ -7021,11 +7271,12 @@
         CM.highlightSelectionMatches(),
         CM.keymap.of(
           mdmKeymap.concat(
-            CM.markdownKeymap,
+            // lang-markdown's own keymap is not installed by the language
+            // (addKeymap below): Enter, Backspace, Delete and Tab are the
+            // editor's own (mdmEnter, mdmBackspace, mdmDelete, mdmTab).
             CM.defaultKeymap,
             CM.historyKeymap,
-            CM.searchKeymap,
-            [CM.indentWithTab]
+            CM.searchKeymap
           )
         ),
         language.of(markdownLanguage()),
@@ -7083,11 +7334,25 @@
     // watching the focus over the whole view, synchronously.
     document.addEventListener(
       "mousedown",
-      function () {
+      function (e) {
         pressedAt = Date.now();
+        // A left button going down over the editor holds the drawing (see
+        // pointerHeld); the buttons of a block's rail and the toolbar move
+        // no caret by being pressed and do not.
+        if (e.button === 0 && view && view.dom.contains(e.target)) pointerHeld = true;
       },
       true
     );
+    // The release comes wherever the pointer is by then, so it is read off
+    // the window; a window that loses the button (Alt+Tab mid-press) is read
+    // as a release too, so the drawing is never held for good.
+    const releasePointer = function () {
+      if (!pointerHeld) return;
+      pointerHeld = false;
+      if (heldRebuild && view) view.dispatch({ effects: pointerReleased.of(true) });
+    };
+    window.addEventListener("mouseup", releasePointer, true);
+    window.addEventListener("blur", releasePointer);
     view.dom.addEventListener("focusin", syncFocus);
     view.dom.addEventListener("focusout", function () {
       // On the way out the focus has not landed yet: activeElement is still
