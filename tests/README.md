@@ -2758,6 +2758,16 @@ written as MIDI (it is left out of a WAV run, and exports as MIDI if that is
 what is asked for), and this file said `done` follows from a `finally` (it
 follows from the last link of the chain).
 
+The Markdown conformance file (`webview-markdown.test.js`) opened the
+`feat/markdown-editor` branch on 2026-09-15 with its 16 passing cases seen
+to fail, two mutations of `main.js` and both caught: **MD1** the bullet
+widget drawing `◦` instead of `•` -> *bullet items draw a bullet for any
+marker* and *task items draw their boxes*; **MD2** the `HeaderMark` of an ATX
+heading left in the flow (`hide(from, r.to)` skipped) -> *ATX headings one
+to six, hashes hidden*, with the setext case still green, since its underline
+goes through `hideLines`. The `todo` cases are the record of what the branch
+owes and are not mutated until their fix lands.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

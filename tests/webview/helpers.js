@@ -557,6 +557,45 @@ function setSettingPosts(page) {
   );
 }
 
+// ---- What the editor draws, row by row ----
+
+// The rows of the editor, top to bottom, as a reader sees them: the lines of
+// the document that are in the flow and the blocks drawn instead of their
+// source (a table, a display equation, a score, a rule), each with the file
+// line it carries in the margin (`n`, from data-mdm-line; a drawn block
+// carries the number of its first source line on its cover, which is the
+// row before it and has no height, so the number is read off that cover
+// here), the mdm-* classes it wears (`roles`), its visible text and its
+// height. The text is what the row shows and not what the file holds: the
+// widgets are named in it, so an equation reads ⟦math:tex⟧ (the TeX from
+// KaTeX's annotation), a checkbox ☐ or ☑ by its state, a picture ⟦img:alt⟧,
+// a rule ⟦hr⟧, and CodeMirror's zero-width widget buffers and the buttons
+// of a block's rail are left out. This is what the conformance tests
+// compare against the page, row for row.
+
+// Puppeteer counts two clicks less than ~500 ms apart at nearby points as a
+// double click, whatever they were meant as. Every click made through here
+// keeps 600 ms from the one before it on the same page, so a test can click
+// twice in a row and get two clicks, and asks for a double click by name.
+const LAST_CLICK = new WeakMap();
+async function spacedClick(page, x, y, options) {
+  const last = LAST_CLICK.get(page) || 0;
+  const wait = 600 - (Date.now() - last);
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  await page.mouse.click(x, y, options || {});
+  LAST_CLICK.set(page, Date.now());
+}
+
+// A real click at a document position, at the middle of the character's
+// box, the way a pointer lands on a word: the editor's own mouse handling
+// answers it, reveal and all, which `setSelection` never exercises.
+// `opts.modifiers` holds keys (["Control"]) down around it, `opts.dx` shifts
+// the point sideways in pixels, `opts.move` drags the pointer that many
+
+function dblClickAt(page, pos, opts) {
+  return clickAt(page, pos, Object.assign({}, opts || {}, { count: 2 }));
+}
+
 module.exports = {
   CHROME,
   HARNESS,
@@ -581,4 +620,7 @@ module.exports = {
   settingsMessage,
   postSettings,
   setSettingPosts,
+  rows,
+  clickAt,
+  dblClickAt,
 };
