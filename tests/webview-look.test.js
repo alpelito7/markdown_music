@@ -2912,6 +2912,29 @@ test("a fill carries a value for each side", { skip }, async () => {
 
 // ---------- Click to edit ----------
 
+test("a click on an equation whose closer carries a label opens its source at the head of the maths", { skip }, async () => {
+  // `$$ {#eq-mass}`: the closing line ends in a paragraph of its own (the
+  // label, drawn under the equation), and the node at the end of the block
+  // is that paragraph, not the maths; the click still lands on the maths.
+  const text = "Intro.\n\n$$\nE = mc^2\n$$ {#eq-mass}\n\nAfter.\n";
+  const h = await open({ text, withFrontMatter: false, scores: 0 });
+  const box = await h.page.evaluate(() => {
+    const r = document.querySelector("#app .mdm-math--block").getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await h.page.mouse.click(box.x, box.y);
+  await sleep(300);
+  const head = await h.page.evaluate(() => window.__mdm.view.state.selection.main.head);
+  assert.equal(head, text.indexOf("E = mc^2"), "the caret is not at the head of the maths");
+  assert.equal(
+    await h.page.evaluate(() => document.querySelectorAll("#app .cm-line.mdm-math-line").length),
+    3,
+    "the source did not open"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("clicking a rendered block opens its source", { skip }, async () => {
   // The YAML header is no longer a rendered block: its lines are always in
   // the text. A click on a display equation or a score puts the caret at

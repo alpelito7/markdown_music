@@ -1,20 +1,28 @@
-// Lezer Markdown extension for Pandoc fenced divs used as Quarto callouts.
+// Lezer Markdown extension for Pandoc fenced divs, Quarto's callouts among
+// them.
 //
 //   ::: {.callout-note title="..."}     opening fence: 3+ colons, optional
 //   ::: {#refs}                         spaces, then an attribute block in
-//   ::: callout-warning                 braces (any attributes, as the
-//                                       editor's CALLOUT_OPEN_LINE accepts
-//                                       today) or a single bare class word
-//                                       (Pandoc's short form).
+//   ::: callout-warning                 braces (any attributes; a `}` inside
+//   ::: {.callout-tip} :::              a quoted value is fine, the block
+//                                       ends at the last brace) or a single
+//                                       bare class word (Pandoc's short
+//                                       form), then optional colons (Pandoc
+//                                       allows them after the attributes).
 //   :::                                 closing fence: 3+ colons alone.
 //
 // Nodes: Callout, a composite block like Blockquote whose inner lines are
 // parsed as ordinary Markdown (Paragraph, StrongEmphasis, lists, nested
 // Callout, ...), with CalloutMark children for the opening line (attributes
-// included) and the closing line. calloutKind(line) returns the kind the
-// editor colours by: the X of a `callout-X` class, "note" when the fence
-// carries none (matching calloutNorm in media/main.js), null when the line
-// is not an opening fence.
+// included) and the closing line. Every fenced div is a Callout node, so
+// the editor can put its fences away; calloutKind(line) says which are
+// Quarto's callouts: the X of a `callout-X` class, or null for any other
+// div (`{.column}`, `{#refs}`, a bare `warning`), which the page prints
+// bare (G051), and null for a line that is no opening fence.
+//
+// An opening fence straight under a paragraph line does not interrupt the
+// paragraph: Pandoc's fenced_divs need a blank line before the opener, and
+// the line is prose there (G053).
 //
 // Unterminated: a fence without a later closing line produces no node and
 // stays plain text. The check is a raw look-ahead over the document (see
@@ -30,9 +38,9 @@ import {forEachLineAfter} from "./lines.js"
 
 const COLON = 58
 
-// Opening fence after the container markup. Group 1 is the brace content,
-// group 2 the bare word.
-const OPEN = /^:{3,}[ \t]*(?:\{([^}\n]*)\}|([A-Za-z0-9_-]+))[ \t]*$/
+// Opening fence after the container markup. Group 1 is the brace content
+// (greedy, to the last brace on the line), group 2 the bare word.
+const OPEN = /^:{3,}[ \t]*(?:\{(.*)\}|([A-Za-z0-9_-]+))[ \t]*:*[ \t]*$/
 const CLOSE = /^:{3,}[ \t]*$/
 // Raw look-ahead forms: blockquote markers and indentation are skipped.
 const RAW_PREFIX = /^[ \t>]*/
@@ -94,9 +102,8 @@ export const mdmCallout = {
   parseBlock: [{
     name: "Callout",
     parse: parseCallout,
-    // A `:::` line interrupts a paragraph, like a fence does.
-    endLeaf: (cx, line) => line.next == COLON && line.indent - line.baseIndent < 4 &&
-      OPEN.test(line.text.slice(line.pos)),
+    // No endLeaf: a `:::` line under a paragraph line is the paragraph's
+    // (see the head).
     before: "FencedCode"
   }]
 }

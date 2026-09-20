@@ -225,19 +225,36 @@ test("block math: one-line `$$ x $$` and content on the fence lines", () => {
 })
 
 test("block math: unterminated $$ falls back to a paragraph, no node", () => {
-  for (const text of ["$$\nx\n", "$$\nx\n\ny $$ z", "$$ x", "$$\n  x\n$$ y"]) {
+  for (const text of ["$$\nx\n", "$$\nx\n\ny $$ z", "$$ x"]) {
     const tree = parse(text)
     assert.deepEqual(nodes(tree, /^BlockMath/), [], JSON.stringify(text))
     assert.equal(tree.topNode.firstChild.name, "Paragraph", JSON.stringify(text))
   }
-  // The fallback paragraph is inline-parsed: a mid-line closer turns the
-  // fence into display math inside the paragraph, as Pandoc reads it.
-  assert.deepEqual(nodes(parse("$$\n  x\n$$ y"), /^InlineBlockMath$/), ["InlineBlockMath@0-9"])
   assert.deepEqual(nodes(parse("$$\nx\n"), /Math/), [])
   // The fallback paragraph has the same extent the default parser gives
   // (up to the blank line) and its inline content is still parsed.
   const tree = parse("$$\nx *em*\n\nafter")
   assert.deepEqual(nodes(tree, /Paragraph|Emphasis/), ["Paragraph@0-9", "Emphasis@5-9", "EmphasisMark@5-6", "EmphasisMark@8-9", "Paragraph@11-16"])
+})
+
+test("block math: a closer with text after it closes the block there, the text a paragraph of its own (G052)", () => {
+  // A Quarto label after the closer, and the next block straight under it:
+  // two blocks, the label between them. The closing line used to break the
+  // block and be read again as an opener, which took the next block's `$$`.
+  const a = "$$\nE = mc^2\n$$ {#eq-mass}\n$$\nF = ma\n$$\n"
+  assert.deepEqual(nodes(parse(a), /^(BlockMath|BlockMathContent|Paragraph)$/, a), [
+    "BlockMath[$$\nE = mc^2\n$$]", "BlockMathContent[E = mc^2]", "Paragraph[{#eq-mass}]",
+    "BlockMath[$$\nF = ma\n$$]", "BlockMathContent[F = ma]"
+  ])
+  // Prose after the closer, inline-parsed.
+  const b = "$$\na^2\n$$ where *c* is.\n"
+  assert.deepEqual(nodes(parse(b), /^(BlockMath|Paragraph|Emphasis)$/, b), [
+    "BlockMath[$$\na^2\n$$]", "Paragraph[where *c* is.]", "Emphasis[*c*]"
+  ])
+  // In a quote, and a closer with spaces only after it is a plain closer.
+  assert.equal(parse("> $$\n> x\n> $$ tail\n").toString(),
+    "Document(Blockquote(QuoteMark,BlockMath(BlockMathMark,QuoteMark,BlockMathContent,QuoteMark,BlockMathMark),Paragraph))")
+  assert.equal(parse("$$\nx\n$$   \n").toString(), "Document(BlockMath(BlockMathMark,BlockMathContent,BlockMathMark))")
 })
 
 test("block math: a mid-line $$ on the opening line is not a block", () => {
@@ -321,7 +338,9 @@ test("callout: composite block with marks, inner Markdown parsed", () => {
 })
 
 test("callout: opening forms accepted and trailing spaces trimmed from marks", () => {
-  for (const open of ["::: {.callout-warning title=\"T\"}", ":::{.callout-tip}", "::::: {#refs}", "::: warning", "::: callout-tip  "]) {
+  for (const open of ["::: {.callout-warning title=\"T\"}", ":::{.callout-tip}", "::::: {#refs}", "::: warning", "::: callout-tip  ",
+                      // Pandoc's colons after the attributes, and a brace inside a quoted value (G053).
+                      "::: {.callout-tip} :::", "::: {.callout-important title=\"Braces {inside}\"}", "::: callout-note ::: "]) {
     const text = `${open}\n\nbody\n\n::::  \n`
     const tree = parse(text)
     assert.deepEqual(nodes(tree, /^Callout/, text),
@@ -337,8 +356,12 @@ test("callout: not an opener", () => {
 test("callout: unterminated gives no node, text stays plain", () => {
   const tree = parse("::: {.callout-note}\nno closer\n\ntext")
   assert.equal(tree.toString(), "Document(Paragraph,Paragraph)")
-  // A closer that belongs to a nested opener does not count for the outer one.
-  assert.equal(parse("::: {.note}\n::: {.tip}\ntext\n:::\n").toString(),
+  // A closer that belongs to a nested opener does not count for the outer
+  // one, whose line is then prose; the inner opener straight under that
+  // prose line is prose too (G053), and a callout once a blank line parts
+  // them.
+  assert.equal(parse("::: {.note}\n::: {.tip}\ntext\n:::\n").toString(), "Document(Paragraph)")
+  assert.equal(parse("::: {.note}\n\n::: {.tip}\ntext\n:::\n").toString(),
     "Document(Paragraph,Callout(CalloutMark,Paragraph,CalloutMark))")
 })
 
@@ -353,13 +376,25 @@ test("callout: nested callouts and blank lines inside", () => {
 test("callout: inside a blockquote and a list item, lists inside", () => {
   assert.equal(parse("> ::: {.note}\n> quoted\n> :::\n").toString(),
     "Document(Blockquote(QuoteMark,Callout(CalloutMark,QuoteMark,Paragraph,QuoteMark,CalloutMark)))")
-  assert.equal(parse("- item\n  ::: {.note}\n  in list\n  :::\n- next").toString(),
+  // After a blank line, as Pandoc asks (G053): straight under the item's
+  // text the opener would be the paragraph's.
+  assert.equal(parse("- item\n\n  ::: {.note}\n  in list\n  :::\n- next").toString(),
     "Document(BulletList(ListItem(ListMark,Paragraph,Callout(CalloutMark,Paragraph,CalloutMark)),ListItem(ListMark,Paragraph)))")
   assert.equal(parse("::: {.note}\n\n- a\n- b\n\n:::\n").toString(),
     "Document(Callout(CalloutMark,BulletList(ListItem(ListMark,Paragraph),ListItem(ListMark,Paragraph)),CalloutMark))")
-  // A `:::` line interrupts a paragraph; math blocks live inside callouts.
+  // Math blocks live inside callouts.
+  assert.equal(parse("::: {.note}\n$$\nx\n$$\n:::").toString(),
+    "Document(Callout(CalloutMark,BlockMath(BlockMathMark,BlockMathContent,BlockMathMark),CalloutMark))")
+})
+
+test("callout: an opener straight under a paragraph line is the paragraph's (Pandoc needs a blank line, G053)", () => {
+  assert.equal(parse("A paragraph line\n::: {.callout-note}\nUnder a paragraph.\n:::\n").toString(), "Document(Paragraph)")
+  // The `$$` still interrupts, and the `:::` after it is prose, no callout having opened.
   assert.equal(parse("text\n::: {.note}\n$$\nx\n$$\n:::").toString(),
-    "Document(Paragraph,Callout(CalloutMark,BlockMath(BlockMathMark,BlockMathContent,BlockMathMark),CalloutMark))")
+    "Document(Paragraph,BlockMath(BlockMathMark,BlockMathContent,BlockMathMark),Paragraph)")
+  // With the blank line, the callout.
+  assert.equal(parse("A paragraph line\n\n::: {.callout-note}\nWith blank.\n:::\n").toString(),
+    "Document(Paragraph,Callout(CalloutMark,Paragraph,CalloutMark))")
 })
 
 test("calloutKind", () => {
@@ -369,10 +404,13 @@ test("calloutKind", () => {
   assert.equal(calloutKind("::::: {.callout-important icon=false}  "), "important")
   assert.equal(calloutKind("::: {.callout-caution}"), "caution")
   assert.equal(calloutKind("::: callout-caution"), "caution")
-  // Any fenced div counts as a callout and defaults to note (as main.js does).
-  assert.equal(calloutKind("::: {#refs}"), "note")
-  assert.equal(calloutKind("::: {.mycallout-tip}"), "note")
-  assert.equal(calloutKind("::: warning"), "note")
+  assert.equal(calloutKind("::: {.callout-tip} :::"), "tip")
+  assert.equal(calloutKind("::: {.callout-important title=\"Braces {inside}\"}"), "important")
+  // Any other fenced div is a div and no callout: the page prints it bare (G051).
+  assert.equal(calloutKind("::: {#refs}"), null)
+  assert.equal(calloutKind("::: {.mycallout-tip}"), null)
+  assert.equal(calloutKind("::: warning"), null)
+  assert.equal(calloutKind("::: {.column width=\"50%\"}"), null)
   assert.equal(calloutKind(":::"), null)
   assert.equal(calloutKind("::: {.x"), null)
   assert.equal(calloutKind("text"), null)
@@ -397,3 +435,164 @@ test("each extension works on its own", () => {
   assert.equal(parser.configure([mdmFrontMatter]).parse("---\na: 1\n---\n").toString(), "Document(FrontMatter(FrontMatterMark,FrontMatterContent,FrontMatterMark))")
   assert.equal(parser.configure([mdmCallout]).parse("::: {.note}\nx\n:::").toString(), "Document(Callout(CalloutMark,Paragraph,CalloutMark))")
 })
+
+// ---------- links that know the definitions ----------
+
+const gfm = parser.configure([GFM, ...mdmMarkdownExtensions])
+
+// The links and images of a parse, each with its label and destination
+// nodes, as "Name[text]".
+function links(text, p = gfm) {
+  return nodes(parse(text, p), /^(Link|Image|LinkLabel|URL)$/, text)
+}
+
+test("links: bracketed text with no definition is text, with one it is a link (CM 6.3, G002)", () => {
+  assert.deepEqual(links("He wrote [sic] and press [Ctrl] then [x].\n"), [])
+  assert.deepEqual(links("A [real] link, [nope][missing], [Real][] and [full][real].\n\n[real]: http://example.com\n"), [
+    "Link[[real]]",
+    "Link[[Real][]]", "LinkLabel[[]]",
+    "Link[[full][real]]", "LinkLabel[[real]]",
+    "LinkLabel[[real]]", "URL[http://example.com]"
+  ])
+  // An inline link needs no definition, an empty destination included.
+  assert.deepEqual(links("[inline](http://a.b) and [empty]()\n"), [
+    "Link[[inline](http://a.b)]", "URL[http://a.b]", "Link[[empty]()]"
+  ])
+})
+
+test("links: balanced brackets inside a link's text stay inside it (CM 6.3, G003)", () => {
+  assert.deepEqual(links("One [a [b] c](https://example.com) end.\n"), [
+    "Link[[a [b] c](https://example.com)]", "URL[https://example.com]"
+  ])
+  assert.deepEqual(links("Three [Sonata [K. 331]](https://en.wikipedia.org/wiki/X_(Y)) end.\n"), [
+    "Link[[Sonata [K. 331]](https://en.wikipedia.org/wiki/X_(Y))]", "URL[https://en.wikipedia.org/wiki/X_(Y)]"
+  ])
+  // A defined inner reference is the link, and spends the outer opener:
+  // links may not contain links.
+  assert.deepEqual(links("[a [real] b](url)\n\n[real]: /r\n"), ["Link[[real]]", "LinkLabel[[real]]", "URL[/r]"])
+})
+
+test("links: an image by reference needs its definition too, and may hold a link", () => {
+  assert.deepEqual(links("![pic][img] and ![lone] here\n\n[img]: <a.png>\n"), [
+    "Image[![pic][img]]", "LinkLabel[[img]]", "LinkLabel[[img]]", "URL[<a.png>]"
+  ])
+  assert.deepEqual(links("![a [t](u) b](p.png)\n"), ["Image[![a [t](u) b](p.png)]", "Link[[t](u)]", "URL[u]", "URL[p.png]"])
+})
+
+test("links: a label matches its definition case-folded and with its whitespace collapsed (CM 4.7)", () => {
+  assert.deepEqual(links("[Foo  Bar] and [foo\nbar]\n\n[FOO BAR]: /x\n"), [
+    "Link[[Foo  Bar]]", "Link[[foo\nbar]]", "LinkLabel[[FOO BAR]]", "URL[/x]"
+  ])
+  assert.equal(normalizeLabel("  Foo \t Bar\n"), "foo bar")
+  // Read raw off the input: a definition after its use, inside a quote,
+  // with the destination on the next line; not a label with no destination.
+  assert.deepEqual([...scanDefinitions("[a]\n\n> [B]: /b\n[c]:\n  /c\n[d]:\n\n[e]: \n")], ["b", "c"])
+})
+
+test("links: the GFM autolinker still stops at the bracket of the link it is in", () => {
+  // hasOpenLink reads Lezer's own openers, which links.js leaves in place.
+  assert.deepEqual(links("[https://a.example](https://b.example)\n"), [
+    "Link[[https://a.example](https://b.example)]", "URL[https://a.example]", "URL[https://b.example]"
+  ])
+})
+
+test("emoji: `:tada:` is text, as the page prints it", () => {
+  const withEmoji = markdownLanguage.parser
+  assert.deepEqual(nodes(parse("a :tada: b\n", withEmoji), /^Emoji$/), ["Emoji@2-8"])
+  assert.deepEqual(nodes(parse("a :tada: b\n", withEmoji.configure(mdmMarkdownExtensions)), /^Emoji$/), [])
+})
+
+test("links: the extension works on its own", () => {
+  assert.deepEqual(links("[sic] and [real]\n\n[real]: /r\n", parser.configure(mdmLinks)), ["Link[[real]]", "LinkLabel[[real]]", "URL[/r]"])
+})
+
+// ---------- the ATX heading written with a tab ----------
+
+test("atx heading: a tab after the marks is a heading (CM 4.2, G042)", () => {
+  const text = "#\tTab heading\n\n##\tSecond ##\n\n#\t\n\n####### too many\n"
+  assert.deepEqual(nodes(parse(text), /^(ATXHeading[1-6]|HeaderMark)$/, text), [
+    "ATXHeading1[#\tTab heading]", "HeaderMark[#]",
+    "ATXHeading2[##\tSecond ##]", "HeaderMark[##]", "HeaderMark[##]",
+    "ATXHeading1[#\t]", "HeaderMark[#]"
+  ])
+  // The content starts past the tab, as Lezer's starts past the space.
+  const tree = parse(text)
+  assert.equal(tree.resolveInner(2, 1).name, "ATXHeading1")
+  // It interrupts a paragraph, as any ATX heading does; indented four it is code.
+  assert.equal(parse("text\n#\tH\n").toString(), "Document(Paragraph,ATXHeading1(HeaderMark))")
+  assert.equal(parse("    #\tH\n").toString(), "Document(CodeBlock(CodeText))")
+  // Lezer's own heading is untouched.
+  assert.equal(parse("# Space\n").toString(), "Document(ATXHeading1(HeaderMark))")
+})
+
+// ---------- Pandoc syntax ----------
+
+test("raw TeX: a backslash before letters, with its groups, is a raw inline; the block form runs to its \\end", () => {
+  assert.deepEqual(nodes(parse("A \\textbf{bold} word and \\alpha here."), /RawTeX/), ["RawTeX@2-15", "RawTeX@25-31"])
+  // A Windows path is raw TeX to Pandoc too, and the page loses it; an
+  // escape and a double backslash are not.
+  assert.deepEqual(nodes(parse("C:\\Users\\bach \\* \\\\ x"), /RawTeX/), ["RawTeX@2-8", "RawTeX@8-13"])
+  // Inside code or maths, nothing.
+  assert.deepEqual(nodes(parse("`\\alpha` and $\\alpha$"), /RawTeX/), [])
+  // The block, closed on a later line or on its own, and unclosed the
+  // paragraph it reads as, with the inline raw in it.
+  const block = "\\begin{center}\nx\n\\end{center}\n\nafter"
+  assert.equal(parse(block).toString(), "Document(RawTeXBlock,Paragraph)")
+  assert.deepEqual(nodes(parse(block), /RawTeXBlock/), ["RawTeXBlock@0-" + (block.indexOf("\\end{center}") + 12)])
+  assert.deepEqual(nodes(parse("\\begin{x}\\end{x}\n"), /RawTeXBlock/), ["RawTeXBlock@0-16"])
+  assert.equal(parse("\\begin{center}\nx\n").toString(), "Document(Paragraph(RawTeX))")
+  // Inside a quote it stays inline: the look-ahead reads past the quote.
+  assert.equal(parse("> \\begin{c}\n> x\n> \\end{c}\n").toString(), "Document(Blockquote(QuoteMark,Paragraph(RawTeX,QuoteMark,QuoteMark,RawTeX)))")
+})
+
+test("attributes: taken after an image, a link, a code span, a `$$` closer and a bracketed span, and left as text in prose", () => {
+  // A heading's attributes are no node (the editor reads them off the
+  // heading's text): an inline parser cannot tell the heading's line.
+  assert.deepEqual(nodes(parse("## Attributed {#sec-attr .unnumbered}"), /Attribute/), [])
+  assert.deepEqual(nodes(parse("![alt](i.png){#fig-x width=30%}"), /Attribute/), ["Attribute@13-31"])
+  assert.deepEqual(nodes(parse("[t](u){.x}"), /Attribute/), ["Attribute@6-10"])
+  assert.deepEqual(nodes(parse("`raw`{=html}"), /Attribute/), ["Attribute@5-12"])
+  assert.deepEqual(nodes(parse("$$\nE\n$$ {#eq-mass}\n"), /Attribute/), ["Attribute@8-18"])
+  assert.deepEqual(nodes(parse("$$\nE\n$$ {#eq-mass} and text\n"), /Attribute/), [])
+  assert.equal(parse("[small caps]{.smallcaps} x").toString(), "Document(Paragraph(Span(LinkMark,LinkMark,Attribute)))")
+  assert.deepEqual(nodes(parse("[small caps]{.smallcaps} x"), /Span|Attribute/), ["Span@0-24", "Attribute@12-24"])
+  // A brace group in the middle of prose, or holding no attribute, is text.
+  assert.deepEqual(nodes(parse("a {.x} b"), /Attribute/), [])
+  assert.deepEqual(nodes(parse("a {not an attribute}"), /Attribute/), [])
+  assert.deepEqual(nodes(parse("[text]{not one}"), /Span|Attribute/), [])
+  // A quoted value may hold spaces.
+  assert.deepEqual(nodes(parse("[t](u){title=\"a b\" .c}"), /Attribute/), ["Attribute@6-22"])
+})
+
+test("citations: bracketed and bare, Quarto's cross-references among them, and never inside a word", () => {
+  assert.deepEqual(nodes(parse("As shown by [@knuth1984, p. 33] and in @fig-brass."), /Citation/), ["Citation@12-31", "Citation@39-49"])
+  assert.deepEqual(nodes(parse("[see @a; -@b]"), /Citation/), ["Citation@0-13"])
+  assert.deepEqual(nodes(parse("mail me@example.org today"), /Citation/), [])
+  assert.deepEqual(nodes(parse("[text](url) and [no cite] and @"), /Citation/), [])
+})
+
+test("footnotes: a reference, an inline note and the note itself with its indented paragraphs are nodes, not a link, a superscript and a code block", () => {
+  const text = "A claim.[^1] Another with an inline note.^[This note is *inline*.]\n\n[^1]: The footnote text, with *emphasis* and $x$.\n\n    A second paragraph of the same footnote, indented.\n\nAfter.\n"
+  const tree = parse(text)
+  assert.equal(tree.toString(), "Document(Paragraph(FootnoteRef(FootnoteMark,FootnoteMark),FootnoteInline(FootnoteMark,Emphasis(EmphasisMark,EmphasisMark),FootnoteMark)),FootnoteDef(FootnoteMark,Paragraph(Emphasis(EmphasisMark,EmphasisMark),InlineMath(InlineMathMark,InlineMathContent,InlineMathMark)),Paragraph),Paragraph)")
+  assert.deepEqual(nodes(tree, /^FootnoteRef$|^FootnoteInline$|^FootnoteDef$/), [
+    "FootnoteRef@8-12",
+    "FootnoteInline@" + text.indexOf("^[") + "-" + (text.indexOf("inline*.]") + 9),
+    "FootnoteDef@" + text.indexOf("[^1]:") + "-" + (text.indexOf("indented.") + 9)
+  ])
+  // The note's paragraphs: the definition line's text, and the indented one
+  // without its indentation.
+  const paras = nodes(tree, /^Paragraph$/)
+  assert.equal(paras[1], "Paragraph@" + text.indexOf("The footnote") + "-" + (text.indexOf("$x$.") + 4))
+  assert.equal(paras[2], "Paragraph@" + text.indexOf("A second") + "-" + (text.indexOf("indented.") + 9))
+  // A reference needs a label with no space and no bracket; a caret with no
+  // bracket after it is the superscript it was.
+  assert.deepEqual(nodes(parse("[^ x] and [^] and ^sup^"), /Footnote/), [])
+  const sup = parser.configure([Superscript, ...mdmMarkdownExtensions])
+  assert.deepEqual(nodes(parse("x^2^ and ^[note]", sup), /^Superscript$|^FootnoteInline$/), ["Superscript@1-4", "FootnoteInline@9-16"])
+  // A definition under a paragraph line is the paragraph's, as Pandoc has
+  // it, and inside a quote it is the link reference it was.
+  assert.equal(parse("text\n[^1]: note\n").toString(), "Document(Paragraph(FootnoteRef(FootnoteMark,FootnoteMark)))")
+  assert.equal(parse("> [^1]: note\n").toString(), "Document(Blockquote(QuoteMark,LinkReference(LinkLabel,LinkMark,URL)))")
+})
+

@@ -3168,7 +3168,7 @@
   // source is open (`open`) and marked while the main caret is in it
   // (`active`), the same readings as a score's: ScoreWidget below.
   class MathWidget extends WidgetType {
-    constructor(tex, display, block, preview, active, open) {
+    constructor(tex, display, block, preview, active, open, frame, tail) {
       super();
       this.tex = tex;
       this.display = display;
@@ -3199,6 +3199,12 @@
       const out = renderTex(this.tex, this.display);
       if (out.html) {
         el.innerHTML = out.html;
+        if (this.tail) {
+          const tail = document.createElement("div");
+          tail.className = "mdm-math-tail";
+          paintParts(tail, this.tail.parts);
+          el.appendChild(tail);
+        }
       } else {
         // Only a block in the middle of an edit gets here (an inline or an
         // untouched block that does not compile keeps its source instead):
@@ -3469,13 +3475,14 @@
   const RULE = new RuleWidget();
 
   class ImageWidget extends WidgetType {
-    constructor(src, alt) {
+    constructor(src, alt, width) {
       super();
       this.src = src;
       this.alt = alt;
+      this.width = width || null;
     }
     eq(other) {
-      return other.src === this.src && other.alt === this.alt;
+      return other.src === this.src && other.alt === this.alt && other.width === this.width;
     }
     toDOM() {
       const img = document.createElement("img");
@@ -4046,6 +4053,9 @@
           }
           if (!open && out.html) {
             hideBlock(blockFrom, blockTo);
+            // The tail is the widget's: its own marks are not wanted under
+            // the cover.
+            if (tailNode) hiddenTails.add(tailNode.from);
             return false;
           }
           delim(node, "BlockMathMark");
@@ -4088,10 +4098,15 @@
 
         if (name === "Callout") {
           const marks = node.getChildren("CalloutMark");
-          const kind = marks.length ? CM.calloutKind(text(marks[0].from, marks[0].to)) || "note" : "note";
-          lines.add(n.from, n.to, "mdm-co-line mdm-co--" + kind);
-          lines.add(n.from, n.from, "mdm-co-first");
-          lines.add(n.to, n.to, "mdm-co-last");
+          // The kind of a Quarto callout, or null for any other fenced div
+          // (`::: {.column}`, `::: {#refs}`), which the page prints bare:
+          // no bar and no tint for those, the fences alone put away (G051).
+          const kind = marks.length ? CM.calloutKind(text(marks[0].from, marks[0].to)) : null;
+          if (kind) {
+            frameLevel(n.from, n.to, { kind: "callout", name: kind });
+            lines.mark(n.from, n.from, "mdm-co-first");
+            lines.mark(n.to, n.to, "mdm-co-last");
+          }
           marks.forEach(function (m) {
             const line = doc.lineAt(m.from);
             if (!touched(line.from, line.to)) lines.add(m.from, m.from, "mdm-co-fence");
@@ -4105,9 +4120,14 @@
           if (!touched(n.from, n.to)) {
             node.getChildren("HeaderMark").forEach(function (m) {
               const r = markWithSpace(m);
+              // The opening run: every space and tab after it goes with it,
+              // since the heading's text starts past them (CM 4.2; `#\t`
+              // and `# \t` are headings, G042).
+              let to = r.to;
+              if (m.from === n.from) while (to < n.to && /[ \t]/.test(text(to, to + 1))) to++;
               // A closing run of #: the space before it goes too.
               const from = m.from > n.from && text(m.from - 1, m.from) === " " ? m.from - 1 : r.from;
-              hide(from, r.to);
+              hide(from, to);
             });
           }
           return true;
@@ -5739,6 +5759,52 @@
   // Reading the modifier setting once at build time would pin it: the click
   // facet is a Compartment so a change from the host reconfigures it live.
   const gestures = new CM.Compartment();
+
+  // The Markdown language, in a Compartment of its own so the parse can be
+  // started over: a `[label]: url` definition decides whether `[label]`
+  // anywhere in the document is a link (links.js in vendor-src), and the
+  // fragments of the tree that an edit leaves untouched are not parsed
+  // again, so a definition typed under a paragraph left the `[label]`
+  // above it as text. Reconfiguring the compartment with a fresh language
+  // makes CodeMirror parse the document from the start (a new Language
+  // value replaces the parse state), which is asked for when, and only
+  // when, the set of definitions changes (definitionsChanged).
+  const language = new CM.Compartment();
+  function markdownLanguage() {
+    return CM.markdown({
+      base: CM.markdownLanguage,
+      codeLanguages: CM.codeLanguages,
+      extensions: CM.mdmMarkdownExtensions,
+      // Its keymap would go in at high precedence, over mdmKeymap.
+      addKeymap: false,
+    });
+  }
+  // The labels defined in the document, sorted and joined, as of the last
+  // look; the definitions are read the way the parser reads them.
+  let definitionKeys = null;
+  function definitionKeysOf(doc) {
+    return Array.from(CM.scanDefinitions(doc.toString())).sort().join("\n");
+  }
+  // True when a change altered the set of definitions. The whole document
+  // is read only when a changed line holds `]:` before or after the
+  // change, which every definition does; a keystroke in prose reads a
+  // line or two.
+  function definitionsChanged(update) {
+    let touched = false;
+    update.changes.iterChangedRanges(function (fromA, toA, fromB, toB) {
+      if (touched) return;
+      const before = update.startState.doc;
+      const after = update.state.doc;
+      touched =
+        before.sliceString(before.lineAt(fromA).from, before.lineAt(toA).to).indexOf("]:") >= 0 ||
+        after.sliceString(after.lineAt(fromB).from, after.lineAt(toB).to).indexOf("]:") >= 0;
+    });
+    if (!touched) return false;
+    const keys = definitionKeysOf(update.state.doc);
+    if (keys === definitionKeys) return false;
+    definitionKeys = keys;
+    return true;
+  }
   function gestureExtensions() {
     return [
       EditorView.clickAddsSelectionRange.of(addsCaret),
@@ -5844,11 +5910,7 @@
             [CM.indentWithTab]
           )
         ),
-        CM.markdown({
-          base: CM.markdownLanguage,
-          codeLanguages: CM.codeLanguages,
-          extensions: CM.mdmMarkdownExtensions,
-        }),
+        language.of(markdownLanguage()),
         CM.syntaxHighlighting(mdmHighlight),
         // Before renderField, which reads it: a field only sees the fields
         // configured ahead of it already updated.
@@ -5875,6 +5937,7 @@
         }),
       ],
     });
+    definitionKeys = definitionKeysOf(state.doc);
     view = new EditorView({
       state: state,
       parent: document.querySelector("#app .mdm-editor"),

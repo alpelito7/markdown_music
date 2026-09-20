@@ -2768,6 +2768,143 @@ to six, hashes hidden*, with the setext case still green, since its underline
 goes through `hideLines`. The `todo` cases are the record of what the branch
 owes and are not mutated until their fix lands.
 
+Links by definition (the parser, the same day). Lezer closes every `[...]`
+into a Link, so `[sic]`, `[Ctrl]`, `[^1]` and `[@key]` were blue links with
+their brackets hidden and `[Sonata [K. 331]](url)` was no link at all, the
+inner brackets closing first and spending the outer opener. `links.js` in
+`vendor-src` replaces LinkEnd alone: a shortcut, collapsed or full
+reference is a link only when its label is defined, the definitions being
+read raw off the whole input once per parse by a block parser that claims
+nothing (a paragraph is started and finished inside one `advance()`, so
+the set read at its first line is the one its inline content sees); an
+undefined reference leaves its opener spent and the brackets as text, and
+an opener outside them live. The openers stay Lezer's own, told apart by
+shape, so the GFM autolinker's `hasOpenLink` keeps stopping a bare URL at
+the link's bracket. Emoji is taken out of the language (`:tada:` is text
+on the page). And since the fragments an edit leaves untouched are not
+parsed again, a definition typed under a paragraph left the `[foo]` above
+as text: the language sits in a Compartment and is reconfigured, which
+starts the parse over, when a change alters the set of definitions
+(`definitionsChanged` in `main.js`, reading the whole document only when
+a changed line holds `]:`). Six mutations, all caught: **LK1** the
+definitions ignored (every reference a link) -> four vendor tests and
+*K11*, *K13*; **LK2** the outer openers left live when a link is formed ->
+the vendor's *balanced brackets* (the defined inner reference case);
+**LK3** Emoji back in -> the vendor's *emoji* test; **LK4** the label not
+case-folded -> two vendor tests and *K05* (`[Ref][]` under `[ref]:`);
+**LK5** the reconfigure never dispatched in `main.js` -> the editing
+suite's *a definition typed below turns the brackets above into a link,
+and its loss turns them back*, whose paragraph stands more than 128
+characters from the edit, the gap under which CodeMirror keeps no
+fragment and the test passed for nothing; **LK6** images never recognised
+as openers -> the vendor's *image by reference* and *I06*. A vendor
+mutation rebuilds the bundle for the webview tests and rebuilds it again
+on restore (the build is deterministic, and the hash says so). Two
+approximations stand: a definition inside a fenced code block, or
+indented four spaces, counts for the parser and not for the page; and a
+label defined only through a definition Lezer would reject (a bad
+destination) counts too.
+
+The maths closer, the fenced divs and the tab heading (the parser, the
+same day). A `$$` closer with text after it (`$$ {#eq-mass}`, a Quarto
+label; `$$ where *c* is the hypotenuse.`) broke the block in `math.js`,
+and since the block parser resumed on the same line the closer was read
+again as an opener and took the next block's `$$` (G052); now the block
+closes at the `$$` and the rest of the line is a Paragraph of its own,
+which `MathWidget` draws under the equation, painted as a cell of a table
+is (`cellParts`), where the page runs it on after the display maths; the
+cover over the block takes the tail's marks with it, and a click on the
+drawing finds the maths past that paragraph. `callout.js` takes Pandoc's
+colons after the attributes and a brace inside a quoted value, no longer
+interrupts a paragraph (Pandoc's fenced_divs need a blank line before the
+opener, G053), and `calloutKind` answers null for a div that is no
+`callout-*`, which the editor draws bare, fences put away and no bar or
+tint, as the page prints it (G051). And `heading.js` reads `#\tTitle` as
+the heading CommonMark 4.2 and the page make of it, the editor hiding the
+run of spaces and tabs after the hashes with them (G042). Ten mutations,
+all caught: **MT1** the tail never emitted -> the vendor's *closer with
+text* and *M11*, *M12*; **MT2** the closer with text breaking the block
+again -> the vendor test and *M11*; **MT3** `calloutKind` back to "note"
+for every div -> the vendor's *calloutKind* and *D05*; **MT4** the old
+opener pattern -> the vendor's *opening forms* and *D06*; **MT5** the
+paragraph interrupted again -> the vendor's *straight under a paragraph*
+and *D07*; **MT6** the tab heading left out of the extensions -> the
+vendor's *atx heading* and *H03*; **MT7** the tail not painted in
+`main.js` -> *M11*, *M12*; **MT8** every div framed as a callout -> *D05*;
+**MT9** the whitespace after the hashes left in view -> *H03* (the `###
+\tSpace then tab` row); **MT10** the click on a labelled equation resolving
+no node -> the look's *a click on an equation whose closer carries a label
+opens its source at the head of the maths*. What stands: the label of an
+equation is drawn as the text it is on the page, `{#eq-mass}` under the
+maths, until the attributes package draws it as a reference.
+
+The dialect, second part (P6-b), the same day: the Pandoc syntax the
+export reads and the editor had no node for, in `pandoc.js`. Raw TeX
+(G013): a backslash before letters, with its brace and bracket groups, is
+a raw inline to Pandoc's reader, which the HTML writer drops and the
+LaTeX writer copies through, and CommonMark read a literal backslash, so
+`\alpha` and `C:\Users\bach` were words in the editor and gone from
+the page; the node is drawn as the source it is, faint and in the code
+face, with what becomes of it in the tooltip, and `\begin{env}` down to
+its `\end{env}` is the block form, at the top level only, since the
+look-ahead reads raw lines past a quote's end. Attributes (G014):
+`{#id .class key=val}` after an image, a link, a code span or a bracketed
+span, and alone as the tail of a `$$` closer, is a node, hidden while
+untouched (the page prints none of it) and small and faint under the
+caret; an image's `width` is the picture's, on the figure and inline; a
+bracketed span `[text]{.smallcaps}` hides its brackets and draws the
+classes the page turns into a look, small caps by the face and a mark by
+the browser's own colours; a heading's attributes are no node, an inline
+parser not knowing a heading's line, and are hidden off the heading's
+text instead; and the label of a labelled equation is drawn no more,
+where it stood as text under the equation until now (M11 changed). A
+`{...}` in prose stays text, as it is on the page. Citations and Quarto's
+cross-references (PX04): `[@key, p. 33]` and `@fig-x` are a node, drawn
+as written in the link colour with what they are in the tooltip, since
+the page resolves them and the editor has no bibliography to; a `@`
+inside a word, a mail address, opens none. Fourteen mutations, seven of
+the parser with the bundle rebuilt each way, seven of `main.js`, all
+caught: **PX1** any backslash raw -> the vendor's *raw TeX*; **PX2** the
+block committed without its closer -> the same; **PX3** an attribute taken
+anywhere -> the vendor's *attributes*; **PX4** any brace group an
+attribute -> the same; **PX5** the span hook off -> the same and *AT01*;
+**PX6** the in-word guard off -> the vendor's *citations* alone, since in
+the editor GFM's autolink takes the mail address before the `@` is
+reached, and *CT01* could not see it; **PX7** trailing punctuation kept in
+a key -> the vendor's *citations*; **ED1** a heading's attributes shown
+-> *AT01*; **ED2** the width ignored -> the same; **ED3** the label drawn
+under the equation -> *M11*; **ED4** small caps not drawn -> *AT01*;
+**ED5** an attribute shown untouched -> the same; **ED6** the tooltip
+without its kind -> *CT01*; **ED7** the block's lines not faint -> *RT01*.
+
+The footnotes (P6-c, PX01), the same day, in `footnote.js`: `[^1]` was a
+bracketed text (and, with its definition below, a reference link),
+`^[note]` a caret and a bracket, `[^1]: text` a link reference definition
+with `^1` for its label, drawn small and faint, and the note's second
+paragraph, indented four, an indented code block; Pandoc reads a
+reference, an inline note and a note with its paragraphs. The nodes are
+those: the reference drawn raised in the link colour with its marks
+hidden, as the page raises the number it gives the note; the inline note
+drawn where it stands, in a small card, its marks hidden; the note itself
+a faint block under the prose face, its `[^1]:` replaced by the raised
+label and the indentation of its later paragraphs hidden, its blank lines
+left to the blank rows they are. The definition is read at the top level
+only and only at the head of a block: under a paragraph line it is the
+paragraph's, as Pandoc has it, and inside a quote it stays the link
+reference it was. Ten mutations, five of the parser with the bundle
+rebuilt each way and five of `main.js`, nine caught: **FN1** an empty
+label a reference -> the vendor's *footnotes*; **FN2** the inline note's
+content not parsed -> the same; **FN3** the note running on past its
+indented lines -> the same; **FN4** the parser's place among the block
+parsers moved -> not caught, and rightly: the link reference is read off a
+paragraph's leaf, so a block parser claims the line first wherever it
+stands, and the claim itself is what the vendor test pins; **FN5** the
+reference parser put after the link opener -> the vendor's *footnotes* and
+*FN01*; **NF1** the reference's marks shown -> *FN01*; **NF2** the `[^1]:`
+left in the note -> the same; **NF3** the indentation shown -> the same;
+**NF4** the inline note without its card -> the same; **NF5** the note's
+blank lines drawn as note lines -> the same.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

@@ -268,6 +268,38 @@ test("a multi-caret insert is one undo step", { skip }, async () => {
   await h.close();
 });
 
+// ---- Links by definition ----
+
+test("a definition typed below turns the brackets above into a link, and its loss turns them back", { skip }, async () => {
+  // `[foo]` is a link only while a `[foo]: url` line exists (links.js in
+  // vendor-src reads the definitions once per parse). The parse of an edit
+  // keeps the fragments of the tree the edit did not touch, so a definition
+  // typed under a paragraph left the `[foo]` above it as text: the editor
+  // starts the parse over when the set of definitions changes. The filler
+  // keeps the paragraph more than 128 characters from the edit: closer than
+  // that CodeMirror keeps no fragment at all (TreeFragment.applyChanges and
+  // its minGap), and the test would pass with nothing started over.
+  const filler = Array.from({ length: 40 }, () => "Filler.").join(" ");
+  const h = await open({ text: "See [foo] here.\n\n" + filler + "\n\nEnd.\n", scores: 0 });
+  const links = () =>
+    h.page.evaluate(() => Array.from(document.querySelectorAll("#app .cm-line .mdm-link")).map((e) => e.textContent));
+  assert.deepEqual(await links(), [], "text with no definition");
+  const end = await h.page.evaluate(() => window.__mdm.view.state.doc.length);
+  await setSelection(h.page, end);
+  await h.page.keyboard.type("\n[foo]: https://foo.example");
+  await sleep(400);
+  // The brackets hidden: the caret is on the definition, not on the link.
+  assert.deepEqual(await links(), ["foo"], "a link once its definition is typed");
+  const text = await docText(h.page);
+  const from = text.indexOf("[foo]: https://foo.example");
+  await setSelection(h.page, [{ anchor: from, head: text.length }]);
+  await h.page.keyboard.press("Backspace");
+  await sleep(400);
+  assert.deepEqual(await links(), [], "text again once the definition is gone");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---- Reveal semantics ----
 
 test("a display equation is a widget over hidden source until a caret enters it", { skip }, async () => {

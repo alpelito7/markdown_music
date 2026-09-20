@@ -126,18 +126,24 @@ function scrub(line) {
 // the Paragraph the default parser would have produced. That is how an
 // unterminated `$$` shows as source: there is no BlockMath node.
 //
-// Closing line: the first line whose text contains `$$` after the opener.
-// If that `$$` is not at the end of the line (trailing spaces allowed) the
-// block is broken and falls back too; Pandoc closes display math at the
-// first `$$`, so a block whose first `$$` sits mid-line cannot be the
-// multi-line fence this parser is for. A single line `$$ x $$` is complete.
+// Closing line: the first line whose text contains `$$` after the opener,
+// which closes the block where Pandoc closes display math, at that `$$`.
+// Whatever follows it on the line (`$$ {#eq-mass}`, a Quarto label; `$$
+// where *c* is the hypotenuse.`) is emitted as a Paragraph of its own on
+// that line, inline-parsed: Pandoc keeps it in the paragraph the display
+// math is in and the page runs it on after the equation. The line used to
+// break the block instead, and since the block parser resumed on the same
+// line, `$$ {#eq-mass}` was read again as an opener and paired with the
+// next block's `$$` (G052). A single line `$$ x $$` is complete; a single
+// line with text after its closer is left to the inline parser, which
+// reads it as display math inside the paragraph, as Pandoc does.
 function parseBlockMath(cx, line) {
   if (!isBlockMathStart(line)) return false
   let from = cx.lineStart + line.pos
   let openTo = from + 2
   let lines = [line.text.slice(line.pos)], starts = [from]
   let marks = []
-  let contentFrom = -1, contentTo = -1, closeFrom = -1, closeTo = -1
+  let contentFrom = -1, contentTo = -1, closeFrom = -1, closeTo = -1, tail = null
   let rest = line.text.slice(line.pos + 2)
   let mid = rest.indexOf("$$")
   if (mid > -1) {
@@ -164,7 +170,6 @@ function parseBlockMath(cx, line) {
         if (contentFrom < 0) contentFrom = lineFrom + line.basePos
         continue
       }
-      if (idx != text.trimEnd().length - 2) break
       closeFrom = lineFrom + idx
       closeTo = closeFrom + 2
       if (contentFrom < 0) contentFrom = lineFrom + line.basePos
@@ -173,6 +178,11 @@ function parseBlockMath(cx, line) {
       contentTo = text.slice(line.basePos, idx).trim().length ? closeFrom : cx.prevLineEnd()
       if (contentTo < contentFrom) contentTo = contentFrom
       closed = true
+      let after = text.slice(idx + 2), trimmed = after.trim()
+      if (trimmed.length) {
+        let tailFrom = closeTo + (after.length - after.trimStart().length)
+        tail = cx.elt("Paragraph", tailFrom, tailFrom + trimmed.length, cx.parser.parseInline(trimmed, tailFrom))
+      }
       cx.nextLine()
       break
     }
@@ -191,6 +201,7 @@ function parseBlockMath(cx, line) {
   children.push(cx.elt("BlockMathMark", closeFrom, closeTo))
   children.sort((a, b) => a.from - b.from)
   cx.addElement(cx.elt("BlockMath", from, closeTo, children))
+  if (tail) cx.addElement(tail)
   return true
 }
 

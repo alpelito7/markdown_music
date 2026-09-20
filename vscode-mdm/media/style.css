@@ -918,6 +918,49 @@ body {
 #app.mdm--dark .mdm-link {
   color: #58a6ff;
 }
+/* Raw TeX (G013): what Pandoc's reader takes as a raw inline or block, which
+   the HTML page leaves out and the PDF sets. Drawn as the source it is,
+   faint and in the code face; the tooltip says what becomes of it. And an
+   attribute block, `{#id .class}`, shown the same way while the caret is on
+   it (G014). */
+#app .mdm-rawtex,
+#app .cm-line.mdm-rawtex-line,
+#app .mdm-attr {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  color: color-mix(in srgb, var(--mdm-ink) 60%, transparent);
+}
+/* A bracketed span with the classes Pandoc turns into a look, drawn as the
+#app .mdm-smallcaps {
+  font-variant: small-caps;
+}
+#app .mdm-highlight {
+}
+/* A citation or a cross-reference (PX04): the page resolves it into a
+   reference or a link; here it is drawn in the link colour, as written. */
+#app .mdm-cite,
+#app .mdm-cite * {
+  color: #0969da;
+}
+/* A footnote (PX01): the reference raised in the link colour, as the page
+   raises the number it gives the note; a note written inline in a small
+   card where it stands; and the note itself, `[^1]: text`, faint under the
+   prose face, since the page sets it at the foot. */
+#app .mdm-note-ref,
+#app .mdm-note-ref * {
+  color: #0969da;
+}
+#app .mdm-note-inline {
+  font-size: 0.88em;
+  color: color-mix(in srgb, var(--mdm-ink) 75%, transparent);
+  background: var(--mdm-syn-card);
+  border: 1px solid var(--mdm-syn-edge);
+  border-radius: 3px;
+  padding: 0.05em 0.3em;
+}
+#app .cm-line.mdm-note-line {
+  color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
+}
 #app .mdm-link:hover {
   text-decoration: underline;
 }
@@ -1171,6 +1214,16 @@ body {
   cursor: pointer;
   /* What the rail of its copy button is placed against (.mdm-chrome). */
   position: relative;
+}
+/* What the closing line of a block carries after its `$$` (`{#eq-mass}`, a
+   run of prose): under the equation, set as the prose is and starting at
+   the left, where the page runs it on after the display maths. */
+#app .mdm-math--block .mdm-math-tail {
+  text-align: left;
+  font-family: var(--mdm-text);
+  font-size: 16px;
+  line-height: 1.7;
+  padding-top: 0.2em;
 }
 /* A wide equation scrolls sideways inside its own box. Only sideways: with
    `overflow-x: auto` alone the vertical axis computes to auto as well, and
