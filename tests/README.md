@@ -5123,6 +5123,46 @@ break test opened carried hyphens, and O6 left that test green: a hyphen is
 a break the line breaker takes anyway, so the address came onto the row
 without the rule. The address it opens now has none, and O6 fails it.
 
+### The pointer over a link (2026-09-27)
+
+The owner asked for the pointer over a link, as over the `$` of an equation
+and everything else a click opens. A link carries it now, and so does the
+number of a note (`.mdm-link`, `.mdm-note-ref`). With the caret in it, a
+link is text being written and takes the caret of the text back
+(`.mdm-link--open` and `.mdm-note-ref--open`, put on by the decorations),
+the address inside it included, which is a link of its own, and it is not
+underlined under the pointer. The key that follows a link (`followKeys` in
+`main.js`, which asks `followsLink`: Ctrl, Cmd on a Mac, or Alt when
+`editor.multiCursorModifier` is `ctrlCmd`) puts `mdm--follow` on `#app`
+while it is down, read off the pointer as it moves and off the key going
+down and up, and a link under the pointer then shows the pointer and the
+underline, open or not, as VS Code's editor shows a link under Ctrl
+(`.detected-link-active`, read in its 1.133 sheet).
+
+Test, in `webview-look.test.js`: *a link carries the pointer until the caret
+is in it, and the key that follows it brings the pointer and the underline
+back* (the four kinds of link and the note's call shut; the open link and
+the address inside it; no underline under the pointer while open; Ctrl down
+and up over it; the key let go when the window loses the focus; a bare
+address and the call with the caret in them; Ctrl against Alt with the
+modifier swapped).
+
+- **H1** no pointer on a link or a note's number → the test.
+- **H2** an open link not given `.mdm-link--open` → the test.
+- **H3** the address inside an open link left pointing → the test.
+- **H4** an open link underlined under the pointer → the test.
+- **H5** the key going down not listened to → the test.
+- **H6** no look for `mdm--follow` → the test.
+- **H7** a bare address with the caret in it not given `.mdm-link--open` →
+  the test.
+- **H8** a call with the caret in it not given `.mdm-note-ref--open` → the
+  test.
+- **H9** Ctrl taken for the key that follows whatever the modifier → the
+  test, at the swap.
+- **H10** the key kept down through the window's `blur` → the test.
+
+All 10 caught, and the files restored after each.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

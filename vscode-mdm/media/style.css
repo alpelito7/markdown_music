@@ -1499,6 +1499,33 @@ body {
 #app .mdm-link:hover {
   text-decoration: underline;
 }
+/* A link carries the pointer, as an equation, a picture, a table and a score
+   do: a click on it opens it to be edited. With the caret in it, it is text
+   being written and takes the caret of the text back, as the source of an
+   open equation does, and so does the address inside it, which is a link of
+   its own (the URL a GFM autolink finds there); no underline under the
+   pointer either. The number of a note the same.
+   The key that follows a link (followKeys in main.js: Ctrl, Cmd on a Mac,
+   Alt when editor.multiCursorModifier is ctrlCmd) brings the pointer and the
+   underline back over any link, open or shut, since that click is the one
+   that follows it, as VS Code's own editor shows under Ctrl. */
+#app .mdm-link,
+#app .mdm-note-ref {
+  cursor: pointer;
+}
+#app .mdm-link--open,
+#app .mdm-link--open .mdm-link,
+#app .mdm-note-ref--open {
+  cursor: text;
+}
+#app .mdm-link--open:hover,
+#app .mdm-link--open .mdm-link:hover {
+  text-decoration: none;
+}
+#app.mdm--follow .mdm-link:hover {
+  cursor: pointer;
+  text-decoration: underline;
+}
 /* ---------- Lists ----------
 
    An item hangs under its text: the frame sets every line of it 1.5em in

@@ -6045,13 +6045,16 @@
           // the Markdown title, when there is one, rides beside it.
           if (target && target.url) attributes.title = target.url;
           if (target && target.title) attributes["data-mdm-title"] = target.title;
+          const open = touched(n.from, n.to);
           decos.push(
             Decoration.mark({
-              class: "mdm-link",
+              // Open, it is text being written, and the pointer gives way to
+              // the caret of the text (style.css).
+              class: open ? "mdm-link mdm-link--open" : "mdm-link",
               attributes: target ? attributes : undefined,
             }).range(n.from, n.to)
           );
-          if (!touched(n.from, n.to)) {
+          if (!open) {
             // The opening bracket, and everything from the closing bracket
             // to the end of the link: the destination and title with the
             // parentheses and whatever space was typed around them (G024),
@@ -6073,7 +6076,8 @@
           // is text here (G017). An address in angle brackets is a link
           // either way.
           if (name === "URL" && !/^[a-z][a-z0-9+.-]*:|@/i.test(text(n.from, n.to))) return false;
-          decos.push(Decoration.mark({ class: "mdm-link" }).range(n.from, n.to));
+          // With the caret in it, it is text being written, as a link is.
+          decos.push(Decoration.mark({ class: touched(n.from, n.to) ? "mdm-link mdm-link--open" : "mdm-link" }).range(n.from, n.to));
           if (name === "Autolink" && !touched(n.from, n.to)) {
             node.getChildren("LinkMark").forEach(function (m) {
               hide(m.from, m.to);
@@ -6191,10 +6195,14 @@
           // it gives the note, the marks hidden.
           const marks = node.getChildren("FootnoteMark");
           const label = marks.length > 1 ? text(marks[0].to, marks[1].from) : text(n.from, n.to);
+          const open = touched(n.from, n.to);
           decos.push(
-            Decoration.mark({ class: "mdm-note-ref mdm-sup", attributes: { title: "Footnote " + label } }).range(n.from, n.to)
+            Decoration.mark({
+              class: open ? "mdm-note-ref mdm-sup mdm-note-ref--open" : "mdm-note-ref mdm-sup",
+              attributes: { title: "Footnote " + label },
+            }).range(n.from, n.to)
           );
-          if (!touched(n.from, n.to)) {
+          if (!open) {
             marks.forEach(function (m) {
               hide(m.from, m.to);
             });
@@ -6249,7 +6257,7 @@
                 }
               });
             } else {
-              decos.push(Decoration.mark({ class: "mdm-note-ref" }).range(mark.from, mark.to));
+              decos.push(Decoration.mark({ class: "mdm-note-ref mdm-note-ref--open" }).range(mark.from, mark.to));
               // Its `[^` and `]:` are marks, in their grey, as a call's are.
               decos.push(Decoration.mark({ class: "mdm-mark" }).range(mark.from, mark.from + 2));
               decos.push(Decoration.mark({ class: "mdm-mark" }).range(mark.to - 2, mark.to));
@@ -9534,6 +9542,19 @@
     return multiCursorModifier === "ctrlCmd" ? e.altKey : e.ctrlKey || e.metaKey;
   }
 
+  // Whether the key that follows a link is down (followsLink): the link
+  // under the pointer then shows the pointer and the underline, open or
+  // shut, since the click is the one that follows it, which is what VS
+  // Code's own editor shows under Ctrl (.detected-link-active in its sheet,
+  // read in 1.133). Read off the pointer as it moves, because a pointer
+  // event carries the keys held, and off the key going down and up, so that
+  // pressing it over a pointer standing still shows it too. A window that
+  // loses the focus with the key down lets it go.
+  function followKeys(e) {
+    const el = app();
+    if (el) el.classList.toggle("mdm--follow", followsLink(e));
+  }
+
   // The destination of the link drawn at `el`: the tooltip carries it for a
   // link with one, and an autolink or a bare address is its own text, an
   // address without a scheme that holds an `@` being mail.
@@ -11218,6 +11239,13 @@
       setTimeout(syncFocus, 0);
     });
     view.contentDOM.addEventListener("mousedown", handleMouseDown, true);
+    view.scrollDOM.addEventListener("mousemove", followKeys);
+    window.addEventListener("keydown", followKeys, true);
+    window.addEventListener("keyup", followKeys, true);
+    window.addEventListener("blur", function () {
+      const el = app();
+      if (el) el.classList.remove("mdm--follow");
+    });
     view.contentDOM.addEventListener("click", handleChromeClick, true);
     // On the scroller and not the text, so that the pointer going out into the
     // margin lets a rail down as well as the pointer going onto another block.

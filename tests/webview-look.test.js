@@ -4420,6 +4420,93 @@ test("an open link's long address breaks where the column ends instead of leavin
   await h.close();
 });
 
+// A link carries the pointer, as an equation, a picture, a table and a score
+// do, since a click on it opens it; it had the caret of the text. Open, it is
+// text again, the address inside it included, and the key that follows a
+// link brings the pointer and the underline back over it, as VS Code's own
+// editor shows a link under Ctrl.
+test("a link carries the pointer until the caret is in it, and the key that follows it brings the pointer and the underline back", { skip }, async () => {
+  const text =
+    "A [link](https://example.com/a), a [reference][abc], an address <https://example.com/b>, a bare https://example.com/c and a note.[^1]\n\n" +
+    "[abc]: https://example.com/ref\n\n[^1]: The note.\n";
+  const h = await open({ text, scores: 0 });
+  const links = () =>
+    h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .cm-line .mdm-link"))
+        .filter((el) => !el.parentElement.closest(".mdm-link"))
+        .map((el) => [el.textContent, getComputedStyle(el).cursor])
+    );
+  const call = () => h.page.evaluate(() => getComputedStyle(document.querySelector("#app .cm-line .mdm-note-ref")).cursor);
+  assert.deepEqual(await links(), [
+    ["link", "pointer"],
+    ["reference", "pointer"],
+    ["https://example.com/b", "pointer"],
+    ["https://example.com/c", "pointer"],
+  ]);
+  assert.equal(await call(), "pointer", "the note's call");
+
+  await setSelection(h.page, await posOf(h.page, "link]", 2));
+  await sleep(250);
+  const opened = await h.page.evaluate(() => {
+    const el = document.querySelector("#app .mdm-link--open");
+    const inner = el && el.querySelector(".mdm-link");
+    return el && { text: el.textContent, cursor: getComputedStyle(el).cursor, address: inner && getComputedStyle(inner).cursor };
+  });
+  assert.deepEqual(opened, { text: "[link](https://example.com/a)", cursor: "text", address: "text" });
+  const box = await h.page.evaluate(() => {
+    const r = document.querySelector("#app .mdm-link--open").getClientRects()[0];
+    return { x: r.x + 12, y: r.y + r.height / 2 };
+  });
+  await h.page.mouse.move(box.x, box.y);
+  await sleep(100);
+  const hovered = () =>
+    h.page.evaluate(() => {
+      const s = getComputedStyle(document.querySelector("#app .mdm-link--open"));
+      return { cursor: s.cursor, underline: s.textDecorationLine, follow: document.getElementById("app").classList.contains("mdm--follow") };
+    });
+  assert.deepEqual(await hovered(), { cursor: "text", underline: "none", follow: false }, "open, under the pointer");
+  // Ctrl in the harness, whose editor.multiCursorModifier is alt.
+  await h.page.keyboard.down("Control");
+  await sleep(80);
+  assert.deepEqual(await hovered(), { cursor: "pointer", underline: "underline", follow: true }, "with Ctrl down");
+  await h.page.keyboard.up("Control");
+  await sleep(80);
+  assert.deepEqual(await hovered(), { cursor: "text", underline: "none", follow: false }, "with Ctrl up again");
+  // A window that loses the focus with the key down lets it go: the key comes
+  // up somewhere else and the page never hears it.
+  const follow = () => h.page.evaluate(() => document.getElementById("app").classList.contains("mdm--follow"));
+  await h.page.keyboard.down("Control");
+  await sleep(80);
+  assert.equal(await follow(), true, "Ctrl down, before the blur");
+  await h.page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  assert.equal(await follow(), false, "the key held through the window's blur");
+  await h.page.keyboard.up("Control");
+
+  // A bare address and a note's call, with the caret in them.
+  await h.page.mouse.move(2, 2);
+  await setSelection(h.page, await posOf(h.page, "example.com/c", 4));
+  await sleep(250);
+  assert.deepEqual((await links())[3], ["https://example.com/c", "text"], "the bare address with the caret in it");
+  await setSelection(h.page, await posOf(h.page, "[^1]", 2));
+  await sleep(250);
+  assert.equal(await call(), "text", "the note's call with the caret in it");
+
+  // With the modifier swapped, Ctrl adds a caret and Alt is the key that
+  // follows (G083).
+  await postSettings(h.page, { multiCursorModifier: "ctrlCmd" });
+  await sleep(100);
+  await h.page.keyboard.down("Control");
+  await sleep(80);
+  assert.equal(await follow(), false, "Ctrl, which adds a caret now");
+  await h.page.keyboard.up("Control");
+  await h.page.keyboard.down("Alt");
+  await sleep(80);
+  assert.equal(await follow(), true, "Alt, which follows now");
+  await h.page.keyboard.up("Alt");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- The numbers in the margin ----------
 
 test("the numbers stand in one column beside the text, out of its flow", { skip }, async () => {

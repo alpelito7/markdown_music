@@ -38,6 +38,13 @@
   an address and the marks of a footnote take the grey of the other marks,
   and a link's definition is faint in every part, where the colours of the
   code were painted over it.
+- A link shows the pointer, as an equation, a picture, a table and a score
+  do, since a click on it opens it for editing; with the caret in it, it
+  shows the caret of the text and is not underlined under the pointer.
+  Holding `Ctrl` (`Cmd` on a Mac, `Alt` or `Option` when
+  `editor.multiCursorModifier` is `ctrlCmd`) shows the pointer and the
+  underline over any link, open or not, since that click follows it. A
+  footnote's number shows the pointer too.
 
 ## 0.7.0
 
