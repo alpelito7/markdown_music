@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- A music symbol button leads the buttons that close the toolbar's first
+  row, before the equation. Its panel holds the notes from the breve to the
+  128th, the dotted notes from the whole to the sixteenth, the two beamed
+  pairs, the rests from the whole to the 128th, and the double flat, the
+  flat, the natural, the sharp and the double sharp, each named at the foot
+  of the panel as the pointer rests on it. The one picked is written at the
+  caret as Unicode text, so a figure stands in a sentence or a table cell as
+  a letter does and reads as text in any other editor. Until a music face
+  travels with the extension they are drawn in whatever face the machine
+  has, and a PDF typeset with TeX leaves them out, as it already left out a
+  flat or a sharp typed into the prose.
+- A drop-down of the toolbar that would pass the right edge of the pane
+  opens moved in, where it used to be cut off at the edge.
 - A table opened for editing stands on a card, as the source of a code
   block or of an equation does, coloured as code is (its pipes and its row
   of alignment in grey, its head in the colour code gives its keywords),

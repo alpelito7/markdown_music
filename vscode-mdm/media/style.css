@@ -1080,6 +1080,44 @@ body {
   font-size: 13px;
   white-space: nowrap;
 }
+/* The music symbol panel (SYMBOLS and symbolPanel in main.js): each family a
+   run of cells under its header, flush left, a family to a row but for the
+   beamed pair and the accidentals, which share the last one. A cell is the
+   character as the text will hold it, in the prose's face and in the ink,
+   not the brass: it is a piece of the document on offer, not a control. Its
+   name is on the caption line under the rows, since the tooltips are put
+   away while a panel is open. */
+#app .mdm-menu--glyphs {
+  padding: 4px 8px;
+}
+#app .mdm-menu__row {
+  display: flex;
+  gap: 18px;
+}
+#app .mdm-menu__cells {
+  display: flex;
+  gap: 2px;
+}
+#app .mdm-menu--glyphs .mdm-menu__head {
+  padding: 6px 2px 1px;
+}
+#app .mdm-menu__item.mdm-menu__glyph {
+  justify-content: center;
+  width: 30px;
+  height: 32px;
+  padding: 0;
+  border-radius: 4px;
+  font-family: var(--mdm-text);
+  font-size: 20px;
+  line-height: 1;
+}
+#app .mdm-menu__caption {
+  padding: 6px 2px 2px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 
 /* ---------- Tooltips ----------
 

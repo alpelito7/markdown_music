@@ -8092,6 +8092,171 @@
     return true;
   }
 
+  // ---- Music symbols ----
+  //
+  // The notes, rests and accidentals Unicode has characters for, behind the
+  // first button of the Insert group, and written into the text as those
+  // characters. A figure in a sentence or in a table cell is then a
+  // character like any other, which CommonMark, Pandoc and GitHub all read
+  // as text, and nothing needs a syntax of its own: the owner's call on
+  // 2026-09-23, over a code written between dollars, which all three take
+  // for maths (Pandoc reads `$negra$` as an equation and sets it as five
+  // italic variables).
+  //
+  // The notes go in precomposed, U+1D15F for the quarter note and not the
+  // black notehead U+1D158 with the combining stem U+1D165 that Unicode
+  // normalisation (NFC) turns it into, although it is the decomposed form
+  // that comes through a tool which normalises unchanged. Measured in Chrome
+  // 151: Bravura Text draws the eighth and the sixteenth wrong from the
+  // decomposed sequence (the flag hangs loose under the head) and FreeSerif
+  // every note with a stem, where all three faces tried draw the precomposed
+  // character whole. Pandoc's markdown reader, the export's, keeps what was
+  // written; its commonmark readers hand the note on decomposed. A dotted
+  // note is its note followed by the combining augmentation dot, U+1D16D,
+  // which has no precomposed form.
+  //
+  // What draws them is not settled yet. No face the prose is set in has
+  // these characters (Latin Modern has ♪ and none of the rest; KaTeX_Main,
+  // carried for the maths, has ♭ ♮ ♯ and stands in no stack of the prose's):
+  // on screen and on the exported page they come from whatever the machine
+  // has, Noto Music or FreeSerif for the notes on the Linux they were
+  // measured on, and on paper they are left out: exported through bin/mdm on
+  // 2026-09-23, in the roman and in the sans alike, the quarter note, the
+  // half, the flat and the sharp left nothing between the words they stood
+  // among, and a table cell holding one came out empty, with no error (the
+  // log says "Missing character" and nothing reads it). A music face
+  // vendored beside Latin Modern is the decision this waits on.
+  //
+  // The panel sets each family on a row of its own under its header, flush
+  // left, and the beamed pair and the accidentals, two cells and five, share
+  // the last row (`beside`): the owner's layout of 2026-09-23. The first one
+  // stood every dotted note, beamed pair and rest under the note of its value,
+  // which cost a row and gave the panel a ragged left edge.
+  const SYMBOLS = [
+    {
+      head: "Notes",
+      items: [
+        ["breve", "\u{1D15C}", "Breve"],
+        ["whole", "\u{1D15D}", "Whole note"],
+        ["half", "\u{1D15E}", "Half note"],
+        ["quarter", "\u{1D15F}", "Quarter note"],
+        ["eighth", "\u{1D160}", "Eighth note"],
+        ["sixteenth", "\u{1D161}", "Sixteenth note"],
+        ["32nd", "\u{1D162}", "32nd note"],
+        ["64th", "\u{1D163}", "64th note"],
+        ["128th", "\u{1D164}", "128th note"],
+      ],
+    },
+    {
+      head: "Dotted notes",
+      items: [
+        ["dotted-whole", "\u{1D15D}\u{1D16D}", "Dotted whole note"],
+        ["dotted-half", "\u{1D15E}\u{1D16D}", "Dotted half note"],
+        ["dotted-quarter", "\u{1D15F}\u{1D16D}", "Dotted quarter note"],
+        ["dotted-eighth", "\u{1D160}\u{1D16D}", "Dotted eighth note"],
+        ["dotted-sixteenth", "\u{1D161}\u{1D16D}", "Dotted sixteenth note"],
+      ],
+    },
+    {
+      head: "Rests",
+      items: [
+        ["whole-rest", "\u{1D13B}", "Whole rest"],
+        ["half-rest", "\u{1D13C}", "Half rest"],
+        ["quarter-rest", "\u{1D13D}", "Quarter rest"],
+        ["eighth-rest", "\u{1D13E}", "Eighth rest"],
+        ["sixteenth-rest", "\u{1D13F}", "Sixteenth rest"],
+        ["32nd-rest", "\u{1D140}", "32nd rest"],
+        ["64th-rest", "\u{1D141}", "64th rest"],
+        ["128th-rest", "\u{1D142}", "128th rest"],
+      ],
+    },
+    {
+      head: "Beamed notes",
+      items: [
+        ["beamed-eighths", "\u266B", "Beamed eighth notes"],
+        ["beamed-sixteenths", "\u266C", "Beamed sixteenth notes"],
+      ],
+    },
+    {
+      head: "Accidentals",
+      beside: true,
+      items: [
+        ["double-flat", "\u{1D12B}", "Double flat"],
+        ["flat", "\u266D", "Flat"],
+        ["natural", "\u266E", "Natural"],
+        ["sharp", "\u266F", "Sharp"],
+        ["double-sharp", "\u{1D12A}", "Double sharp"],
+      ],
+    },
+  ];
+
+  // Written where every range is, over what it selects, with the caret after
+  // it: what a key does with a character, which is all these are.
+  function insertText(text) {
+    return function (v) {
+      const state = v.state;
+      v.dispatch(
+        state.update(
+          state.changeByRange(function (range) {
+            return {
+              changes: { from: range.from, to: range.to, insert: text },
+              range: CM.EditorSelection.cursor(range.from + text.length),
+            };
+          }),
+          { scrollIntoView: true, userEvent: "input" }
+        )
+      );
+      return true;
+    };
+  }
+
+  // The symbol panel, laid out here rather than from a list of rows, since a
+  // row of it can hold two families: rows of families, each family a header
+  // over its run of cells, and a caption line under them all. A cell is a
+  // button with its symbol for a face and its name in the aria-label, which
+  // is what the caption shows (the tooltips are put away while a panel is
+  // open, and a glyph carries no words of its own).
+  function symbolPanel(panel) {
+    let row = null;
+    SYMBOLS.forEach(function (family) {
+      if (!family.beside || !row) {
+        row = document.createElement("div");
+        row.className = "mdm-menu__row";
+        panel.appendChild(row);
+      }
+      const group = document.createElement("div");
+      group.className = "mdm-menu__family";
+      const head = document.createElement("div");
+      head.className = "mdm-menu__head";
+      head.textContent = family.head;
+      const cells = document.createElement("div");
+      cells.className = "mdm-menu__cells";
+      family.items.forEach(function (symbol) {
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "mdm-menu__item mdm-menu__glyph";
+        cell.setAttribute("data-type", "symbol-" + symbol[0]);
+        cell.setAttribute("aria-label", symbol[2]);
+        cell.textContent = symbol[1];
+        cell.addEventListener("click", function (e) {
+          e.stopPropagation();
+          closeMenus();
+          if (!view) return;
+          insertText(symbol[1])(view);
+          view.focus();
+        });
+        cells.appendChild(cell);
+      });
+      group.appendChild(head);
+      group.appendChild(cells);
+      row.appendChild(group);
+    });
+    const caption = document.createElement("div");
+    caption.className = "mdm-menu__caption";
+    caption.textContent = "\u00a0";
+    panel.appendChild(caption);
+  }
+
   // Ctrl+Enter: out of the block the caret is in (a fence, an equation, a
   // list, a quote, a callout, a heading line), into a fresh paragraph below
   // it. Plain Enter inside a code block is a newline, as in any code editor:
@@ -11173,6 +11338,15 @@
     '<svg viewBox="0 0 16 16"><rect x="1" y="8.6" width="8.4" height="1.9" rx="0.95"/><path d="M10.63 6.8H11.91V3.18L10.6 3.45V2.47L11.9 2.2H13.27V6.8H14.55V7.8H10.63Z"/></svg>';
   const RULE_ICON =
     '<svg viewBox="0 0 16 16"><rect x="1" y="1.3" width="14" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="4" width="10.5" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="7.2" width="14" height="2.1" rx="1.05"/><rect x="1" y="11.4" width="14" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="14.1" width="8.5" height="1.4" rx="0.7" fill-opacity="0.45"/></svg>';
+  // The music symbols, which open the Insert group: two eighth notes under
+  // one beam, the ♫ every set of music glyphs draws. The heads and stems are
+  // the score-align note's own (ALIGN_ICON: a head of 2.2 by 1.55 tilted 25
+  // degrees, a stem of 1.5), and the beam is what keeps the pair from being
+  // read as that lone quarter note on the second row. A of the four in
+  // design/design-symbol-icon.html, applied as my pick until the owner
+  // chooses (2026-09-23).
+  const SYMBOL_ICON =
+    '<svg viewBox="0 0 16 16"><ellipse cx="4" cy="12.4" rx="2.2" ry="1.55" transform="rotate(-25 4 12.4)"/><ellipse cx="12" cy="10.9" rx="2.2" ry="1.55" transform="rotate(-25 12 10.9)"/><rect x="4.6" y="4.2" width="1.5" height="8.2"/><rect x="12.6" y="2.6" width="1.5" height="8.3"/><path d="M4.6 3.2 14.1 1.7V3.9L4.6 5.4Z"/></svg>';
   // A quote: the bar the editor draws down a quote's left side, running past
   // two rows of text. Fourth of the block group and built like the other
   // three (see LIST_ICON): the task glyph's own bars at its rows of 4 and 12,
@@ -11544,7 +11718,9 @@
 
   // A button of the bar. `menu` is a list of entries for a drop-down panel:
   // {name, label (HTML), click}; the panel opens on click and closes on a
-  // click anywhere else or on Escape.
+  // click anywhere else or on Escape. `draw` lays a panel out by its own
+  // hand, once, where a list of rows will not do (the music symbols, whose
+  // families share rows), and `panel` is a class of the panel's own.
   function toolbarButton(spec) {
     const item = document.createElement("div");
     item.className = "mdm-toolbar__item";
@@ -11564,9 +11740,9 @@
     if (spec.caret) btn.classList.add("mdm-btn--caret");
     btn.innerHTML = spec.icon;
     item.appendChild(btn);
-    if (spec.menu || spec.build) {
+    if (spec.menu || spec.build || spec.draw) {
       const panel = document.createElement("div");
-      panel.className = "mdm-menu";
+      panel.className = "mdm-menu" + (spec.panel ? " " + spec.panel : "");
       // A panel whose rows work on the selection (the heading levels) is
       // exempt with its button: a press on a row put the block being edited
       // away before the row could find the lines it was for.
@@ -11626,10 +11802,30 @@
           panel.appendChild(note);
         }
       };
+      // A panel of glyphs names the one under the pointer or the focus on a
+      // caption line under them (symbolPanel), and the line is blank again
+      // whenever the panel opens. The pointer's name goes by itself, with the
+      // mouseleave Chrome sends the panel as it hides under it; the one the
+      // keyboard left, a cell focused and then Enter or Escape, would still
+      // be there.
+      const name = function (row) {
+        const caption = panel.querySelector(".mdm-menu__caption");
+        if (caption) caption.textContent = (row && row.getAttribute("aria-label")) || "\u00a0";
+      };
+      panel.addEventListener("mouseover", function (e) {
+        name(e.target.closest(".mdm-menu__item"));
+      });
+      panel.addEventListener("focusin", function (e) {
+        name(e.target.closest(".mdm-menu__item"));
+      });
+      panel.addEventListener("mouseleave", function () {
+        name(null);
+      });
       // A fixed list is filled once; a `build` panel (the outline, whose
       // headings change as the document is edited) is rebuilt each time it
       // opens.
       if (spec.menu) fill(spec.menu);
+      else if (spec.draw) spec.draw(panel);
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
         const open = item.classList.contains("mdm-toolbar__item--open");
@@ -11637,7 +11833,9 @@
         if (!open) {
           if (spec.build) fill(spec.build());
           else refresh();
+          name(null);
           item.classList.add("mdm-toolbar__item--open");
+          keepInPane(panel);
         }
         // The bar is not somewhere to be: the focus goes back to the text, as
         // it does from the buttons that act on the caret. Without this the
@@ -11668,6 +11866,20 @@
     document.querySelectorAll("#app .mdm-toolbar__item--open").forEach(function (el) {
       el.classList.remove("mdm-toolbar__item--open");
     });
+  }
+
+  // A panel hangs from the left edge of its button, and #app clips whatever
+  // passes its right edge (overflow-x: clip in style.css) instead of letting
+  // the page scroll to it, so a panel wider than the room right of its button
+  // was cut there, rows and all. It is moved left by what it overhangs, never
+  // past the pane's left edge, and goes back under its button the next time
+  // it opens with room.
+  function keepInPane(panel) {
+    panel.style.left = "";
+    const pane = document.getElementById("app").getBoundingClientRect();
+    const box = panel.getBoundingClientRect();
+    const over = Math.min(box.right - (pane.right - 4), box.left - (pane.left + 4));
+    if (over > 0) panel.style.left = -Math.round(over) + "px";
   }
 
   function separator() {
@@ -11812,7 +12024,13 @@
       // his call as well: the buttons before it change what a line already
       // is, these put something new in the document, and two gestures that
       // different do not share a run.
+      //
+      // The music symbols open the run (2026-09-23): the smallest thing a
+      // line can hold, a character, and the one that stands in a sentence
+      // where the maths after it may stand on lines of its own. Its panel is
+      // SYMBOLS laid out by symbolPanel, and the row still closes on the rule.
       "|",
+      { name: "insert-symbol", icon: SYMBOL_ICON, tip: "Music symbol", draw: symbolPanel, panel: "mdm-menu--glyphs", caret: true },
       { name: "insert-equation", icon: EQUATION_ICON, tip: "Equation", click: run(toggleInline("$")), caret: true },
       { name: "insert-equation-block", icon: EQUATION_BLOCK_ICON, tip: "Equation block", click: run(insertBlock(EQUATION_BLOCK, EQUATION_CARET)), caret: true },
       { name: "insert-table", icon: TABLE_ICON, tip: "Table", click: run(insertBlock(TABLE_BLOCK, TABLE_CARET)), caret: true },

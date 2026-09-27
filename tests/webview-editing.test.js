@@ -1152,14 +1152,15 @@ test("the bar stands in two rows, the first closing on the rule and the second o
     const second = seen[1].items.map((i) => i.name);
     assert.equal(first[0], "outline", width + ": the first row does not open on the outline");
     assert.equal(first[first.length - 1], "insert-rule", width + ": the first row does not close on the rule");
-    assert.deepEqual(first.slice(-6), [
+    assert.deepEqual(first.slice(-7), [
+      "insert-symbol",
       "insert-equation",
       "insert-equation-block",
       "insert-table",
       "insert-picture",
       "insert-footnote",
       "insert-rule",
-    ], width + ": the six do not close the first row");
+    ], width + ": the seven do not close the first row");
     assert.equal(second[0], "mdm-match-substring", width + ": the second row does not open on the multicursor");
     assert.equal(second[second.length - 1], "mdm-follow", width + ": the second row does not close on the playhead");
     assert.equal(seen[1].items[0].left, seen[0].items[0].left, width + ": the second row does not start under the outline");
@@ -1251,6 +1252,217 @@ test("the Footnote button numbers the reference and opens its note at the end of
   // From inside a quote the note still goes to the top level, under it.
   out = await insertOn("> Cello\n", 7, "footnote");
   assert.equal(out.text, "> Cello[^1]\n\n[^1]: \n");
+});
+
+// The music symbols, the first of the Insert group (SYMBOLS in main.js):
+// notes, rests and accidentals from Unicode's musical symbols, written into
+// the text as that character, which CommonMark, Pandoc and GitHub all read as
+// text (the owner's call on 2026-09-23, over a code between dollars that all
+// three take for maths). The list is the decision, character by character:
+// a note precomposed (U+1D15F, not the black notehead and the combining stem
+// that NFC turns it into, which Bravura Text and FreeSerif draw wrong), a
+// dotted note as its note and the combining augmentation dot, and the flat,
+// natural and sharp from the Miscellaneous Symbols block, where Unicode keeps
+// them.
+const SYMBOL_PANEL = [
+  ["Notes", [
+    ["breve", "\u{1D15C}", "Breve"],
+    ["whole", "\u{1D15D}", "Whole note"],
+    ["half", "\u{1D15E}", "Half note"],
+    ["quarter", "\u{1D15F}", "Quarter note"],
+    ["eighth", "\u{1D160}", "Eighth note"],
+    ["sixteenth", "\u{1D161}", "Sixteenth note"],
+    ["32nd", "\u{1D162}", "32nd note"],
+    ["64th", "\u{1D163}", "64th note"],
+    ["128th", "\u{1D164}", "128th note"],
+  ]],
+  ["Dotted notes", [
+    ["dotted-whole", "\u{1D15D}\u{1D16D}", "Dotted whole note"],
+    ["dotted-half", "\u{1D15E}\u{1D16D}", "Dotted half note"],
+    ["dotted-quarter", "\u{1D15F}\u{1D16D}", "Dotted quarter note"],
+    ["dotted-eighth", "\u{1D160}\u{1D16D}", "Dotted eighth note"],
+    ["dotted-sixteenth", "\u{1D161}\u{1D16D}", "Dotted sixteenth note"],
+  ]],
+  ["Rests", [
+    ["whole-rest", "\u{1D13B}", "Whole rest"],
+    ["half-rest", "\u{1D13C}", "Half rest"],
+    ["quarter-rest", "\u{1D13D}", "Quarter rest"],
+    ["eighth-rest", "\u{1D13E}", "Eighth rest"],
+    ["sixteenth-rest", "\u{1D13F}", "Sixteenth rest"],
+    ["32nd-rest", "\u{1D140}", "32nd rest"],
+    ["64th-rest", "\u{1D141}", "64th rest"],
+    ["128th-rest", "\u{1D142}", "128th rest"],
+  ]],
+  ["Beamed notes", [
+    ["beamed-eighths", "\u266B", "Beamed eighth notes"],
+    ["beamed-sixteenths", "\u266C", "Beamed sixteenth notes"],
+  ]],
+  ["Accidentals", [
+    ["double-flat", "\u{1D12B}", "Double flat"],
+    ["flat", "\u266D", "Flat"],
+    ["natural", "\u266E", "Natural"],
+    ["sharp", "\u266F", "Sharp"],
+    ["double-sharp", "\u{1D12A}", "Double sharp"],
+  ]],
+];
+
+// Each family is a run of cells under its header, flush left, a family to a
+// row but for the beamed pair and the accidentals, which share the last one:
+// the owner's layout of 2026-09-23, over a grid that stood every dotted note,
+// pair and rest under the note of its value and left the panel a ragged left
+// edge. A cell's name is on the caption line under the rows, since a tooltip
+// is put away while its panel is open.
+test("the music symbol button opens its notes, rests and accidentals, a family to a row and flush left", { skip }, async () => {
+  const h = await open({ text: "Text.\n", scores: 0 });
+  await h.page.click('#app button[data-type="insert-symbol"]');
+  await sleep(120);
+  const families = await h.page.evaluate(() => {
+    const panel = document.querySelector("#app .mdm-toolbar__item--open .mdm-menu");
+    const out = [];
+    for (const el of panel.querySelectorAll(".mdm-menu__head, .mdm-menu__item")) {
+      if (el.classList.contains("mdm-menu__head")) {
+        out.push([el.textContent, []]);
+        continue;
+      }
+      const box = el.getBoundingClientRect();
+      out[out.length - 1][1].push([
+        el.getAttribute("data-type").replace(/^symbol-/, ""),
+        el.textContent,
+        el.getAttribute("aria-label"),
+        Math.round(box.left),
+        Math.round(box.top),
+        Math.round(box.right),
+      ]);
+    }
+    return out;
+  });
+  assert.deepEqual(
+    families.map(([head, cells]) => [head, cells.map((c) => c.slice(0, 3))]),
+    SYMBOL_PANEL
+  );
+  const row = new Map(families);
+  for (const [head, cells] of families) {
+    assert.equal(new Set(cells.map((c) => c[4])).size, 1, head + " is not one row");
+  }
+  const left = (head) => row.get(head)[0][3];
+  const top = (head) => row.get(head)[0][4];
+  for (const head of ["Dotted notes", "Rests", "Beamed notes"]) {
+    assert.equal(left(head), left("Notes"), head + " does not start at the edge the notes start at");
+  }
+  assert.ok(
+    top("Notes") < top("Dotted notes") && top("Dotted notes") < top("Rests") && top("Rests") < top("Beamed notes"),
+    "the families are not one under the other"
+  );
+  assert.equal(top("Accidentals"), top("Beamed notes"), "the accidentals do not share the beamed pair's row");
+  const pair = row.get("Beamed notes");
+  assert.ok(left("Accidentals") > pair[pair.length - 1][5], "the accidentals do not stand beside the beamed pair");
+  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "\u00a0");
+  await h.page.hover('#app .mdm-menu [data-type="symbol-dotted-quarter"]');
+  await sleep(60);
+  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "Dotted quarter note");
+  // Blank again when the panel opens anew: a click on a cell hides the panel
+  // under the pointer, with the name it was showing still on it.
+  await h.page.click('#app .mdm-menu [data-type="symbol-dotted-quarter"]');
+  await sleep(120);
+  await h.page.click('#app button[data-type="insert-symbol"]');
+  await sleep(120);
+  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "\u00a0");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+async function symbolOn(text, pos, name) {
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
+  await h.page.click('#app button[data-type="insert-symbol"]');
+  await sleep(120);
+  await h.page.click('#app .mdm-menu [data-type="symbol-' + name + '"]');
+  await sleep(120);
+  const out = await docText(h.page);
+  const ranges = await selectionRanges(h.page);
+  const open_ = await h.page.$$eval("#app .mdm-toolbar__item--open", (els) => els.length);
+  const focused = await h.page.evaluate(() => !!document.activeElement.closest(".cm-content"));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  return { text: out, ranges, open: open_, focused };
+}
+
+// What a key does with a character: in at the caret, over a selection, at
+// every caret, with the caret after it and the keyboard back in the text.
+test("a music symbol goes in at every caret and over a selection, with the caret after it", { skip }, async () => {
+  let out = await symbolOn("A crotchet: .\n", 12, "quarter");
+  assert.equal(out.text, "A crotchet: \u{1D15F}.\n");
+  assert.deepEqual(out.ranges, [[14, 14]]);
+  assert.equal(out.open, 0);
+  assert.equal(out.focused, true);
+  // Two code points, four code units: the caret lands after the dot.
+  out = await symbolOn("Tempo =60\n", 6, "dotted-quarter");
+  assert.equal(out.text, "Tempo \u{1D15F}\u{1D16D}=60\n");
+  assert.deepEqual(out.ranges, [[10, 10]]);
+  out = await symbolOn("Bb and Eb.\n", [{ anchor: 1, head: 2 }, { anchor: 8, head: 9 }], "flat");
+  assert.equal(out.text, "B\u266D and E\u266D.\n");
+  assert.deepEqual(out.ranges, [[2, 2], [9, 9]]);
+});
+
+// From the keyboard: a cell with the focus names itself on the caption,
+// Enter writes its symbol and hands the keyboard back to the text, and the
+// panel opens blank the next time, with no name left over from the focus.
+// The pointer never takes the focus off the text (the bar's mousedown keeps
+// it there), so the keyboard is the one road these two can be seen on.
+test("a music symbol can be chosen from the keyboard, and the panel opens blank again", { skip }, async () => {
+  const h = await open({ text: "In B .\n", scores: 0 });
+  await setSelection(h.page, [{ anchor: 4 }]);
+  await h.page.click('#app button[data-type="insert-symbol"]');
+  await sleep(120);
+  await h.page.focus('#app .mdm-menu [data-type="symbol-flat"]');
+  await sleep(60);
+  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "Flat");
+  await h.page.keyboard.press("Enter");
+  await sleep(120);
+  assert.equal(await docText(h.page), "In B\u266D .\n");
+  assert.equal(
+    await h.page.evaluate(() => !!document.activeElement.closest(".cm-content")),
+    true,
+    "the keyboard was not handed back to the text"
+  );
+  await h.page.click('#app button[data-type="insert-symbol"]');
+  await sleep(120);
+  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "\u00a0");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A panel hangs from its button's left edge and #app clips what passes its
+// right edge, so a panel wider than the room left there opens moved in, and
+// back under its button when there is room again. The symbol panel is 314px
+// wide and its button stands near the end of the first row: at 900px it
+// would have passed the edge by 23px and at 800 by 123 (measured).
+test("a panel that would pass the pane's right edge opens moved in, and under its button when there is room", { skip }, async () => {
+  const h = await open({ text: "Text.\n", scores: 0 });
+  for (const width of [900, 800, 620, 900]) {
+    await h.page.setViewport({ width, height: 900 });
+    await sleep(250);
+    await h.page.click('#app button[data-type="insert-symbol"]');
+    await sleep(120);
+    const m = await h.page.evaluate(() => {
+      const item = document.querySelector("#app .mdm-toolbar__item--open");
+      const panel = item.querySelector(".mdm-menu").getBoundingClientRect();
+      const button = item.querySelector("button").getBoundingClientRect();
+      const pane = document.getElementById("app").getBoundingClientRect();
+      return { left: panel.left, right: panel.right, width: panel.width, button: button.left, paneLeft: pane.left, paneRight: pane.right };
+    });
+    assert.ok(m.right <= m.paneRight, width + ": the panel passes the right edge by " + (m.right - m.paneRight) + "px");
+    assert.ok(m.left >= m.paneLeft, width + ": the panel passes the left edge");
+    if (m.button + m.width <= m.paneRight - 4) {
+      assert.equal(Math.round(m.left), Math.round(m.button), width + ": the panel does not stand under its button");
+    } else {
+      assert.ok(m.left < m.button, width + ": the panel was not moved in");
+    }
+    await h.page.click('#app button[data-type="insert-symbol"]');
+    await sleep(120);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
 });
 
 test("the task button puts a box behind the marker a line has, makes a bulleted task of a line with none, and takes only the box off", { skip }, async () => {
@@ -4033,8 +4245,10 @@ test("a drawn block is numbered by its first line, and by every line once a care
 // (design-annotation-icons.html) and the six of the Insert group close the
 // first row behind a separator of their own, spelled out as buttons where
 // one menu button held them while the bar was a single row: that row is what they cost, and the owner asked
-// to see the bar in two rather than pay it. The second row starts under the
-// outline button, with everything that switches the document as a whole.
+// to see the bar in two rather than pay it. The music symbol button opens
+// that group since 2026-09-23, the smallest thing a line can hold. The second
+// row starts under the outline button, with everything that switches the
+// document as a whole.
 // Written out in full because the order carries a decision that no
 // single button can hold on its own: outline leads, because its panel opens
 // down the left edge and the button sits on the side the panel appears; the
@@ -4074,6 +4288,7 @@ const BAR = [
   "task-list",
   "quote",
   "|",
+  "insert-symbol",
   "insert-equation",
   "insert-equation-block",
   "insert-table",

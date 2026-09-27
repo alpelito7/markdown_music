@@ -179,8 +179,8 @@ D4. Toolbar: **the MDM buttons plus bold, italic, inline code, link,
   Revisited later: almost none of the shape above survives. The outline
   leads the bar again and export follows it; the heading cycle is a menu of
   Paragraph and the six levels (D19); the table came back inside a group of
-  six Insert buttons, with the equation, the equation block, the picture,
-  the footnote and the rule; strikethrough, superscript, subscript, small
+  Insert buttons, with the music symbols, the equation, the equation block,
+  the picture, the footnote and the rule; strikethrough, superscript, subscript, small
   caps and the highlight joined the word marks, and the task list and the
   quote the blocks. The bar stands in two rows since it grew that far: what
   a reader writes above, what the document is set in below.
@@ -379,9 +379,9 @@ D19. **The digit is the level, and a letter names the block that has none**
   claim to a standard among them, and it is a divided one: Google Docs
   spends `Ctrl+.` and `Ctrl+,` on the two and Word spends `Ctrl+Shift+=`
   and `Ctrl+=`, both remembered and neither checked against a running copy,
-  so nothing was spent on them. Neither do the six of the Insert group, which
+  so nothing was spent on them. Neither do the seven of the Insert group: six
   stood in a menu for a day and are buttons of the first row since the bar
-  went to two.
+  went to two, and the music symbols joined them on 2026-09-23.
 
   U, O and Q lasted a day. The owner took them off on 2026-09-19, and the
   reason he gave is that `- `, `1. ` and `> ` are so little to type at the

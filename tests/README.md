@@ -4965,6 +4965,76 @@ left shut; then the table in a list, open, copied without its indent) and
 All 17 caught, with each file restored after each (TC3 and TC4 run again
 against the classes that replaced the brass).
 
+### Music symbols from the Insert group (2026-09-23)
+
+The owner asked for figures in the text, in a sentence and in a table cell,
+and after weighing a code between dollars, which Pandoc, GitHub and the
+editor all read as maths (Pandoc 3.8.3 reads `$negra$` as an equation and
+sets it as five italic variables, measured), took them as the characters
+Unicode has. A button opens the Insert group (`insert-symbol`, `SYMBOL_ICON`,
+A of `design/design-symbol-icon.html`, my pick until the owner chooses) on a
+panel of notes, rests and accidentals from Unicode's musical symbols:
+`SYMBOLS` in `main.js`, laid out by `symbolPanel` and written by
+`insertText` at every range, over the selection, with the caret after it.
+The notes go in precomposed, U+1D15F and not the notehead with the combining
+stem that NFC turns it into: Bravura Text draws the decomposed eighth and
+sixteenth wrong and FreeSerif every note with a stem (Chrome 151, measured).
+The first layout was a grid with a column for each value; the owner asked
+for everything flush left and two families to a row, so each family is a
+row under its header and the beamed pair and the accidentals share the last
+one (`beside`). The two-column arrangement tried beside it came out 586px
+wide against 314, with its right-hand families out of line, and was not
+taken.
+
+Two things came into `toolbarButton` with it and reach every panel of the
+bar: `draw`, a panel laid out by its own hand, once, and `keepInPane`, which
+moves a panel left by what it overhangs the pane's right edge, since `#app`
+clips there (`overflow-x: clip`). The symbol panel would have passed the
+edge by 23px at a 900px pane and by 123 at 800 (measured). The caption line
+under the cells names the cell under the pointer or the focus, from its
+aria-label, because the tooltips are put away while a panel is open; it is
+blanked on opening, which only the keyboard needs: Chrome sends the panel a
+mouseleave as it hides under the pointer, and the bar's mousedown keeps the
+focus in the text for the pointer anyway.
+
+Tests, in `webview-editing.test.js`: *the music symbol button opens its
+notes, rests and accidentals, a family to a row and flush left*
+(the list character by character against `SYMBOL_PANEL`, a row per family,
+every row starting at the notes' edge, the accidentals beside the beamed
+pair, the caption blank, then naming the cell under the pointer, then blank
+again after a pick), *a music symbol goes in at every caret and over a
+selection, with the caret after it*, *a music symbol can be chosen from the
+keyboard, and the panel opens blank again* and *a panel that would pass the
+pane's right edge opens moved in, and under its button when there is room*
+(900, 800, 620 and 900 again). *The toolbar is grouped by what a button is
+about* and *the bar stands in two rows* carry the button, first of the
+seven that close the first row.
+
+- **MS1** the quarter note written decomposed, notehead and combining stem →
+  the panel test and the insertion test.
+- **MS2** the accidentals not beside the beamed pair → the panel test.
+- **MS3** the rows centred instead of flush left → the panel test.
+- **MS4** a row of families not laid out side by side → the panel test.
+- **MS5** the caption showing the cell's data-type instead of its name → the
+  panel test.
+- **MS6** the caption not blanked when the panel opens → the keyboard test.
+- **MS7** `keepInPane` not called on opening → the edge test.
+- **MS8** `keepInPane` not putting the panel back under its button → the
+  edge test.
+- **MS9** the caret left before the symbol → the insertion test.
+- **MS10** the selection kept and the symbol put before it → the insertion
+  test.
+- **MS11** the button moved after the rule → the order test and the
+  two-rows test.
+- **MS12** the keyboard not handed back to the text after a cell → the
+  keyboard test.
+
+All 12 caught, with each file restored after each. MS6 and MS12 got through
+until the keyboard test was written, the pointer being unable to show
+either. A thirteenth, `flex: none` taken off the cells, changed nothing
+between a 300 and a 900px pane (cells of 30px, a panel of 314), so the
+declaration went instead.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -5043,3 +5113,11 @@ against the classes that replaced the brass).
    editor, so not a rewrite regression, and the report of the head drifting
    as it is dragged is not yet reproduced as a fault of its own. No test
    added.
+9. The music symbols have no face of their own. On screen and on the
+   exported page they come from the machine's faces (Noto Music or FreeSerif
+   for the notes here), and on paper they are left out in the roman and in
+   the sans alike (exported through `bin/mdm`, 2026-09-23), as a flat or a
+   sharp typed into the prose already was. The face waits on the owner's
+   choice. And under a pane of about 320px the symbol panel is cut at the
+   right edge (18px at 300, measured), since it cannot move past the left
+   one either.

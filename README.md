@@ -394,9 +394,10 @@ What it does:
   subscript, and the subscript button never writes a pair: over the whole of
   a struck word, which Pandoc would read as the subscript alone, it leaves
   the word as it stands. The bar stands in two rows, and the first
-  closes with six buttons for what a document holds beside its words: an
-  equation, an equation block, a table, a picture, a footnote and a
-  horizontal rule. The second row begins under the outline button, with
+  closes with seven buttons for what a document holds beside its words: a
+  music symbol, an equation, an equation block, a table, a picture, a
+  footnote and a horizontal rule. The second row begins under the outline
+  button, with
   everything that switches the document as a whole. The
   equation button wraps the selection in `$…$` and takes the dollars off again;
   the equation block, the table (two columns and three rows) and the rule
@@ -406,8 +407,14 @@ What it does:
   address goes; and the footnote button writes the reference after the words
   the caret is in, numbered with the lowest number the document has not
   used, and opens its note at the end of the document, the only place Pandoc
-  reads one from. Across the bar's
-  separator from inline code, a code block button, also
+  reads one from. The music symbol button opens a panel of notes from the
+  breve to the 128th, dotted notes, two beamed pairs, rests from the whole to
+  the 128th and the accidentals from the double flat to the double sharp,
+  and writes the one picked at the caret as Unicode text: a figure stands in
+  a sentence or a table cell as a letter does, and any other editor reads it
+  as text. Until a music face travels with the extension they are drawn in
+  whatever face the machine has, and a PDF typeset with TeX leaves them out.
+  Across the bar's separator from inline code, a code block button, also
   `Ctrl+Shift+C` (`⌥⌘C` on a Mac): on an empty line it opens a block with
   the caret after the opening backticks, where the language is typed (`abc`
   makes it a score), under the paragraph the caret is in otherwise, around
@@ -422,7 +429,7 @@ What it does:
   so little to type at the head of a line that the chord bought nothing, and
   `Ctrl+Shift+U` is the desktop's on Linux before it is any editor's, where
   fcitx5's unicode addon opens its `U+` prompt on it. Strikethrough, small
-  caps, the superscript and subscript pair and the six of the Insert group
+  caps, the superscript and subscript pair and the seven of the Insert group
   have none either. The bar leads with the outline, then export, then undo
   and redo, and the second row is the editor's own: multicursor, theme,
   font, alignment, hyphenation and the YAML header, then score fill, staff
