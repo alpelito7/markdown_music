@@ -5230,6 +5230,24 @@ when Ctrl adds a caret, and a plain click edits it (ED12, G083)* in
 
 All 12 caught, and the files restored after each.
 
+### The player's progress bar keeps the focus a click gives it (2026-09-27)
+
+*the progress bar answers the arrow keys, as the volume slider does*
+(`webview-player.test.js`, there since 1971213) was failing on 0.7.0 as
+released, measured on a clean tree of `0a5c33d`: the track never took the
+focus. The player's row stands in the toolbar, whose mousedown cancels the
+press on a button to keep the focus in the text, and abcjs draws the track
+as a `<button>`, not the div the handler's comment took it for. The handler
+leaves alone the two controls of the player's row that are meant to keep the
+focus, the volume slider (an `input`) and the track
+(`.abcjs-midi-progress-background`), the exemption the player makes for
+itself.
+
+- **PB1** the exemption taken out of the toolbar's mousedown → the test (the
+  track did not take the focus).
+
+Caught, and the file restored after it.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

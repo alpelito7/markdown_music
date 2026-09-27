@@ -54,6 +54,10 @@
   when `editor.multiCursorModifier` is `ctrlCmd`, and it follows the setting
   when it changes); an address that is its own text is named the click
   alone. A link in a table, in a caption or after an equation says the same.
+- A click on the player's progress bar leaves the arrow keys, `Page Up`,
+  `Page Down`, `Home` and `End` to it, as a click on the volume leaves them
+  to the slider: the toolbar the player's row stands in kept the focus from
+  it.
 
 ## 0.7.0
 

@@ -12257,15 +12257,24 @@
     // the handlers that want the caret back still call view.focus() for a
     // press made while the text did not have it.
     // Buttons only, and not the panels CodeMirror puts inside the view (the
-    // search row, whose field is there to be typed in): the player's
-    // progress bar is a div that abcjs drags by hand, and preventing its
-    // default would be preventing the drag.
+    // search row, whose field is there to be typed in).
+    // Nor the two controls of the player's row that are meant to keep the
+    // focus: the volume slider and the progress bar, which answers the arrow
+    // keys once it has been clicked. The row is a child of the toolbar
+    // (mountPlayer appends it), so this handler sees its presses too, and
+    // abcjs writes the progress track as a <button>, not the div it was
+    // taken for here: the exemption the player makes for itself has to be
+    // made again in the same terms, or the track never takes the focus and
+    // the keys do nothing (webview-player.test.js, "the progress bar answers
+    // the arrow keys, as the volume slider does").
     // The rail does it another way, with spans that cannot take the focus at
     // all, because it stands inside the content where a focusable element
     // would take the caret with it (chromeButton).
     document.addEventListener("mousedown", function (e) {
       const el = e.target && e.target.closest ? e.target.closest("button, [role=button]") : null;
-      if (el && el.closest(".mdm-toolbar, .mdm-outline") && !el.closest(".cm-panels")) e.preventDefault();
+      if (!el || !el.closest(".mdm-toolbar, .mdm-outline") || el.closest(".cm-panels")) return;
+      if (e.target.closest("input, .abcjs-midi-progress-background")) return;
+      e.preventDefault();
     });
     document.addEventListener("click", closeMenus);
     document.addEventListener("keydown", function (e) {
