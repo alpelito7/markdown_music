@@ -90,7 +90,9 @@ async function linkTips(page) {
         // link goes (K03).
         let el = (at.node.nodeType === 3 ? at.node.parentElement : at.node).closest(".mdm-link");
         while (el && el.parentElement.closest(".mdm-link")) el = el.parentElement.closest(".mdm-link");
-        out.push(el ? [el.getAttribute("title"), el.getAttribute("data-mdm-title")] : null);
+        // The destination is the tooltip's first line; the second, the click
+        // that follows the link, is held in webview-look.test.js.
+        out.push(el ? [(el.getAttribute("title") || "").split("\n")[0] || null, el.getAttribute("data-mdm-title")] : null);
         return false;
       },
     });
@@ -1276,7 +1278,7 @@ const CASES = [
               return (
                 td.textContent +
                 " → " +
-                link.title +
+                link.title.split("\n")[0] +
                 (link.getAttribute("data-mdm-title") ? ' "' + link.getAttribute("data-mdm-title") + '"' : "")
               );
             }
@@ -1329,7 +1331,7 @@ const CASES = [
           const img = td.querySelector("img");
           if (img) return "img src=" + img.getAttribute("src") + " alt=" + img.alt;
           const link = td.querySelector(".mdm-link");
-          return link ? td.textContent + " → " + link.title : td.textContent;
+          return link ? td.textContent + " → " + link.title.split("\n")[0] : td.textContent;
         })
       ),
     domExpected: [

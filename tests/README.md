@@ -5181,6 +5181,55 @@ drawn again as they are edited (G052)*.
 
 Caught, and the file restored after it.
 
+### The click that follows a link, in its tooltip (2026-09-27)
+
+The owner asked for the second line the tooltip of a link was proposed with
+(T1 of `design/design-links.html`): under the destination, the click that
+follows the link, named for the platform (`Cmd` on a Mac) and for
+`editor.multiCursorModifier` (`Alt`, `Option` on a Mac, when it is
+`ctrlCmd`), which is `followHint` in `main.js`; an address that is its own
+text carries the click alone. The destination rides alone in
+`data-mdm-href`, which is where the click reads it now (`hrefOf`), since the
+tooltip is no longer only the destination. A link painted inside a block, a
+table's cell, a caption or the words after an equation, says the same
+(`paintParts` with `follow`), and the outline, whose rows go to their
+heading and follow no link, keeps the destination alone. The modifier comes
+in as a reconfiguration (the gestures), which the decorations did not
+rebuild on, and a block keeps its links as it painted them: the decorations
+are rebuilt on a reconfiguration now, and the three widgets that paint links
+carry the click in their comparison. The tests of `webview-markdown.test.js`
+that read a link's destination off its tooltip read its first line.
+
+Test, in `webview-look.test.js`: *a link's tooltip names the click that
+follows it, for the platform and the modifier in force* (a link, an address,
+a table's cell, a caption, the words after an equation and the outline, on
+the harness's platform and on a Mac, before and after the modifier is
+swapped). The click itself is held by *Ctrl+click follows a link, Alt+click
+when Ctrl adds a caret, and a plain click edits it (ED12, G083)* in
+`webview-editing.test.js`, which TP2 fails.
+
+- **TP1** the link's tooltip left at its destination → the test.
+- **TP2** `hrefOf` reading the tooltip again → the Ctrl+click test of
+  `webview-editing.test.js` (the address posted with the tooltip's second
+  line on it).
+- **TP3** the modifier left out of `followHint` → the test, at the swap.
+- **TP4** the platform left out of `followHint` → the test, on the Mac.
+- **TP5** the decorations not rebuilt on a reconfiguration → the test, the
+  link at the swap.
+- **TP6** the click left out of the table's comparison → the test, the
+  table at the swap.
+- **TP7** the click left out of the figure's comparison → the test, the
+  caption at the swap.
+- **TP8** the click left out of the equation's comparison → the test, the
+  words after it at the swap.
+- **TP9** the click left out of the equation's in-place update → the test,
+  the same.
+- **TP10** a table's cells painted without `follow` → the test.
+- **TP11** the outline painted with `follow` → the test.
+- **TP12** the address in angle brackets left without a tooltip → the test.
+
+All 12 caught, and the files restored after each.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

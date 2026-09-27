@@ -4532,6 +4532,73 @@ test("a link carries the pointer until the caret is in it, and the key that foll
   await h.close();
 });
 
+// A link's tooltip names, under its destination, the click that follows it,
+// named for the platform and for editor.multiCursorModifier, and an address
+// that is its own text names the click alone. A link drawn inside a block (a
+// table's cell, a caption, the words after an equation) says the same and
+// is drawn again when the modifier changes; the outline, whose rows go to
+// their heading and follow no link, keeps the destination alone. The owner's
+// T1 of design/design-links.html.
+test("a link's tooltip names the click that follows it, for the platform and the modifier in force", { skip }, async () => {
+  const text = [
+    "A [link](https://example.com/a) and an address <https://example.com/b>.",
+    "",
+    "| Cell |",
+    "| ---- |",
+    "| [in a table](https://example.com/c) |",
+    "",
+    "![A caption with [a link](https://example.com/d)](" + PNG + ")",
+    "",
+    "$$",
+    "x^2",
+    "$$ where [it](https://example.com/e) runs on.",
+    "",
+    "# A [heading](https://example.com/f)",
+    "",
+  ].join("\n");
+  const tips = (page) =>
+    page.evaluate(() => {
+      const one = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? el.getAttribute("title") : null;
+      };
+      return {
+        link: one("#app .cm-line .mdm-link[data-mdm-href='https://example.com/a']"),
+        address: one("#app .cm-line .mdm-link:not([data-mdm-href])"),
+        table: one("#app .mdm-table .mdm-link"),
+        caption: one("#app .mdm-figcaption .mdm-link"),
+        tail: one("#app .mdm-math-tail .mdm-link"),
+        outline: one("#app .mdm-outline .mdm-link"),
+      };
+    });
+  const expect = (click) => ({
+    link: "https://example.com/a\n" + click,
+    address: click,
+    table: "https://example.com/c\n" + click,
+    caption: "https://example.com/d\n" + click,
+    tail: "https://example.com/e\n" + click,
+    outline: "https://example.com/f",
+  });
+  for (const [platform, first, swapped] of [
+    [null, "Ctrl+click to open", "Alt+click to open"],
+    ["MacIntel", "Cmd+click to open", "Option+click to open"],
+  ]) {
+    const h = await open({
+      text,
+      scores: 0,
+      platform: platform || undefined,
+      seed: { settings: { frontMatter: "hidden", outline: "shown" } },
+    });
+    const where = " (" + (platform || "the harness's platform") + ")";
+    assert.deepEqual(await tips(h.page), expect(first), "with the modifier at alt" + where);
+    await postSettings(h.page, { outline: "shown", multiCursorModifier: "ctrlCmd" });
+    await sleep(300);
+    assert.deepEqual(await tips(h.page), expect(swapped), "with the modifier at ctrlCmd" + where);
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
 // ---------- The numbers in the margin ----------
 
 test("the numbers stand in one column beside the text, out of its flow", { skip }, async () => {

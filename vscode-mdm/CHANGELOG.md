@@ -49,6 +49,11 @@
   sentence that runs on from it, are drawn again under the equation as they
   are edited; they went on reading as they had until the equation itself
   changed.
+- A link's tooltip names the click that follows it under its destination,
+  `Ctrl+click to open` (`Cmd+click` on a Mac, `Alt+click` or `Option+click`
+  when `editor.multiCursorModifier` is `ctrlCmd`, and it follows the setting
+  when it changes); an address that is its own text is named the click
+  alone. A link in a table, in a caption or after an equation says the same.
 
 ## 0.7.0
 

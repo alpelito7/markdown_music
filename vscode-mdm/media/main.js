@@ -3773,6 +3773,10 @@
       // the widget draws it under the equation, painted as a cell of a
       // table is (G052). `key` is its source, for eq; `parts` its content.
       this.tail = tail || null;
+      // The click the tooltips of its links name (followHint), which moves
+      // with editor.multiCursorModifier; a drawing keeps its links as it
+      // painted them, so a change of it has to draw them again.
+      this.tip = followHint();
     }
     eq(other) {
       return (
@@ -3783,7 +3787,8 @@
         other.active === this.active &&
         other.open === this.open &&
         frameKey(other.frame) === frameKey(this.frame) &&
-        (other.tail ? other.tail.key : "") === (this.tail ? this.tail.key : "")
+        (other.tail ? other.tail.key : "") === (this.tail ? this.tail.key : "") &&
+        (other.tail ? other.tip : "") === (this.tail ? this.tip : "")
       );
     }
     className() {
@@ -3799,7 +3804,7 @@
         if (this.tail) {
           const tail = document.createElement("div");
           tail.className = "mdm-math-tail";
-          paintParts(tail, this.tail.parts);
+          paintParts(tail, this.tail.parts, true);
           el.appendChild(tail);
         }
       } else {
@@ -3843,7 +3848,8 @@
       if (
         this.block && from && from.block && !from.preview &&
         from.tex === this.tex && from.display === this.display &&
-        (from.tail ? from.tail.key : "") === (this.tail ? this.tail.key : "")
+        (from.tail ? from.tail.key : "") === (this.tail ? this.tail.key : "") &&
+        (from.tail ? from.tip : "") === (this.tail ? this.tip : "")
       ) {
         const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
         if (!chrome) return false;
@@ -4231,12 +4237,15 @@
       // The width the image's attribute asks for (`{width=30%}`), which the
       // page gives the picture (G014).
       this.width = width || null;
+      // The click the tooltips of its caption's links name (followHint).
+      this.tip = followHint();
     }
     eq(other) {
       return (
         other.src === this.src &&
         other.key === this.key &&
         other.width === this.width &&
+        other.tip === this.tip &&
         frameKey(other.frame) === frameKey(this.frame)
       );
     }
@@ -4259,7 +4268,7 @@
       fig.appendChild(img);
       const caption = document.createElement("div");
       caption.className = "mdm-figcaption";
-      paintParts(caption, this.caption);
+      paintParts(caption, this.caption, true);
       fig.appendChild(caption);
       return framed(fig, this.frame);
     }
@@ -4529,7 +4538,10 @@
       .join("");
   }
 
-  function paintParts(el, parts) {
+  // `follow`: the parts stand in the document, where Ctrl+click reaches a
+  // link (handleMouseDown), and a link's tooltip names that click; the
+  // outline, whose rows go to their heading, passes nothing.
+  function paintParts(el, parts, follow) {
     parts.forEach(function (p) {
       if (p.kind === "text") {
         el.appendChild(document.createTextNode(p.text));
@@ -4573,10 +4585,15 @@
         const link = document.createElement("span");
         link.className = "mdm-link";
         // The tooltip is the destination and the Markdown title rides
-        // beside it, the pair a link in the prose carries.
-        if (p.href) link.title = p.href;
+        // beside it, the pair a link in the prose carries, with the click
+        // that follows it under the destination where there is one; the
+        // destination rides alone in data-mdm-href for that click (hrefOf).
+        if (p.href) {
+          link.title = follow ? linkTip(p.href) : p.href;
+          link.setAttribute("data-mdm-href", p.href);
+        }
         if (p.title) link.setAttribute("data-mdm-title", p.title);
-        paintParts(link, p.parts);
+        paintParts(link, p.parts, follow);
         el.appendChild(link);
         return;
       }
@@ -4584,7 +4601,7 @@
       if (p.cls) mark.className = p.cls;
       else if (p.tag === "code") mark.className = "mdm-inline-code";
       if (p.title) mark.title = p.title;
-      paintParts(mark, p.parts);
+      paintParts(mark, p.parts, follow);
       el.appendChild(mark);
     });
   }
@@ -4686,17 +4703,20 @@
       this.frame = frame || null;
       this.active = !!active;
       this.open = !!open;
+      // The click the tooltips of its cells' links name (followHint).
+      this.tip = followHint();
     }
     eq(other) {
       return (
         other.source === this.source &&
         other.active === this.active &&
         other.open === this.open &&
+        other.tip === this.tip &&
         frameKey(other.frame) === frameKey(this.frame)
       );
     }
     updateDOM(dom, view, from) {
-      if (!from || from.source !== this.source || frameKey(from.frame) !== frameKey(this.frame)) return false;
+      if (!from || from.source !== this.source || from.tip !== this.tip || frameKey(from.frame) !== frameKey(this.frame)) return false;
       const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
       if (!chrome) return false;
       switchChrome(chrome, this);
@@ -4718,7 +4738,7 @@
         const el = document.createElement(tag);
         if (model.align[i]) el.style.textAlign = model.align[i];
         el.dataset.mdmAt = String(c.at);
-        paintParts(el, c.parts);
+        paintParts(el, c.parts, true);
         return el;
       };
       if (model.head.length) {
@@ -6045,9 +6065,14 @@
         if (name === "Link") {
           const target = linkTarget(node, text, refs);
           const attributes = {};
-          // The tooltip is the destination, what a hover shows anywhere;
-          // the Markdown title, when there is one, rides beside it.
-          if (target && target.url) attributes.title = target.url;
+          // The tooltip is the destination, what a hover shows anywhere, over
+          // the click that follows it (followHint); the destination rides alone
+          // in data-mdm-href, where the click reads it (hrefOf), and the
+          // Markdown title, when there is one, beside it.
+          if (target && target.url) {
+            attributes.title = linkTip(target.url);
+            attributes["data-mdm-href"] = target.url;
+          }
           if (target && target.title) attributes["data-mdm-title"] = target.title;
           const open = touched(n.from, n.to);
           decos.push(
@@ -6080,8 +6105,15 @@
           // is text here (G017). An address in angle brackets is a link
           // either way.
           if (name === "URL" && !/^[a-z][a-z0-9+.-]*:|@/i.test(text(n.from, n.to))) return false;
-          // With the caret in it, it is text being written, as a link is.
-          decos.push(Decoration.mark({ class: touched(n.from, n.to) ? "mdm-link mdm-link--open" : "mdm-link" }).range(n.from, n.to));
+          // With the caret in it, it is text being written, as a link is. Its
+          // tooltip is the click that follows it, its destination being its
+          // own text.
+          decos.push(
+            Decoration.mark({
+              class: touched(n.from, n.to) ? "mdm-link mdm-link--open" : "mdm-link",
+              attributes: { title: followHint() },
+            }).range(n.from, n.to)
+          );
           if (name === "Autolink" && !touched(n.from, n.to)) {
             node.getChildren("LinkMark").forEach(function (m) {
               hide(m.from, m.to);
@@ -6677,7 +6709,10 @@
       const byContent =
         tr.docChanged ||
         tr.state.field(hiddenLinesField) !== tr.startState.field(hiddenLinesField) ||
-        CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState);
+        CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState) ||
+        // The configuration, which is how a changed editor.multiCursorModifier
+        // comes in (gestures), and with it the click a link's tooltip names.
+        tr.reconfigured;
       if (byContent || released || (byGesture && !pointerHeld)) {
         heldRebuild = false;
         return rebuilt(value, tr);
@@ -9559,12 +9594,28 @@
     if (el) el.classList.toggle("mdm--follow", followsLink(e));
   }
 
-  // The destination of the link drawn at `el`: the tooltip carries it for a
-  // link with one, and an autolink or a bare address is its own text, an
+  // The click that follows a link, named for the platform in use and for
+  // the editor.multiCursorModifier in force (followsLink): the second line
+  // of a link's tooltip, under its destination, and the whole tooltip of an
+  // address that is its own text. The pointer over a link says that a click
+  // does something, and a plain click opens it for editing: this says which
+  // click follows it. The owner's T1 of design/design-links.html
+  // (2026-09-27).
+  function followHint() {
+    const mac = /Mac/.test(navigator.platform);
+    const key = multiCursorModifier === "ctrlCmd" ? (mac ? "Option" : "Alt") : mac ? "Cmd" : "Ctrl";
+    return key + "+click to open";
+  }
+  function linkTip(href) {
+    return href + "\n" + followHint();
+  }
+
+  // The destination of the link drawn at `el`: data-mdm-href carries it for
+  // a link with one, and an autolink or a bare address is its own text, an
   // address without a scheme that holds an `@` being mail.
   function hrefOf(el) {
-    const title = el.getAttribute("title");
-    if (title) return title;
+    const href = el.getAttribute("data-mdm-href");
+    if (href) return href;
     let node = CM.syntaxTree(view.state).resolveInner(view.posAtDOM(el), 1);
     while (node && node.name !== "Autolink" && node.name !== "URL") node = node.parent;
     if (!node) return null;
