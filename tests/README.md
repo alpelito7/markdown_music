@@ -5035,6 +5035,27 @@ either. A thirteenth, `flex: none` taken off the cells, changed nothing
 between a 300 and a 900px pane (cells of 30px, a panel of 314), so the
 declaration went instead.
 
+### The link blue on the dark side (2026-09-27)
+
+A citation and the number of a note are drawn in the link's blue (PX04,
+PX01), and their two rules named the light side's `#0969da` themselves, so
+on the dark side they stood in it beside links in `#58a6ff`; the page draws
+a note's number, which is a link there, in the dark side's blue. The blue is
+one custom property per side now, `--mdm-link` on `#app`, holding the values
+`SIDES` gives the page in `mdm.lua`, and the three rules read it. Test, in
+`webview-look.test.js`: *a link, a citation and the number of a note are
+drawn in the page's link blue, on either side*, which reads the two values
+out of `SIDES` instead of naming them, so a blue changed on one surface and
+not on the other fails it.
+
+- **F1** the citation's rule back on `#0969da` → the test, on the dark
+  side.
+- **F2** the note's rule back on `#0969da` → the test, on the dark side.
+- **F3** the dark side's `--mdm-link` taken off → the test, the link itself
+  on the dark side.
+
+All 3 caught, and the file restored after each.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

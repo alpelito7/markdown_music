@@ -24,6 +24,9 @@
   long for the column is kept whole and the card scrolls to its end, where
   it used to wrap. In a quote, the `>` marks of its lines show on the
   caret's line alone, as a code block's do.
+- On a dark theme, citations and the numbers of footnotes take the dark
+  side's link blue, which the links beside them and the exported page's
+  links already had; they stood in the light side's darker blue.
 
 ## 0.7.0
 

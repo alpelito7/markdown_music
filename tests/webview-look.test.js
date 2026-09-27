@@ -4224,6 +4224,40 @@ test("a figure carries the pointer, and a click on it opens its source", { skip 
   await h.close();
 });
 
+// ---------- Links ----------
+
+// The blue of a link is the page's, side by side (`link` in SIDES, mdm.lua),
+// and a citation and the number of a note are drawn in it too. Those two
+// named the light side's value themselves and stood in it on the dark side,
+// beside links in the dark side's own blue.
+test("a link, a citation and the number of a note are drawn in the page's link blue, on either side", { skip }, async () => {
+  const lua = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "_extensions", "mdm", "mdm.lua"), "utf8");
+  const start = lua.indexOf("local SIDES = {");
+  const sides = lua.slice(start, lua.indexOf("\n}\n", start));
+  const page = {};
+  for (const m of sides.matchAll(/\n {2}(light|dark) = \{[^}]*?\n {4}link = "#([0-9a-f]{6})"/g)) {
+    const n = parseInt(m[2], 16);
+    page[m[1]] = "rgb(" + (n >> 16) + ", " + ((n >> 8) & 255) + ", " + (n & 255) + ")";
+  }
+  assert.deepEqual(Object.keys(page).sort(), ["dark", "light"], "the link colours of SIDES were not found in mdm.lua");
+  const text = "A [link](https://example.com), a citation [@knuth] and a note.[^1]\n\n[^1]: The note.\n";
+  for (const side of ["light", "dark"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { theme: side, frontMatter: "hidden" } } });
+    const seen = await h.page.evaluate(() => {
+      // Off the deepest box that holds the text, which is what paints it.
+      const ink = (el) => {
+        while (el.firstElementChild && el.firstElementChild.textContent === el.textContent) el = el.firstElementChild;
+        return getComputedStyle(el).color;
+      };
+      const first = (sel) => document.querySelector("#app .cm-line " + sel);
+      return { link: ink(first(".mdm-link")), citation: ink(first(".mdm-cite")), note: ink(first(".mdm-note-ref")) };
+    });
+    assert.deepEqual(seen, { link: page[side], citation: page[side], note: page[side] }, side);
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
 // ---------- The numbers in the margin ----------
 
 test("the numbers stand in one column beside the text, out of its flow", { skip }, async () => {

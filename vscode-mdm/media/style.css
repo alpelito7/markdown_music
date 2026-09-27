@@ -1305,20 +1305,27 @@ body {
 #app .mdm-delim * {
   color: var(--mdm-line-ink);
 }
+/* The blue of a link, one per side: the values the page is given for its
+   own links (`link` in SIDES, mdm.lua). A citation and the number of a note
+   are drawn in it as well, and they named the light side's value themselves,
+   so on the dark side they stood in #0969da beside links in #58a6ff; on the
+   page a note's number is a link, and is drawn in the dark side's blue. */
+#app {
+  --mdm-link: #0969da;
+}
+#app.mdm--dark {
+  --mdm-link: #58a6ff;
+}
 /* The inner selector as well: the highlighter wraps a bare URL, a label
    and a title in spans of its own, each with a colour (url, labelName,
    string), and the link's blue on the outer span never reached the glyphs
    (G016). */
 #app .mdm-link,
 #app .mdm-link * {
-  color: #0969da;
+  color: var(--mdm-link);
 }
 #app .mdm-link {
   text-decoration: none;
-}
-#app.mdm--dark .mdm-link,
-#app.mdm--dark .mdm-link * {
-  color: #58a6ff;
 }
 /* An escaped character and an entity are text: the highlighter's grey and
    string colour on their spans give way to the ink around them. */
@@ -1395,7 +1402,7 @@ body {
    reference or a link; here it is drawn in the link colour, as written. */
 #app .mdm-cite,
 #app .mdm-cite * {
-  color: #0969da;
+  color: var(--mdm-link);
 }
 /* A footnote (PX01): the reference raised in the link colour, as the page
    raises the number it gives the note; a note written inline in a small
@@ -1403,7 +1410,7 @@ body {
    prose face, since the page sets it at the foot. */
 #app .mdm-note-ref,
 #app .mdm-note-ref * {
-  color: #0969da;
+  color: var(--mdm-link);
 }
 #app .mdm-note-inline {
   font-size: 0.88em;
