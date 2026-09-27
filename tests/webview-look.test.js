@@ -2027,8 +2027,11 @@ test("an editor left in the sans comes back in the sans", { skip }, async () => 
 // ---------- Justified text ----------
 
 // Each kind of line that wraps, written long enough to take several rows of a
-// 500 px column: the three kinds of prose, which justify, and the three that
-// do not, a heading, the source of a table with a caret in it and a comment.
+// 500 px column: the three kinds of prose, which justify, and the two that do
+// not, a heading and a comment. And the source of a table with a caret in it,
+// which is written as long and does not wrap at all: it stands on a card, as
+// the source of a block of code does, and keeps its line whole, the end of it
+// reached by scrolling the card (2026-09-23).
 const JUSTIFY_DOC = [
   "# A heading written long enough to wrap over two rows of the narrow column, which is the point",
   "",
@@ -2122,11 +2125,19 @@ test("the prose is justified to both edges, and the button sets it ragged on the
       assert.ok(Math.abs(row.gap) < 1, key + "has a row " + row.gap + "px short of the edge: " + JSON.stringify(justified[key]));
     }
   }
-  // A heading, the source of a table and a comment are set as typed.
-  for (const key of ["A heading wr", "A table cell", "<!-- A comme"]) {
+  // A heading and a comment are set as typed.
+  for (const key of ["A heading wr", "<!-- A comme"]) {
     assert.ok(justified[key], key + " did not wrap: " + JSON.stringify(Object.keys(justified)));
     assert.ok(justified[key][0].gap > 5, key + " was justified: " + JSON.stringify(justified[key]));
   }
+  // And the source of the table more so: its line is one row, and what does
+  // not fit the column is held by the card and not by a second row.
+  assert.ok(!justified["A table cell"], "the source of the table wrapped: " + JSON.stringify(justified["A table cell"]));
+  const tableRow = await h.page.evaluate(() => {
+    const line = Array.from(document.querySelectorAll("#app .cm-line.mdm-table-line")).find((l) => l.textContent.indexOf("A table cell") >= 0);
+    return line ? { held: line.scrollWidth - line.clientWidth } : null;
+  });
+  assert.ok(tableRow && tableRow.held > 0, "the long row of the table is not held by its card: " + JSON.stringify(tableRow));
 
   // A caret on the first row of the paragraph, well inside it, where the
   // spaces before it are widened: the drawn caret has to follow its letter
@@ -3778,6 +3789,258 @@ test("clicking a drawn table opens its source at the cell that was clicked", { s
   await h.close();
 });
 
+// The source of a table stands as the source of an equation and of a block
+// of code stand, at the owner's request (2026-09-23): on the card of the code
+// ground, coloured from the palette of the code on a card (its marks in the
+// grey of a comment, the cells of its head in the colour of a keyword; the
+// brass of the scores was tried first and turned down), and with a copy
+// button in the rail beside it. A block of code in the same
+// document is the measure of the card: the same ground, face, size and
+// padding, read off one of its lines. A last row too long for the column is
+// there for the card's scroll, which the table's lines take in one piece.
+const TABLE_CARD_DOC = [
+  "A block of code, the measure of a card.",
+  "",
+  "```python",
+  "x = 1",
+  "```",
+  "",
+  "| a | `b` |",
+  "| :--- | ---: |",
+  "| $x$ | **y** |",
+  "| a row too long | for the column of a narrow pane, which it runs on past by a good deal |",
+  "",
+  "After.",
+  "",
+].join("\n");
+
+test("an open table stands on a card, coloured as code is, with its copy in the rail", { skip }, async () => {
+  const h = await open({ text: TABLE_CARD_DOC, scores: 0, withFrontMatter: false });
+  await setSelection(h.page, await posOf(h.page, "y**"));
+  await sleep(300);
+  const seen = await h.page.evaluate(() => {
+    const px = (n) => Math.round(n * 100) / 100;
+    const look = (el) => {
+      const cs = getComputedStyle(el);
+      return { ground: cs.backgroundColor, face: cs.fontFamily, size: cs.fontSize, space: cs.whiteSpace, side: cs.paddingLeft };
+    };
+    const lines = Array.from(document.querySelectorAll("#app .cm-line.mdm-table-line"));
+    const code = document.querySelector("#app .cm-line.mdm-code-line");
+    const ink = (token) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(" + token + ")";
+      document.getElementById("app").appendChild(probe);
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    };
+    const deepestInk = (el) => {
+      let deepest = el;
+      while (deepest.firstElementChild) deepest = deepest.firstElementChild;
+      return getComputedStyle(deepest).color;
+    };
+    const table = document.querySelector("#app .mdm-table");
+    const rail = table.querySelector(":scope > .mdm-chrome");
+    const copy = rail.querySelector(".mdm-copy");
+    const column = document.querySelector("#app .cm-content").getBoundingClientRect();
+    return {
+      count: lines.length,
+      looks: lines.map((l) => JSON.stringify(look(l))),
+      code: JSON.stringify(look(code)),
+      first: lines[0].classList.contains("mdm-table-first") && parseFloat(getComputedStyle(lines[0]).paddingTop) > 0,
+      last: lines[lines.length - 1].classList.contains("mdm-table-last") && parseFloat(getComputedStyle(lines[lines.length - 1]).paddingBottom) > 0,
+      // One width of scroll for the whole card, the longest line's.
+      widths: Array.from(new Set(lines.map((l) => l.scrollWidth))).length,
+      // The marks of the table, line by line, the outermost element of each,
+      // and the cells of its head.
+      marks: lines.slice(0, 3).map((l) =>
+        Array.from(l.querySelectorAll(".mdm-table-mark"))
+          .filter((d) => !d.parentElement.closest(".mdm-table-mark"))
+          .map((d) => d.textContent)
+      ),
+      heads: lines.map((l) => Array.from(l.querySelectorAll(".mdm-table-head")).map((d) => d.textContent)),
+      markInks: Array.from(new Set(lines.flatMap((l) => Array.from(l.querySelectorAll(".mdm-table-mark"))).map(deepestInk))),
+      headInk: getComputedStyle(lines[0].querySelector(".mdm-table-head")).color,
+      // Nothing of the table in the brass of the delimiters of a fence.
+      brassed: lines.flatMap((l) => Array.from(l.querySelectorAll(".mdm-delim"))).length,
+      comment: ink("--mdm-syn-comment"),
+      keyword: ink("--mdm-syn-keyword"),
+      rail: {
+        open: rail.classList.contains("mdm-chrome--open"),
+        active: rail.classList.contains("mdm-chrome--active"),
+        shown: getComputedStyle(copy).visibility,
+        off: px(rail.getBoundingClientRect().left - column.right),
+        level: px(rail.getBoundingClientRect().top - lines[0].getBoundingClientRect().top),
+      },
+    };
+  });
+  assert.equal(seen.count, 4, "the four lines of the table did not show");
+  seen.looks.forEach((l, i) => assert.equal(l, seen.code, "line " + (i + 1) + " of the table is not on the card a block of code is on"));
+  assert.ok(seen.first, "the first line of the table does not open the card");
+  assert.ok(seen.last, "the last line of the table does not close the card");
+  assert.equal(seen.widths, 1, "the lines of the table scroll over different widths");
+  assert.deepEqual(seen.marks, [
+    ["|", "|", "`", "`", "|"],
+    ["| :--- | ---: |"],
+    ["|", "$", "$", "|", "|"],
+  ], "the pipes, the row of alignment and the marks of code and maths are not the table's marks");
+  assert.deepEqual(seen.heads, [["a", "`b`"], [], [], []], "the cells of the head, and only those, are not marked as the head");
+  assert.deepEqual(seen.markInks, [seen.comment], "a mark of the table is not drawn in the grey of a comment");
+  assert.equal(seen.headInk, seen.keyword, "the head of the table is not drawn in the colour of a keyword");
+  assert.equal(seen.brassed, 0, "a mark of the table is drawn in the brass of the delimiters");
+  assert.deepEqual(
+    seen.rail,
+    { open: true, active: true, shown: "visible", off: 10, level: 0 },
+    "the copy of an open table is not up in the rail, level with its first line"
+  );
+
+  // At a narrow pane the long row runs past the column: the card scrolls in
+  // one piece and the document does not, and Home and End go to the ends of
+  // the line and not to the ends of the card's window.
+  await h.page.setViewport({ width: 480, height: 2400 });
+  await sleep(300);
+  await setSelection(h.page, await posOf(h.page, "good deal"));
+  await sleep(300);
+  const scrolled = await h.page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll("#app .cm-line.mdm-table-line"));
+    const scroller = document.querySelector("#app .cm-scroller");
+    return {
+      offsets: Array.from(new Set(lines.map((l) => l.scrollLeft))),
+      documentHeld: scroller.scrollWidth - scroller.clientWidth,
+    };
+  });
+  assert.equal(scrolled.offsets.length, 1, "the lines of the table stand at different offsets: " + scrolled.offsets);
+  assert.ok(scrolled.offsets[0] > 0, "the card did not scroll to the caret at the end of its long row");
+  assert.equal(scrolled.documentHeld, 0, "the document scrolled sideways for a row of the table");
+  await h.page.keyboard.press("Home");
+  await sleep(300);
+  const home = await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    const head = view.state.selection.main.head;
+    return head - view.state.doc.lineAt(head).from;
+  });
+  assert.equal(home, 0, "Home stopped short of the start of the row: column " + home);
+  assert.equal(await docText(h.page), TABLE_CARD_DOC, "the document was changed by looking at it");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The copy button of a table copies the table as Markdown, its rows as they
+// were typed and nothing of the quote or the list it stands in, the way the
+// copy of a card of code leaves those out. The rail comes up on a shut table
+// under the pointer, as it does on an equation, and its copy leaves the caret
+// where it was; on an open one it is up while the caret is in the table.
+const TABLES_IN_CONTAINERS = [
+  "Prose.",
+  "",
+  "> | a | b |",
+  "> | --- | --- |",
+  "> | 1 | $x$ |",
+  "",
+  "- An item holding a table:",
+  "",
+  "  | c | d |",
+  "  | :-- | --: |",
+  "  | 3 | 4 |",
+  "",
+  "The end.",
+  "",
+].join("\n");
+
+test("a table's copy button copies it as Markdown, without the quote or the list it stands in", { skip }, async () => {
+  const h = await open({ text: TABLES_IN_CONTAINERS, scores: 0, withFrontMatter: false, clipboard: true });
+  await setSelection(h.page, 2);
+  await sleep(250);
+  const tableAt = (i) =>
+    h.page.evaluate((i) => {
+      const el = document.querySelectorAll("#app .mdm-table")[i];
+      el.scrollIntoView({ block: "center" });
+      const r = el.getBoundingClientRect();
+      return { x: r.left + 20, y: r.top + 12 };
+    }, i);
+  const copyAt = (i) =>
+    h.page.evaluate((i) => {
+      const copy = document.querySelectorAll("#app .mdm-table")[i].querySelector(":scope > .mdm-chrome .mdm-copy");
+      const r = copy.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, shown: getComputedStyle(copy).visibility };
+    }, i);
+  // The quoted one, shut: the pointer on it brings its rail up.
+  const quoted = await tableAt(0);
+  await h.page.mouse.move(quoted.x, quoted.y);
+  await sleep(300);
+  const button = await copyAt(0);
+  assert.equal(button.shown, "visible", "the pointer on a shut table did not bring its copy up");
+  await h.page.mouse.move(button.x, button.y);
+  await sleep(200);
+  await h.page.mouse.click(button.x, button.y);
+  await sleep(100);
+  const pulsed = await h.page.evaluate(() => document.querySelectorAll("#app .mdm-table.mdm-copy-pulse").length);
+  await sleep(300);
+  assert.deepEqual(
+    await h.page.evaluate(() => window.__copied),
+    ["| a | b |\n| --- | --- |\n| 1 | $x$ |"],
+    "the quoted table was not copied as a table"
+  );
+  assert.equal(pulsed, 1, "the table that was copied gave no pulse");
+  assert.equal(
+    await h.page.evaluate(() => window.__mdm.view.state.selection.main.head),
+    2,
+    "the copy moved the caret"
+  );
+  assert.equal(
+    await h.page.evaluate(() => document.querySelectorAll("#app .cm-line.mdm-table-line").length),
+    0,
+    "the copy opened the table"
+  );
+  // The one in the list, open: its rail is up with the caret in it.
+  await setSelection(h.page, await posOf(h.page, "| 3"));
+  await sleep(300);
+  const listed = await copyAt(1);
+  assert.equal(listed.shown, "visible", "the copy of an open table is not up");
+  await h.page.mouse.click(listed.x, listed.y);
+  await sleep(300);
+  assert.deepEqual(
+    (await h.page.evaluate(() => window.__copied))[1],
+    "| c | d |\n| :-- | --: |\n| 3 | 4 |",
+    "the table in the list was copied with its indent"
+  );
+  assert.equal(await docText(h.page), TABLES_IN_CONTAINERS, "a copy changed the document");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A table in a quote, open: the `>` of its lines are put away but on the
+// line the caret is on, as a fence in a quote does with its own (G033).
+// Lezer hangs the `>` of every line but the first under the table, where the
+// walk that puts marks away never went, so they stood on the card at the
+// head of those lines while the first line's, which is the quote's, was put
+// away.
+test("a table in a quote shows its > on the caret's line alone, as a fence does", { skip }, async () => {
+  const h = await open({ text: TABLES_IN_CONTAINERS, scores: 0, withFrontMatter: false });
+  const shown = async (needle) => {
+    await setSelection(h.page, await posOf(h.page, needle));
+    await sleep(300);
+    return h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .cm-line.mdm-table-line"))
+        .slice(0, 3)
+        .map((l) => l.textContent)
+    );
+  };
+  assert.deepEqual(
+    await shown("| 1 |"),
+    ["| a | b |", "| --- | --- |", "> | 1 | $x$ |"],
+    "the > of a line the caret is not on stood on the card"
+  );
+  assert.deepEqual(
+    await shown("| --- |"),
+    ["| a | b |", "> | --- | --- |", "| 1 | $x$ |"],
+    "the > did not follow the caret to the row of alignment"
+  );
+  assert.equal(await docText(h.page), TABLES_IN_CONTAINERS, "the document was changed by looking at it");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // Fourteen columns of prose at a 600px pane: the columns squeeze to their
 // longest word and the box scrolls the rest, and no word is broken in the
 // middle. CodeMirror sets `overflow-wrap: anywhere` on the content, which
@@ -3806,7 +4069,9 @@ test("a wide table squeezes its columns to their longest word and scrolls the re
   await h.page.mouse.click(2, 2);
   await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
   const out = await h.page.evaluate(() => {
-    const box = document.querySelector("#app .mdm-table");
+    // The box that scrolls, inside the widget: the widget itself is what the
+    // rail of its copy button is placed against, out in the margin.
+    const box = document.querySelector("#app .mdm-table .mdm-table-scroll");
     const broken = [];
     for (const cell of box.querySelectorAll("th, td")) {
       for (const node of cell.childNodes) {
@@ -3821,10 +4086,15 @@ test("a wide table squeezes its columns to their longest word and scrolls the re
         }
       }
     }
-    return { box: box.clientWidth, ink: box.scrollWidth, broken };
+    // What the editor itself holds back sideways: a box that does not scroll
+    // reports its ink past its width all the same, and it is the document
+    // that takes the overflow then.
+    const scroller = document.querySelector("#app .cm-scroller");
+    return { box: box.clientWidth, ink: box.scrollWidth, documentHeld: scroller.scrollWidth - scroller.clientWidth, broken };
   });
   assert.deepEqual(out.broken, [], "words broken inside a cell");
   assert.ok(out.ink > out.box, "the table did not scroll inside its box: " + JSON.stringify(out));
+  assert.equal(out.documentHeld, 0, "the table stretched the document sideways: " + JSON.stringify(out));
   assert.deepEqual(h.errors, []);
   await h.close();
 });

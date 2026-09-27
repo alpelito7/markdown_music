@@ -619,10 +619,11 @@ What it does:
   the width of the panel, and narrow ones (`%%staffwidth`) centred.
 - **Tables drawn**: a pipe table is set as a table, the maths of its cells
   rendered and each column taking the alignment its second row asks for. A
-  caret in one brings the pipes back, in a monospace grid the columns line up
-  in, with the drawing below as the live preview; a click on a cell opens the
-  source at that cell, and the page is held where it was instead of sliding
-  down by the height the source took.
+  caret in one brings the pipes back on a card, as a code block's source
+  stands, in the code's face and colours; a row too long for the column is
+  kept whole and the card scrolls to it, and the drawing below is the live
+  preview. A click on a cell opens the source at that cell, and the page is
+  held where it was instead of sliding down by the height the source took.
 - **Outline panel**: the button leading the bar opens a column down the left
   edge with the headings of the whole document, however long, indented by
   level, the section the caret is in marked and every row a jump to it. A row
@@ -643,11 +644,12 @@ What it does:
   (note/tip/warning/important/caution), and the `:::` lines are drawn small
   and faint until the caret is on them. An unclosed `:::` stays plain text.
 - **Copying a block flashes the block, not the page**: the copy button of a
-  code block, a display equation or a score, in the margin right of the text
-  beside the block the pointer is on or whose source is open, puts the source
-  on the clipboard through
-  the API, with nothing selected and the caret left where it was (the formula
-  of an equation as written between its `$$`). A score is
+  code block, a display equation, a table or a score, in the margin right of
+  the text beside the block the pointer is on or whose source is open, puts
+  the source on the clipboard through the API, with nothing selected and the
+  caret left where it was (the formula of an equation as written between its
+  `$$`, a table as its rows without the `>` or the indentation of a quote or
+  a list it stands in). A score is
   copied without its layout directives (`%%staffwidth` and the like), which
   size it for this document and mean nothing pasted elsewhere.
 - **The buttons remember what they were left on.** Every toolbar button that

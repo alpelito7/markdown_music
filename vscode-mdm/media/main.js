@@ -1190,8 +1190,8 @@
 
   // ---------- Copy ----------
 
-  // The copy button of a code block, a display equation or a score, in the
-  // rail beside the block (widget chrome, see handleChromeClick and
+  // The copy button of a code block, a display equation, a table or a score,
+  // in the rail beside the block (widget chrome, see handleChromeClick and
   // `#app .mdm-chrome` in style.css): the source goes to the clipboard
   // through the clipboard API, nothing is selected, and the block that was
   // copied gives a brief pulse of its own background as the feedback.
@@ -4388,6 +4388,11 @@
     Subscript: "sub",
   };
 
+  // The marks of an open table, coloured as one: its pipes and its row of
+  // alignment (both TableDelimiter), and the marks of the code and the maths
+  // in its cells.
+  const TABLE_MARKS = /^(?:TableDelimiter|CodeMark|InlineMathMark|InlineBlockMathMark)$/;
+
   // The parts of a link that are not its label: skipped when the label is
   // read, so `[text](url "title")` draws as its text alone and a reference
   // (`[text][ref]`) draws as its text without the `[ref]` after it (G002).
@@ -4644,32 +4649,66 @@
       while (out.length < headCells.length) out.push({ at: row.to - node.from, parts: [] });
       return out;
     };
+    // What the copy button copies: the rows as typed, one to a line. A row
+    // starts past the `> ` or the indent of the container the table stands
+    // in, so the table comes out as a table and not as a piece of a quote.
+    const rows = [];
+    for (let row = node.firstChild; row; row = row.nextSibling) {
+      if (/^Table(?:Header|Delimiter|Row)$/.test(row.name)) rows.push(text(row.from, row.to));
+    }
     return {
       align: align,
       head: headCells,
       body: node.getChildren("TableRow").map(fit),
+      copy: rows.join("\n"),
     };
   }
 
   // A drawn table, a block widget under the source lines, which are hidden
   // while no caret is in them. Equal while the source is the same, so the
   // element survives carets going in and out of the document around it.
+  //
+  // It carries a copy button in a rail beside it, the twin of a display
+  // equation's (MathWidget): shown while its source is open (`open`), marked
+  // while the main caret is in it (`active`), and switched in place when only
+  // those change. What the button copies is the table as Markdown, its rows
+  // without the `> ` or the indent of a quote or a list it stands in, the
+  // way a code block's copy leaves those out (tableModel, `copy`).
   class TableWidget extends WidgetType {
-    constructor(source, model, frame) {
+    constructor(source, model, frame, active, open) {
       super();
       this.source = source;
       this.model = model;
       this.frame = frame || null;
+      this.active = !!active;
+      this.open = !!open;
     }
     eq(other) {
-      return other.source === this.source && frameKey(other.frame) === frameKey(this.frame);
+      return (
+        other.source === this.source &&
+        other.active === this.active &&
+        other.open === this.open &&
+        frameKey(other.frame) === frameKey(this.frame)
+      );
+    }
+    updateDOM(dom, view, from) {
+      if (!from || from.source !== this.source || frameKey(from.frame) !== frameKey(this.frame)) return false;
+      const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
+      if (!chrome) return false;
+      switchChrome(chrome, this);
+      return true;
     }
     toDOM() {
       const model = this.model;
-      // The scroller is the widget itself: a table wider than the page is
-      // pushed around inside it instead of stretching the document.
+      // The block is what the rail is placed against, and the scroller is a
+      // box inside it: a table wider than the page is pushed around in there
+      // instead of stretching the document, and the rail, which stands out in
+      // the margin, would be clipped by the scroller if it were inside it.
       const wrap = document.createElement("div");
       wrap.className = "mdm-table";
+      wrap.setAttribute("data-mdm-source", model.copy);
+      const scroll = document.createElement("div");
+      scroll.className = "mdm-table-scroll";
       const table = document.createElement("table");
       const cell = function (c, i, tag) {
         const el = document.createElement(tag);
@@ -4696,11 +4735,17 @@
         body.appendChild(tr);
       });
       table.appendChild(body);
-      wrap.appendChild(table);
+      scroll.appendChild(table);
+      wrap.appendChild(scroll);
+      const chrome = document.createElement("div");
+      chrome.className = chromeClass("mdm-chrome", this);
+      chrome.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
+      wrap.appendChild(chrome);
       return framed(wrap, this.frame);
     }
     // The click puts the caret at the source, which the editor's own handler
-    // does (revealBlock); CodeMirror leaves the event alone.
+    // does (revealBlock), and the rail's are answered by handleChromeClick;
+    // CodeMirror leaves every event alone.
     ignoreEvent() {
       return true;
     }
@@ -5895,18 +5940,22 @@
         if (name === "Table") {
           const blockFrom = doc.lineAt(n.from).from;
           const blockTo = doc.lineAt(n.to).to;
+          const open = touched(blockFrom, blockTo);
+          const active = open && holdsMainHead(state, blockFrom, blockTo);
           decos.push(
             Decoration.widget({
               widget: new TableWidget(
                 text(blockFrom, blockTo),
                 tableModel(node, text, refs),
-                frameOf(doc.lineAt(blockFrom).number)
+                frameOf(doc.lineAt(blockFrom).number),
+                active,
+                open
               ),
               block: true,
               side: 1,
             }).range(blockTo)
           );
-          if (!touched(blockFrom, blockTo)) {
+          if (!open) {
             hideBlock(blockFrom, blockTo);
             return false;
           }
@@ -5915,7 +5964,47 @@
           // table below as the live preview. The cells keep their source,
           // equations included: a rendered `$i$` in a column would move the
           // pipe the row below is being aligned against.
+          //
+          // On a card, the way the source of an equation and of a block of
+          // code stands: the same ground, the same padding and corners, the
+          // same scroll inside itself for a row longer than the column. And
+          // coloured from the palette the code on a card is painted from
+          // (--mdm-syn-*), at the owner's word, and not in the brass of the
+          // scores: the pipes, the row of alignment and the backticks and `$`
+          // of the cells are the table's marks (.mdm-table-mark), and the
+          // cells of the head carry a class of their own (.mdm-table-head),
+          // since the head is the one row a table sets apart. What colour each
+          // takes is style.css's.
           lines.add(blockFrom, blockTo, "mdm-table-line mdm-src-line");
+          lines.card(blockFrom, blockTo);
+          lines.add(blockFrom, blockFrom, "mdm-table-first");
+          lines.add(blockTo, blockTo, "mdm-table-last");
+          (function marksIn(parent) {
+            for (let c = parent.firstChild; c; c = c.nextSibling) {
+              if (c.to <= c.from) continue;
+              if (TABLE_MARKS.test(c.name)) {
+                decos.push(Decoration.mark({ class: "mdm-table-mark" }).range(c.from, c.to));
+                continue;
+              }
+              if (c.name === "TableCell" && parent.name === "TableHeader") {
+                decos.push(Decoration.mark({ class: "mdm-table-head" }).range(c.from, c.to));
+              }
+              marksIn(c);
+            }
+          })(node);
+          // The > of a quote the table stands in, on every line but the first:
+          // Lezer hangs them under the table, where the walk never goes, so
+          // they stood on the card at the head of those lines while the first
+          // line's, which is the quote's, was put away. Put away the same on
+          // every line the caret is not on, as a fence does with its own
+          // (G033).
+          node.getChildren("QuoteMark").forEach(function (m) {
+            const line = doc.lineAt(m.from);
+            if (!touched(line.from, line.to)) {
+              const r = markWithSpace(m);
+              hide(r.from, r.to);
+            }
+          });
           return false;
         }
 
@@ -9723,9 +9812,9 @@
   // written: what drawSelection put there is remembered together with the
   // offset the card stood at, and from then on a mark of that card is moved
   // by the difference and cut to the card's window.
-  const CARD_ROWS = ".mdm-code-line, .mdm-math-line, .mdm-fm-line";
-  const CARD_FIRST = /mdm-(?:code|math|fm)-first/;
-  const CARD_LAST = /mdm-(?:code|math|fm)-last/;
+  const CARD_ROWS = ".mdm-code-line, .mdm-math-line, .mdm-table-line, .mdm-fm-line";
+  const CARD_FIRST = /mdm-(?:code|math|table|fm)-first/;
+  const CARD_LAST = /mdm-(?:code|math|table|fm)-last/;
   // What a caret keeps between itself and the edge of the card it is brought
   // back into: the card's own air, 0.9em of the monospace it is set in.
   const CARD_AIR = 12;
@@ -10390,15 +10479,17 @@
     view.focus();
   }
 
-  // The source of the block a piece of chrome belongs to: a score and a
-  // display equation carry it on their widget; a code block's chrome sits at
-  // the start of the top line of its card, and the text is read back from the
-  // editor at that position.
+  // The source of the block a piece of chrome belongs to: a score, a display
+  // equation and a table carry it on their widget; a code block's chrome sits
+  // at the start of the top line of its card, and the text is read back from
+  // the editor at that position.
   function chromeSource(el) {
     const score = el.closest(".mdm-score");
     if (score) return { source: score.getAttribute("data-mdm-source") || "", score: score };
     const math = el.closest(".mdm-math--block");
     if (math) return { source: math.getAttribute("data-mdm-source") || "", math: math };
+    const table = el.closest(".mdm-table");
+    if (table) return { source: table.getAttribute("data-mdm-source") || "", table: table };
     const chrome = el.closest(".mdm-chrome--code");
     if (!chrome || !view) return null;
     const pos = view.posAtDOM(chrome);
@@ -10425,27 +10516,28 @@
   //
   // A rail of buttons is shown while the pointer is on its block
   // (.mdm-chrome--hover), as it is while the block's source is open
-  // (.mdm-chrome--open, from the widgets): a score, a display equation or a
-  // block of code, its source lines included while they show, or the rail
-  // itself (style.css, `#app .mdm-chrome`). Where the rail of a short block
-  // hangs past it beside the next one's, the rail under the pointer is also
-  // drawn over the others, as the caret's is over the rest
+  // (.mdm-chrome--open, from the widgets): a score, a display equation, a
+  // table or a block of code, its source lines included while they show, or
+  // the rail itself (style.css, `#app .mdm-chrome`). Where the rail of a
+  // short block hangs past it beside the next one's, the rail under the
+  // pointer is also drawn over the others, as the caret's is over the rest
   // (.mdm-chrome--active).
   //
-  // Which rail is read off the element under the pointer. A score and an
-  // equation are one element each with their rail inside; the source lines
-  // of either run straight into that element; a block of code is lines, and
-  // its chrome rides the top one of them.
+  // Which rail is read off the element under the pointer. A score, an
+  // equation and a table are one element each with their rail inside; the
+  // source lines of any of them run straight into that element; a block of
+  // code is lines, and its chrome rides the top one of them.
   function chromeUnder(target) {
     if (!view || !target || !target.closest) return null;
     const rail = target.closest(".mdm-chrome");
     if (rail) return rail;
-    const drawing = target.closest(".mdm-score, .mdm-math--block");
+    const drawing = target.closest(".mdm-score, .mdm-math--block, .mdm-table");
     if (drawing) return drawing.querySelector(":scope > .mdm-chrome");
     const line = target.closest(".cm-line");
     if (!line || !view.contentDOM.contains(line)) return null;
     if (line.classList.contains("mdm-abc-line")) return railAfter(line, "mdm-abc-line", "mdm-score");
     if (line.classList.contains("mdm-math-line")) return railAfter(line, "mdm-math-line", "mdm-math--block");
+    if (line.classList.contains("mdm-table-line")) return railAfter(line, "mdm-table-line", "mdm-table");
     if (!line.classList.contains("mdm-code-line")) return null;
     // Back up the lines of the block to the one the chrome rides. What stands
     // between two of them with no class is a hidden fence; anything else with
@@ -10503,11 +10595,11 @@
 
   // ---- The rail of an open block stays where it stood ----
   //
-  // A score and a display equation are block widgets under their source, and
-  // the rail rides the widget: when a caret opened the source, the lines of
-  // it came in above the drawing and the rail went down with the drawing, a
-  // tune's height of source away from where the reader had just pressed its
-  // copy. The rail of an open one is stood on the first line of its source
+  // A score, a display equation and a table are block widgets under their
+  // source, and the rail rides the widget: when a caret opened the source,
+  // the lines of it came in above the drawing and the rail went down with the
+  // drawing, a tune's height of source away from where the reader had just
+  // pressed its copy. The rail of an open one is stood on the first line of its source
   // instead, which is where the top of the block was while it was shut, and
   // where a block of code keeps its own rail either way (on its fence). The
   // lift is read off the lines as they are laid out, since the source can be
@@ -10521,13 +10613,18 @@
       read: function () {
         const moves = [];
         const blocks = view.contentDOM.querySelectorAll(
-          ":scope > .mdm-score, :scope > .mdm-math--block, " +
-            ":scope > .mdm-block-framed > .mdm-score, :scope > .mdm-block-framed > .mdm-math--block"
+          ":scope > .mdm-score, :scope > .mdm-math--block, :scope > .mdm-table, " +
+            ":scope > .mdm-block-framed > .mdm-score, :scope > .mdm-block-framed > .mdm-math--block, " +
+            ":scope > .mdm-block-framed > .mdm-table"
         );
         blocks.forEach(function (block) {
           const rail = block.querySelector(":scope > .mdm-chrome");
           if (!rail) return;
-          const lineClass = block.classList.contains("mdm-score") ? "mdm-abc-line" : "mdm-math-line";
+          const lineClass = block.classList.contains("mdm-score")
+            ? "mdm-abc-line"
+            : block.classList.contains("mdm-table")
+              ? "mdm-table-line"
+              : "mdm-math-line";
           // The block's place among the lines is its wrapper's when it has
           // one (a block in a quote).
           const outer = block.parentElement.classList.contains("mdm-block-framed") ? block.parentElement : block;
@@ -10571,6 +10668,8 @@
       pulseBlock(found.score);
     } else if (found.math) {
       pulseBlock(found.math);
+    } else if (found.table) {
+      pulseBlock(found.table);
     } else if (found.lines) {
       found.lines.forEach(pulseBlock);
     }
@@ -10649,7 +10748,7 @@
   // selected from there (measured in the harness). A line of source does not
   // wrap, so the ends of the line are the answer, which is what CodeMirror
   // itself does when nothing in the editor wraps at all.
-  const CARD_NODES = /^(?:FencedCode|CodeBlock|BlockMath|FrontMatter)$/;
+  const CARD_NODES = /^(?:FencedCode|CodeBlock|BlockMath|Table|FrontMatter)$/;
   function inCard(state, pos) {
     let node = CM.syntaxTree(state).resolveInner(pos, 1);
     while (node) {

@@ -106,7 +106,7 @@ async function at(page, width) {
     const scroller = document.querySelector("#app .cm-scroller");
     const content = document.querySelector("#app .cm-content");
     const eq = document.querySelector("#app .mdm-math--block .katex-display");
-    const table = document.querySelector("#app .mdm-table");
+    const table = document.querySelector("#app .mdm-table .mdm-table-scroll");
     const codeLines = Array.from(document.querySelectorAll("#app .cm-line.mdm-code-line"));
     const long = codeLines.find((l) => l.textContent.indexOf("unbreakable") >= 0);
     const short = codeLines.find((l) => l.textContent.indexOf("x = 1") >= 0);

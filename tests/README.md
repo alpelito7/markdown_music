@@ -67,8 +67,8 @@ a selection range overlaps or touches its lines, so a caret at the very end
 of the line above does not open it and one at the start of its first line
 does. The hidden source of a rendered block is a `div[contenteditable=false]`
 with no class and zero height between the lines. The chrome of a block (a
-score's player toggle under its copy, the copy of a display equation and of a
-code block) is a rail in the margin right of the column. Its buttons are
+score's player toggle under its copy, the copy of a display equation, of a
+code block and of a table) is a rail in the margin right of the column. Its buttons are
 `visibility: hidden` at rest: read `getComputedStyle(button).visibility`, not
 the rail's, whose box stays. They are up while `.mdm-chrome--hover` is on the
 rail of the block under the pointer (from a `mousemove` on the scroller, so a
@@ -4880,6 +4880,90 @@ by the window listener standing in for the webview host. Round, all in
   `Shift+KeyQ` missing from what was heard.
 
 All 3 caught, and the file restored after each.
+
+### A table opened for editing, on a card with its copy (2026-09-23)
+
+The owner asked for the source of a table to stand as a code block's does
+once it is clicked: the ground behind it, the colouring, the copy button. It
+is the source of an equation that it now matches in every part. The lines
+carry `mdm-table-line` on the card rules of `style.css` (ground, face, size,
+padding, corners, the line kept whole and the card's own scroll), with
+`mdm-table-first` and `mdm-table-last` at the ends, `lines.card` for the
+card's width, and the table in `CARD_ROWS`, `CARD_FIRST`, `CARD_LAST` (the
+run of lines scrolled as one, `syncCards`) and `CARD_NODES` (Home and End).
+The pipes, the row of alignment and the backticks and `$` of the cells are
+the table's marks (`.mdm-table-mark`, `TABLE_MARKS`) and the cells of its
+head carry `.mdm-table-head`; `style.css` paints them from the palette of the
+code on a card, the marks in `--mdm-syn-comment` and the head in
+`--mdm-syn-keyword`. The first round drew the marks in the brass of the
+fences (`.mdm-delim`), and the owner turned it down as reading like a
+score's colours; the four variants in the code's palette are in
+`design/design-table-source.html`, and the one in place is its A while the
+owner picks. The `**` and the rest keep the grey of the marks. The `>` of a
+quote the table stands in are put away on every line the caret is not on,
+as a fence's are (G033): Lezer hangs them under the table, where the walk
+never went, so every line but the first showed its `>` on the card.
+`TableWidget` carries a rail
+with a copy button, as `MathWidget` does, read by `chromeSource`,
+`chromeUnder` and `placeOpenRails`; what it copies is the rows as typed
+without the `>` or the indent of a container (`tableModel`, `copy`). The
+widget is the block the rail is placed against and the scroll moved into a
+box inside it, `.mdm-table-scroll`, because a scroller clips what stands
+outside it.
+
+One thing changed that was not asked for and follows from the card: a row
+of the source too long for the column used to wrap and is now kept whole,
+reached by scrolling the card, as a line of code is. *The prose is
+justified to both edges* had the table's source among the lines that wrap
+and are set ragged; it now asserts that the row stays one row and is held
+by its card. *A wide table squeezes its columns* and the table in
+`webview-narrow`'s `at()` measure `.mdm-table-scroll` instead of the widget,
+and the first also asserts that the document is not scrolled sideways,
+which is what caught TC13 below: a box that does not scroll reports its ink
+past its width all the same.
+
+Tests, in `webview-look.test.js`: *an open table stands on a card, coloured
+as code is, with its copy in the rail* (the look of every line against a
+line of code in the same document, the ends of the card, one width of
+scroll, the marks line by line and the cells of the head, their two colours
+read off the palette's tokens and nothing in the brass of `.mdm-delim`, the
+rail open, active, 10px off
+the column and level with the first line; then at 480px the long row
+scrolled in one piece with the document still, and Home to the start of the
+row) and *a table's copy button copies it as Markdown, without the quote or
+the list it stands in* (the rail brought up by the pointer on a shut table
+in a quote, its copy, the pulse, the caret left in the prose and the table
+left shut; then the table in a list, open, copied without its indent) and
+*a table in a quote shows its > on the caret's line alone, as a fence does*.
+
+- **TC1** the table's lines not made a card (no `lines.card`, no first and
+  last) → the card test.
+- **TC2** `.mdm-table-line` taken off the card rule of the sheet → the card
+  test, the justify test and *a caret in a table shows the pipes* (the
+  monospace).
+- **TC3** no class for any mark of the table → the card test.
+- **TC4** the pipes and the row of alignment left out of `TABLE_MARKS` →
+  the card test.
+- **TC5** the table left out of `CARD_ROWS` → the card test (the card did not
+  scroll to the caret at the end of the long row).
+- **TC6** the table left out of `CARD_NODES` → the card test (Home).
+- **TC7** the copy reading the source with its container's marks → the copy
+  test.
+- **TC8** the pointer on a drawn table not bringing its rail up → the copy
+  test.
+- **TC9** `placeOpenRails` not lifting a table's rail → the card test.
+- **TC10** no pulse on the copied table → the copy test.
+- **TC11** the rail of a table not placed in the margin → the card test.
+- **TC12** the widget never told it is open or active → both new tests.
+- **TC13** the scroller of a drawn table not scrolling → *a wide table
+  squeezes its columns*, once it read the document's sideways scroll.
+- **TC14** the `>` under the table never put away → the quote test.
+- **TC15** the cells of the head not marked → the card test.
+- **TC16** the marks left in the grey of `.mdm-mark` → the card test.
+- **TC17** the head left in the ink of the cells → the card test.
+
+All 17 caught, with each file restored after each (TC3 and TC4 run again
+against the classes that replaced the brass).
 
 ## Pending
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- A table opened for editing stands on a card, as the source of a code
+  block or of an equation does, coloured as code is (its pipes and its row
+  of alignment in grey, its head in the colour code gives its keywords),
+  with a copy button in the rail beside it, which copies the table as
+  Markdown without the `>` or the indentation of a quote or a list it is
+  in. The button comes up under the pointer on a drawn table too. A row too
+  long for the column is kept whole and the card scrolls to its end, where
+  it used to wrap. In a quote, the `>` marks of its lines show on the
+  caret's line alone, as a code block's do.
+
 ## 0.7.0
 
 - The editor reads Markdown the way the page prints it. Lists, quotes and

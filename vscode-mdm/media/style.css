@@ -1548,13 +1548,13 @@ body {
 /* A card in a frame: its ground starts after the inset and the bars go on
    over the inset, two layers where the card alone was a colour. */
 #app .cm-line.mdm-framed.mdm-code-line,
-#app .cm-line.mdm-framed.mdm-math-line {
+#app .cm-line.mdm-framed.mdm-math-line,
+#app .cm-line.mdm-framed.mdm-table-line {
   background-color: transparent;
   background-image: var(--mdm-bars, none), linear-gradient(var(--mdm-syn-card), var(--mdm-syn-card));
   background-origin: border-box, padding-box;
   background-clip: border-box, padding-box;
 }
-#app .cm-line.mdm-table-line,
 #app .cm-line.mdm-html-line {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.88em;
@@ -1575,15 +1575,21 @@ body {
    fainter one between rows, no outer frame, so the columns sit on the page
    instead of in a box. The first and last columns keep their outer padding
    off, so the table starts and ends on the text margin like every other
-   block. Wider than the pane, it is pushed sideways inside the widget rather
-   than stretching the document; only sideways, for the reason the equations
-   carry above. */
+   block. Wider than the pane, it is pushed sideways inside a box of its own
+   rather than stretching the document; only sideways, for the reason the
+   equations carry above. The box is inside the widget and not the widget
+   itself, because the widget is what the rail of its copy button is placed
+   against (.mdm-chrome), out in the margin, and a scroller clips what stands
+   outside it. */
 #app .mdm-table {
   margin: 0;
+  cursor: pointer;
+  position: relative;
+}
+#app .mdm-table-scroll {
   padding: 0.3em 0;
   overflow-x: auto;
   overflow-y: hidden;
-  cursor: pointer;
 }
 #app .mdm-table table {
   border-collapse: collapse;
@@ -1639,14 +1645,15 @@ body {
   padding: 0.05em 0.3em;
 }
 
-/* ---------- Source cards: code, equations, the header ----------
+/* ---------- Source cards: code, equations, tables, the header ----------
 
-   The lines of a code block, of an equation being edited and of the YAML
-   header sit on a card of the code ground, in the editor's monospace. The
-   first and last lines carry the padding and the corners, so the card reads
-   as one box whether its fences are showing or not. */
+   The lines of a code block, of an equation or a table being edited and of
+   the YAML header sit on a card of the code ground, in the editor's
+   monospace. The first and last lines carry the padding and the corners, so
+   the card reads as one box whether its fences are showing or not. */
 #app .cm-line.mdm-code-line,
 #app .cm-line.mdm-math-line,
+#app .cm-line.mdm-table-line,
 #app .cm-line.mdm-fm-line {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.88em;
@@ -1728,6 +1735,7 @@ body {
    and the text of a scrolled card sheared line by line. */
 #app .cm-line.mdm-code-line::after,
 #app .cm-line.mdm-math-line::after,
+#app .cm-line.mdm-table-line::after,
 #app .cm-line.mdm-fm-line::after {
   content: "";
   display: block;
@@ -1749,6 +1757,7 @@ body {
 }
 #app .cm-line.mdm-code-first,
 #app .cm-line.mdm-math-first,
+#app .cm-line.mdm-table-first,
 #app .cm-line.mdm-fm-first {
   padding-top: 0.55em;
   border-top-left-radius: 4px;
@@ -1756,6 +1765,7 @@ body {
 }
 #app .cm-line.mdm-code-last,
 #app .cm-line.mdm-math-last,
+#app .cm-line.mdm-table-last,
 #app .cm-line.mdm-fm-last {
   padding-bottom: 0.55em;
   border-bottom-left-radius: 4px;
@@ -1773,6 +1783,21 @@ body {
 #app .cm-line.mdm-fence-line,
 #app .cm-line.mdm-fm-mark {
   color: color-mix(in srgb, var(--mdm-syn-base) 45%, transparent);
+}
+/* A table being edited is coloured from the palette the code on a card is
+   painted from, at the owner's word (2026-09-23), and not in the brass of the
+   scores: its marks (the pipes, the row of alignment, the backticks and the
+   `$` of its cells) in the grey of a comment, and the cells of its head in
+   the colour of a keyword. The inner selector for the marks, because the
+   Markdown highlighting puts a span of its own inside them with the grey of
+   .mdm-mark; none for the head, whose maths and code keep the colours their
+   own highlighting gives them. */
+#app .cm-line.mdm-table-line .mdm-table-mark,
+#app .cm-line.mdm-table-line .mdm-table-mark * {
+  color: var(--mdm-syn-comment);
+}
+#app .cm-line.mdm-table-line .mdm-table-head {
+  color: var(--mdm-syn-keyword);
 }
 /* An equation that does not compile, with no caret in it: the source stays
    on its card and says what it is. */
@@ -1860,8 +1885,8 @@ body {
 }
 /* The chrome of a block, its buttons: a rail in the margin right of the
    column, the twin of the numbers in the margin left of it, on a score (the
-   copy over the headphones), a display equation and a block of code (the
-   copy alone). Nothing of it is the document's: it takes no height over,
+   copy over the headphones), a display equation, a table and a block of
+   code (the copy alone). Nothing of it is the document's: it takes no height over,
    under or inside its block and no width from the column, so a block stands
    where the exported page stands it.
 
@@ -1961,8 +1986,8 @@ body {
 #app .mdm-score[data-mdm-audio] > .mdm-chrome .mdm-audio-toggle {
   pointer-events: auto;
 }
-/* A score and a display equation are block widgets, and the rail is placed
-   against the widget, level with the top of the drawing. While the source is
+/* A score, a display equation and a table are block widgets, and the rail is
+   placed against the widget, level with the top of the drawing. While the source is
    open the lines of it stand over the drawing, and the rail is lifted onto
    the first of them by an inline `top` (placeOpenRails in main.js), so it
    stays where the top of the block was when the caret came in. The 10px
@@ -1970,7 +1995,8 @@ body {
    document as it does anywhere else beside the text (deadMargin in main.js),
    unless the rail is up and its bridge is over them. */
 #app .mdm-score > .mdm-chrome,
-#app .mdm-math--block > .mdm-chrome {
+#app .mdm-math--block > .mdm-chrome,
+#app .mdm-table > .mdm-chrome {
   top: 0;
   left: calc(100% + 10px);
 }
@@ -2362,7 +2388,8 @@ body {
 #app .cm-line.mdm-code-line.mdm-copy-pulse {
   animation: mdm-copy-pulse-code 0.5s ease-out;
 }
-#app .mdm-math--block.mdm-copy-pulse {
+#app .mdm-math--block.mdm-copy-pulse,
+#app .mdm-table.mdm-copy-pulse {
   animation: mdm-copy-pulse 0.5s ease-out;
 }
 
