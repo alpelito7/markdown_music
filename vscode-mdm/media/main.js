@@ -3831,7 +3831,10 @@
     // element of the plain (non-preview) widget it is replacing.
     //
     // A display equation whose caret came or went is the same drawing, and
-    // only its rail is switched.
+    // only its rail is switched. Not when the words after its `$$` changed
+    // (the tail): the drawing kept them as it had drawn them, so a sentence
+    // edited on the closing line went on reading as before under the
+    // equation, with the caret there and after it left.
     updateDOM(dom, view, from) {
       if (this.preview) {
         this.paint(dom);
@@ -3839,7 +3842,8 @@
       }
       if (
         this.block && from && from.block && !from.preview &&
-        from.tex === this.tex && from.display === this.display
+        from.tex === this.tex && from.display === this.display &&
+        (from.tail ? from.tail.key : "") === (this.tail ? this.tail.key : "")
       ) {
         const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
         if (!chrome) return false;

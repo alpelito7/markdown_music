@@ -45,6 +45,10 @@
   `editor.multiCursorModifier` is `ctrlCmd`) shows the pointer and the
   underline over any link, open or not, since that click follows it. A
   footnote's number shows the pointer too.
+- The words a display equation's closing line carries after its `$$`, a
+  sentence that runs on from it, are drawn again under the equation as they
+  are edited; they went on reading as they had until the equation itself
+  changed.
 
 ## 0.7.0
 

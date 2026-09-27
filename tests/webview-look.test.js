@@ -3186,6 +3186,31 @@ test("a click on an equation whose closer carries a label opens its source at th
   await h.close();
 });
 
+// The words the closing line of a display equation carries after its `$$`
+// (G052) are drawn under the equation, and the drawing was kept whole while
+// the TeX stayed the same: a tail edited on the closing line went on showing
+// its old words under the equation, with the caret there and after it left.
+test("the words after an equation's $$ are drawn again as they are edited (G052)", { skip }, async () => {
+  const text = "Above.\n\n$$\nx^2\n$$ where it is.\n\nBelow.\n";
+  const h = await open({ text, withFrontMatter: false, scores: 0 });
+  const tail = () =>
+    h.page.evaluate(() => {
+      const el = document.querySelector("#app .mdm-math-tail");
+      return el ? el.textContent : null;
+    });
+  assert.equal(await tail(), "where it is.");
+  await setSelection(h.page, await posOf(h.page, "it is", 5));
+  await sleep(200);
+  await h.page.keyboard.type(" and more");
+  await sleep(300);
+  assert.equal(await tail(), "where it is and more.", "with the caret on the closing line");
+  await setSelection(h.page, await posOf(h.page, "Below", 2));
+  await sleep(300);
+  assert.equal(await tail(), "where it is and more.", "with the caret gone");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("clicking a rendered block opens its source", { skip }, async () => {
   // The YAML header is no longer a rendered block: its lines are always in
   // the text. A click on a display equation or a score puts the caret at

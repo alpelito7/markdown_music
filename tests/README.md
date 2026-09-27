@@ -5163,6 +5163,24 @@ modifier swapped).
 
 All 10 caught, and the files restored after each.
 
+### The words after an equation's `$$`, drawn again as they are edited (2026-09-27)
+
+The closing line of a display equation can carry words after its `$$`, a
+label or a sentence that runs on (G052), which the widget draws under the
+equation. Its in-place update kept the drawing whenever the TeX was the same
+and switched only the rail, so a tail edited on the closing line went on
+showing its old words, with the caret there and after it left (found while
+the tooltip of the next round was being put into the same widget, and
+measured: the document read `where it is and more.` and the drawing `where
+it is.`). The update is in place now only while the tail is the same too.
+Test, in `webview-look.test.js`: *the words after an equation's $$ are
+drawn again as they are edited (G052)*.
+
+- **FT1** the tail left out of the in-place update's condition → the test,
+  with the caret on the closing line.
+
+Caught, and the file restored after it.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
