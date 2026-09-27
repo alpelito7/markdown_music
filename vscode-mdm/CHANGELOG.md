@@ -27,6 +27,17 @@
 - On a dark theme, citations and the numbers of footnotes take the dark
   side's link blue, which the links beside them and the exported page's
   links already had; they stood in the light side's darker blue.
+- A link opened for editing no longer comes out blue from end to end. Its
+  brackets and parentheses take the grey of every other mark, its words
+  keep the link's blue, and its address is set small and faint in the code
+  face, as a link's definition is, so the words keep the eye. An address too
+  long for the rest of its row breaks where the column ends, where it used
+  to go whole to the next row and, in justified text, leave the row above
+  stretched across the column. The label of a link written by reference
+  and a picture's address are set as an address is, the `<` and `>` around
+  an address and the marks of a footnote take the grey of the other marks,
+  and a link's definition is faint in every part, where the colours of the
+  code were painted over it.
 
 ## 0.7.0
 

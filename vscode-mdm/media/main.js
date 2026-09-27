@@ -5254,6 +5254,24 @@
     return (refs && refs.get(refKey(inner))) || null;
   }
 
+  // The address of a link or an image open for editing: what stands inside
+  // its parentheses, the destination and the title with whatever space was
+  // typed around them, or the label it is written by, in its brackets. It
+  // is not prose and nothing prints it, so style.css sets it as the other
+  // source that is not prose (.mdm-link-dest). The parentheses are the last
+  // two marks, read by what they are: brackets in the words can come before.
+  function linkAddress(node, text, decos) {
+    const marks = node.getChildren("LinkMark");
+    const open = marks[marks.length - 2];
+    const close = marks[marks.length - 1];
+    if (marks.length >= 4 && text(open.from, open.to) === "(" && text(close.from, close.to) === ")" && close.from > open.to) {
+      decos.push(Decoration.mark({ class: "mdm-link-dest" }).range(open.to, close.from));
+    }
+    node.getChildren("LinkLabel").forEach(function (label) {
+      if (label.to > label.from) decos.push(Decoration.mark({ class: "mdm-link-dest" }).range(label.from, label.to));
+    });
+  }
+
   // The character an entity stands for, or the entity itself when it stands
   // for nothing (`&bogus;`), decoded by the browser.
   function decodeEntity(raw) {
@@ -6041,6 +6059,8 @@
             const marks = node.getChildren("LinkMark");
             if (marks.length) hide(marks[0].from, marks[0].to);
             if (marks.length > 1) hide(marks[1].from, n.to);
+          } else {
+            linkAddress(node, text, decos);
           }
           return true;
         }
@@ -6105,6 +6125,8 @@
             decos.push(Decoration.replace({ widget: new ImageWidget(src, alt, width) }).range(n.from, n.to));
             return false;
           }
+          // Open, its address is set as a link's.
+          if (touched(n.from, n.to)) linkAddress(node, text, decos);
           return true;
         }
 
@@ -6176,6 +6198,12 @@
             marks.forEach(function (m) {
               hide(m.from, m.to);
             });
+          } else {
+            // Showing, the `[^` and the `]` are marks and are drawn in their
+            // grey, as a link's brackets are; the label keeps the blue.
+            marks.forEach(function (m) {
+              if (m.to > m.from) decos.push(Decoration.mark({ class: "mdm-mark" }).range(m.from, m.to));
+            });
           }
           return false;
         }
@@ -6222,6 +6250,9 @@
               });
             } else {
               decos.push(Decoration.mark({ class: "mdm-note-ref" }).range(mark.from, mark.to));
+              // Its `[^` and `]:` are marks, in their grey, as a call's are.
+              decos.push(Decoration.mark({ class: "mdm-mark" }).range(mark.from, mark.from + 2));
+              decos.push(Decoration.mark({ class: "mdm-mark" }).range(mark.to - 2, mark.to));
             }
           }
           return true;

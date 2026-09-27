@@ -1319,13 +1319,46 @@ body {
 /* The inner selector as well: the highlighter wraps a bare URL, a label
    and a title in spans of its own, each with a colour (url, labelName,
    string), and the link's blue on the outer span never reached the glyphs
-   (G016). */
+   (G016). The marks are left out of it: a link open for editing shows its
+   brackets and its parentheses, which are marks as much as the `**` of a
+   bold span is, and the blue on every span inside the link painted them as
+   well, so the whole of `[words](address)` came out blue. They keep the
+   grey of .mdm-mark. */
 #app .mdm-link,
-#app .mdm-link * {
+#app .mdm-link *:not(.mdm-mark) {
   color: var(--mdm-link);
 }
 #app .mdm-link {
   text-decoration: none;
+}
+/* The address of a link or an image open for editing (linkAddress in
+   main.js): what is inside its parentheses, or the label it is written by.
+   It is not prose and nothing prints it, so it is set as the editor sets the
+   other source that is not prose, a link's definition, raw HTML and TeX, an
+   attribute block: the code face, a little smaller, in the faint ink. The
+   words keep their blue, and the eye. The owner's pick of four
+   (design/design-links.html, A, 2026-09-27).
+   Two things come with the face. Its own line box, at the prose's 1.7,
+   stood 0.73px below the row's (27.19 to 27.92 in the roman, measured), so
+   the row grew as the caret came in and everything under it moved down, the
+   fault of G103; at a line height of 1 it stays inside. And the address is
+   one word to the line breaker, which put it whole on the next row and left
+   the row it came from stretched across the column by the justification;
+   it breaks at any character instead, where the column ends, as a line of
+   source does. */
+#app .mdm-link-dest {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  line-height: 1;
+  word-break: break-all;
+}
+/* The same weight as the link's blue and after it, which the address sits
+   inside of. */
+#app .mdm-link-dest,
+#app .mdm-link-dest *,
+#app .mdm-link .mdm-link-dest,
+#app .mdm-link .mdm-link-dest * {
+  color: color-mix(in srgb, var(--mdm-ink) 60%, transparent);
 }
 /* An escaped character and an entity are text: the highlighter's grey and
    string colour on their spans give way to the ink around them. */
@@ -1409,7 +1442,7 @@ body {
    card where it stands; and the note itself, `[^1]: text`, faint under the
    prose face, since the page sets it at the foot. */
 #app .mdm-note-ref,
-#app .mdm-note-ref * {
+#app .mdm-note-ref *:not(.mdm-mark) {
   color: var(--mdm-link);
 }
 #app .mdm-note-inline {
@@ -1613,6 +1646,14 @@ body {
 #app .cm-line.mdm-linkref-line {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.88em;
+}
+/* Faint in every part, which it was not: the highlighter painted its label,
+   its address and its title over the line's ink in the colours of the code
+   (a green label and a purple address on the dark side). Its colon keeps
+   the grey of a mark. The address of an open link is drawn as this line
+   is (.mdm-link-dest). */
+#app .cm-line.mdm-linkref-line *:not(.mdm-mark) {
+  color: inherit;
 }
 
 /* A drawn table, the block widget the source lines give way to. Hairlines

@@ -4258,6 +4258,168 @@ test("a link, a citation and the number of a note are drawn in the page's link b
   }
 });
 
+// A link open for editing, and the twins of one: the marks in the grey of
+// every mark, the words in the link's blue, and the address in the code face,
+// a little smaller and in the faint ink, as the definition of a link is set.
+// The whole of it used to come out in the blue, brackets and address in the
+// prose's face (G016's selector reached the marks). The owner's A of
+// design/design-links.html.
+const OPEN_LINKS = [
+  'A **bold** run, and [the words](https://example.com/a/path "A title") of a link.',
+  "",
+  "A [reference][abc], an address <https://example.com/x>, a picture ![its alt](pic.png) and a note.[^1]",
+  "",
+  '[abc]: https://example.com/ref "Its title"',
+  "",
+  "[^1]: The note.",
+  "",
+].join("\n");
+
+test("an open link sets its marks in grey and its address in the code face and the faint ink, and so do its twins", { skip }, async () => {
+  for (const side of ["light", "dark"]) {
+    const h = await open({ text: OPEN_LINKS, scores: 0, seed: { settings: { theme: side, frontMatter: "hidden" } } });
+    const carets = await Promise.all([
+      posOf(h.page, "bold", 2),
+      posOf(h.page, "the words", 2),
+      posOf(h.page, "reference", 2),
+      posOf(h.page, "example.com/x", 2),
+      posOf(h.page, "its alt", 2),
+      posOf(h.page, "[^1]", 2),
+      posOf(h.page, "The note", 2),
+    ]);
+    for (const at of carets) assert.ok(at > 0, "the fixture lost a place to put a caret in");
+    await setSelection(h.page, carets.map((at) => ({ anchor: at })));
+    await sleep(250);
+    const seen = await h.page.evaluate(() => {
+      // Every run of text, with what it is and how it is painted: the box a
+      // glyph is painted by is its parent element.
+      const runs = (root) => {
+        const out = [];
+        const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+          if (!t.textContent.trim()) continue;
+          const box = t.parentElement;
+          const s = getComputedStyle(box);
+          out.push({
+            text: t.textContent,
+            kind: box.closest(".mdm-mark") ? "mark" : box.closest(".mdm-link-dest") ? "address" : "words",
+            colour: s.color,
+            face: s.fontFamily,
+            size: s.fontSize,
+          });
+        }
+        return out;
+      };
+      const bold = Array.from(document.querySelectorAll("#app .mdm-mark")).find((m) => m.textContent === "**");
+      const definition = document.querySelector("#app .cm-line.mdm-linkref-line");
+      const outer = Array.from(document.querySelectorAll("#app .cm-line .mdm-link")).filter((el) => !el.parentElement.closest(".mdm-link"));
+      // The picture's address is the one no link holds.
+      const picture = Array.from(document.querySelectorAll("#app .mdm-link-dest")).filter((d) => !d.closest(".mdm-link"));
+      const addresses = Array.from(document.querySelectorAll("#app .mdm-link-dest")).map((d) => {
+        const s = getComputedStyle(d);
+        return { text: d.textContent, lineHeight: s.lineHeight, size: s.fontSize, wordBreak: s.wordBreak };
+      });
+      return {
+        grey: bold ? getComputedStyle(bold).color : null,
+        faint: getComputedStyle(definition).color,
+        code: getComputedStyle(definition).fontFamily,
+        links: outer.map((el) => ({ text: el.textContent, blue: getComputedStyle(el).color, runs: runs(el) })),
+        picture: picture.map((d) => runs(d)).flat(),
+        notes: Array.from(document.querySelectorAll("#app .mdm-note-ref")).map((el) => runs(el)),
+        definition: runs(definition),
+        addresses: addresses,
+      };
+    });
+    const which = " (" + side + ")";
+    assert.ok(seen.grey, "the ** of the bold run was not showing" + which);
+    assert.notEqual(seen.faint, seen.grey, "the faint ink and the grey of a mark are one colour" + which);
+    const texts = seen.links.map((l) => l.text);
+    assert.deepEqual(
+      texts,
+      ['[the words](https://example.com/a/path "A title")', "[reference][abc]", "<https://example.com/x>"],
+      "the links did not all open" + which
+    );
+    const [inline, reference, auto] = seen.links;
+    const check = (runs, where) => {
+      for (const r of runs) {
+        const at = where + ", `" + r.text + "`" + which;
+        if (r.kind === "mark") assert.equal(r.colour, seen.grey, at + ": a mark out of the marks' grey");
+        else if (r.kind === "address") {
+          assert.equal(r.colour, seen.faint, at + ": an address out of the faint ink");
+          assert.equal(r.face, seen.code, at + ": an address out of the code face");
+          assert.equal(r.size, "14.08px", at + ": an address not at 0.88 of the prose");
+        }
+      }
+    };
+    // The link: [ ] ( ) in grey, the words blue, the address and its title
+    // faint in the code face.
+    assert.deepEqual(inline.runs.filter((r) => r.kind === "mark").map((r) => r.text), ["[", "]", "(", ")"], JSON.stringify(inline.runs));
+    assert.deepEqual(inline.runs.filter((r) => r.kind === "address").map((r) => r.text).join(" "), 'https://example.com/a/path "A title"');
+    for (const r of inline.runs.filter((r) => r.kind === "words")) assert.equal(r.colour, inline.blue, "the words `" + r.text + "` left the link's blue" + which);
+    check(inline.runs, "the link");
+    // By reference: its label is its address.
+    assert.deepEqual(reference.runs.filter((r) => r.kind === "address").map((r) => r.text).join(""), "[abc]", JSON.stringify(reference.runs));
+    check(reference.runs, "the reference");
+    // In angle brackets: the brackets are marks, and the address is the
+    // words the page prints, in the blue.
+    assert.deepEqual(auto.runs.filter((r) => r.kind === "mark").map((r) => r.text), ["<", ">"], JSON.stringify(auto.runs));
+    for (const r of auto.runs.filter((r) => r.kind === "words")) assert.equal(r.colour, auto.blue, "the address in angle brackets left the blue" + which);
+    check(auto.runs, "the address in angle brackets");
+    // The picture: its address as a link's.
+    assert.deepEqual(seen.picture.filter((r) => r.kind === "address").map((r) => r.text), ["pic.png"], JSON.stringify(seen.picture));
+    check(seen.picture, "the picture");
+    // The note's call and its definition, open: `[^` and `]` (`]:`) in grey,
+    // the label in the blue.
+    assert.equal(seen.notes.length, 2, JSON.stringify(seen.notes));
+    for (const note of seen.notes) {
+      assert.deepEqual(note.filter((r) => r.kind === "mark").map((r) => r.text).length, 2, JSON.stringify(note));
+      check(note, "the note");
+      for (const r of note.filter((r) => r.kind === "words")) assert.equal(r.colour, inline.blue, "the note's label left the blue" + which);
+    }
+    // The definition: faint in every part, its colon in the grey of a mark.
+    assert.deepEqual(seen.definition.filter((r) => r.kind === "mark").map((r) => r.text), [":"], JSON.stringify(seen.definition));
+    for (const r of seen.definition.filter((r) => r.kind !== "mark")) {
+      assert.equal(r.colour, seen.faint, "the definition's `" + r.text + "` out of the faint ink" + which);
+    }
+    // Its own line box inside the row's (a line height of 1), and free to
+    // break at any character.
+    assert.equal(seen.addresses.length, 3, JSON.stringify(seen.addresses));
+    for (const a of seen.addresses) {
+      assert.equal(a.lineHeight, a.size, "the address `" + a.text + "` keeps a line box of its own" + which);
+      assert.equal(a.wordBreak, "break-all", "the address `" + a.text + "` cannot break" + which);
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// An address is one word to the line breaker, unless it happens to carry a
+// hyphen: it went whole to the next row and left the row it came from
+// stretched across the column by the justification. It breaks where the
+// column ends instead, so the `(` stays on the row of the `]` it follows.
+// The address here has no hyphen, which would let it break without that.
+test("an open link's long address breaks where the column ends instead of leaving its row stretched", { skip }, async () => {
+  const text =
+    'The whole edition is scanned at [IMSLP](https://imslp.org/wiki/Category:Bach,_Johann_Sebastian_Bach_Gesellschaft_Ausgabe "Petrucci Music Library"), and the sentence runs on.\n';
+  const h = await open({ text, scores: 0, seed: { settings: { textAlign: "justify" } } });
+  await setSelection(h.page, await posOf(h.page, "IMSLP", 2));
+  await sleep(250);
+  const seen = await h.page.evaluate(() => {
+    const link = document.querySelector("#app .cm-line .mdm-link");
+    const mark = (t) => Array.from(link.querySelectorAll(".mdm-mark")).find((m) => m.textContent === t);
+    const address = link.querySelector(".mdm-link-dest");
+    return {
+      close: mark("]").getBoundingClientRect().bottom,
+      open: mark("(").getBoundingClientRect().bottom,
+      rows: address ? new Set(Array.from(address.getClientRects()).map((r) => Math.round(r.bottom))).size : 0,
+    };
+  });
+  assert.ok(Math.abs(seen.open - seen.close) < 2, "the ( went to another row than the ]: " + JSON.stringify(seen));
+  assert.ok(seen.rows >= 2, "the address did not break across rows: " + JSON.stringify(seen));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- The numbers in the margin ----------
 
 test("the numbers stand in one column beside the text, out of its flow", { skip }, async () => {

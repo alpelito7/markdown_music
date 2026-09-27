@@ -5056,6 +5056,73 @@ not on the other fails it.
 
 All 3 caught, and the file restored after each.
 
+### A link opened for editing, its marks grey and its address in the code face (2026-09-27)
+
+The owner found a link opened with a click blue from end to end, the whole
+of `[words](address)` in the link colour and in the prose's face, and asked
+for the rest not to be blue and for the address in another face. Four ways
+of it are in `design/design-links.html`, and this is its A. The blue reached
+the marks through the inner selector G016 put on `.mdm-link` so that the
+glyphs of an address would take it; the marks are left out of it now
+(`*:not(.mdm-mark)`) and keep the grey of every mark. An open link's
+address, what is inside its parentheses or the label it is written by,
+carries `.mdm-link-dest` (`linkAddress` in `main.js`) and is set in the code
+face at 0.88em and the faint ink, as a link's definition is (G025).
+
+Two things came with the face, and both are measured. The face's own line
+box, at the prose's 1.7, stood 0.73px below the row's (27.19 to 27.92 in the
+roman), which grew the row as the caret came in and moved the text under it,
+the fault G103 was: the address has a line height of 1. And an address with
+no hyphen in it is one word to the line breaker, which sent it whole to the
+next row and left the row before it stretched by the justification: it
+breaks at any character (`word-break: break-all`).
+
+The twins, in the same pass: a picture's address; a reference's label; the
+`<` and `>` of an address in angle brackets, which are marks already and
+were painted blue with the rest; the `[^` and `]` of a note's call and the
+`[^` and `]:` of its definition, given `.mdm-mark` while they show; and the
+definition line, whose label, address and title the highlighter painted in
+the colours of the code over the line's faint ink
+(`*:not(.mdm-mark) { color: inherit }`).
+
+Tests, in `webview-look.test.js`: *an open link sets its marks in grey and
+its address in the code face and the faint ink, and so do its twins* (both
+sides; every run of text of every open link read off the box that paints it,
+the marks against the `**` of a bold run, the words against the link's own
+colour, the address against the definition line's face and ink and at
+14.08px; the picture, the reference, the angle brackets, the note's call and
+its definition, the definition line glyph by glyph, and the line height and
+the break of every address) and *an open link's long address breaks where
+the column ends instead of leaving its row stretched* (the `(` on the row of
+the `]`, the address across two rows or more). The row's height is held by
+*a row of prose keeps its height with a mark hidden or a glyph drawn in it
+(G103)*, whose fixture opens a link.
+
+- **O1** `.mdm-link *` again, without `:not(.mdm-mark)`: the link's blue on
+  its marks → the look test.
+- **O2** `linkAddress` not called for an open link → the look test and the
+  break test.
+- **O3** the address left in the prose's face → the look test.
+- **O4** the address's faint ink taken off → the look test.
+- **O5** the address's line height of 1 taken off → G103's test (the rows
+  under the link moved as the caret came in) and the look test.
+- **O6** the address kept whole, no `break-all` → the look test and the
+  break test.
+- **O7** the definition's parts left in the colours of the code → the look
+  test.
+- **O8** an open picture's address not marked → the look test.
+- **O9** a reference's label not taken for its address → the look test.
+- **O10** the `[^` and `]` of a call not given `.mdm-mark` → the look test.
+- **O11** `.mdm-note-ref *` again: the note's blue on its marks → the look
+  test.
+- **O12** the `[^` and `]:` of a definition not given `.mdm-mark` → the look
+  test.
+
+All 12 caught, and the files restored after each. The first address the
+break test opened carried hyphens, and O6 left that test green: a hyphen is
+a break the line breaker takes anyway, so the address came onto the row
+without the rule. The address it opens now has none, and O6 fails it.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
