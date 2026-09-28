@@ -78,6 +78,11 @@
   there), the export failed. A file that opens with a byte order mark (an
   invisible character some Windows programs write first) keeps its header,
   which came out on the page as a paragraph of text.
+- On Windows, Quarto and Chrome are started without a console window, and
+  an export leaves neither Chrome's `debug.log` nor a folder named `-p`
+  beside the document. A PDF printed without TeX that a viewer holds open,
+  as Acrobat does, is said to be held open, where the notice said TeX or
+  Chrome was missing.
 - A music symbol button leads the buttons that close the toolbar's first
   row, before the equation. Its panel holds the notes from the breve to the
   128th, the dotted notes from the whole to the sixteenth, the two beamed

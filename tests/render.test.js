@@ -297,6 +297,18 @@ function crc32(buf) {
   return ~c >>> 0;
 }
 
+// The filter makes its cache through Pandoc and never through a shell's
+// mkdir: cmd.exe on Windows has no `-p`, so `mkdir -p mdm_cache` made a folder
+// named `-p` beside the document as well, on the PDF road of a machine with
+// no TeX too (2026-09-28). What the cache holds is read by the tests around.
+test("the filter makes its folders without a shell", () => {
+  for (const tree of ["_extensions/mdm/mdm.lua", "vscode-mdm/render/mdm/mdm.lua"]) {
+    const lua = fs.readFileSync(path.join(ROOT, tree), "utf8");
+    const shelled = lua.split("\n").filter((l) => /(run|os\.execute|io\.popen)\(.*mkdir/.test(l));
+    assert.deepEqual(shelled, [], tree + " makes a folder through a shell");
+  }
+});
+
 test("a figure named by an absolute path is copied into the cache", () => {
   const dir = freshDir("abs-figure");
   // Outside the render directory on purpose: that is the case Quarto mangles.

@@ -1077,7 +1077,10 @@ function printHtmlToPdf(chrome, htmlPath, pdfPath) {
     };
     let child;
     try {
-      child = cp.spawn(chrome, args);
+      // In its own profile, where the debug.log Chrome writes into its working
+      // folder on Windows goes away with the profile (one was found in a
+      // document's folder on Windows, 2026-09-14), and with no console window.
+      child = cp.spawn(chrome, args, { cwd: profile, windowsHide: true });
     } catch (e) {
       finish(false, "Starting Chrome failed: " + String(e.message || e));
       return;
@@ -1926,7 +1929,10 @@ async function runExport(document, to) {
       let log = "";
       let child;
       try {
-        child = cp.spawn(quarto, stepArgs, { cwd: dir });
+        // windowsHide: Windows opens a console window for a console program
+        // started by one that has none, as the extension host has none, and
+        // it stood open over the editor for the length of the render.
+        child = cp.spawn(quarto, stepArgs, { cwd: dir, windowsHide: true });
       } catch (e) {
         // The same silence as the `error` handler below had, and the report
         // for code -1 now sends the reader to the log: the reason has to be
@@ -2004,7 +2010,10 @@ async function runExport(document, to) {
             ".pdf: " +
             String(e.message || e)
         );
-        return { ok: false, why: "print" };
+        // The PDF was made and could not take its place: on Windows a PDF
+        // open in a viewer that holds it (Acrobat does) cannot be replaced.
+        // That is said as what it is, and not as a program that is missing.
+        return { ok: false, why: "write", code: e.code || "" };
       }
       return { ok: true };
     } catch (e) {
@@ -2101,6 +2110,7 @@ async function runExport(document, to) {
           const print = await printInstead(false);
           if (print.ok) return { code: 0, printed: true, printLack: printLack };
           if (print.why === "render") return { code: print.code };
+          if (print.why === "write") return { code: -1, pdfHeld: print.code };
           if (print.why === "nohtml") {
             return {
               code: -1,
@@ -2125,6 +2135,7 @@ async function runExport(document, to) {
           const print = await printInstead(wantsHtml);
           cleanFailedLatex();
           if (print.ok) return { code: 0, printed: true };
+          if (print.why === "write") return { code: -1, pdfHeld: print.code };
           return { code: primary.code, noTex: true };
         }
         if (failed === "pdf") removeFailedFolders();
@@ -2144,6 +2155,15 @@ async function runExport(document, to) {
   // What this run did land, for the notices that end in something missing: a
   // "both" writes its page before the PDF half fails.
   const page = wantsHtml && isFile(base + ".html") ? base + ".html" : null;
+  if (outcome.pdfHeld !== undefined) {
+    const pdfName = path.basename(base) + ".pdf";
+    exportFailed(
+      "the PDF was made but could not be written over " + pdfName + ". " +
+        writeHelp(outcome.pdfHeld, pdfName, dir, "export again", "The reason is in the log."),
+      "The printed PDF could not take the place of " + base + ".pdf (" + outcome.pdfHeld + ")."
+    );
+    return;
+  }
   if (outcome.scoresLack) {
     scoresMissing(outcome.scoresLack, dir, outcome.printTried, page);
     return;

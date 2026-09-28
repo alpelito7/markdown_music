@@ -1231,6 +1231,16 @@ local function run(cmd)
   return ok == true or code == 0
 end
 
+-- The folder the filter keeps its drawings in, made by Pandoc rather than by
+-- a shell: `mkdir -p` goes to cmd.exe on Windows, which has no `-p` and makes
+-- a folder of that name beside the document as well as the cache, and the PDF
+-- road runs it on a machine with no TeX too, when a document holds an
+-- equation and no score (read in the code, 2026-09-28). Like `mkdir -p`, it
+-- makes what is missing and is quiet about what is there.
+local function make_cache()
+  pcall(pandoc.system.make_directory, CACHE_DIR, true)
+end
+
 -- abcjs engraves a tune that names neither its number nor its key; abcm2ps,
 -- which goes by the standard, engraves nothing at all from one, and it says so
 -- by leaving with a status of 0 and no EPS behind it. The same block would
@@ -2140,7 +2150,7 @@ local function render_math_pass(doc)
     end,
   })
   if #jobs > 0 then
-    run("mkdir -p " .. CACHE_DIR)
+    make_cache()
     engrave_math(jobs, ink)
   end
   return doc:walk({
@@ -2369,7 +2379,7 @@ local function render_latex(el)
     if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
       return insert_score(digest, true)
     end
-    run("mkdir -p " .. CACHE_DIR)
+    make_cache()
     if engrave_abcjs(source, ink, staff, roman, digest) then
       return insert_score(digest, true)
     end
@@ -2397,7 +2407,7 @@ local function render_latex(el)
   if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
     return insert_score(digest)
   end
-  run("mkdir -p " .. CACHE_DIR)
+  make_cache()
   if engrave_abcm2ps(source, ink, staff, digest) then
     return insert_score(digest)
   end
@@ -2548,7 +2558,7 @@ local function svg_as_pdf(src)
   local digest = sha1(svg)
   local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
   if file_exists(pdf) then return pdf end
-  run("mkdir -p " .. CACHE_DIR)
+  make_cache()
   local html = CACHE_DIR .. "/" .. digest .. ".svg.html"
   local page = io.open(html, "w")
   if not page then return nil end
@@ -2588,7 +2598,7 @@ local function copy_figure(el)
   local ext = src:match("(%.[%w]+)$") or ""
   local copy = CACHE_DIR .. "/" .. sha1(bytes) .. ext
   if not file_exists(copy) then
-    run("mkdir -p " .. CACHE_DIR)
+    make_cache()
     local to = io.open(copy, "wb")
     if not to then return nil end
     to:write(bytes)

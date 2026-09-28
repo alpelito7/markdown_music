@@ -2162,6 +2162,85 @@ test("a PDF made without TeX leaves no LaTeX under the name Quarto spells, and s
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// Quarto and Chrome are started with no console window, which Windows opens
+// for a console program started from one that has none, as the extension
+// host has none; and Chrome in its own profile, where the debug.log it writes
+// into its working folder on Windows goes away with the profile (one was
+// found in a document's folder, 0.5.7 on Windows). Neither shows here, so
+// what is read is how each was started.
+test("Quarto and Chrome start with no console window, and Chrome in its own profile", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoNames(tmp, { noTex: true });
+  fakeChromePrint(bin);
+  const restore = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, "---\ntitle: T\n---\n\nBody.\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  const cp = require("node:child_process");
+  const spawn = cp.spawn;
+  const seen = [];
+  cp.spawn = function (cmd, args, opts) {
+    seen.push({ cmd: path.basename(cmd), opts: opts || {} });
+    return spawn.apply(this, arguments);
+  };
+  try {
+    await h.receive({ type: "export", to: "pdf" });
+  } finally {
+    cp.spawn = spawn;
+    restore();
+  }
+  const quarto = seen.filter((c) => c.cmd === "quarto");
+  const chrome = seen.filter((c) => c.cmd === "google-chrome");
+  assert.equal(quarto.length, 2, "not the PDF render and the page's: " + JSON.stringify(seen));
+  assert.ok(quarto.every((c) => c.opts.windowsHide === true), "Quarto opens a console window: " + JSON.stringify(quarto));
+  assert.equal(chrome.length, 1, "Chrome did not print once: " + JSON.stringify(seen));
+  assert.equal(chrome[0].opts.windowsHide, true, "Chrome opens a console window");
+  const profile = fs.readFileSync(path.join(tmp, "chrome-profile.txt"), "utf8").trim();
+  assert.equal(chrome[0].opts.cwd, profile, "Chrome does not run in its own profile");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// A PDF open in a viewer that holds it, as Acrobat holds one on Windows: the
+// print was made and could not take its place, and the notice said that a
+// program was missing, "a PDF needs TeX" without a score and Chrome's print
+// "did not work either" with one, where the answer is to close the viewer.
+// The lock is played by the rename throwing what Windows throws.
+test("a PDF held open by a viewer is said to be held, and not a program missing", async () => {
+  for (const scores of [false, true]) {
+    vscode._reset();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+    const bin = fakeQuartoNames(tmp, { noTex: true });
+    fakeChromePrint(bin);
+    const restore = usePath(bin);
+    const doc = path.join(tmp, "held.mdm");
+    fs.writeFileSync(doc, "---\ntitle: T\n---\n\nBody.\n" + (scores ? "\n```abc\nX:1\nK:C\nC|\n```\n" : ""));
+    const h = boot("Body\n", {}, null, "file://" + doc);
+    vscode._state.workspaceFolder = tmp;
+    const rename = fs.renameSync;
+    fs.renameSync = function (from, to) {
+      if (String(to).endsWith("held.pdf")) {
+        const e = new Error("EBUSY: resource busy or locked, rename");
+        e.code = "EBUSY";
+        throw e;
+      }
+      return rename.apply(this, arguments);
+    };
+    try {
+      await h.receive({ type: "export", to: "pdf" });
+    } finally {
+      fs.renameSync = rename;
+      restore();
+    }
+    const said = vscode._state.errorMessages.map((m) => m.message);
+    assert.deepEqual(vscode._state.warningMessages.map((m) => m.message), [], "a program was said to be missing (scores: " + scores + ")");
+    assert.ok(
+      said.some((m) => m.includes("could not be written over held.pdf. Close held.pdf in the program that has it open, and export again.")),
+      "the notice does not say the PDF is held (scores: " + scores + "): " + JSON.stringify(said)
+    );
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 // A Quarto whose HTML render fails, which is what the print fallback meets
 // when the document itself is what Quarto cannot read.
