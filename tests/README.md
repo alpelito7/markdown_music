@@ -5248,7 +5248,7 @@ itself.
 
 Caught, and the file restored after it.
 
-### A table's head in the weight of its body (2026-09-27)
+### A table's head in the weight of its body, and a link underlined whole (2026-09-27)
 
 The owner's word on a table's head: set as the PDF has always set it, in
 the weight of the rows, and bold only where a cell asks for it with `**`.
@@ -5258,6 +5258,14 @@ a cell asks for it* (`webview-look.test.js`), *the page sets a table's head
 in the weight of its body, as the editor does* (`html.test.js`), and *the
 .tex writes a table's head as it is written, bold only where a cell asks for
 it* (`render.test.js`, written with `--to latex`, so no TeX runs).
+
+And a link in a paragraph whose words are divided, which came out in pieces:
+the division points are marks on one letter, their field stood after
+renderField, and CodeMirror draws the source of lower precedence around the
+others, so each point cut the link's span in two. A link in a Spanish
+document was 11 pieces, and the pointer underlined "vail pour un-e coll".
+*a word divided inside a link leaves the link one piece, underlined whole
+under the pointer* (`webview-hyphenation.test.js`).
 
 Each mutation was made on the file as it stood and undone the same way,
 not restored from a copy: another session's round was rewriting the same
@@ -5272,6 +5280,9 @@ twice.
   (the page's head is not in the weight of its body).
 - **TH4** a `Table` filter in mdm.lua wrapping every head cell in `Strong`
   → the .tex test (`\textbf{index and type} & \textbf{\textbf{bold head}}`).
+- **HL1** the division points drawn at their field's own precedence again,
+  without `Prec.highest` → the link's test (the link was drawn in 11
+  pieces).
 
 All caught, and each file came back.
 

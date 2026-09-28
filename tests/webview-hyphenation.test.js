@@ -286,3 +286,38 @@ test("Delete and multiple carets edit letters, and the default opens with words 
   assert.equal(await docText(h.page), text + text);
   assert.deepEqual(h.errors, []);
 });
+
+// A division point is a mark on one letter, drawn inside every other mark.
+// Drawn around them, as it was, it cut the mark it stood in: a link came out
+// as a span per syllable, and the pointer underlined the one it rested on
+// ("vail pour un-e coll", a link in 11 pieces in a Spanish document,
+// 2026-09-27).
+test("a word divided inside a link leaves the link one piece, underlined whole under the pointer", { skip }, async t => {
+  const text = "---\nlang: es\n---\n\nFuente oficial: [Première demande de permis de travail pour un-e " +
+    "collaborateur/trice de l'Université de Genève](https://www.unige.ch/x).\n";
+  const h = await open({ text, scores: 0, seed: ON });
+  t.after(() => h.close());
+  await h.page.waitForSelector("#app .mdm-hyphen");
+  const at = await h.page.evaluate(() => {
+    const v = window.__mdm.view, c = v.coordsAtPos(v.state.doc.toString().indexOf("pour") + 2);
+    return { x: c.left, y: (c.top + c.bottom) / 2 };
+  });
+  await h.page.mouse.move(at.x, at.y);
+  await sleep(100);
+  const drawn = await h.page.evaluate(() => {
+    const links = Array.from(document.querySelectorAll("#app .mdm-link"));
+    return {
+      pieces: links.length,
+      whole: links.map(e => e.textContent).join(""),
+      underlined: links.filter(e => getComputedStyle(e).textDecorationLine.includes("underline"))
+        .map(e => e.textContent).join(""),
+      // Inside the link or around a piece of it, whichever way it is drawn.
+      divided: Array.from(document.querySelectorAll("#app .mdm-hyphen"))
+        .filter(e => e.closest(".mdm-link") || e.querySelector(".mdm-link")).length,
+    };
+  });
+  assert.ok(drawn.divided > 0, "no word of the link was divided, so this proves nothing");
+  assert.equal(drawn.pieces, 1, "the link was drawn in " + drawn.pieces + " pieces");
+  assert.equal(drawn.underlined, drawn.whole, "the pointer underlined " + JSON.stringify(drawn.underlined));
+  assert.deepEqual(h.errors, []);
+});

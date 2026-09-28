@@ -145,6 +145,9 @@
   TeX has always set it, with the stronger rule under it to set it apart; a
   head cell written in `**` is bold. The editor, the exported page and a PDF
   printed without TeX drew the whole head in bold.
+- A link in a paragraph whose words are divided is underlined whole under
+  the pointer. It was underlined in pieces, from one point where a word
+  could be divided to the next.
 
 ## 0.7.0
 

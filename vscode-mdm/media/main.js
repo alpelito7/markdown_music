@@ -6781,7 +6781,14 @@
         tr.effects.some(function (effect) { return effect.is(refreshHyphenation); })
         ? buildHyphens(tr.state) : value;
     },
-    provide: function (field) { return EditorView.decorations.from(field); },
+    // The innermost mark of all. CodeMirror draws a source of lower
+    // precedence around the others, and a letter wrapped from outside cuts
+    // the mark it stands in: a link came out as a span per syllable, and the
+    // pointer underlined the one it rested on ("vail pour un-e coll", a link
+    // in 11 pieces in a Spanish document, 2026-09-27). One letter long, this
+    // mark cuts nothing from inside, and its soft hyphen takes the ink of the
+    // link it breaks, as it does on the page.
+    provide: function (field) { return CM.Prec.highest(EditorView.decorations.from(field)); },
   });
 
   // ---------- Syntax colours in the editor ----------
