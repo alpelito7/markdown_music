@@ -63,6 +63,10 @@
   where more than an em too much stood under its caption. A
   cross-referenced figure keeps its number and floats where LaTeX puts it,
   its caption at the same size and flush left.
+- A line of prose breaks where the exported page breaks it, never beside
+  the hidden marks of bold, italics, code or a link, and never at a curly
+  apostrophe, a note's number or a no-break space: a period after bold
+  words could go down to the next row alone.
 - A music symbol button leads the buttons that close the toolbar's first
   row, before the equation. Its panel holds the notes from the breve to the
   128th, the dotted notes from the whole to the sixteenth, the two beamed

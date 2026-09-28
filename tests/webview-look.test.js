@@ -6335,3 +6335,72 @@ test("the keys of the heading menu make one quiet column at the right edge", { s
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// ---------- Where a line of prose breaks ----------
+
+// A line of prose breaks where the page breaks it. CodeMirror flanks what it
+// draws in place of source inside a line (a hidden mark, a curly quote, an
+// entity, a note's number) with two images for the caret, and Chrome breaks a
+// line beside an image as it would at a space: a period after bold words
+// stood alone at the head of the next row, "(LEI)**." broken between ")" and
+// "." (the owner's report of 2026-09-27), and so could a curly apostrophe
+// inside a word, the parentheses around italics, the comma after a link, a
+// note's number and the second half of `5&nbsp;km`. The page has no images
+// there and breaks none of them; style.css takes the images out of the flow.
+// Every width from 420 to 1100 px in steps of 6: at none of them do the two
+// characters of a pair stand on two rows. Without the rule, 11 of the 12
+// pairs parted somewhere in a scan by steps of 3, ")." at 61 widths of 227.
+test("a line of prose breaks where the page breaks it, never beside a hidden mark", { skip }, async () => {
+  const text = [
+    "First line.",
+    "",
+    "La norma decisiva es el **art. 34 de la Loi fédérale sur les étrangers et l'intégration (LEI)**. " +
+      "Y sigue (*una frase*) con [un enlace](https://example.org), luego `código`; una nota[^1]. " +
+      "Otra **palabra**-compuesta, 5&nbsp;km y el final.",
+    "",
+    "[^1]: La nota.",
+    "",
+  ].join("\n");
+  const pairs = [").", "l’", "’i", "(u", "e)", "e,", "o;", "a1", "1.", "a-", "5 ", " k"];
+  const h = await open({ text, scores: 0, seed: { settings: { textFont: "roman" } } });
+  const parted = {};
+  let rows = 0;
+  for (let width = 420; width <= 1100; width += 6) {
+    await h.page.setViewport({ width, height: 900 });
+    const seen = await h.page.evaluate((pairs) => {
+      const line = Array.from(document.querySelectorAll("#app .cm-line")).find((l) =>
+        l.textContent.startsWith("La norma")
+      );
+      const chars = [];
+      const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        for (let i = 0; i < n.textContent.length; i++) {
+          const range = document.createRange();
+          range.setStart(n, i);
+          range.setEnd(n, i + 1);
+          const box = range.getClientRects()[0];
+          if (box) chars.push({ c: n.textContent[i], mid: (box.top + box.bottom) / 2 });
+        }
+      }
+      // A row is 27 px apart from the next; a raised note number or a chip
+      // of code moves its own box by a few.
+      const apart = (a, b) => Math.abs(a.mid - b.mid) > 12;
+      const out = [];
+      for (let k = 0; k + 1 < chars.length; k++) {
+        const pair = chars[k].c + chars[k + 1].c;
+        if (pairs.includes(pair) && apart(chars[k], chars[k + 1])) out.push(pair);
+      }
+      const mids = chars.map((c) => c.mid).sort((a, b) => a - b);
+      let count = mids.length ? 1 : 0;
+      for (let k = 1; k < mids.length; k++) if (mids[k] - mids[k - 1] > 12) count++;
+      return { parted: out, rows: count };
+    }, pairs);
+    seen.parted.forEach((p) => (parted[p] = (parted[p] || 0) + 1));
+    rows = Math.max(rows, seen.rows);
+  }
+  assert.deepEqual(parted, {}, "pairs that stood on two rows, and at how many widths");
+  // The scan crosses widths where the paragraph wraps, into several rows.
+  assert.ok(rows >= 4, "the paragraph never took more than " + rows + " rows");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});

@@ -1260,6 +1260,32 @@ body {
 #app .cm-line .cm-widgetBuffer {
   vertical-align: top;
 }
+/* And the buffers around hidden source, and around a character drawn in
+   place of source (a curly quote, an entity, a note's number), are taken out
+   of the flow. An image in a line is a place where Chrome may break it, and
+   the page has no image there: a period after bold words went down to a row
+   of its own, "(LEI)**." broken between ")" and "." (2026-09-27), and a word
+   could break at the curly apostrophe drawn inside it. Out of the flow the
+   buffers stay where CodeMirror put them, and the characters on either side
+   meet as they meet on the page, so the line breaks where the page breaks
+   it, after a dash and never before a period. A picture, an equation and a
+   list's marker keep theirs in the flow: the page breaks beside a picture or
+   an equation too, and a caret stands beside a marker. Hidden source is the
+   empty span CodeMirror draws for a replaced range with no widget of its
+   own. A line that holds nothing but hidden source, the `>` of a blank line
+   in a quote, took its height from the buffers, and with them out of the
+   flow its line box was empty and fell to nothing (16px to 0, which put the
+   numbers of two lines over each other); a line is never less than a line
+   tall, which is what the buffers gave it at every size. */
+#app .cm-line img.cm-widgetBuffer:has(+ span[contenteditable="false"]:empty),
+#app .cm-line span[contenteditable="false"]:empty + img.cm-widgetBuffer,
+#app .cm-line img.cm-widgetBuffer:has(+ :is(.mdm-smart, .mdm-entity, .mdm-note-ref)),
+#app .cm-line :is(.mdm-smart, .mdm-entity, .mdm-note-ref) + img.cm-widgetBuffer {
+  position: absolute;
+}
+#app .cm-line {
+  min-height: 1lh;
+}
 /* Paragraph spacing, taken from the Office Viewer preview: a line stands at
    1.7 of an em there (`--editor-line-height` in Vditor's sheet, which that
    preview draws with) and two paragraphs an em apart (`p { margin-bottom:
