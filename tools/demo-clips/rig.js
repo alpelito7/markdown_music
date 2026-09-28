@@ -530,6 +530,39 @@ class Rig {
     await this.click({ modifiers: 1 });
   }
 
+  // Two presses, the second counted as the second, which is what a hand
+  // sends: CodeMirror reads the count from the event's detail (getClickType in
+  // @codemirror/view, in Chrome), and the first press is the one that puts
+  // the caret down, or adds one with Alt, before the second takes the word.
+  // The modifiers ride on the mouse events alone, with no key sent for them,
+  // so a held Alt never reaches VS Code as a clean tap that would open its
+  // menu bar (addsCaret in main.js has that story).
+  async doubleClick(opts) {
+    const o = opts || {};
+    await this.page.evaluate((p) => window.__mdmRig && window.__mdmRig.ring(p.x, p.y), { x: this.x, y: this.y });
+    const base = { x: this.x, y: this.y, button: "left", modifiers: o.modifiers || 0 };
+    for (const n of [1, 2]) {
+      await this.cdp.send("Input.dispatchMouseEvent", { ...base, type: "mousePressed", buttons: 1, clickCount: n });
+      await sleep(55);
+      await this.cdp.send("Input.dispatchMouseEvent", { ...base, type: "mouseReleased", buttons: 0, clickCount: n });
+      if (n === 1) await sleep(85);
+    }
+    this.reshapeLater(180);
+  }
+
+  // A press here, an eased travel to target with the button held, and the
+  // release there: a selection dragged out with the mouse.
+  async dragTo(target, ms) {
+    const base = { button: "left", clickCount: 1 };
+    await this.page.evaluate((p) => window.__mdmRig && window.__mdmRig.ring(p.x, p.y), { x: this.x, y: this.y });
+    await this.cdp.send("Input.dispatchMouseEvent", { ...base, x: this.x, y: this.y, type: "mousePressed", buttons: 1 });
+    await sleep(90);
+    await this.moveTo(target, ms, { buttons: 1 });
+    await sleep(60);
+    await this.cdp.send("Input.dispatchMouseEvent", { ...base, x: this.x, y: this.y, type: "mouseReleased", buttons: 0 });
+    this.reshapeLater(180);
+  }
+
   // ---- reading the document ----
   //
   // CodeMirror builds only the lines in view, so a score below the fold is not

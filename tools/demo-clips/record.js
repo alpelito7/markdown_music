@@ -10,8 +10,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { Rig, sleep, encodeMp4, encodeGif, encodePoster, seam, dissolveHome } = require("./rig.js");
-const { clips, clearLayout, closeAll, openDoc, pinCaret, warmPiano, settleCaret, rest } = require("./clips.js");
-const { SETTINGS, FRAMES, CLIPS_OUT, DEMO, WORKSPACE } = require("./paths.js");
+const { clips, clearLayout, closeAll, openDoc, pinCaret, warmPiano, settleCaret, rest, picturesOf } = require("./clips.js");
+const { SETTINGS, FRAMES, CLIPS_OUT, DEMO, HERE, WORKSPACE } = require("./paths.js");
 
 // The two grounds a clip can be shot on. mdm.theme is the editor's own look
 // and workbench.colorTheme the window around it; at rest the two agree, or the
@@ -45,6 +45,11 @@ function writeSettings(look, extra) {
     "breadcrumbs.enabled": false,
     "editor.minimap.enabled": false,
     "window.restoreWindows": "none",
+    // VS Code's own dialogs, drawn in the workbench, and not the system's.
+    // On Linux the save prompt is a native window by default, which nothing
+    // driving the workbench can see: a take that left a document edited
+    // stood behind one that closeAll's check never found (2026-09-28).
+    "window.dialogStyle": "custom",
     // The logical size of the frame: see the note in rig.js.
     "window.zoomLevel": 2,
     // Every mdm.* back to its shipped default, so a take never inherits the
@@ -57,6 +62,7 @@ function writeSettings(look, extra) {
     "mdm.multicursorMatch": "word",
     "mdm.followPlayhead": "follow",
     "mdm.textFont": "roman",
+    "mdm.textAlign": "justify",
     ...LOOKS[look],
     ...(extra || {}),
   };
@@ -64,11 +70,16 @@ function writeSettings(look, extra) {
   fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2));
 }
 
-// What the editor holds for demo.mdm: the file without its YAML header, which
-// mdm.frontMatter "hidden" keeps out of the view, and without the blank line
-// after it.
-function pristine() {
-  return fs.readFileSync(DEMO, "utf8").replace(/^---\n[\s\S]*?\n---\n\n/, "");
+// The document a clip is shot on: demo.mdm unless it names another beside it.
+function docOf(clip) {
+  return clip.doc ? path.join(HERE, clip.doc) : DEMO;
+}
+
+// What the editor holds for a clip's document: the file without its YAML
+// header, which mdm.frontMatter "hidden" keeps out of the view, and without
+// the blank line after it.
+function pristine(clip) {
+  return fs.readFileSync(docOf(clip), "utf8").replace(/^---\n[\s\S]*?\n---\n\n/, "");
 }
 
 async function editorText(rig) {
@@ -97,12 +108,16 @@ async function take(rig, clip, look, keepFrames) {
   await rig.clearToasts();
   await clearLayout(rig);
   await closeAll(rig);
+  const doc = path.basename(docOf(clip));
   fs.mkdirSync(WORKSPACE, { recursive: true });
-  fs.copyFileSync(DEMO, path.join(WORKSPACE, "demo.mdm"));
-  await openDoc(rig, "demo.mdm");
+  fs.copyFileSync(docOf(clip), path.join(WORKSPACE, doc));
+  // A picture a take pasted is written beside the copy, and one left there
+  // from a take that stopped halfway would make the next paste image-2.png.
+  fs.rmSync(picturesOf(doc), { recursive: true, force: true });
+  await openDoc(rig, doc);
   await rig.webview();
   await rig.waitFor(() => !!document.querySelector("#app .mdm-toolbar"), { timeout: 15000 });
-  if ((await editorText(rig)) !== pristine()) throw new Error("demo.mdm did not open as it is in the repository");
+  if ((await editorText(rig)) !== pristine(clip)) throw new Error(`${doc} did not open as it is in the repository`);
   await pinCaret(rig);
   await rig.overlay();
   if (clip.needsPiano) {
@@ -112,7 +127,7 @@ async function take(rig, clip, look, keepFrames) {
   // Framed first and the caret put down after, so the click lands on prose
   // the frame shows and nothing scrolls between the settling and the take.
   await clip.frame(rig);
-  await settleCaret(rig);
+  await (clip.settle || settleCaret)(rig);
   const at = await rest(rig);
   await rig.warp(at.x, at.y);
   await sleep(700);
@@ -130,11 +145,11 @@ async function take(rig, clip, look, keepFrames) {
   // to the document it opened on; its seam, taken after the dissolve, measures
   // 0, since its last frame is then its first. The seam check stays for any
   // clip that closes on its own first frame.
-  if (clip.after) await clip.after(rig, { look, isPristine: async () => (await editorText(rig)) === pristine() });
+  if (clip.after) await clip.after(rig, { look, isPristine: async () => (await editorText(rig)) === pristine(clip) });
   if (clip.dissolve) frames = dissolveHome(frames, clip.dissolve);
   // A take that changes the text ends on a different frame from the one it
   // began on, so its loop has a seam; and the next take would inherit it.
-  if ((await editorText(rig)) !== pristine()) {
+  if ((await editorText(rig)) !== pristine(clip)) {
     throw new Error(`${tag} left the document edited: its last frame is not its first`);
   }
   const seconds = frames[frames.length - 1].t - frames[0].t;

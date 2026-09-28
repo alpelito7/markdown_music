@@ -3,7 +3,7 @@
 Markdown Music is an editor for `.mdm` files: Markdown with equations, code and playable scores, drawn as you write. Scores are written in [ABC notation](https://abcnotation.com/wiki/abc:standard:v2.1) inside a ```` ```abc ```` block, so the file stays plain Markdown. To try it, download **[example.mdm](https://cdn.jsdelivr.net/gh/alpelito7/markdown_music@main/example.mdm)** (or [read it on GitHub](https://github.com/alpelito7/markdown_music/blob/main/example.mdm)), save it with the `.mdm` extension and open it in VS Code.
 
 <!-- clip: tour -->
-![The document opens at its top in MDM Dark, set in the font Markdown is usually written in. The toolbar's font button sets the text in Latin Modern, the face of a LaTeX document, and every word of the page is redrawn in it. The theme menu then switches to MDM Light, another button draws the staff lines in ink and a third turns on multicursor matches inside words. The page scrolls to the score, and a click on the engraved score opens its ABC above the drawing. A click on a bare E, then Ctrl+D four times, selects the four E's of the tune, two of them inside chords; typing e moves all four up an octave, and a flat typed in front of them makes them E flats, each step showing at once in the drawing underneath. The headphones open the player, and play moves a brass playhead across the edited staff, each note turning brass as it sounds.](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/clip-tour.gif)
+![The toolbar sets the document in Latin Modern, switches it to MDM Light, draws the staff lines in ink and lets Ctrl+D match inside words. A click on the score opens its ABC, and Ctrl+D selects its four E's, which typing turns into E flats an octave up while the drawing follows. The player sounds the edited tune with a brass playhead on the staff, and the score's export button offers it as MIDI or WAV.](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/clip-tour.gif)
 
 ## Writing a score
 
@@ -15,33 +15,29 @@ Repeats, ties, lyrics, several voices and the rest of the notation are in the [A
 
 ## Writing Markdown
 
-The text is the file, and the editor reads it as the export does: Pandoc's Markdown, with CommonMark's blank lines. Lists, quotes and callouts are drawn nested as the page nests them; links and images work by reference as well as inline; footnotes, citations, attributes, raw TeX and Pandoc's curly quotes and dashes are drawn, and the source of a line comes back when the caret is on it. `Enter`, `Backspace`, `Tab` and `Shift+Tab` continue, end, nest and unnest lists; `Ctrl+B`, `Ctrl+I`, `Ctrl+E` and `Ctrl+K` put a mark on and take it off; `Ctrl+Shift+0` to `Ctrl+Shift+6` make the line a paragraph or a heading of that level, `Ctrl+Shift+C` a code block with the caret where its language goes (`abc` for a score) and `Ctrl+Shift+T` a task list; each is a toolbar button too, which names its key where it has one, and the toolbar also strikes words through, raises or lowers them (`x^2^`, `H~2~O`), sets them in small caps and highlights them (Pandoc's `[word]{.mark}`, which the page writes as `<mark>`, drawn in a wash of the document's own on all three surfaces), and seven buttons close its first row with what a document holds beside its words: a note, a rest or an accidental, written as its Unicode character, an equation inline or on lines of its own, a table, a picture, a footnote with its note, and a horizontal rule; a click ticks a task's box, and `Ctrl+click` follows a link (`Alt+click` where `Ctrl+click` adds a caret). `Shift+Enter` breaks a line inside its paragraph (Pandoc's backslash at the end of the line; `<br>` in a table cell), `Tab` and `Shift+Tab` walk the cells of a table and add a row after its last, a mark typed over selected words wraps them (`*`, `_`, `~`, `^`, `$`, a backtick, a quote or a bracket), an address pasted over selected words links them, and a picture pasted from the clipboard or dropped on the text with Shift held is written beside the document, in a folder named after it, and linked where the caret is; saving the document without it sends the file to the system's trash and removes the folder once it is empty. `Ctrl+F` searches, `Ctrl+H` searches and replaces, and the outline button lists the headings.
+<!-- clip: markdown -->
+![In Latin Modern on MDM Light, the toolbar justifies the text, and English chosen from the hyphenation menu divides its words and writes lang: en into a YAML header that the YAML button shows and hides. Three words picked with Alt and a double click turn bold as two asterisks are typed, three lines become a bulleted list and a phrase is highlighted. A table is filled cell by cell with Tab, and a pasted picture is saved beside the document and drawn with the caption typed under it.](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/clip-markdown.gif)
+
+The text is the file, and the editor reads it as the export does: Pandoc's Markdown, with CommonMark's blank lines. Lists, quotes, callouts, tables, footnotes and citations are drawn in place, and a line shows its source while the caret is on it. `Ctrl+B`, `Ctrl+I`, `Ctrl+E` and `Ctrl+K` mark words; `Ctrl+Shift+0` to `Ctrl+Shift+6` make the line a paragraph or a heading, `Ctrl+Shift+C` a code block (`abc` for a score) and `Ctrl+Shift+T` a task list. A mark typed over selected words wraps them, an address pasted over them links them, and `Shift+Enter` breaks a line inside its paragraph. A picture pasted, or dropped with Shift held, is saved in a folder beside the document; saving the document without it moves the file to the trash. `Ctrl+click` follows a link (`Alt+click` where `Ctrl+click` adds a caret), `Ctrl+F` searches and `Ctrl+H` replaces.
 
 ## The toolbar
 
-### Font
+The first row writes: headings, marks on words, blocks, and what a document holds beside its words (a music symbol, an equation, a table, a picture, a footnote, a rule). A tooltip names the button's key where it has one. The two buttons at its left open the outline of the headings and export the document.
 
-The text is set in Latin Modern Roman, the face of a LaTeX document, which comes with the extension and needs no LaTeX installed. The font button switches it to the system's sans, the face Markdown is usually written in; code keeps its monospace either way.
+The second row holds settings shared by every document, except the hyphenation, which each file keeps:
 
-### Justified text
-
-Paragraphs, list items and quotations are justified: every line but the last of each reaches both edges of the text, and the spaces between its words are widened as you type. The justify button sets them ragged on the right instead. Lines break on the same words either way, and headings, code, tables and scores are never justified.
-
-### Hyphenation
-
-Words are kept whole at line endings until a language is chosen from the hyphenation menu: German, English, Spanish, French, Italian, Dutch, Polish, Portuguese, Russian or Ukrainian. Choosing one divides the prose and writes the language into the YAML header (`lang: en` for English), adding a header if the file had none, which comes up hidden until the YAML button beside the menu opens it. The hyphen is only drawn at the wrap, so copying and saving keep each word as it was typed. Division is remembered per file, since a document in Spanish and one in English can be open side by side; every other button of the bar is the editor's and is shared by all of them.
-
-### Multicursor
-
-Ctrl+D adds the next occurrence of the selection, as in VS Code, and matches whole words: from "score" it steps over "scores". The multicursor button makes it match inside words too. Alt+click adds a caret, or Ctrl+click when VS Code's multi-cursor modifier is set to it.
-
-### Following the playhead
-
-While a tune plays, a brass playhead walks the staff and the page scrolls to keep the system being played whole on screen. The follow button turns that off, so a long score can go on sounding while you read elsewhere in the document.
+- **Multicursor**: `Ctrl+D` adds the next match of the selection, whole words only unless this button is on. `Alt+click` adds a caret.
+- **Theme**: follows VS Code by default; MDM Light, MDM Dark and MDM White are the editor's own.
+- **Font**: Latin Modern Roman, the face of a LaTeX document, which comes with the extension, or the system's sans. Code keeps its monospace.
+- **Justify**: paragraphs justified, or ragged on the right. The lines break on the same words either way.
+- **Hyphenation**: words stay whole until a language is chosen here. It is written into the YAML header as `lang:`, in a new, hidden header if the file had none; the hyphen is only drawn, never saved.
+- **YAML**: shows or hides the header.
+- **Score fill**, **staff lines** and **score alignment**: a paper, slate or brass ground under the scores, staff lines in gray or in ink, and scores centred or at the left.
+- **Follow**: while a tune plays, the page scrolls to keep the sounding system in view; turned off, it stays where you are reading.
 
 ### Export
 
-The export button has two branches. **Document** writes the document as HTML or PDF, with the font, the justification and the hyphenation the editor is using, and needs [Quarto](https://quarto.org) 1.4 or later. With Chrome, Chromium or Microsoft Edge it can print a PDF from the HTML page without TeX, including scores and equations; installing TeX adds its typeset line breaking and page layout. The first kind of PDF says which road it took. Its **Don't show again** button hides that notice, and `mdm.showPdfFallbackNotice` in Settings turns it back on. The editor itself needs none of them. **Audio** writes every score of the document as MIDI or as WAV beside it, one file per score, which is what a score's own button above does for the one score it stands by; it needs nothing installed at all, and in a document with no score its rows are greyed out.
+**Document** writes HTML or PDF with the editor's font, justification and hyphenation, and needs [Quarto](https://quarto.org) 1.4 or later. Without TeX, Chrome, Chromium or Microsoft Edge prints the PDF from the HTML page, scores and equations included; with TeX it gets TeX's line breaking and page layout. **Audio** writes every score beside the document as MIDI or WAV and needs nothing installed. The editor itself needs none of these.
 
 ## Documentation and licence
 

@@ -192,3 +192,56 @@ test("the README writes no ABC as plain code", () => {
   assert.deepEqual(plain, [], "ABC written as plain code in the README");
 });
 
+
+// Where the two clips stand, as the owner placed them (2026-09-28): the tour
+// under the introduction, and the Markdown one at the head of "Writing
+// Markdown", after "Writing a score", as the picture of what that section
+// says. The section's text was halved round it the same day, from 377 words to
+// 139, and it is held under half of what it had: a README that grows a
+// sentence per feature is what the owner has asked twice to be undone.
+function readmeSection(md, heading) {
+  const from = md.indexOf(`\n## ${heading}\n`);
+  if (from < 0) return null;
+  const next = md.indexOf("\n## ", from + 1);
+  return { from, to: next < 0 ? md.length : next, text: md.slice(from, next < 0 ? md.length : next) };
+}
+
+test("the README shows the tour first and the Markdown clip under Writing Markdown", () => {
+  const md = read(EXT, "README.md");
+  const ids = [...md.matchAll(/^<!-- clip: ([a-z0-9-]+) -->[ \t]*$/gm)].map((m) => m[1]);
+  assert.deepEqual(ids, ["tour", "markdown"], "the README's clips are not the tour and then the Markdown one");
+  const score = readmeSection(md, "Writing a score");
+  const markdown = readmeSection(md, "Writing Markdown");
+  assert.ok(score && markdown && score.from < markdown.from, "Writing Markdown no longer follows Writing a score");
+  assert.ok(md.indexOf("<!-- clip: tour -->") < score.from, "the tour is not above Writing a score");
+  const clip = md.indexOf("<!-- clip: markdown -->");
+  assert.ok(clip > markdown.from && clip < markdown.to, "the Markdown clip is not in Writing Markdown");
+  // At the head of the section: nothing but the heading before it.
+  const before = md.slice(markdown.from, clip).replace(/^\s*## Writing Markdown\s*/, "");
+  assert.equal(before, "", "the Markdown clip is not the first thing under its heading");
+});
+
+test("Writing Markdown is kept under half the words it had before its clip", () => {
+  const markdown = readmeSection(read(EXT, "README.md"), "Writing Markdown");
+  const words = markdown.text
+    .split("\n")
+    .filter((l) => !/^(## |<!-- |!\[)/.test(l))
+    .join(" ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+  assert.ok(words <= 188, `Writing Markdown has ${words} words; it was cut from 377 to under half on 2026-09-28`);
+});
+
+// A clip's alt text is two or three sentences (owner, 2026-09-28): the
+// first ones walked through every beat of the take in ten or more, and on
+// the page that is a paragraph nobody reads, where the clip already shows it.
+test("every clip's alt text in the README is at most three sentences", () => {
+  const lines = read(EXT, "README.md").split("\n");
+  lines.forEach((line, i) => {
+    const m = line.match(/^<!-- clip: ([a-z0-9-]+) -->\s*$/);
+    if (!m) return;
+    const alt = ((lines[i + 1] || "").match(/^!\[([^\]]*)\]/) || [])[1] || "";
+    const sentences = (alt.match(/[.!?](?=\s|$)/g) || []).length;
+    assert.ok(sentences >= 1 && sentences <= 3, `clip ${m[1]}'s alt text has ${sentences} sentences`);
+  });
+});

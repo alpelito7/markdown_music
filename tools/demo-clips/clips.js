@@ -1,5 +1,5 @@
-// The clips, one object each, written as beats. There is one, the tour, and
-// the README carries it.
+// The clips, one object each, written as beats. There are two and the README
+// carries both: the tour, on demo.mdm, and the Markdown one, on markdown.mdm.
 //
 // A loop has no seam: a clip ends on the frame it opened on, or ends
 // elsewhere and dissolves back into its first frame as the tour does, and
@@ -34,7 +34,10 @@
 
 "use strict";
 
+const fs = require("node:fs");
+const path = require("node:path");
 const { sleep } = require("./rig.js");
+const { REPO, WORKSPACE } = require("./paths.js");
 
 // ---------------------------------------------------------------- helpers
 
@@ -83,10 +86,13 @@ async function closeAll(rig) {
   await rig.press("Control+k");
   await rig.press("w");
   await sleep(800);
-  // A save dialog here means a take left the document edited; the check at the
+  // A save dialog here means a take left a document edited; the check at the
   // end of every take in record.js should have stopped the run before this.
+  // It is in the workbench's DOM only because record.js asks for VS Code's own
+  // dialogs (window.dialogStyle): the native one is a window of its own that
+  // nothing here can see.
   if (await rig.page.evaluate(() => !!document.querySelector(".monaco-dialog-box"))) {
-    throw new Error("VS Code asks to save demo.mdm: a take left it edited");
+    throw new Error("VS Code asks to save a document: a take left it edited");
   }
 }
 
@@ -246,7 +252,8 @@ async function scoreTop(rig) {
 // Several of the editor's features in one take, in the order a reader meets
 // them: the face, the theme, the staff lines, the multicursor setting, the
 // source under a click, four notes edited at once (two of them inside
-// chords), and the tune played with the playhead on the staff.
+// chords), the tune played with the playhead on the staff, and the score's
+// export button opened on the two files it writes.
 //
 // The face goes first, before the theme, by the owner's order (2026-09-19;
 // asked the other way round the same evening and put back). It is in the take
@@ -269,7 +276,7 @@ const tour = {
   id: "tour",
   title: "The editor in one take",
   alt:
-    "The document opens at its top in MDM Dark, set in the font Markdown is usually written in. The toolbar's font button sets the text in Latin Modern, the face of a LaTeX document, and every word of the page is redrawn in it. The theme menu then switches to MDM Light, another button draws the staff lines in ink and a third turns on multicursor matches inside words. The page scrolls to the score, and a click on the engraved score opens its ABC above the drawing. A click on a bare E, then Ctrl+D four times, selects the four E's of the tune, two of them inside chords; typing e moves all four up an octave, and a flat typed in front of them makes them E flats, each step showing at once in the drawing underneath. The headphones open the player, and play moves a brass playhead across the edited staff, each note turning brass as it sounds.",
+    "The toolbar sets the document in Latin Modern, switches it to MDM Light, draws the staff lines in ink and lets Ctrl+D match inside words. A click on the score opens its ABC, and Ctrl+D selects its four E's, which typing turns into E flats an octave up while the drawing follows. The player sounds the edited tune with a brass playhead on the staff, and the score's export button offers it as MIDI or WAV.",
   frameRate: 16,
   needsPiano: true,
   // The sans, so the first press has somewhere to come from: every other
@@ -409,11 +416,51 @@ const tour = {
     await sleep(380);
     await rig.click();
     await rig.moveTo(await rest(rig), 900);
-    await sleep(4200);
+
+    // The score's export button, pressed while the tune plays, so the take
+    // shows that a score can be written out as a file (owner, 2026-09-28).
+    // It stands in the rail under the headphones, up while the source is
+    // open; its tooltip names it on the way in, and the press opens the two
+    // formats beside the rail. Nothing is picked: a row would open VS Code's
+    // save dialog over the window.
+    //
+    // Timed by the player's clock and not by sleeps. The tune is 7.5 s (five
+    // bars of 3/4 at 120), and a take that ran past it would show the player
+    // stop and reset under the menu. By sleeps alone the first take with this
+    // beat pressed 7 s into the tune: the moves ran longer than their
+    // nominal times, and the screencast drops the frames still in flight when
+    // the camera stops, about 0.85 s of that take's end, which with the
+    // 0.6 s dissolve left the menu 0.6 s on screen (measured on its frames).
+    // Leaving the rest at 0:02, the press came about 4 s into the tune (the
+    // click itself costs some 0.3 s over its sleeps), and a hold of 3.2 s
+    // stopped the take a quarter of a second before the tune's end; 2.8 s
+    // leaves the menu about 2 s on screen before the dissolve and more than
+    // half a second to spare.
+    await rig.waitFor(
+      () => {
+        const clock = document.querySelector("#app .abcjs-midi-clock");
+        const m = clock && /(\d+):(\d\d)/.exec(clock.textContent);
+        return !!m && Number(m[1]) * 60 + Number(m[2]) >= 2;
+      },
+      { timeout: 8000, poll: 40 }
+    );
+    await rig.moveTo(await rig.at("#app .mdm-score .mdm-audio-export"), 700);
+    await sleep(520);
+    await rig.click();
+    await sleep(2800);
   },
   // Off camera: the player shut, the edit undone, the block folded. The theme
   // and the two toolbar settings go back with the next take's settings.
   async after(rig, ctx) {
+    // The export menu the take ends on, shut as a reader shuts it: a second
+    // press on its button. The headphones below would shut it too, but only
+    // while the player is open.
+    if (await rig.evalFrame(() => !!document.querySelector("#app .mdm-audio-export.mdm-toolbar__item--open"))) {
+      const ex = await rig.at("#app .mdm-score .mdm-audio-export");
+      await rig.warp(ex.x, ex.y);
+      await rig.click();
+      await sleep(400);
+    }
     if (await rig.evalFrame(() => !!document.querySelector("#app .abcjs-midi-start"))) {
       const hp = await rig.at("#app .mdm-score .mdm-audio-toggle");
       await rig.warp(hp.x, hp.y);
@@ -432,8 +479,349 @@ const tour = {
   },
 };
 
+// ---------------------------------------------------------------- markdown
+
+// The window point of a stretch of the document's text, found through
+// CodeMirror as prose() finds its line, so the take follows markdown.mdm when
+// its words change: where the stretch starts, or where it ends with end set,
+// or the middle of it with mid set. Null means it is not in the pane, which a
+// beat treats as a take gone wrong rather than clicking the title bar.
+async function atText(rig, needle, opts) {
+  const o = opts || {};
+  const off = await rig.webviewOffset();
+  const c = await rig.evalFrame(
+    (n, o) => {
+      const view = window.__mdm.view;
+      const i = view.state.doc.toString().indexOf(n);
+      if (i < 0) return null;
+      const a = view.coordsAtPos(i, 1);
+      const b = view.coordsAtPos(i + n.length, -1);
+      const pane = document.querySelector("#app .cm-scroller").getBoundingClientRect();
+      const at = o.end ? b : a;
+      if (!at || at.top < pane.top || at.bottom > pane.bottom) return null;
+      const x = o.mid && b && Math.abs(b.top - a.top) < 2 ? (a.left + b.right) / 2 : at.left;
+      return { x, y: (at.top + at.bottom) / 2 };
+    },
+    needle,
+    o
+  );
+  if (!c) throw new Error(`${JSON.stringify(needle)} is not on screen`);
+  return { x: Math.round(off.x + c.x), y: Math.round(off.y + c.y) };
+}
+
+// The scroll offset that puts the line holding needle a little under the top
+// of the pane, read from CodeMirror's own heights at the moment it is asked
+// for. Measured on camera and not in frame(): by then the take has justified
+// the prose, divided its words and made three of them bold, and every one of
+// those moves the lines below.
+async function scrollFor(rig, needle, below) {
+  return rig.evalFrame(
+    (n, below) => {
+      const view = window.__mdm.view;
+      const i = view.state.doc.toString().indexOf(n);
+      return Math.max(0, Math.round(view.lineBlockAt(i).top + view.documentTop - view.scrollDOM.getBoundingClientRect().top + view.scrollDOM.scrollTop - below));
+    },
+    needle,
+    below === undefined ? 14 : below
+  );
+}
+
+// What a take pastes: the extension's own icon, a picture that belongs to the
+// project and reads at the size the editor draws it.
+const PICTURE = path.join(REPO, "vscode-mdm", "media", "icon.png");
+
+// A picture pasted into the text. The event is the one Ctrl+V fires, built
+// with the picture in its clipboardData and dispatched on CodeMirror's
+// content, so the editor takes it through its own paste handler, to the host,
+// which writes the file, and back, as it takes a real one; the clipboard
+// alone is left out. The rig's VS Code shares the desktop's clipboard, and
+// putting the picture on it would throw away whatever the owner had copied.
+// Named image.png, the name Chrome gives a screenshot pasted from the
+// clipboard (pictureFiles in main.js).
+async function pastePicture(rig, file) {
+  const bytes = fs.readFileSync(file).toString("base64");
+  await rig.evalFrame((b64) => {
+    const bin = atob(b64);
+    const data = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
+    const clip = new DataTransfer();
+    clip.items.add(new File([data], "image.png", { type: "image/png" }));
+    window.__mdm.view.contentDOM.dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData: clip, bubbles: true, cancelable: true })
+    );
+  }, bytes);
+}
+
+// Where a pasted picture of doc goes: `<stem>-images` beside it
+// (PICTURE_FOLDER_SUFFIX in extension.js).
+function picturesOf(doc) {
+  return path.join(WORKSPACE, path.basename(doc, path.extname(doc)) + "-images");
+}
+
+// The file put back as it is on disk, through VS Code's own File: Revert
+// File. Some of what the Markdown take writes is not in the editor's undo
+// history: the host writes the `lang:` line into the header, and the header
+// is hidden from the editor's text. The chord goes to the workbench from the
+// active tab, as closeAll's does.
+async function revertFile(rig) {
+  await rig.page.evaluate(() => {
+    const tab = document.querySelector(".tabs-container .tab.active");
+    if (tab) tab.focus();
+  });
+  await sleep(250);
+  await rig.press("Control+Shift+p");
+  await sleep(600);
+  await rig.type("File: Revert File", 10);
+  await sleep(700);
+  await rig.press("Enter");
+  await sleep(1500);
+  await rig.webview();
+  await rig.waitFor(() => !!document.querySelector("#app .mdm-toolbar"), { timeout: 15000 });
+}
+
+// The caret on the blank line under the heading before the camera rolls, for
+// the reason settleCaret gives for the tour: without it the caret is on the
+// heading and the first press on the bar shows its "###" for the rest of the
+// take.
+async function settleUnderHeading(rig) {
+  const off = await rig.webviewOffset();
+  const c = await rig.evalFrame(() => {
+    const view = window.__mdm.view;
+    const doc = view.state.doc;
+    for (let i = 1; i < doc.lines; i++) {
+      if (doc.line(i).text.startsWith("#") && doc.line(i + 1).text.trim() === "") {
+        const at = view.coordsAtPos(doc.line(i + 1).from);
+        return at && { x: at.left + 120, y: (at.top + at.bottom) / 2 };
+      }
+    }
+    return null;
+  });
+  if (!c) throw new Error("the blank line under the heading is not on screen");
+  await rig.warp(Math.round(off.x + c.x), Math.round(off.y + c.y));
+  await rig.click();
+  await sleep(500);
+}
+
+// The Markdown the editor writes and draws, in one take, in the order the
+// owner gave (2026-09-28): the prose justified, its words divided once a
+// language is chosen and the YAML header that choice writes opened and shut
+// again, three words picked with the multicursor and made bold by typing
+// `**` over them, three lines made a list, words highlighted, a table
+// written cell by cell, and a picture pasted with its caption. It opens in
+// Latin Modern, the editor's default, on MDM Light.
+//
+// markdown.mdm is the take's guide as demo.mdm is the tour's: every paragraph
+// says what is about to be done to it, and the three lines the list button
+// turns into a list name what the page has done before them.
+//
+// It opens ragged (settings), so that the first press has somewhere to go,
+// and with no YAML header at all, so that choosing a language writes one,
+// hidden, and the YAML button goes from grey to pressable (writeLanguage in
+// extension.js). It ends a long way from where it began, and like the tour
+// it is put back off camera (after) and dissolves into its first frame.
+const markdown = {
+  id: "markdown",
+  title: "Markdown in one take",
+  doc: "markdown.mdm",
+  alt:
+    "In Latin Modern on MDM Light, the toolbar justifies the text, and English chosen from the hyphenation menu divides its words and writes lang: en into a YAML header that the YAML button shows and hides. Three words picked with Alt and a double click turn bold as two asterisks are typed, three lines become a bulleted list and a phrase is highlighted. A table is filled cell by cell with Tab, and a pasted picture is saved beside the document and drawn with the caption typed under it.",
+  frameRate: 14,
+  settings: { "mdm.textAlign": "left" },
+  dissolve: 0.6,
+  // What the table button's empty table is filled with, header first, a cell
+  // at a time with Tab between them. The rows are the marks the take has just
+  // used, as they are drawn and as they are written, so the table says what
+  // the take did; its third row is the one Tab adds after the last cell of the
+  // two the button writes (TABLE_BLOCK in main.js).
+  //
+  // Not the highlight, though the take has just used it: a bracketed span in
+  // a cell is drawn in the editor without its class, so `[x]{.mark}` there
+  // shows no wash where the page would write <mark> (cellParts in main.js,
+  // found by this take on 2026-09-28 and left for its own round).
+  cells: ["Drawn", "Written", "**bold**", "`**bold**`", "*italic*", "`*italic*`", "~~struck~~", "`~~struck~~`"],
+  async frame(rig) {
+    await rig.scrollTop(0);
+  },
+  settle: settleUnderHeading,
+  async beats(rig) {
+    const button = (type) => rig.at(`#app button[data-type="${type}"]`);
+    await sleep(900);
+
+    // Justified. The tooltip reads "Justify text" on the ragged page
+    // (textAlignTip names the press), and every paragraph on screen squares
+    // up at once.
+    await rig.moveTo(await button("mdm-text-align"), 620);
+    await sleep(520);
+    await rig.click();
+    await sleep(1300);
+
+    // English, from the hyphenation menu. The host writes the header and
+    // answers, and the button lights once the language is dividing the
+    // prose: waited for, so the hold after it is a hold on divided words and
+    // not on a round trip.
+    await rig.moveTo(await button("mdm-hyphenation"), 380);
+    await sleep(420);
+    await rig.click();
+    await sleep(600);
+    await rig.moveTo(await rig.atLabel("#app .mdm-menu__item", "English"), 420);
+    await sleep(380);
+    await rig.click();
+    await rig.waitFor(
+      () => document.querySelector('#app button[data-type="mdm-hyphenation"]').classList.contains("mdm-btn--on"),
+      { timeout: 8000 }
+    );
+    await sleep(1500);
+
+    // The header the choice wrote, opened above the heading and shut again.
+    await rig.moveTo(await button("mdm-front-matter"), 380);
+    await sleep(520);
+    await rig.click();
+    await sleep(2000);
+    await rig.click();
+    await sleep(1100);
+
+    // Three words at once: a double click takes the first, and Alt with a
+    // double click adds each of the others. Then two asterisks typed over the
+    // three selections wrap every one of them (surroundSelection in main.js).
+    const words = ["melody", "harmony", "rhythm"];
+    for (let i = 0; i < words.length; i++) {
+      await rig.moveTo(await atText(rig, words[i], { mid: true }), i ? 460 : 720);
+      await sleep(i ? 240 : 320);
+      await rig.doubleClick({ modifiers: i ? 1 : 0 });
+      await sleep(460);
+    }
+    // Off the word before the typing, as the tour steps off its note: left on
+    // it, the I-beam stood over the last selection.
+    await rig.moveTo({ x: rig.x + 14, y: rig.y + 34 }, 240);
+    await sleep(520);
+    await rig.type("*", 0);
+    await sleep(320);
+    await rig.type("*", 0);
+    await sleep(1500);
+
+    // Down to the list, and the three lines made one.
+    await rig.smoothScrollTo(await scrollFor(rig, "The list button"), 800);
+    await sleep(500);
+    const first = await atText(rig, "Justified the text");
+    await rig.moveTo({ x: first.x + 1, y: first.y }, 620);
+    await sleep(260);
+    await rig.dragTo(await atText(rig, "Made three words bold", { end: true }), 650);
+    await sleep(420);
+    await rig.moveTo(await button("unordered-list"), 640);
+    await sleep(500);
+    await rig.click();
+    await sleep(1300);
+
+    // A phrase highlighted.
+    const phrase = "as it marks these";
+    const from = await atText(rig, phrase);
+    await rig.moveTo({ x: from.x + 1, y: from.y }, 640);
+    await sleep(260);
+    await rig.dragTo(await atText(rig, phrase, { end: true }), 520);
+    await sleep(400);
+    await rig.moveTo(await button("highlight"), 640);
+    await sleep(500);
+    await rig.click();
+    await sleep(1300);
+
+    // The table. Scrolled first so that its paragraph, the source the button
+    // writes under it and the table drawn under that are all in the pane
+    // while it is filled in.
+    await rig.smoothScrollTo(await scrollFor(rig, "The table button"), 700);
+    await sleep(450);
+    await rig.moveTo(await atText(rig, "after the last one.", { end: true }), 620);
+    await sleep(300);
+    await rig.click();
+    await sleep(500);
+    await rig.moveTo(await button("insert-table"), 700);
+    await sleep(500);
+    await rig.click();
+    await sleep(900);
+    // The pointer to its corner while the keyboard works, so the button's
+    // tooltip goes and nothing stands over the cells.
+    await rig.moveTo(await rest(rig), 700);
+    for (let i = 0; i < markdown.cells.length; i++) {
+      await rig.type(markdown.cells[i], 45);
+      if (i < markdown.cells.length - 1) {
+        await sleep(160);
+        await rig.press("Tab");
+        await sleep(220);
+      }
+    }
+    await sleep(900);
+    // Out of the table: a click on its paragraph, and the source goes,
+    // leaving the table drawn.
+    await rig.moveTo(await atText(rig, "after the last one.", { end: true }), 700);
+    await sleep(300);
+    await rig.click();
+    await sleep(1400);
+
+    // The picture, pasted into the empty line that ends the document, and
+    // its caption typed into the label the paste leaves the caret in
+    // (writePicture in main.js). A click on the paragraph above draws it.
+    await rig.smoothScrollTo(await scrollFor(rig, "A picture pasted"), 700);
+    await sleep(450);
+    const intro = await atText(rig, "where the caret is:", { end: true });
+    const last = await rig.evalFrame(() => {
+      const view = window.__mdm.view;
+      const at = view.coordsAtPos(view.state.doc.length);
+      const pane = document.querySelector("#app .cm-scroller").getBoundingClientRect();
+      return at && at.bottom <= pane.bottom && { x: at.left + 120, y: (at.top + at.bottom) / 2 };
+    });
+    if (!last) throw new Error("the empty line that ends the document is not on screen");
+    const off = await rig.webviewOffset();
+    await rig.moveTo({ x: Math.round(off.x + last.x), y: Math.round(off.y + last.y) }, 620);
+    await sleep(300);
+    await rig.click();
+    await sleep(600);
+    await pastePicture(rig, PICTURE);
+    await rig.waitFor(() => /!\[\]\([^)]*-images\/image\.png\)/.test(window.__mdm.view.state.doc.toString()), {
+      timeout: 8000,
+    });
+    await sleep(900);
+    await rig.moveTo({ x: rig.x + 16, y: rig.y + 38 }, 240);
+    await rig.type("The extension's icon", 55);
+    await sleep(700);
+    await rig.moveTo({ x: intro.x + 3, y: intro.y }, 620);
+    await sleep(300);
+    await rig.click();
+    await sleep(350);
+    // Down to the picture whole, caption and all, as soon as it is drawn. The
+    // scroll before the paste stopped short of it: the document ended on the
+    // empty line then, and the page cannot scroll past its end, so the
+    // picture was drawn with its lower half under the pane (the first take,
+    // 2026-09-28).
+    await rig.smoothScrollTo(await scrollFor(rig, "A picture pasted"), 700);
+    await rig.moveTo(await rest(rig), 700);
+    // Long enough to read the caption: the screencast drops the frames still
+    // in flight when the camera stops (about 0.85 s, the tour's note) and the
+    // dissolve takes 0.6 s more, so 2.2 s here left the whole picture on
+    // screen for about 1.5 s in the second take.
+    await sleep(3400);
+  },
+  // Off camera: the division turned off for this document, which the
+  // extension keeps per file, the file reverted, and the picture's folder
+  // gone, so the next take pastes image.png again and not image-2.png.
+  async after(rig) {
+    const hy = await rig.at('#app button[data-type="mdm-hyphenation"]');
+    await rig.warp(hy.x, hy.y);
+    await rig.click();
+    await sleep(500);
+    const none = await rig.atLabel("#app .mdm-menu__item", "No hyphenation");
+    await rig.warp(none.x, none.y);
+    await rig.click();
+    await sleep(600);
+    await revertFile(rig);
+    await pinCaret(rig);
+    fs.rmSync(picturesOf(markdown.doc), { recursive: true, force: true });
+    await rig.scrollTop(0);
+    await settleUnderHeading(rig);
+  },
+};
+
 module.exports = {
-  clips: [tour],
+  clips: [tour, markdown],
+  picturesOf,
   clearLayout,
   closeAll,
   openDoc,

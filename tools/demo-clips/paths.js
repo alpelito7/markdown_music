@@ -22,10 +22,11 @@ module.exports = {
   STATE,
   SETTINGS: path.join(STATE, "profile", "User", "settings.json"),
   FRAMES: path.join(STATE, "frames"),
-  // The document every clip is recorded on, and the copy of it VS Code opens.
-  // The copy is put back from DEMO before every take (record.js), so no take
-  // can start on a document the one before it edited, and none can write
-  // into the repository.
+  // The tour's document, and the folder where VS Code opens the copy of it.
+  // A clip that names another document (clip.doc) has it beside this one.
+  // The copy is put back before every take (record.js), so no take can start
+  // on a document the one before it edited, and none can write into the
+  // repository.
   DEMO: path.join(HERE, "demo.mdm"),
   WORKSPACE: path.join(STATE, "workspace"),
   BUILD: path.join(HERE, "build"),

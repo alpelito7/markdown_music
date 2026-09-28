@@ -52,11 +52,19 @@ strips `muted` from a `<video>` and Chrome then shows only its poster.
 
 ## Where things are
 
-- `demo.mdm` is the document every clip is recorded on. Its blocks are sized
-  so the frames in `clips.js` fit; the arithmetic is at the top of that file.
-  VS Code opens a copy of it, put back before every take, and a take that
-  leaves the text changed fails instead of being encoded.
-- `clips.js` holds the takes as beats, with each clip's alt text.
+- `demo.mdm` is the document the tour is recorded on, and `markdown.mdm` the
+  one the Markdown clip is; a clip names its own with `doc`. The tour's blocks
+  are sized so its frames fit, with the arithmetic at the top of `clips.js`.
+  VS Code opens a copy of the document, put back before every take, and a
+  take that leaves the text changed fails instead of being encoded. Each is
+  written as a guide to its take: the words on screen say what is being done
+  to them.
+- `clips.js` holds the takes as beats, with each clip's alt text. The
+  Markdown clip pastes `vscode-mdm/media/icon.png` by dispatching the paste
+  event Ctrl+V would fire, so the desktop's clipboard, which the rig's VS Code
+  shares, is never touched; the picture is written into
+  `markdown-images/` beside the copy, and that folder is removed before
+  every take.
 - `abc-card.mdm` is the score block the README shows as a picture, so that its
   ABC reads in the extension's colours: `abc-card.js` draws it with the
   editor's own stylesheet in the test harness, writes
@@ -64,7 +72,9 @@ strips `muted` from a `<video>` and Chrome then shows only its poster.
   whose alt text is the block itself.
 - `rig.js` drives VS Code and encodes; the reasons for the frame size, the
   pointer and the hairline drawn round every frame are in its comments.
-- The VS Code profile, the link to `vscode-mdm/`, the copy of `demo.mdm` and
-  the frames of a take in progress go to `~/.cache/mdm-demo-clips` (another
-  path: `MDM_DEMO_STATE`).
+- The VS Code profile, the link to `vscode-mdm/`, the copies of the
+  documents and the frames of a take in progress go to
+  `~/.cache/mdm-demo-clips` (another path: `MDM_DEMO_STATE`). The profile
+  asks for VS Code's own dialogs (`window.dialogStyle`), because the native
+  save prompt of Linux is a window the scripts cannot see.
   The frames are deleted after each take unless `--keep-frames` is given.

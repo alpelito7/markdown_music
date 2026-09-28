@@ -1,7 +1,8 @@
 #!/bin/bash
 # Starts the VS Code the clips are recorded in: a profile of its own, the
-# extension from this working tree, a copy of demo.mdm as the only file in its
-# folder, and the DevTools port the scripts drive it through.
+# extension from this working tree, a folder holding a copy of demo.mdm (and
+# of each clip's document once record.js has put it there), and the DevTools
+# port the scripts drive it through.
 #
 # The environment is rebuilt from nothing because this is usually run from a
 # terminal inside VS Code, whose extension host exports ELECTRON_RUN_AS_NODE=1

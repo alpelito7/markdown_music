@@ -1,0 +1,20 @@
+### Writing Markdown
+
+This paragraph opens ragged on the right, as Markdown is usually shown. The justify button in the toolbar squares it to both margins, and every line keeps the word it broke on.
+
+No word is divided at the end of a line yet, because the document names no language. Choosing English in the hyphenation menu writes `lang: en` into a YAML header, hidden above this heading, and words now divide where they meet the margin. The YAML button opens the header, and a second press hides it again.
+
+A double click with Alt held selects several words at once: melody, harmony and rhythm. Typing two asterisks over them makes all three bold.
+
+The list button turns the three lines below, what this page has done so far, into a list:
+
+Justified the text
+Divided words at the margin
+Made three words bold
+
+The highlight button marks words without changing their voice, as it marks these.
+
+The table button writes an empty table, and Tab walks its cells and adds a row after the last one.
+
+A picture pasted with Ctrl+V is saved beside this file, in `markdown-images`, and linked where the caret is:
+
