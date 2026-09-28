@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.1
 
 - A picture pasted from the clipboard (a screenshot) or dropped on the text
   with `Shift` held is written beside the document, in a folder named after
