@@ -205,3 +205,128 @@ test("the division is each file's own, and the rest of the bar is the editor's",
     [["mdm.staffLines", "ink"]]
   );
 });
+
+// ---- A pasted picture, end to end ----
+//
+// The page pastes, the real host writes the file beside the document and
+// answers, the page writes the link, and the save and the undo after it go
+// through the host's own listeners (sweepPictures, restorePictures). The
+// halves on their own are in webview-editing.test.js and
+// extension-host.test.js; this is the wire between them.
+
+const fsE2E = require("node:fs");
+const osE2E = require("node:os");
+const { setSelection: selectAt } = require("./webview/helpers.js");
+
+// A file opened in the editor with the host on the wire, as openFile opens
+// one, for a document with no score. The bytes of a message are rebuilt on
+// the way over: puppeteer's bridge hands a Uint8Array across as an object
+// keyed by index, where VS Code's structured clone keeps it the typed array
+// it was (webview-audio-export.test.js rebuilds them the same way).
+async function openWithBytes(provider, uri) {
+  let page = null;
+  let receive = null;
+  let dispose = null;
+  const panel = {
+    webview: {
+      asWebviewUri: (u) => u,
+      cspSource: "vscode-resource:",
+      postMessage(msg) {
+        if (!page) return Promise.resolve(false);
+        return page.evaluate((m) => window.postMessage(m, "*"), msg).then(
+          () => true,
+          () => false
+        );
+      },
+      onDidReceiveMessage(handler) {
+        receive = handler;
+      },
+    },
+    onDidDispose(handler) {
+      dispose = handler;
+    },
+  };
+  provider.resolveCustomTextEditor(vscode._makeDocument(uri), panel);
+  const settings = JSON.parse(/window\.MDM_SETTINGS = (\{.*?\});/.exec(panel.webview.html)[1]);
+  const h = await open({
+    seed: { settings },
+    scores: 0,
+    toHost: (msg, p) => {
+      page = p;
+      if (msg && msg.bytes && !(msg.bytes instanceof Uint8Array)) {
+        const keys = Object.keys(msg.bytes);
+        const bytes = new Uint8Array(keys.length);
+        keys.forEach((k) => {
+          bytes[Number(k)] = msg.bytes[k];
+        });
+        msg = Object.assign({}, msg, { bytes: bytes });
+      }
+      return receive(msg);
+    },
+  });
+  return {
+    page: h.page,
+    errors: h.errors,
+    close: async () => {
+      dispose();
+      await h.close();
+    },
+  };
+}
+
+// The host's copy of the text once it holds, or stops holding, `needle`.
+async function hostText(uri, needle, present) {
+  for (let i = 0; i < 100; i++) {
+    const text = vscode._state.documents.get(uri) || "";
+    if (text.includes(needle) === present) return text;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return vscode._state.documents.get(uri) || "";
+}
+
+test("a pasted picture is written beside the document, and a save without it takes it back", { skip }, async () => {
+  const tmp = fsE2E.mkdtempSync(path.join(osE2E.tmpdir(), "mdm-picture-e2e-"));
+  const doc = path.join(tmp, "notes.mdm");
+  const uri = "file://" + doc;
+  fsE2E.writeFileSync(doc, "Body.\n");
+  vscode._reset();
+  vscode._state.documents.set(uri, "Body.\n");
+  const provider = start(vscode._memento());
+  const h = await openWithBytes(provider, uri);
+  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7];
+  await selectAt(h.page, 5);
+  await h.page.evaluate((png) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(png)], "image.png", { type: "image/png" }));
+    window.__mdm.view.contentDOM.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, png);
+  const link = "![](notes-images/image.png)";
+  const file = path.join(tmp, "notes-images", "image.png");
+  assert.equal(await hostText(uri, link, true), "Body." + link + "\n");
+  assert.deepEqual(Array.from(fsE2E.readFileSync(file)), png);
+  // Saved with it: kept.
+  await vscode._didSave(uri);
+  assert.ok(fsE2E.existsSync(file));
+  // Taken out in the page, the edit reaches the host, and the save takes the
+  // file and its folder to the trash. Past the history's join delay first
+  // (newGroupDelay, 500 ms): a deletion that close to the paste is one undo
+  // event with it, and the undo below would take the picture out instead.
+  await new Promise((r) => setTimeout(r, 600));
+  await h.page.evaluate((link) => {
+    const v = window.__mdm.view;
+    const at = v.state.doc.toString().indexOf(link);
+    v.dispatch({ changes: { from: at, to: at + link.length } });
+  }, link);
+  assert.equal(await hostText(uri, link, false), "Body.\n");
+  await vscode._didSave(uri);
+  assert.ok(!fsE2E.existsSync(file), "the picture outlived the save");
+  assert.ok(!fsE2E.existsSync(path.join(tmp, "notes-images")), "its empty folder was left");
+  assert.equal(vscode._state.trashed.length, 1);
+  // Undone in the page: the link is back in the file, and the picture with it.
+  await h.page.evaluate(() => window.__mdm.CM.undo(window.__mdm.view));
+  assert.equal(await hostText(uri, link, true), "Body." + link + "\n");
+  assert.deepEqual(Array.from(fsE2E.readFileSync(file)), png);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  fsE2E.rmSync(tmp, { recursive: true, force: true });
+});

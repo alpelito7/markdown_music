@@ -61,6 +61,15 @@ function openLink(document, href) {
 function activate(context) {
   globalState = context.globalState;
   context.subscriptions.push(channel());
+  // The pictures a document was given, taken back when it is saved without
+  // them and put back when an undo brings them into the text again
+  // (sweepPictures, restorePictures). Here and not in an editor, so that a
+  // save from the text editor beside it, or after the MDM editor is closed,
+  // counts the same.
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((document) => pictureTurn(() => sweepPictures(document))),
+    vscode.workspace.onDidChangeTextDocument((e) => restorePictures(e.document))
+  );
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
       "mdm.editor",
@@ -2338,21 +2347,24 @@ function audioSkipLine(skip) {
 // back. It names the file and the folder rather than the call that failed: the
 // thing to do about EBUSY is to close whatever is holding the file, and a
 // musician has no use for the name of a system call.
-function audioWriteHelp(code, name, dir) {
+// `again` is what to do once the cause is seen to, "export again" for the
+// audio and "paste again" for a picture (pasteImageStep), and `fallback`
+// what to say for a code with no advice of its own.
+function writeHelp(code, name, dir, again, fallback) {
   if (code === "EBUSY" || code === "EPERM") {
-    return "Close " + name + " in the program that has it open, and export again.";
+    return "Close " + name + " in the program that has it open, and " + again + ".";
   }
   if (code === "EACCES" || code === "EROFS") {
     return (
       "The folder " + dir + " cannot be written to. Save the document in a " +
-      "folder this computer can write to, and export again."
+      "folder this computer can write to, and " + again + "."
     );
   }
   if (code === "ENOSPC") return "The disk is full.";
   if (code === "ENAMETOOLONG") {
     return (
       "The name of the document is too long for a file to be written beside " +
-      "it. Rename it shorter and export again."
+      "it. Rename it shorter and " + again + "."
     );
   }
   // The guard below the name, which no title can trip: what reaches it is a
@@ -2362,10 +2374,13 @@ function audioWriteHelp(code, name, dir) {
   if (code === "EINVAL") {
     return (
       "The name of the document cannot be made part of a file name beside " +
-      "it. Rename it and export again."
+      "it. Rename it and " + again + "."
     );
   }
-  return AUDIO_SAYS.look;
+  return fallback;
+}
+function audioWriteHelp(code, name, dir) {
+  return writeHelp(code, name, dir, "export again", AUDIO_SAYS.look);
 }
 
 // "MThd" and a header six bytes long, which is how every standard MIDI file
@@ -2811,6 +2826,417 @@ function audioRunSkip(run, webview, msg) {
   });
 }
 
+// ---------- A picture pasted or dropped, as a file beside the document ----------
+//
+// The webview sends the bytes of a picture from the clipboard or a drop
+// (pastePictures in media/main.js), and the host writes them beside the
+// document and answers with the path it wrote them under, which the editor
+// writes into the text as `![](path)`. Beside the document because that is
+// where a relative path resolves from, for the editor and for Quarto alike;
+// in a folder of the document's own, named after it (`songbook-images` beside
+// `songbook.mdm`), so that two documents in one folder keep their pictures
+// apart and the folder says whose it is. A file already there is never
+// written over: the picture is new, and the one under that name may be in
+// the text already. The name is the file's own when a drop gave it one, and
+// `image` otherwise, which is what Chrome names a screenshot on the
+// clipboard; a name taken is numbered on from 2.
+
+// The kinds written, by the type the browser reports, and the file name
+// extension each is written under; media/main.js sends these and no other.
+const PICTURE_KINDS = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "image/bmp": "bmp",
+};
+const PICTURE_FOLDER_SUFFIX = "-images";
+// A cap on what one paste may write: a screenshot is under a megabyte and a
+// photograph under twenty, and a document is not the place for more.
+const PICTURE_MAX = 64 * 1024 * 1024;
+const PICTURE_NAME_MAX = 64;
+
+const PICTURE_SAYS = {
+  unsaved: function (pretty) {
+    return (
+      "MDM: save " + pretty + " first. A pasted picture is written in the " +
+      "folder the document is saved in."
+    );
+  },
+  notPicture: function (pretty) {
+    return (
+      "MDM: what was pasted into " + pretty + " is not a picture the editor " +
+      "writes (PNG, JPEG, GIF, WebP, SVG or BMP), and nothing was written."
+    );
+  },
+  tooLarge: function (pretty) {
+    return (
+      "MDM: the picture pasted into " + pretty + " is over 64 MB and was not " +
+      "written. Save it beside the document by hand and link it with the " +
+      "picture button."
+    );
+  },
+  failed: function (pretty, help) {
+    return "MDM: the picture pasted into " + pretty + " could not be written. " + help;
+  },
+  look: "See the MDM output for what went wrong (View > Output, MDM).",
+};
+
+// Whether the bytes open as a file of the kind the browser said, so that
+// what is written under `.png` is a PNG: the signatures of the binary kinds
+// (PNG, JPEG, GIF, WebP and BMP each begin the same way in every file), and
+// for SVG the `<svg` or `<?xml` a text file of it opens with, anywhere in
+// its first kilobyte since a comment or a doctype may come first.
+function pictureLooksRight(bytes, ext) {
+  const head = function (text) {
+    return bytes.length >= text.length && bytes.toString("latin1", 0, text.length) === text;
+  };
+  if (ext === "png") return head("\x89PNG\r\n\x1a\n");
+  if (ext === "jpg") return head("\xff\xd8\xff");
+  if (ext === "gif") return head("GIF87a") || head("GIF89a");
+  if (ext === "webp") return head("RIFF") && bytes.length >= 12 && bytes.toString("latin1", 8, 12) === "WEBP";
+  if (ext === "bmp") return head("BM");
+  if (ext === "svg") return /<svg[\s>]|<\?xml[\s>]/i.test(bytes.toString("utf8", 0, Math.min(bytes.length, 1024)));
+  return false;
+}
+
+// The bytes of one picture, or null. Only a real Uint8Array or ArrayBuffer is
+// taken, for the reason audioBytes gives: Buffer.from would make something
+// out of a string or an array too, and this is a door into the extension.
+function pictureBytes(value) {
+  if (value instanceof Uint8Array) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  if (value instanceof ArrayBuffer) return Buffer.from(value, 0, value.byteLength);
+  return null;
+}
+
+// The stem a picture is written under, from the name the browser gave the
+// file: its own folder and extension off (the kind decides the extension),
+// what no filesystem takes out of it, and `image` when nothing is left or
+// what is left is a name Windows keeps for a device; cut to a length, since
+// a name off a web page can run to hundreds of characters.
+function pictureStem(given) {
+  let stem = typeof given === "string" ? given.normalize("NFC") : "";
+  stem = stem.replace(/\\/g, "/");
+  stem = stem.slice(stem.lastIndexOf("/") + 1);
+  stem = stem.replace(/\.[^.]*$/, "");
+  stem = stem.replace(/[\x00-\x1f\x7f-\x9f<>:"|?*]/g, "");
+  stem = trimDotsAndSpaces(Array.from(stem).slice(0, PICTURE_NAME_MAX).join(""));
+  if (!stem || /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(stem)) return "image";
+  return stem;
+}
+
+// A relative path as it goes into a link destination: each segment
+// percent-encoded past the letters, digits and `-._~` that need no escape,
+// so a space or a parenthesis in the document's own name does not end the
+// destination (CommonMark 6.3 stops at a space, and counts parentheses).
+// Pandoc undoes the escapes when it fetches a local file, and the editor
+// resolves the path as a URL, so both find the file under its own name.
+function encodedPath(rel) {
+  return rel
+    .split("/")
+    .map(function (segment) {
+      return encodeURIComponent(segment).replace(/[!'()*]/g, function (c) {
+        return "%" + c.charCodeAt(0).toString(16).toUpperCase();
+      });
+    })
+    .join("/");
+}
+
+// The file created and written, under the first free name: the stem, then
+// the stem numbered on from 2. Created exclusively (`wx`), so that a name
+// taken between the look and the write is a name taken and not a file
+// overwritten. Returns the name written, or throws the error the system gave.
+function writePictureFile(dir, stem, ext, bytes) {
+  for (let n = 1; ; n++) {
+    const name = stem + (n > 1 ? "-" + n : "") + "." + ext;
+    let fd;
+    try {
+      fd = fs.openSync(path.join(dir, name), "wx");
+    } catch (e) {
+      if (e.code === "EEXIST") continue;
+      throw e;
+    }
+    try {
+      fs.writeSync(fd, bytes);
+    } finally {
+      fs.closeSync(fd);
+    }
+    return name;
+  }
+}
+
+// `pasteImage`, from the webview: one picture, answered with the path it was
+// written under or with `ok: false`, the reason said in a message, since the
+// webview has no notifications of its own. The shape of the message first,
+// and in silence, as the audio's steps are: it is the extension's own
+// protocol and not anything the reader did.
+function pasteImageStep(document, webview, msg) {
+  if (typeof msg.id !== "string" || !msg.id || msg.id.length > 64) return;
+  const ext = PICTURE_KINDS[msg.mime];
+  if (!ext) return;
+  const answer = function (ok, rel) {
+    webview.postMessage({ type: "pasteImage", id: msg.id, ok: ok, path: ok ? rel : null });
+  };
+  const pretty =
+    document.uri.scheme === "file"
+      ? path.basename(document.uri.fsPath)
+      : path.basename(document.uri.path) || "this document";
+  // The folder is the document's, so a document that is not saved has none.
+  if (document.uri.scheme !== "file") {
+    answer(false);
+    vscode.window.showInformationMessage(PICTURE_SAYS.unsaved(pretty));
+    return;
+  }
+  const bytes = pictureBytes(msg.bytes);
+  if (!bytes) return;
+  if (bytes.length > PICTURE_MAX) {
+    answer(false);
+    vscode.window.showWarningMessage(PICTURE_SAYS.tooLarge(pretty));
+    return;
+  }
+  if (!bytes.length || !pictureLooksRight(bytes, ext)) {
+    answer(false);
+    vscode.window.showWarningMessage(PICTURE_SAYS.notPicture(pretty));
+    return;
+  }
+  const file = document.uri.fsPath;
+  const folder = path.basename(file, path.extname(file)) + PICTURE_FOLDER_SUFFIX;
+  const dir = path.join(path.dirname(file), folder);
+  const stem = pictureStem(msg.name);
+  let name;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    name = writePictureFile(dir, stem, ext, bytes);
+  } catch (e) {
+    answer(false);
+    channel().appendLine("Writing a picture beside " + file + " failed: " + String(e.message || e));
+    vscode.window
+      .showErrorMessage(
+        PICTURE_SAYS.failed(pretty, writeHelp(e.code, stem + "." + ext, dir, "paste again", PICTURE_SAYS.look)),
+        "Show log"
+      )
+      .then(function (choice) {
+        if (choice === "Show log") channel().show(true);
+      });
+    return;
+  }
+  channel().appendLine("wrote " + path.join(dir, name) + " (" + bytes.length + " bytes), pasted into " + pretty);
+  answer(true, encodedPath(folder + "/" + name));
+  pictureTurn(() => givePicture(document.uri.toString(), folder + "/" + name));
+}
+
+// ---------- The pictures a document was given, taken back when it is saved without them ----------
+//
+// A pasted picture stays in its folder while the text changes: a picture
+// deleted from the text may come back with an undo, and nothing is lost
+// until the reader says the document is what it should be, which is a save.
+// A document saved without a picture it was given sends that file to the
+// system's trash, and its folder after it once nothing is left in the folder
+// (the owner's call, 2026-09-27). To the trash and not deleted, so a picture
+// wanted back after all is where a reader looks for a file they threw away;
+// and while the editor runs its bytes are kept as well, so an undo that
+// brings the picture back into the text puts the file back beside it at
+// once, where the reader would otherwise find a broken picture.
+//
+// Only the files the editor wrote are ever touched: the paths are kept per
+// document, by URI, in globalState (DOCUMENT_PICTURES), from the paste that
+// wrote them to the save that no longer mentions them. A picture the reader
+// put in the folder by hand, or one the list lost with a document renamed or
+// moved, is left alone; the folder is taken away only when it is empty, or
+// holds nothing but the files a file browser leaves in any folder it opens.
+const DOCUMENT_PICTURES = "documentPictures";
+const FOLDER_LITTER = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+// The bytes of the pictures sent to the trash, kept for an undo while the
+// editor runs, the oldest let go past this much: they are in the trash still.
+const TRASHED_KEPT_MAX = 64 * 1024 * 1024;
+
+// The pictures given, by document URI. Anything but an object of lists of
+// strings is read as nothing given, as keptDivisions reads its own.
+function givenPictures() {
+  const all = globalState ? globalState.get(DOCUMENT_PICTURES) : undefined;
+  return all && typeof all === "object" && !Array.isArray(all) ? all : {};
+}
+// Only a path of the shape the paste writes, a folder ending in the suffix
+// and a name in it, is ever read back: the sweep sends what it names to the
+// trash, and globalState is JSON off the disk, so a path that climbs out of
+// the document's folder (`..`) or into another is not taken on trust.
+const GIVEN_PICTURE = new RegExp("^[^/\\\\]+" + PICTURE_FOLDER_SUFFIX + "/[^/\\\\]+$");
+function picturesOf(uri) {
+  const all = givenPictures();
+  const list = Object.prototype.hasOwnProperty.call(all, uri) ? all[uri] : null;
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (rel) => typeof rel === "string" && GIVEN_PICTURE.test(rel) && !rel.split("/").some((seg) => seg === ".." || seg === ".")
+  );
+}
+// The list of a document written back, the document moved to the end as the
+// one used last and the oldest forgotten past DOCUMENTS_KEPT; an empty list
+// takes the document out.
+function keepPictures(uri, list) {
+  if (!globalState) return Promise.resolve();
+  const all = Object.assign({}, givenPictures());
+  delete all[uri];
+  if (list.length) all[uri] = list;
+  const uris = Object.keys(all);
+  uris.slice(0, Math.max(0, uris.length - DOCUMENTS_KEPT)).forEach((u) => {
+    delete all[u];
+  });
+  return globalState.update(DOCUMENT_PICTURES, all);
+}
+function givePicture(uri, rel) {
+  const list = picturesOf(uri).filter((r) => r !== rel);
+  list.push(rel);
+  return keepPictures(uri, list);
+}
+
+// Every change to the lists goes through one turn, so that a save's sweep and
+// a paste that lands while it waits on the trash do not write over each other.
+let pictureQueue = Promise.resolve();
+function pictureTurn(task) {
+  const run = pictureQueue.then(task, task);
+  pictureQueue = run.catch(() => {});
+  return run;
+}
+
+// Whether the text still points at a picture, read wide: its path or its
+// name alone, as written or as the paste escaped it, in the text as it
+// stands or with its escapes undone. A picture named anywhere is kept, in a
+// definition, in raw HTML, in a link of another folder that shares its name:
+// keeping a file the text no longer needs costs a file, and taking one it
+// still needs costs the picture.
+function pictureMentioned(text, rel) {
+  let decoded = text;
+  try {
+    decoded = decodeURI(text);
+  } catch (e) {
+    // A stray percent sign: the text as it stands is read twice.
+  }
+  const name = path.posix.basename(rel);
+  const forms = [rel, encodedPath(rel), name, encodedPath(name)];
+  return forms.some((form) => text.includes(form) || decoded.includes(form));
+}
+
+// The folder taken away when nothing is left in it but a file browser's own
+// litter. rmdir refuses a folder that is not empty, so a file that arrives
+// between the look and the removal keeps the folder.
+function removeIfEmpty(dir) {
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch (e) {
+    return;
+  }
+  if (names.some((n) => !FOLDER_LITTER.has(n))) return;
+  try {
+    names.forEach((n) => fs.rmSync(path.join(dir, n), { force: true }));
+    fs.rmdirSync(dir);
+    channel().appendLine("removed " + dir + ", which held no picture any more");
+  } catch (e) {
+    // In use, or no longer empty: left where it is.
+  }
+}
+
+// The bytes of the pictures sent to the trash, by "uri\npath", oldest first.
+const trashedPictures = new Map();
+let trashedBytes = 0;
+function keepTrashed(uri, rel, bytes) {
+  const key = uri + "\n" + rel;
+  const old = trashedPictures.get(key);
+  if (old) trashedBytes -= old.length;
+  trashedPictures.delete(key);
+  trashedPictures.set(key, bytes);
+  trashedBytes += bytes.length;
+  for (const [k, b] of trashedPictures) {
+    if (trashedBytes <= TRASHED_KEPT_MAX) break;
+    trashedPictures.delete(k);
+    trashedBytes -= b.length;
+  }
+}
+
+// A save: every picture the document was given and no longer mentions goes to
+// the trash, and its folder after it when it is left empty.
+async function sweepPictures(document) {
+  if (document.uri.scheme !== "file") return;
+  const uri = document.uri.toString();
+  const given = picturesOf(uri);
+  if (!given.length) return;
+  const text = document.getText();
+  const base = path.dirname(document.uri.fsPath);
+  const pretty = path.basename(document.uri.fsPath);
+  const kept = [];
+  const folders = new Set();
+  for (const rel of given) {
+    if (pictureMentioned(text, rel)) {
+      kept.push(rel);
+      continue;
+    }
+    const full = path.join(base, rel);
+    let bytes;
+    try {
+      bytes = fs.readFileSync(full);
+    } catch (e) {
+      // Gone already, taken away by hand: nothing to send, and nothing to
+      // keep a name for. Unreadable: left, and asked about again next save.
+      if (e.code !== "ENOENT") kept.push(rel);
+      continue;
+    }
+    try {
+      await vscode.workspace.fs.delete(vscode.Uri.file(full), { useTrash: true });
+    } catch (e) {
+      // A trash the system has not got, or a file held open: the picture
+      // stays, and so does its name, for the next save to try again.
+      kept.push(rel);
+      channel().appendLine(
+        full + " is no longer in " + pretty + " but could not be moved to the trash (" +
+          String((e && e.message) || e) + "); it stays."
+      );
+      continue;
+    }
+    keepTrashed(uri, rel, bytes);
+    folders.add(path.dirname(full));
+    channel().appendLine("moved " + full + " to the trash: " + pretty + " was saved without it");
+  }
+  await keepPictures(uri, kept);
+  folders.forEach(removeIfEmpty);
+}
+
+// A change: a picture sent to the trash that the text mentions again (an undo
+// after the save, or the link typed back) is written back beside the
+// document, into its folder made again if need be, and is the document's once
+// more. Never over a file of that name, which is the picture put back by hand.
+function restorePictures(document) {
+  const uri = document.uri.toString();
+  if (document.uri.scheme !== "file" || !trashedPictures.size) return;
+  const prefix = uri + "\n";
+  const text = document.getText();
+  const base = path.dirname(document.uri.fsPath);
+  for (const [key, bytes] of Array.from(trashedPictures)) {
+    if (!key.startsWith(prefix)) continue;
+    const rel = key.slice(prefix.length);
+    if (!pictureMentioned(text, rel)) continue;
+    trashedPictures.delete(key);
+    trashedBytes -= bytes.length;
+    const full = path.join(base, rel);
+    try {
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      const fd = fs.openSync(full, "wx");
+      try {
+        fs.writeSync(fd, bytes);
+      } finally {
+        fs.closeSync(fd);
+      }
+      channel().appendLine("put back " + full + ": " + path.basename(document.uri.fsPath) + " mentions it again");
+    } catch (e) {
+      if (e.code !== "EEXIST") {
+        channel().appendLine("could not put back " + full + " (" + String(e.message || e) + ")");
+        continue;
+      }
+    }
+    pictureTurn(() => givePicture(uri, rel));
+  }
+}
+
 // How long a save is held for the webview to post the edit it was holding
 // back. VS Code gives a save participant a short while and then writes the
 // file regardless, and the edit is one message and one write away, so a
@@ -3158,6 +3584,8 @@ class MdmEditorProvider {
         await inTurn(() => writeLanguage(msg.lang));
       } else if (msg.type === "openLink") {
         openLink(document, msg.href);
+      } else if (msg.type === "pasteImage") {
+        pasteImageStep(document, webview, msg);
       }
     });
   }

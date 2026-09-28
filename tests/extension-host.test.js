@@ -42,7 +42,7 @@ function boot(initialText, settings, extensions, uriString, globalState) {
   ext.activate(context);
   const provider = vscode._state.registeredProviders[0].provider;
   const h = openPanel(provider, initialText, uriString || "file:///doc.mdm");
-  return Object.assign(h, { provider, globalState: context.globalState });
+  return Object.assign(h, { provider, globalState: context.globalState, context });
 }
 
 // A document opened in an editor of the extension already running, with the
@@ -722,13 +722,21 @@ test("non-mdm configuration changes are ignored", async () => {
 test("disposing the panel unsubscribes every listener", async () => {
   const h = boot(DOC, {});
   await h.receive({ type: "ready" });
-  assert.equal(vscode._state.textDocumentListeners.length, 1);
+  // One text listener and the save listener are the extension's own, for
+  // the pictures a document was given (restorePictures, sweepPictures): they
+  // live as long as the extension, in its subscriptions, and the panel's
+  // text listener is the second.
+  assert.equal(vscode._state.textDocumentListeners.length, 2);
+  assert.equal(vscode._state.didSaveListeners.length, 1);
   assert.equal(vscode._state.configurationListeners.length, 1);
   assert.equal(vscode._state.colorThemeListeners.length, 1);
   h.dispose();
-  assert.equal(vscode._state.textDocumentListeners.length, 0);
+  assert.equal(vscode._state.textDocumentListeners.length, 1);
   assert.equal(vscode._state.configurationListeners.length, 0);
   assert.equal(vscode._state.colorThemeListeners.length, 0);
+  h.context.subscriptions.forEach((s) => s && s.dispose && s.dispose());
+  assert.equal(vscode._state.textDocumentListeners.length, 0);
+  assert.equal(vscode._state.didSaveListeners.length, 0);
 });
 
 // ---------- Word division is the document's own ----------
@@ -3795,4 +3803,336 @@ test("a link followed from the editor opens an address outside and a file in VS 
   await h.receive({ type: "openLink" });
   assert.equal(vscode._state.executed.length, 3);
   assert.equal(vscode._state.openedExternal.length, 3);
+});
+
+// ---------- A picture pasted or dropped, as a file beside the document ----------
+//
+// The bytes come from the webview (pastePictures in media/main.js); what is
+// checked here is what the host does with them, which is everything that
+// touches the disk: the folder, the name, the answer, and what is said when
+// nothing can be written.
+
+// The eight bytes every PNG begins with, and a body the test can find again.
+function pngFile(tail) {
+  const head = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return new Uint8Array(Buffer.concat([head, Buffer.from(tail || "IHDR", "latin1")]));
+}
+
+function picturePaste(id, name, mime, bytes) {
+  return { type: "pasteImage", id: id, name: name, mime: mime, bytes: bytes };
+}
+
+function pictureAnswers(h) {
+  return h.posted.filter((m) => m.type === "pasteImage");
+}
+
+test("a pasted picture is written beside the document, in a folder named after it, and never over one there", async () => {
+  const h = audioBoot();
+  const first = pngFile("one");
+  const second = pngFile("two");
+  await h.receive(picturePaste("picture-1", "image.png", "image/png", first));
+  await h.receive(picturePaste("picture-2", "image.png", "image/png", second));
+  // A drop keeps the file's own name, its folder and its extension off; the
+  // kind decides the extension and a space is escaped in the path written.
+  await h.receive(picturePaste("picture-3", "C:\\shots\\brass band.jpeg", "image/jpeg", new Uint8Array(Buffer.from("\xff\xd8\xffJFIF", "latin1"))));
+  await settle();
+
+  const dir = path.join(h.tmp, "doc-images");
+  assert.deepEqual(fs.readdirSync(dir).sort(), ["brass band.jpg", "image-2.png", "image.png"]);
+  assert.deepEqual(new Uint8Array(fs.readFileSync(path.join(dir, "image.png"))), first);
+  assert.deepEqual(new Uint8Array(fs.readFileSync(path.join(dir, "image-2.png"))), second, "the first picture was written over");
+  assert.deepEqual(pictureAnswers(h), [
+    { type: "pasteImage", id: "picture-1", ok: true, path: "doc-images/image.png" },
+    { type: "pasteImage", id: "picture-2", ok: true, path: "doc-images/image-2.png" },
+    { type: "pasteImage", id: "picture-3", ok: true, path: "doc-images/brass%20band.jpg" },
+  ]);
+  // Nothing is saved, started or announced: the path in the text is the
+  // whole of the news.
+  assert.deepEqual(vscode._state.savedUris, []);
+  assert.deepEqual(vscode._state.infoMessages, []);
+  assert.deepEqual(vscode._state.warningMessages, []);
+  assert.deepEqual(vscode._state.errorMessages, []);
+  const lines = exportLog().lines;
+  assert.equal(lines[0], "wrote " + path.join(dir, "image.png") + " (" + first.length + " bytes), pasted into doc.mdm");
+  audioDone(h);
+});
+
+test("the folder of the pictures follows the document's name, escaped in the path written", async () => {
+  const h = audioBoot("my song (draft).mdm");
+  await h.receive(picturePaste("picture-1", "image.png", "image/png", pngFile()));
+  await settle();
+  assert.ok(fs.existsSync(path.join(h.tmp, "my song (draft)-images", "image.png")));
+  assert.deepEqual(pictureAnswers(h), [
+    { type: "pasteImage", id: "picture-1", ok: true, path: "my%20song%20%28draft%29-images/image.png" },
+  ]);
+  audioDone(h);
+});
+
+test("a picture's name is made plain, and a name with nothing left is image", async () => {
+  const h = audioBoot();
+  await h.receive(picturePaste("picture-1", "../../etc/passwd.png", "image/png", pngFile()));
+  await h.receive(picturePaste("picture-2", "..", "image/png", pngFile()));
+  await h.receive(picturePaste("picture-3", "con.png", "image/png", pngFile()));
+  await h.receive(picturePaste("picture-4", 'a<b>:"c|d?e*f\n.png', "image/png", pngFile()));
+  await h.receive(picturePaste("picture-5", "x".repeat(300) + ".png", "image/png", pngFile()));
+  await settle();
+  const dir = path.join(h.tmp, "doc-images");
+  assert.deepEqual(fs.readdirSync(dir).sort(), ["abcdef.png", "image-2.png", "image.png", "passwd.png", "x".repeat(64) + ".png"].sort());
+  assert.deepEqual(fs.readdirSync(h.tmp).sort(), ["doc-images", "doc.mdm"], "a name climbed out of the folder");
+  audioDone(h);
+});
+
+test("a document that is not saved is told where a picture would go", async () => {
+  const h = boot("Body\n", {}, null, "untitled:Untitled-1");
+  const before = fs.readdirSync(process.cwd());
+  await h.receive(picturePaste("picture-1", "image.png", "image/png", pngFile()));
+  await settle();
+  assert.equal(vscode._state.infoMessages.length, 1);
+  assert.equal(
+    vscode._state.infoMessages[0].message,
+    "MDM: save Untitled-1 first. A pasted picture is written in the folder the document is saved in."
+  );
+  assert.deepEqual(pictureAnswers(h), [{ type: "pasteImage", id: "picture-1", ok: false, path: null }]);
+  assert.deepEqual(
+    fs.readdirSync(process.cwd()).filter((n) => before.indexOf(n) === -1),
+    [],
+    "a file was written where the editor happens to run"
+  );
+  h.dispose();
+});
+
+test("bytes that are not the picture the kind says, and a message out of shape, write nothing", async () => {
+  const h = audioBoot();
+  // A JPEG sent as a PNG, and an empty file.
+  await h.receive(picturePaste("picture-1", "image.png", "image/png", new Uint8Array(Buffer.from("\xff\xd8\xffJFIF", "latin1"))));
+  await h.receive(picturePaste("picture-2", "image.png", "image/png", new Uint8Array(0)));
+  // The shape: no id, a kind the editor does not send, bytes that are not
+  // bytes. Dropped in silence, as the audio's steps drop theirs.
+  await h.receive({ type: "pasteImage", name: "image.png", mime: "image/png", bytes: pngFile() });
+  await h.receive(picturePaste("picture-4", "image.tiff", "image/tiff", pngFile()));
+  await h.receive(picturePaste("picture-5", "image.png", "image/png", Array.from(pngFile())));
+  await h.receive(picturePaste("picture-6", "image.png", "image/png", "\x89PNG\r\n\x1a\n"));
+  await settle();
+  assert.ok(!fs.existsSync(path.join(h.tmp, "doc-images")), "a folder was made for nothing");
+  assert.deepEqual(pictureAnswers(h), [
+    { type: "pasteImage", id: "picture-1", ok: false, path: null },
+    { type: "pasteImage", id: "picture-2", ok: false, path: null },
+  ]);
+  assert.equal(vscode._state.warningMessages.length, 2);
+  assert.match(vscode._state.warningMessages[0].message, /^MDM: what was pasted into doc\.mdm is not a picture the editor writes/);
+  assert.deepEqual(vscode._state.errorMessages, []);
+  audioDone(h);
+});
+
+test("each kind is checked by its own signature", async () => {
+  const h = audioBoot();
+  const kinds = [
+    ["image/gif", "gif", "GIF89a...."],
+    ["image/webp", "webp", "RIFF\x00\x00\x00\x00WEBPVP8 "],
+    ["image/bmp", "bmp", "BM\x00\x00"],
+    ["image/svg+xml", "svg", "<!-- a comment -->\n<svg xmlns='http://www.w3.org/2000/svg'></svg>"],
+  ];
+  for (let i = 0; i < kinds.length; i++) {
+    await h.receive(picturePaste("picture-" + i, "pic", kinds[i][0], new Uint8Array(Buffer.from(kinds[i][2], "latin1"))));
+  }
+  await h.receive(picturePaste("picture-x", "pic", "image/svg+xml", new Uint8Array(Buffer.from("just words", "latin1"))));
+  await settle();
+  assert.deepEqual(fs.readdirSync(path.join(h.tmp, "doc-images")).sort(), ["pic.bmp", "pic.gif", "pic.svg", "pic.webp"]);
+  assert.deepEqual(pictureAnswers(h).map((a) => a.path), ["doc-images/pic.gif", "doc-images/pic.webp", "doc-images/pic.bmp", "doc-images/pic.svg", null]);
+  audioDone(h);
+});
+
+test("a folder the picture cannot be written to names the folder", {
+  skip: process.platform === "win32" || process.getuid() === 0 ? "needs a folder root cannot write to" : false,
+}, async () => {
+  const h = audioBoot();
+  fs.chmodSync(h.tmp, 0o500);
+  try {
+    await h.receive(picturePaste("picture-1", "image.png", "image/png", pngFile()));
+    await settle();
+  } finally {
+    fs.chmodSync(h.tmp, 0o700);
+  }
+  assert.deepEqual(pictureAnswers(h), [{ type: "pasteImage", id: "picture-1", ok: false, path: null }]);
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.equal(
+    vscode._state.errorMessages[0].message,
+    "MDM: the picture pasted into doc.mdm could not be written. The folder " +
+      path.join(h.tmp, "doc-images") +
+      " cannot be written to. Save the document in a folder this computer can write to, and paste again."
+  );
+  assert.deepEqual(vscode._state.errorMessages[0].buttons, ["Show log"]);
+  assert.match(exportLog().lines[0], /^Writing a picture beside .* failed: /);
+  audioDone(h);
+});
+
+// ---------- The pictures a document was given, taken back on a save without them ----------
+
+test("a picture the document is saved without goes to the trash, and its folder once empty", async () => {
+  const h = audioBoot();
+  const uri = h.document.uri.toString();
+  await h.receive(picturePaste("picture-1", "image.png", "image/png", pngFile("one")));
+  await settle();
+  const file = path.join(h.tmp, "doc-images", "image.png");
+  assert.ok(fs.existsSync(file));
+  // Written into the text and saved with it: kept.
+  vscode._setText(uri, "Body\n\n![](doc-images/image.png)\n");
+  await vscode._didSave(uri);
+  assert.ok(fs.existsSync(file));
+  assert.deepEqual(vscode._state.trashed, []);
+  // Taken out of the text and not saved: the file stays, for an undo.
+  vscode._setText(uri, "Body\n");
+  assert.ok(fs.existsSync(file));
+  // Saved without it: to the trash, and the folder, empty now, after it.
+  await vscode._didSave(uri);
+  assert.ok(!fs.existsSync(file), "the picture outlived the save");
+  assert.ok(!fs.existsSync(path.join(h.tmp, "doc-images")), "the empty folder was left");
+  assert.deepEqual(vscode._state.trashed, [{ path: file, options: { useTrash: true } }]);
+  assert.ok(
+    exportLog().lines.includes("moved " + file + " to the trash: doc.mdm was saved without it"),
+    exportLog().lines.join("\n")
+  );
+  // Nothing is left to take: another save asks nothing of the trash.
+  await vscode._didSave(uri);
+  assert.equal(vscode._state.trashed.length, 1);
+  audioDone(h);
+});
+
+test("the folder stays while it holds anything else, and a file the editor did not write is never touched", async () => {
+  const h = audioBoot();
+  const uri = h.document.uri.toString();
+  await h.receive(picturePaste("picture-1", "image.png", "image/png", pngFile("one")));
+  await h.receive(picturePaste("picture-2", "chart.png", "image/png", pngFile("two")));
+  await settle();
+  const dir = path.join(h.tmp, "doc-images");
+  fs.writeFileSync(path.join(dir, "mine.png"), "the reader's own");
+  vscode._setText(uri, "Body\n\n![](doc-images/chart.png)\n");
+  await vscode._didSave(uri);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ["chart.png", "mine.png"]);
+  vscode._setText(uri, "Body\n");
+  await vscode._didSave(uri);
+  assert.deepEqual(fs.readdirSync(dir), ["mine.png"], "a file the editor did not write went, or its folder");
+  audioDone(h);
+});
+
+test("an undo after the save puts the picture back, folder and all, and it is the document's again", async () => {
+  const h = audioBoot();
+  const uri = h.document.uri.toString();
+  const bytes = pngFile("kept for an undo");
+  await h.receive(picturePaste("picture-1", "image.png", "image/png", bytes));
+  await settle();
+  const file = path.join(h.tmp, "doc-images", "image.png");
+  vscode._setText(uri, "Body\n\n![](doc-images/image.png)\n");
+  await vscode._didSave(uri);
+  vscode._setText(uri, "Body\n");
+  await vscode._didSave(uri);
+  assert.ok(!fs.existsSync(file));
+  // The undo: the link is in the text again, and the file beside it at once.
+  vscode._setText(uri, "Body\n\n![](doc-images/image.png)\n");
+  assert.deepEqual(new Uint8Array(fs.readFileSync(file)), bytes);
+  assert.ok(exportLog().lines.includes("put back " + file + ": doc.mdm mentions it again"));
+  // Saved without it once more, it goes once more.
+  vscode._setText(uri, "Body\n");
+  await vscode._didSave(uri);
+  assert.ok(!fs.existsSync(file));
+  assert.equal(vscode._state.trashed.length, 2);
+  audioDone(h);
+});
+
+test("a picture the trash refuses stays, and the next save asks again", async () => {
+  const h = audioBoot();
+  const uri = h.document.uri.toString();
+  await h.receive(picturePaste("picture-1", "image.png", "image/png", pngFile()));
+  await settle();
+  const file = path.join(h.tmp, "doc-images", "image.png");
+  vscode._state.trashFails = ["image.png"];
+  await vscode._didSave(uri);
+  assert.ok(fs.existsSync(file), "a picture the trash refused was deleted");
+  assert.ok(
+    exportLog().lines.includes(file + " is no longer in doc.mdm but could not be moved to the trash (no trash here); it stays."),
+    exportLog().lines.join("\n")
+  );
+  vscode._state.trashFails = [];
+  await vscode._didSave(uri);
+  assert.ok(!fs.existsSync(file));
+  audioDone(h);
+});
+
+test("a picture named anywhere in the text is kept", async () => {
+  const h = audioBoot();
+  const uri = h.document.uri.toString();
+  await h.receive(picturePaste("picture-1", "my pic.png", "image/png", pngFile()));
+  await settle();
+  const file = path.join(h.tmp, "doc-images", "my pic.png");
+  const mentions = [
+    "[fig]: doc-images/my%20pic.png\n",
+    '<img src="doc-images/my pic.png">\n',
+    "![](<doc-images/my pic.png>)\n",
+    "![](other/my%20pic.png)\n",
+    "The file is my pic.png.\n",
+  ];
+  for (const text of mentions) {
+    vscode._setText(uri, text);
+    await vscode._didSave(uri);
+    assert.ok(fs.existsSync(file), "taken with the text " + JSON.stringify(text));
+  }
+  assert.deepEqual(vscode._state.trashed, []);
+  audioDone(h);
+});
+
+test("the pictures a document was given outlive a restart of VS Code", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-pictures-"));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, SOURCE);
+  const memory = vscode._memento();
+  const first = boot("Body\n", {}, null, "file://" + doc, memory);
+  await first.receive(picturePaste("picture-1", "image.png", "image/png", pngFile()));
+  await settle();
+  first.dispose();
+  // VS Code closed and opened again: a new extension host, the module loaded
+  // afresh, with nothing in hand but what globalState kept. The rest of this
+  // file goes on with the module it loaded at the top.
+  const id = require.resolve("../vscode-mdm/extension.js");
+  delete require.cache[id];
+  const reborn = require(id);
+  delete require.cache[id];
+  vscode._reset();
+  vscode._state.documents.set("file://" + doc, "Body\n");
+  reborn.activate({ subscriptions: [], extensionUri: vscode.Uri.file("/ext"), globalState: memory });
+  await vscode._didSave("file://" + doc);
+  assert.ok(!fs.existsSync(path.join(tmp, "doc-images", "image.png")), "the restart forgot the picture");
+  assert.ok(!fs.existsSync(path.join(tmp, "doc-images")));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a path in the kept list that is not one the paste writes is never swept", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-pictures-"));
+  const doc = path.join(tmp, "work", "doc.mdm");
+  fs.mkdirSync(path.dirname(doc));
+  fs.writeFileSync(doc, SOURCE);
+  const uri = "file://" + doc;
+  // A globalState edited by hand, or by anything else that can write it.
+  const memory = vscode._memento();
+  const bait = [
+    "../outside.png",
+    "doc-images/../../outside.png",
+    "doc-images/..",
+    "other/doc.png",
+    "/etc/hostname",
+    "doc-images/nested/deep.png",
+  ];
+  await memory.update("documentPictures", { [uri]: bait });
+  fs.writeFileSync(path.join(tmp, "outside.png"), "not the editor's");
+  fs.mkdirSync(path.join(tmp, "work", "other"));
+  fs.writeFileSync(path.join(tmp, "work", "other", "doc.png"), "not the editor's");
+  fs.mkdirSync(path.join(tmp, "work", "doc-images", "nested"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "work", "doc-images", "nested", "deep.png"), "not the editor's");
+  const h = boot("Body\n", {}, null, uri, memory);
+  await vscode._didSave(uri);
+  assert.deepEqual(vscode._state.trashed, []);
+  assert.ok(fs.existsSync(path.join(tmp, "outside.png")));
+  assert.ok(fs.existsSync(path.join(tmp, "work", "other", "doc.png")));
+  assert.ok(fs.existsSync(path.join(tmp, "work", "doc-images", "nested", "deep.png")));
+  h.dispose();
+  fs.rmSync(tmp, { recursive: true, force: true });
 });

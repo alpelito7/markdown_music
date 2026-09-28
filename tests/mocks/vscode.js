@@ -13,6 +13,9 @@ const state = {
   documentVersion: new Map(), // uri -> TextDocument.version, one more per change
   textDocumentListeners: [],
   willSaveListeners: [],
+  didSaveListeners: [],
+  trashed: [], // {path, options} of every workspace.fs.delete
+  trashFails: [], // path fragments whose delete throws, as a system with no trash does
   configurationListeners: [],
   colorThemeListeners: [],
   errorMessages: [], // {message, buttons}
@@ -46,6 +49,9 @@ function reset() {
   state.documentVersion = new Map();
   state.textDocumentListeners = [];
   state.willSaveListeners = [];
+  state.didSaveListeners = [];
+  state.trashed = [];
+  state.trashFails = [];
   state.configurationListeners = [];
   state.colorThemeListeners = [];
   state.errorMessages = [];
@@ -136,6 +142,27 @@ const workspace = {
     });
     return true;
   },
+  onDidSaveTextDocument(listener) {
+    state.didSaveListeners.push(listener);
+    return {
+      dispose() {
+        const i = state.didSaveListeners.indexOf(listener);
+        if (i !== -1) state.didSaveListeners.splice(i, 1);
+      },
+    };
+  },
+  // The file system as the extension reaches it through VS Code. delete()
+  // takes the file off the disk and keeps what it was asked, so a test reads
+  // whether the trash was asked for (options.useTrash); a path named in
+  // _state.trashFails throws instead, as a system with no trash does.
+  fs: {
+    async delete(uri, options) {
+      const p = uri.fsPath || uri.path;
+      if (state.trashFails.some((f) => p.includes(f))) throw new Error("no trash here");
+      state.trashed.push({ path: p, options: options || {} });
+      require("node:fs").rmSync(p, { recursive: !!(options && options.recursive) });
+    },
+  },
   onWillSaveTextDocument(listener) {
     state.willSaveListeners.push(listener);
     return {
@@ -177,6 +204,14 @@ async function willSave(uriString, reason) {
   };
   state.willSaveListeners.forEach((l) => l(e));
   await Promise.all(waits.map((p) => p.catch(() => {})));
+}
+
+// What VS Code does once a file is written: every listener is told, and
+// nothing waits for them there; here the promises they return are waited for,
+// so a test reads the disk once the extension has done with the save.
+async function didSave(uriString) {
+  const doc = makeDocument(uriString);
+  await Promise.all(state.didSaveListeners.map((l) => l(doc)));
 }
 
 // The EOL VS Code gives a file it opens: a vote, not the first line break it
@@ -303,7 +338,7 @@ const Uri = {
     return { path, scheme: base.scheme || "file", toString: () => path };
   },
   file(p) {
-    return { path: p, toString: () => "file://" + p };
+    return { path: p, fsPath: p, scheme: "file", toString: () => "file://" + p };
   },
   // The pages a notice of a missing tool opens. Kept as written: the ones
   // the export uses have nothing in them that VS Code would encode.
@@ -508,4 +543,5 @@ module.exports = {
   _memento: memento,
   _setText: setText,
   _willSave: willSave,
+  _didSave: didSave,
 };

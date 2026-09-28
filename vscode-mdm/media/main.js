@@ -11169,6 +11169,12 @@
       extensions: CM.mdmMarkdownExtensions,
       // Its keymap would go in at high precedence, over mdmKeymap.
       addKeymap: false,
+      // Its paste of an address over a selection (pasteURLAsLink, on by
+      // default since lang-markdown 6.4) is the editor's own instead
+      // (pasteLink): that one took the main selection alone, wrote the
+      // address with the line ending a browser may copy after it, and
+      // linked words that hold a bracket, none of which reads as a link.
+      pasteURLAsLink: false,
     });
   }
   // The labels defined in the document, sorted and joined, as of the last
@@ -11250,6 +11256,217 @@
       });
       return true;
     };
+  }
+
+  // ---------- What is typed over a selection, pasted and dropped ----------
+
+  // A mark typed over a selection wraps it rather than replacing it, as VS
+  // Code's own Markdown editor does with its surrounding pairs (`*`, `_`,
+  // the backtick, a bracket or a quote): the words stay, selected still, so
+  // a second mark goes on outside the first. Pandoc's own pairs are in the
+  // list too, the tilde, the caret and the dollar. Not over a selection in
+  // a block no mark belongs on (code, an equation, the header), where the
+  // key types over the selection as ever; an empty range takes the
+  // character as it would, beside the ranges that are wrapped.
+  const SURROUND = {
+    "*": "*",
+    _: "_",
+    "`": "`",
+    "~": "~",
+    "^": "^",
+    $: "$",
+    '"': '"',
+    "'": "'",
+    "(": ")",
+    "[": "]",
+    "{": "}",
+  };
+  function surroundSelection(v, from, to, text) {
+    const close = SURROUND[text];
+    if (!close) return false;
+    const state = v.state;
+    const ranges = state.selection.ranges;
+    if (
+      ranges.every(function (r) {
+        return r.empty;
+      })
+    ) {
+      return false;
+    }
+    const tree = CM.syntaxTree(state);
+    for (let i = 0; i < ranges.length; i++) {
+      if (!ranges[i].empty && unmarkableLine(tree, state.doc.lineAt(ranges[i].from))) return false;
+    }
+    v.dispatch(
+      state.update(
+        state.changeByRange(function (range) {
+          if (range.empty) {
+            return {
+              changes: { from: range.from, insert: text },
+              range: CM.EditorSelection.cursor(range.from + text.length),
+            };
+          }
+          return {
+            changes: [
+              { from: range.from, insert: text },
+              { from: range.to, insert: close },
+            ],
+            range: CM.EditorSelection.range(range.anchor + text.length, range.head + text.length),
+          };
+        }),
+        { scrollIntoView: true, userEvent: "input.type" }
+      )
+    );
+    return true;
+  }
+
+  // An address pasted over a selection makes the selection a link to it,
+  // `[words](address)`, as GitHub, Notion and Markdown All in One paste
+  // one: the words were selected to be linked, not to be replaced. An
+  // address is what the link gesture takes for one (a scheme, or `www.`,
+  // which is written with the `https://` the page needs to follow it),
+  // on one line and with nothing else on the clipboard's text but the line
+  // ending a browser may copy after it. Pasted as text as ever where the
+  // selection is not words to link: an address itself (pasted over to be
+  // replaced), text with brackets in it, which would not read as a label, a
+  // stretch of more than one line, a selection that cuts a mark or a span
+  // in half (`[**bo](x)ld**` is no link), or one inside code, maths, a link
+  // or a picture already, where a link inside a link is the inner one alone
+  // (CommonMark 6.3); a whole mark, a whole code span or a whole picture
+  // inside the selection is linked with it. Every range or none, so a paste
+  // over three carets does one thing.
+  // lang-markdown's own pasteURLAsLink did this for the main selection alone
+  // and is turned off in markdownLanguage().
+  const PASTED_ADDRESS = /^(?:[a-z][a-z0-9+.-]*:|www\.)\S+$/i;
+  // What a selection may not be inside of, nor hold whole.
+  const UNLINKABLE_AROUND = new RegExp(
+    "^(?:Link|Image|InlineCode|InlineMath|InlineBlockMath|Autolink|URL|LinkTitle|LinkLabel|HTMLTag|Comment|" +
+      "ProcessingInstruction|RawTeX|Attribute|Citation|FootnoteRef|FencedCode|CodeBlock|BlockMath|FrontMatter|" +
+      RAW_HTML +
+      ")$"
+  );
+  const UNLINKABLE_INSIDE = /^(?:Link|Autolink)$/;
+  function linkable(tree, from, to) {
+    let ok = true;
+    tree.iterate({
+      from: from,
+      to: to,
+      enter: function (n) {
+        if (!ok || n.from >= to || n.to <= from) return false;
+        const inside = n.from >= from && n.to <= to;
+        const around = n.from <= from && n.to >= to;
+        if (!inside && !around) ok = false;
+        else if (around && UNLINKABLE_AROUND.test(n.name)) ok = false;
+        else if (inside && UNLINKABLE_INSIDE.test(n.name)) ok = false;
+        return ok;
+      },
+    });
+    return ok;
+  }
+  function pasteLink(v, text) {
+    let address = text.replace(/[\r\n]+$/, "");
+    if (!PASTED_ADDRESS.test(address)) return false;
+    if (/^www\./i.test(address)) address = "https://" + address;
+    const state = v.state;
+    const ranges = state.selection.ranges;
+    const tree = CM.syntaxTree(state);
+    for (let i = 0; i < ranges.length; i++) {
+      const r = ranges[i];
+      if (r.empty) return false;
+      const line = state.doc.lineAt(r.from);
+      if (r.to > line.to || !linkable(tree, r.from, r.to)) return false;
+      const label = state.sliceDoc(r.from, r.to);
+      if (PASTED_ADDRESS.test(label.trim()) || /[\[\]]/.test(label)) return false;
+    }
+    v.dispatch(
+      state.update(
+        state.changeByRange(function (range) {
+          const insert = "[" + state.sliceDoc(range.from, range.to) + "](" + address + ")";
+          return {
+            changes: { from: range.from, to: range.to, insert: insert },
+            range: CM.EditorSelection.cursor(range.from + insert.length),
+          };
+        }),
+        { scrollIntoView: true, userEvent: "input.paste" }
+      )
+    );
+    return true;
+  }
+
+  // The pictures among what was pasted or dropped, of the kinds the host
+  // writes (pasteImageStep in extension.js; the two lists agree). A
+  // screenshot on the clipboard is a PNG that Chrome names image.png, a
+  // file dropped keeps its own name; the host takes the name from there.
+  const PICTURE_TYPES = {
+    "image/png": true,
+    "image/jpeg": true,
+    "image/gif": true,
+    "image/webp": true,
+    "image/svg+xml": true,
+    "image/bmp": true,
+  };
+  function pictureFiles(data) {
+    const out = [];
+    const files = data && data.files ? data.files : [];
+    for (let i = 0; i < files.length; i++) {
+      if (PICTURE_TYPES[files[i].type]) out.push(files[i]);
+    }
+    return out;
+  }
+
+  // A picture pasted or dropped goes to the host, which writes it beside
+  // the document in a folder named after it and answers with the path it
+  // wrote, or says in a message of its own why it could not; the answer
+  // comes back through the message listener below (`pasteImage`), which
+  // writes `![](path)` at the caret (writePicture). The requests are kept
+  // by id, so an answer to a paste of a page that has been rebuilt since
+  // is nothing. Several at once are read whole first and sent in the order
+  // they came in, since the host answers in the order it is asked.
+  const pictureRequests = new Map();
+  let pictureSeq = 0;
+  function pastePictures(v, files) {
+    Promise.all(
+      files.map(function (file) {
+        return file.arrayBuffer();
+      })
+    ).then(
+      function (buffers) {
+        buffers.forEach(function (buffer, i) {
+          const id = "picture-" + ++pictureSeq;
+          pictureRequests.set(id, { last: i === buffers.length - 1 });
+          vscode.postMessage({
+            type: "pasteImage",
+            id: id,
+            name: files[i].name,
+            mime: files[i].type,
+            bytes: new Uint8Array(buffer),
+          });
+        });
+      },
+      function () {
+        // A file the browser could not read: nothing to send.
+      }
+    );
+  }
+
+  // The picture written beside the document, at the caret, as the picture
+  // button writes one whose address is known: `![label](path)` with the
+  // words that were selected as the label and the caret in the label, to
+  // type the caption into. Several pasted at once each take a line of
+  // their own, the caret in the label of the last.
+  function writePicture(path, last) {
+    const state = view.state;
+    const main = state.selection.main;
+    const selected = state.sliceDoc(main.from, main.to);
+    const label = /[\r\n\[\]]/.test(selected) ? "" : selected;
+    const insert = "![" + label + "](" + path + ")" + (last ? "" : state.lineBreak);
+    const caret = last ? main.from + 2 + label.length : main.from + insert.length;
+    view.dispatch({
+      changes: { from: main.from, to: main.to, insert: insert },
+      selection: { anchor: caret },
+      scrollIntoView: true,
+      userEvent: "input.paste",
+    });
   }
 
   // Ctrl+H: the search row, its replace field taking the keyboard with what
@@ -11380,17 +11597,42 @@
         CM.history(),
         gestures.of(gestureExtensions()),
         CM.highlightSelectionMatches(),
-        // A paste that carries no text (a picture, or rich text alone) is
-        // not a paste of nothing: CodeMirror's own handler replaced the
-        // selection with the empty string it was given, and the emptied text
-        // went to the host (G082). Taken here, the selection stays as it was.
+        // What the clipboard and a drop bring, ahead of CodeMirror's own
+        // handlers (a plugin's run first). Text is pasted as ever, except an
+        // address over a selection, which makes the selection a link
+        // (pasteLink). With no text, a picture among the files goes to the
+        // host to be written beside the document (pastePictures); and a
+        // paste that carries neither (rich text alone) is not a paste of
+        // nothing: CodeMirror's own handler replaced the selection with the
+        // empty string it was given, and the emptied text went to the host
+        // (G082). Taken here, the selection stays as it was. Text first,
+        // because a spreadsheet puts a picture of the cells on the clipboard
+        // beside their text, and it is the text that is wanted.
         CM.EditorView.domEventHandlers({
-          paste: function (e) {
+          paste: function (e, v) {
             const data = e.clipboardData;
             if (!data) return false;
-            return !data.getData("text/plain") && !data.getData("text/uri-list");
+            const text = data.getData("text/plain");
+            if (text) return pasteLink(v, text);
+            if (data.getData("text/uri-list")) return false;
+            const pictures = pictureFiles(data);
+            if (pictures.length) pastePictures(v, pictures);
+            return true;
+          },
+          // A picture dropped on the text lands where the pointer let go of
+          // it. Anything else dropped is CodeMirror's own (text dragged
+          // within the editor, or from another window).
+          drop: function (e, v) {
+            const pictures = pictureFiles(e.dataTransfer);
+            if (!pictures.length) return false;
+            const at = v.posAtCoords({ x: e.clientX, y: e.clientY });
+            if (at !== null) v.dispatch({ selection: { anchor: at } });
+            v.focus();
+            pastePictures(v, pictures);
+            return true;
           },
         }),
+        CM.EditorView.inputHandler.of(surroundSelection),
         CM.search({ top: true, createPanel: searchPanel }),
         CM.keymap.of(
           mdmKeymap.concat(
@@ -12605,6 +12847,16 @@
       const waiting = run.waiting;
       run.waiting = null;
       if (waiting) waiting(msg);
+      return;
+    }
+    if (msg.type === "pasteImage") {
+      // The host has written the picture, or has said why not: the path
+      // it wrote comes into the text, and nothing does for a refusal, which
+      // the host names in a message of its own.
+      const request = pictureRequests.get(msg.id);
+      if (!request) return;
+      pictureRequests.delete(msg.id);
+      if (msg.ok === true && typeof msg.path === "string" && msg.path && view) writePicture(msg.path, request.last);
       return;
     }
     if (msg.type === "settings") {

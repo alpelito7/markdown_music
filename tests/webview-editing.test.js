@@ -4336,6 +4336,42 @@ test("the toolbar is grouped by what a button is about", { skip }, async () => {
 // a picture pasted or dropped written beside the document, and Ctrl+H for
 // the replace field.
 
+// A paste of the given types and files, dispatched on the text the way the
+// browser dispatches one (the G082 test does the same for text alone).
+function pasteInto(page, types, files) {
+  return page.evaluate(
+    (types, files) => {
+      const dt = new DataTransfer();
+      for (const [type, value] of types) dt.setData(type, value);
+      for (const f of files) dt.items.add(new File([new Uint8Array(f.bytes)], f.name, { type: f.type }));
+      const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+      window.__mdm.view.contentDOM.dispatchEvent(ev);
+    },
+    types,
+    files || []
+  );
+}
+
+// The eight bytes every PNG begins with, and one more.
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1];
+
+function picturePosts(page) {
+  return page.evaluate(() =>
+    window.__posts
+      .filter((m) => m.type === "pasteImage")
+      .map((m) => ({ id: m.id, name: m.name, mime: m.mime, bytes: Array.from(m.bytes) }))
+  );
+}
+
+// The host's answer to a paste, as it arrives in the page.
+function pictureWritten(page, id, path) {
+  return page.evaluate(
+    (id, path) => window.postMessage({ type: "pasteImage", id: id, ok: path !== null, path: path }, "*"),
+    id,
+    path
+  );
+}
+
 const SHIFT_ENTER = { chord: ["Shift"], key: "Enter" };
 
 test("Shift+Enter writes a hard line break, the next line carrying the container's marks", { skip }, async () => {
@@ -4445,6 +4481,44 @@ test("Tab walks the cells of a table, and adds a row after the last", { skip }, 
   assert.equal(out.text, "Words\t here\n");
 });
 
+test("a mark typed over a selection wraps it, and types over it in code", { skip }, async () => {
+  const h = await open({ text: "A paragraph of words.\n", scores: 0 });
+  await setSelection(h.page, [{ anchor: 2, head: 11 }]);
+  await h.page.keyboard.type("*");
+  assert.equal(await docText(h.page), "A *paragraph* of words.\n");
+  // The words stay selected, so the next mark goes on outside the first;
+  // a bracket closes with its own other half.
+  assert.deepEqual(await selectionRanges(h.page), [[3, 12]]);
+  await h.page.keyboard.type("(");
+  assert.equal(await docText(h.page), "A *(paragraph)* of words.\n");
+  await h.page.keyboard.type('"');
+  assert.equal(await docText(h.page), 'A *("paragraph")* of words.\n');
+  assert.deepEqual(await selectionRanges(h.page), [[5, 14]]);
+  // A selection made backwards keeps its direction.
+  await setSelection(h.page, [{ anchor: 14, head: 5 }]);
+  await h.page.keyboard.type("_");
+  assert.equal(await docText(h.page), 'A *("_paragraph_")* of words.\n');
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.state.selection.main.anchor), 15);
+  // A caret types the character, and two selections are both wrapped.
+  await setSelection(h.page, 0);
+  await h.page.keyboard.type("*");
+  assert.equal(await docText(h.page), '*A *("_paragraph_")* of words.\n');
+  await setSelection(h.page, [
+    { anchor: 1, head: 2 },
+    { anchor: 24, head: 29 },
+  ]);
+  await h.page.keyboard.type("`");
+  assert.equal(await docText(h.page), '*`A` *("_paragraph_")* of `words`.\n');
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  // In a fence and in the header the key types over the selection, as any
+  // key does.
+  let out = await pressOn("```js\nlet x = 1;\n```\n", [{ anchor: 10, head: 11 }], [{ type: "*" }]);
+  assert.equal(out.text, "```js\nlet * = 1;\n```\n");
+  out = await pressOn("---\ntitle: t\n---\n\nBody\n", [{ anchor: 11, head: 12 }], [{ type: '"' }]);
+  assert.equal(out.text, '---\ntitle: "\n---\n\nBody\n');
+});
+
 test("Ctrl+H opens the search row with the replace field focused, and stops at the text", { skip }, async () => {
   const h = await open({ text: "one word here\n", scores: 0 });
   await h.page.evaluate(() => {
@@ -4479,3 +4553,146 @@ test("Ctrl+H opens the search row with the replace field focused, and stops at t
   await h.close();
 });
 
+test("an address pasted over selected words makes them a link", { skip }, async () => {
+  const h = await open({ text: "See the standard and the site.\n", scores: 0 });
+  await setSelection(h.page, [{ anchor: 8, head: 16 }]);
+  // A trailing line ending, which a browser may put after a copied address.
+  await pasteInto(h.page, [["text/plain", "https://abcnotation.com/\n"]]);
+  await sleep(100);
+  assert.equal(await docText(h.page), "See the [standard](https://abcnotation.com/) and the site.\n");
+  assert.deepEqual(await selectionRanges(h.page), [[44, 44]]);
+  // Over two selections at once, both are linked; `www.` is an address
+  // too, written with the scheme the page needs to follow it.
+  await setSelection(h.page, [
+    { anchor: 4, head: 7 },
+    { anchor: 53, head: 57 },
+  ]);
+  await pasteInto(h.page, [["text/plain", "www.example.org/page"]]);
+  await sleep(100);
+  assert.equal(
+    await docText(h.page),
+    "See [the](https://www.example.org/page) [standard](https://abcnotation.com/) and the [site](https://www.example.org/page).\n"
+  );
+  // Pasted as text as ever: with nothing selected, over an address, and
+  // inside a link already.
+  const before = await docText(h.page);
+  await setSelection(h.page, 0);
+  await pasteInto(h.page, [["text/plain", "https://example.org/"]]);
+  await sleep(100);
+  assert.equal(await docText(h.page), "https://example.org/" + before);
+  await setSelection(h.page, [{ anchor: 0, head: 20 }]);
+  await pasteInto(h.page, [["text/plain", "https://other.org/"]]);
+  await sleep(100);
+  assert.equal(await docText(h.page), "https://other.org/" + before);
+  const inLink = (await docText(h.page)).indexOf("standard");
+  await setSelection(h.page, [{ anchor: inLink, head: inLink + 8 }]);
+  await pasteInto(h.page, [["text/plain", "https://other.org/"]]);
+  await sleep(100);
+  assert.equal((await docText(h.page)).slice(inLink - 1, inLink + 19), "[https://other.org/]");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  // Words with a bracket in them, half a mark, a code span and a picture
+  // are pasted over; a whole mark inside the selection is linked with it,
+  // and text that is not an address alone is text.
+  const cases = [
+    ["a [b] c\n", 2, 5, "a https://x.org/ c\n"],
+    ["**bold** words\n", 4, 14, "**bohttps://x.org/\n"],
+    ["a `code` b\n", 3, 7, "a `https://x.org/` b\n"],
+    ["a ![pic](p.png) b\n", 4, 7, "a ![https://x.org/](p.png) b\n"],
+    ["see **bold** words\n", 4, 18, "see [**bold** words](https://x.org/)\n"],
+    ["a b\n", 0, 1, "see https://x.org/ b\n"],
+  ];
+  for (const [text, from, to, want] of cases) {
+    const h2 = await open({ text, scores: 0 });
+    await setSelection(h2.page, [{ anchor: from, head: to }]);
+    await pasteInto(h2.page, [["text/plain", want.startsWith("see https") ? "see https://x.org/" : "https://x.org/"]]);
+    await sleep(100);
+    assert.equal(await docText(h2.page), want);
+    assert.deepEqual(h2.errors, []);
+    await h2.close();
+  }
+});
+
+test("a picture pasted goes to the host, and comes back as a picture at the caret", { skip }, async () => {
+  const h = await open({ text: "See the chart here.\n", scores: 0 });
+  await setSelection(h.page, [{ anchor: 8, head: 13 }]);
+  await pasteInto(h.page, [], [
+    { name: "chart.png", type: "image/png", bytes: PNG },
+    { name: "chart 2.png", type: "image/png", bytes: PNG },
+  ]);
+  await sleep(200);
+  // The bytes, the name and the kind, one message per picture and in order;
+  // the text is untouched until the host answers.
+  assert.deepEqual(await picturePosts(h.page), [
+    { id: "picture-1", name: "chart.png", mime: "image/png", bytes: PNG },
+    { id: "picture-2", name: "chart 2.png", mime: "image/png", bytes: PNG },
+  ]);
+  assert.equal(await docText(h.page), "See the chart here.\n");
+  // The first written: the selected words are its label, and since another
+  // follows it takes a line of its own; the last leaves the caret in its
+  // label, to type the caption into.
+  await pictureWritten(h.page, "picture-1", "doc-images/chart.png");
+  await sleep(100);
+  assert.equal(await docText(h.page), "See the ![chart](doc-images/chart.png)\n here.\n");
+  await pictureWritten(h.page, "picture-2", "doc-images/chart%202.png");
+  await sleep(100);
+  assert.equal(await docText(h.page), "See the ![chart](doc-images/chart.png)\n![](doc-images/chart%202.png) here.\n");
+  assert.deepEqual(await selectionRanges(h.page), [[41, 41]]);
+  // An answer nobody asked for, and a refusal, change nothing.
+  await pictureWritten(h.page, "picture-9", "x.png");
+  await pictureWritten(h.page, "picture-2", "again.png");
+  await sleep(100);
+  assert.equal(await docText(h.page), "See the ![chart](doc-images/chart.png)\n![](doc-images/chart%202.png) here.\n");
+  // The edit reached the host as any edit does.
+  const sent = await lastEdit(h.page);
+  assert.ok(sent.includes("![](doc-images/chart%202.png)"), sent);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+
+  // Text on the clipboard beside a picture is pasted as text: a
+  // spreadsheet copies a picture of its cells with them. A file of another
+  // kind is nothing to the editor, and the selection stays as it was
+  // (G082).
+  const h2 = await open({ text: "Cells here.\n", scores: 0 });
+  await setSelection(h2.page, [{ anchor: 0, head: 5 }]);
+  await pasteInto(h2.page, [["text/plain", "1\t2"]], [{ name: "image.png", type: "image/png", bytes: PNG }]);
+  await sleep(100);
+  assert.equal(await docText(h2.page), "1\t2 here.\n");
+  assert.deepEqual(await picturePosts(h2.page), []);
+  await setSelection(h2.page, [{ anchor: 0, head: 3 }]);
+  await pasteInto(h2.page, [], [{ name: "notes.pdf", type: "application/pdf", bytes: [37, 80, 68, 70] }]);
+  await sleep(100);
+  assert.equal(await docText(h2.page), "1\t2 here.\n");
+  assert.deepEqual(await selectionRanges(h2.page), [[0, 3]]);
+  assert.deepEqual(await picturePosts(h2.page), []);
+  assert.deepEqual(h2.errors, []);
+  await h2.close();
+});
+
+test("a picture dropped on the text lands where it was let go", { skip }, async () => {
+  const h = await open({ text: "Drop on this line.\n\nNot here.\n", scores: 0 });
+  await setSelection(h.page, 25);
+  const at = await coordsAt(h.page, 8);
+  await h.page.evaluate(
+    (png, at) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array(png)], "dropped.png", { type: "image/png" }));
+      const ev = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true, clientX: at.x, clientY: at.y });
+      window.__mdm.view.contentDOM.dispatchEvent(ev);
+    },
+    PNG,
+    at
+  );
+  await sleep(200);
+  assert.deepEqual(
+    (await picturePosts(h.page)).map((m) => [m.id, m.name]),
+    [["picture-1", "dropped.png"]]
+  );
+  assert.deepEqual(await selectionRanges(h.page), [[8, 8]]);
+  await pictureWritten(h.page, "picture-1", "doc-images/dropped.png");
+  await sleep(100);
+  assert.equal(await docText(h.page), "Drop on ![](doc-images/dropped.png)this line.\n\nNot here.\n");
+  assert.deepEqual(await selectionRanges(h.page), [[10, 10]]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});

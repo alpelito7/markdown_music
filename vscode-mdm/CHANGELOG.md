@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- A picture pasted from the clipboard (a screenshot) or dropped on the text
+  with `Shift` held is written beside the document, in a folder named after
+  it (`songbook-images` beside `songbook.mdm`), and `![](path)` is written
+  where the caret is, with the words that were selected as its label and
+  the caret in the label; a picture already there is never written over,
+  and a name taken is numbered on. The kinds written are PNG, JPEG, GIF,
+  WebP, SVG and BMP; a document that is not saved yet, and a file that is
+  not the picture it claims to be, are told so. Text on the clipboard
+  beside a picture is pasted as text, as a spreadsheet's cells are. A
+  picture taken out of the text stays in its folder until the document is
+  saved without it; then the file goes to the system's trash, and its
+  folder is removed once nothing is left in it. An undo that brings the
+  picture back into the text puts the file back beside it. Only the
+  pictures the editor wrote are ever moved: a file put in the folder by
+  hand is left alone, and so is its folder.
+- An address pasted over selected words makes them a link to it,
+  `[words](address)`, as GitHub pastes one, over every selection at once
+  and with the caret after the link. The editor did this before for one
+  selection alone, and wrote what came: an address copied with its line
+  ending, which broke the link, and a link around words holding a bracket,
+  which is no link. Pasted over an address, inside a link, code or maths,
+  or with nothing selected, it is pasted as text; a `www.` address is
+  written with the `https://` the page needs to follow it.
+- A mark typed over selected words wraps them instead of replacing them,
+  the way VS Code's own Markdown editor surrounds a selection: `*`, `_`, a
+  backtick, `~`, `^`, `$`, a quote or a bracket, the words staying selected
+  for the next mark. In a code block or a score, in an equation on lines of
+  its own and in the header the key types over the selection as before.
 - `Shift+Enter` breaks a line inside its paragraph: Pandoc's backslash at
   the end of the line (the form Pandoc itself writes a line break in), with
   the next line carrying the `>` of the quote or the indentation of the
