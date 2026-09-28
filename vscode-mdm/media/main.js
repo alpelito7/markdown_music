@@ -11483,6 +11483,37 @@
   }
 
   function buildEditor(text) {
+    // ---- The layers of the keyboard ----
+    //
+    // A key is answered by the innermost layer that is active and binds it,
+    // and falls outward through the layers that do not, out of the page to
+    // VS Code last (D20 in docs/cm6-migration.md; the owner's model,
+    // 2026-09-27). From the outside in:
+    //
+    //  1. VS Code. Its webview host hears every key of the page in the
+    //     bubble phase, whatever the page did with it (D19), so a layer that
+    //     answers a key the workbench also binds stops it there
+    //     (stopPropagation on the binding), and a key no layer stops is the
+    //     workbench's: Ctrl+S, Ctrl+Z, Ctrl+Shift+O and the rest.
+    //  2. The text, while the caret shows (a click in the text; syncFocus):
+    //     this keymap and CodeMirror's own after it, the marks, the block
+    //     keys, Enter and its kin, Tab, the search keys. Ahead of them the
+    //     bindings of the block the caret is in (Home and End over a card),
+    //     which return false anywhere else so the key falls to the text's
+    //     own binding: that is how a layer inside the text is written, and
+    //     how the score's editing keys will be when its edit mode comes. The
+    //     search row's fields are a scope of this layer (searchPanel).
+    //  3. The player, while its bar holds the keyboard, which the headphones
+    //     hand it and Escape or a click in the text takes back: Space plays
+    //     and pauses (watchPlayerKeys), the arrows and Home and End walk the
+    //     progress bar (makeProgressDraggable). A caret in the text keeps
+    //     Space for the text, player open or not.
+    //  4. A panel of the toolbar while it is open, which Escape closes
+    //     (buildToolbar).
+    //
+    // Being active is holding the focus, or being open; a layer never asks
+    // where in the page its element sits, which is the trap of the player's
+    // bar, a widget that hangs inside the text's own content (SELF_KEYED).
     const mdmKeymap = [
       // Ctrl+S goes on to the workbench, which saves the file: what is held
       // back by the debounce is sent ahead of it, and the host holds the save

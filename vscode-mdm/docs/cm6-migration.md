@@ -1,7 +1,7 @@
 # Moving the MDM editor to CodeMirror 6
 
 Status: implemented (2026-08-20) and merged into `main`, tagged
-`v0.2.0-cm6-editor` (2026-08-24). The nineteen
+`v0.2.0-cm6-editor` (2026-08-24). The twenty
 decisions below lean towards Obsidian's live preview and towards what the
 MDM editor already did; each says what was chosen, and each is open to
 revision. Everything under "Measured" was observed on 2026-08-20 on this
@@ -404,6 +404,31 @@ D19. **The digit is the level, and a letter names the block that has none**
   layout through CDP, which is where it matters (`Ctrl+Shift+2` arrives as
   `"` there and not as a 2; CodeMirror falls back to the key's base
   name by keyCode, so the binding is the digit and not the character).
+
+D20. **The keyboard works in layers** (2026-09-27, the owner's model). A key
+  is answered by the innermost layer that is active and binds it, and falls
+  outward through the layers that do not, out of the page to VS Code last.
+  From the outside in: VS Code, whose webview host hears every key of the
+  page (D19), so a layer that answers a key the workbench also binds stops
+  it there and a key no layer stops is the workbench's; the text, while the
+  caret shows, which is the page's keymap (`mdmKeymap` in main.js) and
+  CodeMirror's own after it, with the bindings of the block the caret is
+  in ahead of them (Home and End over a card) returning false anywhere else
+  so the key falls through to the text's own; the player, while its bar
+  holds the keyboard, where Space plays and pauses and the arrows and Home
+  and End walk the progress bar, and a caret in the text keeps Space for
+  the text, player open or not; a panel of the toolbar while it is open,
+  which Escape closes. Being active is holding the focus, or being open,
+  never where in the page the element sits: the player's bar hangs inside
+  the text's own content, and a rule read off what an element hangs from
+  took Space from every key typed. The layers still to come, the score's
+  editing keys once its edit mode exists, go inside the text the way the
+  card's bindings do, a keymap ahead of the text's whose commands decline
+  outside the layer. Pinned in `webview-editing.test.js` (the formatting
+  keys stop at the text and reach VS Code from anywhere else; Ctrl+H stops
+  at the text) and `webview-player.test.js` (the bar takes the keyboard,
+  the keys of the workbench leave the page with the bar focused, a caret
+  keeps Space).
 
 Found on the way and settled:
 inside VS Code the workbench replays Ctrl+Z into the page as
