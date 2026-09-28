@@ -1343,6 +1343,27 @@ test("exporting both formats asks for both and offers both files", async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// A file that opens with a byte order mark keeps its header in the copy.
+// VS Code hands the editor the text without the mark and the export read it
+// with it: no header at the head of the file, so the copy got a header of its
+// own and the document's came out on the page as a paragraph of text.
+test("a file that opens with a byte order mark keeps its header in the copy", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp, { abcm2ps: true }));
+  const doc = path.join(tmp, "doc.mdm");
+  fs.writeFileSync(doc, "﻿---\ntitle: T\n---\n\nBody.\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  await h.receive({ type: "export", to: "html" });
+  restore();
+  const copy = fs.readFileSync(path.join(tmp, "copy.qmd"), "utf8");
+  const header = /^---\n([\s\S]*?)\n---\n/.exec(copy);
+  assert.ok(header, "the copy does not open with a header: " + JSON.stringify(copy.slice(0, 80)));
+  assert.ok(header[1].includes("title: T"), "the document's own header is not the copy's: " + JSON.stringify(copy));
+  assert.equal((copy.match(/^---$/gm) || []).length, 2, "the copy holds more than one header: " + JSON.stringify(copy));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test("the copy is read in the dialect of the editor, and a document that names one keeps it", () => {
   const from = "markdown-x";
 
@@ -2027,6 +2048,43 @@ function fakeQuartoTexFallback(tmp, opts) {
   return bin;
 }
 
+// A Quarto that names what it writes as Quarto 1.9.37 does: the LaTeX of a
+// PDF under the copy's stem with each character TeX cannot take in a file
+// name made a hyphen (texSafeFilename in its core/tex.ts), the PDF under that
+// same stem unless --output names it, and the page under the stem as it is.
+// With `noTex` the PDF render leaves its LaTeX and stops, as it does on a
+// machine with no TeX; with TeX it writes the PDF and takes the LaTeX away.
+// In Node, by the absolute path of the one running the tests, since the PATH
+// a test runs under holds the stand-ins and nothing else.
+function fakeQuartoNames(tmp, opts) {
+  const options = opts || {};
+  const bin = path.join(tmp, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const quarto = path.join(bin, "quarto");
+  const script = [
+    "#!" + process.execPath,
+    "const fs = require('fs');",
+    "const path = require('path');",
+    "const args = process.argv.slice(2);",
+    "fs.appendFileSync(" + JSON.stringify(path.join(tmp, "calls.txt")) + ", JSON.stringify(args) + '\\n');",
+    "const at = (flag) => { const i = args.indexOf(flag); return i === -1 ? null : args[i + 1]; };",
+    "const stem = path.basename(args[1], '.qmd');",
+    "const safe = stem.replace(/[ <>()|:&;#?*'\\\\/]/g, '-');",
+    "const to = at('--to');",
+    "if (to === 'html') { fs.writeFileSync(at('--output') || stem + '.html', '" + FINISHED_PAGE + "'); process.exit(0); }",
+    "if (to === 'pdf') {",
+    "  fs.writeFileSync(safe + '.tex', 'quarto wrote this\\n');",
+    options.noTex
+      ? "  process.stderr.write('No TeX installation was detected. Please run quarto install tinytex.\\n'); process.exit(1);"
+      : "  fs.writeFileSync(at('--output') || safe + '.pdf', '%PDF-1.4 fake\\n'); fs.unlinkSync(safe + '.tex'); process.exit(0);",
+    "}",
+    "process.exit(0);",
+  ].join("\n");
+  fs.writeFileSync(quarto, script + "\n");
+  fs.chmodSync(quarto, 0o755);
+  return bin;
+}
+
 function fakeChromePrint(bin, opts) {
   const options = opts || {};
   const chrome = path.join(bin, "google-chrome");
@@ -2059,6 +2117,51 @@ function fakeChromePrint(bin, opts) {
   );
   fs.chmodSync(chrome, 0o755);
 }
+
+// A document named with a space and brackets, as a musician names one. Quarto
+// names a PDF after the stem of its LaTeX, with those characters made
+// hyphens, so "my song (draft).mdm" came out as "my-song--draft-.pdf" while the
+// notice named "my song (draft).pdf" and its button opened nothing; and the
+// LaTeX a PDF made without TeX leaves behind, "my-song--draft-.tex", was
+// looked for under the document's own name, so it stayed beside the document
+// after every such export, and a reader's own file of that name was written
+// over (found by the review of the export without TeX, 2026-09-28).
+test("a PDF keeps its document's name, spaces and brackets and all", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeQuartoNames(tmp));
+  const doc = path.join(tmp, "my song (draft).mdm");
+  fs.writeFileSync(doc, "---\ntitle: T\n---\n\nBody.\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  await h.receive({ type: "export", to: "pdf" });
+  restore();
+  const left = fs.readdirSync(tmp).sort();
+  assert.deepEqual(left, ["bin", "calls.txt", "my song (draft).mdm", "my song (draft).pdf"], "the folder holds " + left);
+  assert.equal(vscode._state.infoMessages[0].message, "MDM: exported my song (draft).pdf");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("a PDF made without TeX leaves no LaTeX under the name Quarto spells, and spares a reader's file of it", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeQuartoNames(tmp, { noTex: true });
+  fakeChromePrint(bin);
+  const restore = usePath(bin);
+  const doc = path.join(tmp, "my song (draft).mdm");
+  fs.writeFileSync(doc, "---\ntitle: T\n---\n\nBody.\n");
+  const h = boot("Body\n", {}, null, "file://" + doc);
+  vscode._state.workspaceFolder = tmp;
+  await h.receive({ type: "export", to: "pdf" });
+  const left = fs.readdirSync(tmp).filter((n) => !/^(bin|calls\.txt|chrome-.*\.txt)$/.test(n)).sort();
+  assert.deepEqual(left, ["my song (draft).mdm", "my song (draft).pdf"], "the folder holds " + left);
+  // A reader's own file under the name Quarto writes its LaTeX to.
+  const mine = path.join(tmp, "my-song--draft-.tex");
+  fs.writeFileSync(mine, "my own LaTeX\n");
+  await h.receive({ type: "export", to: "pdf" });
+  restore();
+  assert.equal(fs.readFileSync(mine, "utf8"), "my own LaTeX\n", "the reader's .tex was written over");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 
 // A Quarto whose HTML render fails, which is what the print fallback meets
 // when the document itself is what Quarto cannot read.
@@ -2663,6 +2766,13 @@ test("the filter entry is put in whatever shape the header has", () => {
 
   // A path with a quote in it cannot break out of the YAML scalar.
   assert.ok(ext.withFilter("plain\n", "/a'b/mdm.lua").includes("'/a''b/mdm.lua'"));
+
+  // A header saved with Windows line endings, its list followed by another
+  // key (the language menu writes `lang:` after it): the entry is ours all
+  // the same, and the lines keep their endings.
+  const crlf = ext.withFilter("---\r\ntitle: T\r\nfilters:\r\n  - mdm\r\nlang: es\r\n---\r\n\r\nb\r\n", lua);
+  assert.ok(crlf.includes("  - '/x/mdm.lua'\r\nlang: es"), JSON.stringify(crlf));
+  assert.ok(!/-\s*mdm\s*$/m.test(crlf), "the bare entry is left: " + JSON.stringify(crlf));
 });
 
 test("a score is recognised in both fence forms, and nothing else is", () => {

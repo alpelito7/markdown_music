@@ -5438,6 +5438,37 @@ swap back, the undo could not find them, and LB4 then ran against a sheet
 without them and passed; the lines were put back and both were run again
 with a placeholder in their place.
 
+### The export on a computer without TeX, reviewed (2026-09-28)
+
+Two reviews of the export, at the owner's request once the captions were
+done: one ran 40 exports through the real `extension.js` on the mock, with
+real Quarto and Chrome and TeX taken off the PATH, and one read the code for
+Windows and macOS. What they found and was put right, each with its test in
+`extension-host.test.js` unless another file is named.
+
+The name, the line endings and the first bytes of a document. Quarto names
+the LaTeX of a PDF after the copy's stem with each character TeX cannot take
+in a file name made a hyphen, and the PDF after that stem too: `my song
+(draft).mdm` came out as `my-song--draft-.pdf` and left
+`my-song--draft-.tex` beside it after every PDF made without TeX, over a
+reader's own file of that name if there was one. The fake Quarto the tests
+had wrote its LaTeX under the copy's own name, which is why none of them saw
+it; *a PDF keeps its document's name, spaces and brackets and all* and *a PDF
+made without TeX leaves no LaTeX under the name Quarto spells, and spares a
+reader's file of it* run on a fake that names its files as Quarto 1.9.37
+does. A header saved with Windows line endings kept its bare `- mdm` when
+another key followed the list (*the filter entry is put in whatever shape
+the header has*), and a file that opens with a byte order mark lost its
+header to the page (*a file that opens with a byte order mark keeps its
+header in the copy*).
+
+- **EX1** the PDF left for Quarto to name → `my-song--draft-.pdf`.
+- **EX2** the LaTeX looked for under the document's own name →
+  `my-song--draft-.tex` left in the folder.
+- **EX3** the filter's entry rewritten past the line's `\r` → the bare
+  `- mdm` left.
+- **EX4** the byte order mark kept → the copy opens with a header of its own.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

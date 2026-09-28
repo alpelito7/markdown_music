@@ -1241,8 +1241,14 @@ function withFilter(text, lua) {
         break;
       }
     }
+    // The entry is rewritten up to the line's own \r and not past it: a file
+    // saved on Windows ends its lines in \r\n, the split above leaves the \r
+    // on each, and `.*$` found no end in front of it, so a CRLF header kept
+    // its bare `- mdm` whenever another key followed the list (the language
+    // menu writes `lang:` there) and Quarto went looking for an _extensions
+    // folder that is not there.
     if (at === -1) lines.splice(i + 1, 0, "  - " + item);
-    else lines[at] = lines[at].replace(/-[ \t]*.*$/, "- " + item);
+    else lines[at] = lines[at].replace(/-[ \t]*[^\r]*/, "- " + item);
     done = true;
   }
   if (!done) lines.push("filters:", "  - " + item);
@@ -1607,6 +1613,15 @@ function withoutExtension(file) {
   return ext ? file.slice(0, file.length - ext.length) : file;
 }
 
+// The stem Quarto gives the LaTeX of a PDF, each character TeX cannot take in
+// a file name made a hyphen (texSafeFilename in Quarto 1.9.37's core/tex.ts):
+// `my song (draft).qmd` is typeset as `my-song--draft-.tex`, and its PDF came
+// out as `my-song--draft-.pdf` until the render named it (--output, in
+// runExport).
+function texSafeFilename(name) {
+  return name.replace(/[ <>()|:&;#?*'\\/]/g, "-");
+}
+
 // ---------- The name a score's audio is written under ----------
 
 // At most this many code points of the title, and at most this many bytes of
@@ -1781,7 +1796,12 @@ async function runExport(document, to) {
   const dir = path.dirname(file);
   let text;
   try {
-    text = fs.readFileSync(file, "utf8");
+    // Without the byte order mark a file can open with (PowerShell's
+    // `-Encoding UTF8`, an old Notepad): VS Code hands the editor the text
+    // without it, and with it here no header was found at the head of the
+    // file, so the copy was given a header of its own and the document's
+    // came out on the page as a paragraph of text.
+    text = fs.readFileSync(file, "utf8").replace(/^﻿/, "");
   } catch (e) {
     exportFailed(
       "the file could not be read for export.",
@@ -1822,7 +1842,10 @@ async function runExport(document, to) {
   }
   const pretty = path.basename(file);
   const base = withoutExtension(file);
-  const texPath = base + ".tex";
+  // The LaTeX goes under the name Quarto spells it with, so a document named
+  // with a space or a bracket found its `.tex` left beside it after every PDF
+  // made without TeX, and a reader's own file of that name written over.
+  const texPath = path.join(dir, texSafeFilename(path.basename(base)) + ".tex");
   const filesPath = base + "_files";
   const hadTex = fs.existsSync(texPath);
   const hadFiles = fs.existsSync(filesPath);
@@ -1883,8 +1906,13 @@ async function runExport(document, to) {
     }
   }
   const look = exportLook(document, text);
+  // The PDF is named after the document: Quarto names it after the stem of
+  // its LaTeX (texSafeFilename), and a document with a space, a bracket or an
+  // apostrophe in its name came out under another name than the one the
+  // notice offered to open.
   const steps = (target.steps || [to]).map(function (name) {
-    return { name: name, args: renderArgs(text, copy, EXPORT_TARGETS[name].args.concat(look)) };
+    const named = name === "pdf" ? ["--output", path.basename(base) + ".pdf"] : [];
+    return { name: name, args: renderArgs(text, copy, EXPORT_TARGETS[name].args.concat(named, look)) };
   });
 
   // Every Quarto call, announced and logged as it happens: normally the one

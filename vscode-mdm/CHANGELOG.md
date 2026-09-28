@@ -67,6 +67,17 @@
   the hidden marks of bold, italics, code or a link, and never at a curly
   apostrophe, a note's number or a no-break space: a period after bold
   words could go down to the next row alone.
+- A PDF typeset with TeX keeps the name of its document when the name has
+  a space, a parenthesis, an apostrophe or one of `& # ; ? * : | < >` in it:
+  `my song (draft).mdm` came out as `my-song--draft-.pdf`, and the notice's
+  Open PDF opened nothing. A PDF made without TeX leaves nothing beside such
+  a document, where the LaTeX of the attempt stayed, and a file of the
+  reader's under that LaTeX's name is no longer written over.
+- A document saved with Windows line endings exports: when its list of
+  filters was followed by another key (the language menu writes `lang:`
+  there), the export failed. A file that opens with a byte order mark (an
+  invisible character some Windows programs write first) keeps its header,
+  which came out on the page as a paragraph of text.
 - A music symbol button leads the buttons that close the toolbar's first
   row, before the equation. Its panel holds the notes from the breve to the
   128th, the dotted notes from the whole to the sixteenth, the two beamed
