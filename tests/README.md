@@ -5278,7 +5278,8 @@ Caught, and the file restored after it.
    bullets, the numbers and the quote have no key at all since
    `Ctrl+Shift+U` opened fcitx5's `U+` prompt on his machine (see the
    section on it), so what is left to press on his own keyboard is
-   `Ctrl+Shift+0` to `6`, `C` and `T`.
+   `Ctrl+Shift+0` to `6`, `C` and `T`, and `Ctrl+H`, which the text keeps
+   from the workbench.
 5. The three webview files share `webview/helpers.js`; a cold-start flake
    was seen once (the first `open()` of a run timing out on its three SVGs)
    and not reproduced. A second flake, *the caret keeps its place in the

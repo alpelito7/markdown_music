@@ -8862,6 +8862,142 @@
     return continueMarkup(view);
   }
 
+  // ---------- Shift+Enter: a hard line break ----------
+
+  // The row of a table around a position: its header, one of its body rows,
+  // or the alignment row under the header (the one TableDelimiter that is a
+  // child of the table itself, as tableModel reads it); null anywhere else.
+  // Read from either side of the position, as a link is (linkAround), so
+  // that the head of the row's line answers too.
+  function tableRowAround(tree, pos) {
+    const sides = [-1, 1];
+    for (let i = 0; i < sides.length; i++) {
+      for (let n = tree.resolveInner(pos, sides[i]); n; n = n.parent) {
+        if (n.name === "TableHeader" || n.name === "TableRow") return n;
+        if (n.name === "TableDelimiter" && n.parent && n.parent.name === "Table") return n;
+      }
+    }
+    return null;
+  }
+
+  // The row before or after one, past the alignment row and past the `>`
+  // marks a quote puts between the rows of a table inside it, which the
+  // parser makes children of the table (QuoteMark siblings of the rows).
+  function rowBeside(row, dir) {
+    let other = dir > 0 ? row.nextSibling : row.prevSibling;
+    while (other && other.name !== "TableRow" && other.name !== "TableHeader") {
+      other = dir > 0 ? other.nextSibling : other.prevSibling;
+    }
+    return other;
+  }
+
+  // The cells of a row: each the stretch between two of its pipes, with
+  // where its text stands inside the spaces, read the way tableModel reads
+  // them. A stretch between two pipes is a cell whatever it holds, and the
+  // stretch before the first pipe or after the last is one only when it
+  // holds something, since a row may leave its outer pipes off (GFM 4.10).
+  // The pipes are the row's TableDelimiter children, which the table parser
+  // does not put on a `|` inside code or maths (vendor-src/src/markdown/
+  // table.js), so a cell holding `$|x|$` is one cell here as it is one on
+  // the page.
+  function rowCells(row, doc) {
+    const out = [];
+    const stretch = function (from, to, outer) {
+      let a = from;
+      let b = to;
+      while (a < b && /[ \t]/.test(doc.sliceString(a, a + 1))) a++;
+      while (b > a && /[ \t]/.test(doc.sliceString(b - 1, b))) b--;
+      if (outer && a === b) return;
+      out.push({ from: from, to: to, textFrom: a, textTo: b });
+    };
+    let at = row.from;
+    row.getChildren("TableDelimiter").forEach(function (pipe, i) {
+      stretch(at, pipe.from, i === 0);
+      at = pipe.to;
+    });
+    stretch(at, row.to, true);
+    return out;
+  }
+
+  // Shift+Enter: a hard line break, written as Pandoc's own writer writes
+  // one, a backslash at the end of the line (`pandoc -t markdown` puts `\`
+  // where the reader had two trailing spaces, measured on the Pandoc 3.8.3
+  // Quarto ships here), and the next line of the same paragraph after it,
+  // carrying the marks of the quote or the item the paragraph is in. Two
+  // trailing spaces would read the same and show nothing, and an editor
+  // that trims them takes the break with them. In a table row, where a line
+  // cannot break, the `<br>` the page and the editor both read in a cell.
+  // Anywhere a break would not be one, Enter's own gesture: in a fence, a
+  // heading, an equation or the header, on a blank line, and at the head
+  // of a line's own text, where a backslash before the line ending is a
+  // backslash (CommonMark 6.7: a hard break cannot open a block). Inside
+  // code or maths in a line too: code by inlineCodeAround, and maths by the
+  // language test, since what stands between its dollars is a document of
+  // its own where Markdown is active on neither side of the caret (read in
+  // the harness, 2026-09-28).
+  function hardBreak(view) {
+    const state = view.state;
+    if (state.readOnly) return false;
+    const tree = CM.syntaxTree(state);
+    const doc = state.doc;
+    let plain = false;
+    const changes = state.changeByRange(function (range) {
+      const pos = range.from;
+      const line = doc.lineAt(pos);
+      if (
+        range.to > line.to ||
+        fenceAround(tree, pos) ||
+        headingAround(tree, pos) ||
+        unmarkableLine(tree, line) ||
+        inlineCodeAround(tree, pos) ||
+        inlineCodeAround(tree, range.to) ||
+        (!CM.markdownLanguage.isActiveAt(state, pos, -1) && !CM.markdownLanguage.isActiveAt(state, pos, 1))
+      ) {
+        plain = true;
+        return { range: range };
+      }
+      if (tableRowAround(tree, pos)) {
+        return {
+          changes: { from: range.from, to: range.to, insert: "<br>" },
+          range: CM.EditorSelection.cursor(range.from + 4),
+        };
+      }
+      const head = line.from + LINE_PREFIX.exec(line.text)[0].length;
+      let from = pos;
+      while (from > head && /[ \t]/.test(line.text.charAt(from - line.from - 1))) from--;
+      if (from <= head) {
+        plain = true;
+        return { range: range };
+      }
+      let to = range.to;
+      while (to < line.to && /[ \t]/.test(line.text.charAt(to - line.from))) to++;
+      const levels = markupLevels(tree.resolveInner(pos, -1), doc);
+      while (levels.length && levels[levels.length - 1].from > pos - line.from) levels.pop();
+      const insert = "\\" + state.lineBreak + (levels.length ? continuationPrefix(levels, line) : "");
+      return {
+        changes: { from: from, to: to, insert: insert },
+        range: CM.EditorSelection.cursor(from + insert.length),
+      };
+    });
+    if (plain) return mdmEnter(view);
+    view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: "input" }));
+    return true;
+  }
+
+  // The code inside a line that a position stands in, between its marks. A
+  // backslash before a line ending there is no break: Pandoc keeps it as
+  // written, `co\ de` for one typed into `code` (Pandoc 3.8.3, 2026-09-28).
+  // The span's two edges are outside it, so a break just before its opening
+  // mark or just after its closing one is still a break. Resolved to the
+  // right, a span that ends at the position is never entered, so only its
+  // start needs the test.
+  function inlineCodeAround(tree, pos) {
+    for (let node = tree.resolveInner(pos, 1); node; node = node.parent) {
+      if (node.name === "InlineCode" && node.from < pos) return node;
+    }
+    return null;
+  }
+
   // ---------- Backspace and Delete ----------
 
   // The node the markup context of a deletion is read from: lang-markdown's
@@ -9195,14 +9331,65 @@
     return { changes: set, range: range.map(set) };
   }
 
+  // Tab in a table: the next cell of the row, its text selected to be typed
+  // over, the way a spreadsheet and Typora walk a table; from the last cell
+  // of a row, the first of the row under it, past the alignment row; from
+  // the last cell of the last row, a new row, as wide as the header and
+  // inside the marks of the quote or the item the table stands in.
+  // Shift+Tab walks back and stops at the first cell. Before this a tab
+  // typed into a cell was whitespace to the table and nothing to the
+  // reader. A caret on a pipe belongs to the cell before it, and one on the
+  // opening pipe to none, so Tab there goes to the first cell; the
+  // alignment row has no cells, so Tab on it goes to the first cell of the
+  // row under it and Shift+Tab to the last of the header.
+  function stepCell(state, tree, range, dir) {
+    const doc = state.doc;
+    if (doc.lineAt(range.from).number !== doc.lineAt(range.to).number) return null;
+    const pos = range.head;
+    const row = tableRowAround(tree, pos);
+    if (!row) return null;
+    const cells = row.name === "TableDelimiter" ? [] : rowCells(row, doc);
+    let at = -1;
+    for (let i = 0; i < cells.length && at < 0; i++) {
+      if (pos >= cells[i].from && pos <= cells[i].to) at = i;
+    }
+    if (at < 0) at = cells.length && pos < cells[0].from ? -1 : dir > 0 ? cells.length - 1 : cells.length;
+    const pick = function (cell) {
+      return {
+        range:
+          cell.textFrom < cell.textTo
+            ? CM.EditorSelection.range(cell.textFrom, cell.textTo)
+            : CM.EditorSelection.cursor(Math.min(cell.from + 1, cell.to)),
+      };
+    };
+    const target = at + dir;
+    if (target >= 0 && target < cells.length) return pick(cells[target]);
+    const other = rowBeside(row, dir);
+    if (other) {
+      const theirs = rowCells(other, doc);
+      if (theirs.length) return pick(dir > 0 ? theirs[0] : theirs[theirs.length - 1]);
+    }
+    if (dir < 0) return { range: range };
+    const table = row.parent;
+    const header = table.getChild("TableHeader");
+    const width = Math.max(1, header ? rowCells(header, doc).length : cells.length);
+    const line = doc.lineAt(row.to);
+    const prefix = blockPrefix(markupLevels(table, doc), line);
+    const insert = state.lineBreak + prefix + "|" + "  |".repeat(width);
+    return {
+      changes: { from: line.to, insert: insert },
+      range: CM.EditorSelection.cursor(line.to + state.lineBreak.length + prefix.length + 2),
+    };
+  }
+
   // Tab, the editor's own. In a fence, the code's indentation: the unit at
-  // the caret, or at the head of each selected line. In an item, the
-  // nesting above. In prose, a tab at the caret in the middle of a line,
-  // and nothing at the head of the line's text, where four columns of
-  // indentation would make an indented code block of the paragraph (G070);
-  // nothing either on a selection, or on an item that has nothing to nest
-  // under. The key is always taken: an unhandled Tab moves the focus out
-  // of the editor.
+  // the caret, or at the head of each selected line. In a table, the next
+  // cell (stepCell above). In an item, the nesting above. In prose, a tab
+  // at the caret in the middle of a line, and nothing at the head of the
+  // line's text, where four columns of indentation would make an indented
+  // code block of the paragraph (G070); nothing either on a selection, or
+  // on an item that has nothing to nest under. The key is always taken: an
+  // unhandled Tab moves the focus out of the editor.
   function mdmTab(view) {
     const state = view.state;
     if (state.readOnly) return false;
@@ -9223,6 +9410,13 @@
         const set = state.changes(out);
         changed = true;
         return { changes: set, range: range.map(set, 1) };
+      }
+      // Before the items: a table inside an item walks its cells rather
+      // than nesting the item.
+      const cell = stepCell(state, tree, range, 1);
+      if (cell) {
+        changed = true;
+        return cell;
       }
       const nested = nestItems(state, tree, range, taken);
       if (nested) {
@@ -9266,6 +9460,11 @@
         const set = state.changes(out);
         changed = changed || out.length > 0;
         return { changes: set, range: range.map(set) };
+      }
+      const cell = stepCell(state, tree, range, -1);
+      if (cell) {
+        changed = true;
+        return cell;
       }
       const unnested = unnestItems(state, tree, range, taken);
       if (unnested) {
@@ -11053,6 +11252,19 @@
     };
   }
 
+  // Ctrl+H: the search row, its replace field taking the keyboard with what
+  // it holds selected, the way the find field takes it on Ctrl+F. Opening
+  // the panel seeds the find field from the selection, as Ctrl+F does.
+  function openReplace(v) {
+    CM.openSearchPanel(v);
+    const field = v.dom.querySelector(".mdm-search input[name=replace]");
+    if (field) {
+      field.focus();
+      field.select();
+    }
+    return true;
+  }
+
   function buildEditor(text) {
     const mdmKeymap = [
       // Ctrl+S goes on to the workbench, which saves the file: what is held
@@ -11066,7 +11278,7 @@
           return false;
         },
       },
-      { key: "Enter", run: mdmEnter },
+      { key: "Enter", run: mdmEnter, shift: hardBreak },
       { key: "Backspace", run: mdmBackspace },
       { key: "Delete", run: mdmDelete },
       { key: "Tab", run: mdmTab, shift: mdmShiftTab },
@@ -11085,6 +11297,13 @@
       { key: "Mod-i", run: toggleInline("*"), stopPropagation: true },
       { key: "Mod-e", run: toggleInline("`"), stopPropagation: true },
       { key: "Mod-k", run: insertLink, stopPropagation: true },
+      // Ctrl+H is Replace in VS Code's own editor (Cmd+Alt+F on a Mac,
+      // where Cmd+H hides the application): the search row with the
+      // replace field taking the keyboard, from the text and from the find
+      // field alike (the second scope), and stopped like the marks above,
+      // since the workbench would open its own replace widget on the same
+      // message. Ctrl+F is searchKeymap's own.
+      { key: "Mod-h", mac: "Cmd-Alt-f", run: openReplace, scope: "editor search-panel", stopPropagation: true },
       // The block keys, all on one second modifier (BLOCK_MOD, Shift on a
       // PC and Option on a Mac): a digit for a line that has a level, the
       // digit being the level, with 0 for the paragraph, and a letter for

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- `Shift+Enter` breaks a line inside its paragraph: Pandoc's backslash at
+  the end of the line (the form Pandoc itself writes a line break in), with
+  the next line carrying the `>` of the quote or the indentation of the
+  item the paragraph is in, and `<br>` in a table cell, where a line cannot
+  break. Where a break would not be one, on a blank line, in a heading
+  written with `#`, in code or maths, or at the head of a line's text, the
+  key is Enter.
+- `Tab` in a table walks to the next cell, its text selected to be typed
+  over, and `Shift+Tab` to the one before; from the last cell of a row to
+  the first of the row under it, past the alignment row, and from the last
+  cell of the last row into a new row as wide as the header, inside the
+  quote or the item the table stands in. A tab typed into a cell was only
+  whitespace to the table.
+- `Ctrl+H` (`Cmd+Option+F` on a Mac) opens the search row with the replace
+  field taking the keyboard, from the text and from the find field alike.
 - A music symbol button leads the buttons that close the toolbar's first
   row, before the equation. Its panel holds the notes from the breve to the
   128th, the dotted notes from the whole to the sixteenth, the two beamed

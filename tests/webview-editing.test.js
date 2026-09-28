@@ -4326,3 +4326,156 @@ test("the toolbar is grouped by what a button is about", { skip }, async () => {
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// ---- What the classics do: the round of 2026-09-27 ----
+//
+// The gestures a Markdown editor is expected to have (Markdown All in One,
+// Office Viewer, Typora, VS Code's own editor) that this one lacked: a hard
+// line break on Shift+Enter, Tab between the cells of a table, a mark typed
+// over a selection wrapping it, an address pasted over words linking them,
+// a picture pasted or dropped written beside the document, and Ctrl+H for
+// the replace field.
+
+const SHIFT_ENTER = { chord: ["Shift"], key: "Enter" };
+
+test("Shift+Enter writes a hard line break, the next line carrying the container's marks", { skip }, async () => {
+  // Pandoc's own form of a hard break, the backslash, and the spaces
+  // either side of the caret taken with it.
+  let out = await pressOn("A paragraph of words.\n", 14, [SHIFT_ENTER]);
+  assert.equal(out.text, "A paragraph of\\\nwords.\n");
+  assert.equal(out.head, 16);
+  // Inside a nested item the next line is indented to the item's text;
+  // inside a quote it carries the `>`.
+  out = await pressOn("- an item\n  - nested words\n", 20, [SHIFT_ENTER]);
+  assert.equal(out.text, "- an item\n  - nested\\\n    words\n");
+  out = await pressOn("> quoted words\n", 8, [SHIFT_ENTER]);
+  assert.equal(out.text, "> quoted\\\n> words\n");
+  // A selection on one line is replaced by the break.
+  out = await pressOn("A b c\n", [{ anchor: 2, head: 3 }], [SHIFT_ENTER]);
+  assert.equal(out.text, "A\\\nc\n");
+  assert.equal(out.head, 3);
+  // In a table cell, where a line cannot break, the `<br>` a cell reads.
+  const table = "| a | b |\n|---|---|\n| 1 | 2 |\n";
+  out = await pressOn(table, table.indexOf("1") + 1, [SHIFT_ENTER]);
+  assert.equal(out.text, "| a | b |\n|---|---|\n| 1<br> | 2 |\n");
+  assert.equal(out.head, table.indexOf("1") + 5);
+  // Where a break would not be one the key is Enter: a heading, a blank
+  // line, the head of an item's text (a new item, as Enter makes one), and
+  // a fence, where the newline is CodeMirror's own.
+  out = await pressOn("# Title\n\nText.\n", 7, [SHIFT_ENTER]);
+  assert.equal(out.text, "# Title\n\n\nText.\n");
+  out = await pressOn("One.\n\nTwo.\n", 5, [SHIFT_ENTER]);
+  assert.equal(out.text, "One.\n\n\nTwo.\n");
+  out = await pressOn("- item\n", 2, [SHIFT_ENTER]);
+  assert.ok(!out.text.includes("\\"), out.text);
+  out = await pressOn("```js\ncode\n```\n", 10, [SHIFT_ENTER]);
+  assert.equal(out.text, "```js\ncode\n\n```\n");
+  // Inside code or maths in a line a backslash is no break either (Pandoc
+  // prints `co\ de` for one typed into `code`), so the key is Enter there
+  // too; just before the opening mark and just past the closing one it
+  // breaks the line.
+  const enter = async (text, pos) => (await pressOn(text, pos, ["Enter"])).text;
+  const code = "A `code span` here.\n";
+  out = await pressOn(code, code.indexOf("span"), [SHIFT_ENTER]);
+  assert.ok(!out.text.includes("\\"), out.text);
+  assert.equal(out.text, await enter(code, code.indexOf("span")));
+  const maths = "Then $a+b$ holds.\n";
+  out = await pressOn(maths, maths.indexOf("+"), [SHIFT_ENTER]);
+  assert.ok(!out.text.includes("\\"), out.text);
+  assert.equal(out.text, await enter(maths, maths.indexOf("+")));
+  out = await pressOn(code, code.indexOf("`"), [SHIFT_ENTER]);
+  assert.equal(out.text, "A\\\n`code span` here.\n");
+  out = await pressOn(code, code.indexOf(" here"), [SHIFT_ENTER]);
+  assert.equal(out.text, "A `code span`\\\nhere.\n");
+});
+
+test("Tab walks the cells of a table, and adds a row after the last", { skip }, async () => {
+  const table = "Before.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter.\n";
+  const h = await open({ text: table, scores: 0 });
+  const one = table.indexOf("1");
+  await setSelection(h.page, one);
+  await h.page.keyboard.press("Tab");
+  // The next cell, its text selected to be typed over.
+  assert.deepEqual(await selectionRanges(h.page), [[one + 4, one + 5]]);
+  // From the last cell of the last row, a new row as wide as the header,
+  // with the caret in its first cell.
+  await h.page.keyboard.press("Tab");
+  assert.equal(await docText(h.page), "Before.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n|  |  |\n\nAfter.\n");
+  const row = one + 8;
+  assert.deepEqual(await selectionRanges(h.page), [[row + 2, row + 2]]);
+  await h.page.keyboard.type("x");
+  assert.equal(await docText(h.page), "Before.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| x |  |\n\nAfter.\n");
+  // Shift+Tab walks back, into the row above at its end, and stops at the
+  // first cell of the header.
+  await chord(h.page, ["Shift"], "Tab");
+  assert.deepEqual(await selectionRanges(h.page), [[one + 4, one + 5]]);
+  await chord(h.page, ["Shift"], "Tab");
+  assert.deepEqual(await selectionRanges(h.page), [[one, one + 1]]);
+  const a = table.indexOf("a");
+  await chord(h.page, ["Shift"], "Tab");
+  assert.deepEqual(await selectionRanges(h.page), [[a + 4, a + 5]]);
+  await chord(h.page, ["Shift"], "Tab");
+  assert.deepEqual(await selectionRanges(h.page), [[a, a + 1]]);
+  await chord(h.page, ["Shift"], "Tab");
+  assert.deepEqual(await selectionRanges(h.page), [[a, a + 1]]);
+  // From the header's last cell to the body's first, past the alignment
+  // row, and from the alignment row itself to the same cell.
+  await setSelection(h.page, a + 4);
+  await h.page.keyboard.press("Tab");
+  assert.deepEqual(await selectionRanges(h.page), [[one, one + 1]]);
+  await setSelection(h.page, table.indexOf("---") + 1);
+  await h.page.keyboard.press("Tab");
+  assert.deepEqual(await selectionRanges(h.page), [[one, one + 1]]);
+  assert.equal(await docText(h.page), "Before.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| x |  |\n\nAfter.\n", "a tab was typed into the table");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+
+  // In a quote the `>` marks stand between the rows in the tree, and the
+  // new row carries one; in an item the new row is indented to the text.
+  const quoted = "> | a | b |\n> |---|---|\n> | 1 | 2 |\n";
+  let out = await pressOn(quoted, quoted.indexOf("b"), ["Tab"]);
+  assert.deepEqual(out.ranges, [[quoted.indexOf("1"), quoted.indexOf("1") + 1]]);
+  out = await pressOn(quoted, quoted.indexOf("2"), ["Tab", { type: "x" }]);
+  assert.equal(out.text, "> | a | b |\n> |---|---|\n> | 1 | 2 |\n> | x |  |\n");
+  const listed = "- | a | b |\n  |---|---|\n  | 1 | 2 |\n";
+  out = await pressOn(listed, listed.indexOf("2"), ["Tab", { type: "x" }]);
+  assert.equal(out.text, "- | a | b |\n  |---|---|\n  | 1 | 2 |\n  | x |  |\n");
+  // Outside a table Tab is what it was: a tab in the text.
+  out = await pressOn("Words here\n", 5, ["Tab"]);
+  assert.equal(out.text, "Words\t here\n");
+});
+
+test("Ctrl+H opens the search row with the replace field focused, and stops at the text", { skip }, async () => {
+  const h = await open({ text: "one word here\n", scores: 0 });
+  await h.page.evaluate(() => {
+    window.__heard = [];
+    window.addEventListener("keydown", (e) => {
+      if (e.ctrlKey && !/^(Control|Shift|Alt|Meta)$/.test(e.key)) window.__heard.push(e.code);
+    });
+  });
+  const focused = () => h.page.evaluate(() => document.activeElement && document.activeElement.name);
+  await setSelection(h.page, [{ anchor: 4, head: 8 }]);
+  await chord(h.page, ["Control"], "h");
+  await sleep(100);
+  assert.ok(await h.page.evaluate(() => !!document.querySelector("#app .mdm-search")), "no search row");
+  assert.equal(await focused(), "replace");
+  // The find field was seeded from the selection, as Ctrl+F seeds it.
+  assert.equal(await h.page.evaluate(() => document.querySelector("#app .mdm-search input[name=search]").value), "word");
+  // The workbench never hears the key from the text.
+  assert.deepEqual(await h.page.evaluate(() => window.__heard.splice(0)), []);
+  // From the find field the same key moves to the replace field.
+  await chord(h.page, ["Control"], "f");
+  await sleep(50);
+  assert.equal(await focused(), "search");
+  await chord(h.page, ["Control"], "h");
+  await sleep(50);
+  assert.equal(await focused(), "replace");
+  // Escape closes the row and the text takes the keyboard back.
+  await h.page.keyboard.press("Escape");
+  await sleep(50);
+  assert.ok(await h.page.evaluate(() => !document.querySelector("#app .mdm-search")), "the row stayed open");
+  assert.ok(await h.page.evaluate(() => window.__mdm.view.hasFocus));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+

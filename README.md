@@ -446,7 +446,13 @@ What it does:
   `Shift+Tab` nest and unnest a list item with its children, by the width of
   the marker above it, the numbers following; in prose `Tab` writes a tab in
   the middle of a line and nothing at its head, where it would make the line
-  code.
+  code. In a table `Tab` walks to the next cell with its text selected, past
+  the alignment row, and from the last cell into a new row as wide as the
+  header; `Shift+Tab` walks back. `Shift+Enter` breaks a line inside its
+  paragraph with Pandoc's backslash at the end of the line, the next line
+  carrying the `>` or the indentation of the quote or the item it is in,
+  and writes `<br>` in a table cell; on a blank line, in a heading written
+  with `#`, in code or maths, or at the head of a line's text it is `Enter`.
 - **Clicks.** A click on a bullet or a number puts the caret after the
   marker; a task's box is ticked by a click, in a quote and after `1)` as
   well; `Ctrl+click` on a link follows it (`Alt+click` where
@@ -471,9 +477,10 @@ What it does:
 - **Characters that draw nothing** (a bidi override, a zero-width space, a
   soft hyphen) are left to the page's own drawing while a line is read, and
   named by a mark with a tooltip on the line the caret is on.
-- **Search** opens with `Ctrl+F` wherever the focus is, and a match inside a
-  rendered block opens the block. A YAML header that is hidden is not in the
-  editor's text, so it is not searched.
+- **Search** opens with `Ctrl+F` wherever the focus is, and `Ctrl+H`
+  (`⌥⌘F` on a Mac) opens it with the replace field taking the keyboard; a
+  match inside a rendered block opens the block. A YAML header that is
+  hidden is not in the editor's text, so it is not searched.
 - **Two writers of one file.** A change made by the text editor beside this
   one, or by the host, is merged with what is being typed here instead of
   one overwriting the other, lands where it was made, and stays out of this
