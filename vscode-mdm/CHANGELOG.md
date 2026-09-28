@@ -45,6 +45,24 @@
   whitespace to the table.
 - `Ctrl+H` (`Cmd+Option+F` on a Mac) opens the search row with the replace
   field taking the keyboard, from the text and from the find field alike.
+- A figure's caption is drawn in the ink of the prose, in the editor, on
+  the exported page and in the PDF, and so is a table's caption on the page
+  and in the PDF. It was a grey chosen for a white page, faint on the dark
+  theme, and it came out black in the PDF on either look. A PDF printed
+  without TeX sets both at the size the editor gives a figure's caption,
+  where they came out smaller than on screen. In a PDF typeset with TeX the
+  rule over the footnotes takes the ink too, where it was black, unseen on
+  the dark look.
+- In a PDF typeset with TeX, a figure that is not a cross-reference is set
+  as the editor draws it: its caption at the editor's size and flush left,
+  under a picture that stands flush left; with no number, where LaTeX
+  numbered every figure, so that a caption carrying its own number read
+  "Figure 1: Figure 1." and a cross-referenced figure (`{#fig-name}`) was
+  counted after the figures before it; in place, where one with a plain
+  anchor floated to the top of a page; and with the editor's air around it,
+  where more than an em too much stood under its caption. A
+  cross-referenced figure keeps its number and floats where LaTeX puts it,
+  its caption at the same size and flush left.
 - A music symbol button leads the buttons that close the toolbar's first
   row, before the equation. Its panel holds the notes from the breve to the
   128th, the dotted notes from the whole to the sixteenth, the two beamed

@@ -382,6 +382,275 @@ test("an SVG figure is printed to PDF by the filter's own Chrome", () => {
 // dialects need goes into the .qmd twin and never into the .mdm: see the
 // breaks() pass of bin/mdm and withBreaks in vscode-mdm/extension.js, which
 // the host suite holds to the same cases.
+// A figure on paper as the editor and the page draw it (figure_on_paper and
+// the caption block of look_tex in mdm.lua, 2026-09-27). The caption is in
+// the ink, where a float's reset to LaTeX's default colour had set it pure
+// black on either side, the dark page included; at 0.956 of the text, where
+// the class set it at the size of the text; and flush left and ragged, under
+// a picture that stands flush left too, where the class centred both. A
+// figure that is not a cross-reference has no number, since the editor and
+// the page print its alt and nothing else: LaTeX had printed "Figure 1:
+// Figure 1. Construction..." for this alt, and called the labelled figure
+// Figure 2 where the page calls it Figure 1. A figure with a plain anchor
+// stays where it is written, and one that asks to be centred is. The air
+// around it is the editor's within a fifth of an em: from the prose's last
+// baseline to the picture, from the picture to the caption's baseline and
+// from there to the next line's, 1.383, 1.883 and 2.609 ems of the text in
+// the editor's roman (read off its pixels), where the paper had 1.296, 2.136
+// and 3.972. The rest goes on a page of its own, so the first is not full
+// and TeX has no reason to shrink its glue: a taller figure on a full page
+// took two points off the air over it. Rendered on the dark side, where
+// the black caption was plainest, and read off pdftotext's word boxes and
+// the pixels.
+const CAPTION_DOC = `---
+title: "Captions"
+format:
+  pdf:
+    documentclass: article
+filters:
+  - mdm
+---
+
+We first construct a family of vector fields whose fixed points can be placed in advance, and then choose how the field behaves around each of them.
+
+![Figure 1. Construction of the synthetic curved test field.](pic.png)
+
+The table below lists its points, @fig-two shows another, and [one more](#plain) carries an anchor.
+
+\\newpage
+
+![A labelled one.](pic.png){#fig-two}
+
+![Anchored and not numbered.](pic.png){#plain}
+
+![Centred on purpose.](pic.png){fig-align="center"}
+
+| a | b |
+|---|---|
+| 1 | 2 |
+
+: The points of the field.
+`;
+
+// The colours painted inside a box of a page, as [r, g, b] with the number
+// of pixels of each, and the ground (the commonest).
+function paintedIn(pdf, page, box, dpi) {
+  const k = dpi / 72;
+  const r = spawnSync(
+    "pdftoppm",
+    [
+      "-r", String(dpi), "-f", String(page), "-l", String(page),
+      "-x", String(Math.floor(box.x0 * k)), "-y", String(Math.floor(box.y0 * k)),
+      "-W", String(Math.ceil((box.x1 - box.x0) * k)), "-H", String(Math.ceil((box.y1 - box.y0) * k)),
+      pdf,
+    ],
+    { maxBuffer: 1 << 30 }
+  );
+  assert.equal(r.status, 0, String(r.stderr));
+  const buf = r.stdout;
+  const space = (b) => b === 0x20 || b === 0x0a || b === 0x0d || b === 0x09;
+  const fields = [];
+  let at = 0;
+  while (fields.length < 4) {
+    while (space(buf[at])) at++;
+    const start = at;
+    while (!space(buf[at])) at++;
+    fields.push(buf.toString("latin1", start, at));
+  }
+  at++;
+  const counts = new Map();
+  for (let i = at; i + 2 < buf.length; i += 3) {
+    const key = buf[i] + "," + buf[i + 1] + "," + buf[i + 2];
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const all = [...counts].map(([key, n]) => ({ rgb: key.split(",").map(Number), n }));
+  all.sort((a, b) => b.n - a.n);
+  return { ground: all[0].rgb, colours: all, width: Number(fields[1]) };
+}
+
+// A page as pixels, and the rows of it a test asks about: the last row of
+// ink under a box of text (its baseline, for a word with no descender), and
+// the rows a flat colour runs across for a hundred pixels (a picture).
+function pageRaster(pdf, page, dpi) {
+  const r = spawnSync("pdftoppm", ["-r", String(dpi), "-f", String(page), "-l", String(page), pdf], {
+    maxBuffer: 1 << 30,
+  });
+  assert.equal(r.status, 0, String(r.stderr));
+  const buf = r.stdout;
+  const head = buf.toString("latin1", 0, 40).split(/\s+/);
+  const w = Number(head[1]);
+  const h = Number(head[2]);
+  const start = buf.length - w * h * 3;
+  const k = dpi / 72;
+  const px = (x, y) => {
+    const i = start + (y * w + x) * 3;
+    return [buf[i], buf[i + 1], buf[i + 2]];
+  };
+  const ground = px(Math.round(10 * k), Math.round(10 * k));
+  const far = (p) => Math.abs(p[0] - ground[0]) + Math.abs(p[1] - ground[1]) + Math.abs(p[2] - ground[2]) > 200;
+  return {
+    baseline(box) {
+      let last = -1;
+      for (let y = Math.floor(box.y0 * k); y < Math.ceil(box.y1 * k); y++) {
+        for (let x = Math.floor(box.x0 * k); x < Math.ceil(box.x1 * k); x++) {
+          if (far(px(x, y))) {
+            last = y;
+            break;
+          }
+        }
+      }
+      return (last + 1) / k;
+    },
+    rowsOf(rgb, y0, y1) {
+      const rows = [];
+      for (let y = Math.floor(y0 * k); y < Math.ceil(y1 * k); y++) {
+        let run = 0;
+        for (let x = 0; x < w && run < 100; x++) {
+          const p = px(x, y);
+          run = p[0] === rgb[0] && p[1] === rgb[1] && p[2] === rgb[2] ? run + 1 : 0;
+        }
+        if (run >= 100) rows.push(y);
+      }
+      return rows.length ? { top: rows[0] / k, bottom: (rows[rows.length - 1] + 1) / k } : null;
+    },
+  };
+}
+
+// Every word pdftotext finds, with its page and its whole box.
+function pdfWordBoxes(pdf) {
+  const t = spawnSync("pdftotext", ["-bbox", pdf, "-"], { encoding: "utf8" });
+  assert.equal(t.status, 0, t.stderr);
+  const words = [];
+  let page = 0;
+  for (const line of t.stdout.split("\n")) {
+    if (/^\s*<page /.test(line)) page++;
+    const m = /<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)<\/word>/.exec(line);
+    if (m) words.push({ page, x0: +m[1], y0: +m[2], x1: +m[3], y1: +m[4], text: m[5] });
+  }
+  return words;
+}
+
+test("a figure on paper is captioned, placed and numbered as the editor sets it", {
+  skip:
+    (spawnSync("pdftotext", ["-v"]).status !== 0 || spawnSync("pdftoppm", ["-v"]).status !== 0) &&
+    "needs pdftotext and pdftoppm",
+}, () => {
+  const dir = freshDir("captions");
+  fs.writeFileSync(path.join(dir, "pic.png"), png());
+  fs.writeFileSync(path.join(dir, "doc.mdm"), CAPTION_DOC);
+  const r = runMdm(
+    ["render", "doc.mdm", "--to", "pdf", "-M", "keep-tex:true", "-M", "mdm-look:dark", "-M", "mdm-text-font:roman"],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const tex = texOf(dir);
+  const pdf = path.join(dir, "doc.pdf");
+
+  // Numbered only when it is a cross-reference, in place and flush left
+  // unless it asks otherwise.
+  assert.match(
+    tex,
+    /\\begin\{figure\}\[H\]\s*\\pandocbounded\{\\includegraphics\[keepaspectratio\]\{pic\.png\}\} \\hfill\{\}\s*\\caption\*\{Figure 1\. Construction/,
+    "the figure with no label is not unnumbered, in place and flush left"
+  );
+  assert.ok(tex.includes("\\caption{\\label{fig-two}A labelled one.}"), "the labelled figure lost its number");
+  assert.match(
+    tex,
+    /\\begin\{figure\}\[H\]\s*\\pandocbounded\{[^\n]*\} \\hfill\{\}\s*\\caption\*\{Anchored and not numbered\.\}/,
+    "the anchored figure is not unnumbered, in place and flush left"
+  );
+  assert.match(
+    tex,
+    /\{\\centering \\pandocbounded\{[^\n]*\}\s*\}\s*\\caption\*\{Centred on purpose\.\}/,
+    "the figure that asks to be centred is not"
+  );
+  const text = spawnSync("pdftotext", ["-layout", pdf, "-"], { encoding: "utf8" }).stdout.replace(/\s+/g, " ");
+  assert.ok(!/Figure 1: Figure 1/.test(text), "the caption carries a second number: " + text);
+  assert.ok(text.includes("Figure 1. Construction of the synthetic curved test field."), text);
+  assert.ok(text.includes("Figure 1: A labelled one."), "the labelled figure is not Figure 1: " + text);
+  assert.ok(text.includes("its points, Figure 1 shows another"), "the reference is not to Figure 1: " + text);
+
+  // The caption's size and place, against the prose on the same page.
+  const words = pdfWordBoxes(pdf);
+  const word = (text) => {
+    const found = words.find((x) => x.text === text);
+    assert.ok(found, text + " is not on the page");
+    return found;
+  };
+  const prose = word("construct");
+  const caption = word("Construction");
+  const ratio = (caption.y1 - caption.y0) / (prose.y1 - prose.y0);
+  assert.ok(Math.abs(ratio - 0.956) < 0.005, "the caption is " + ratio.toFixed(3) + " of the text");
+  const margin = word("We").x0;
+  const opener = words.find((x) => x.text === "Figure" && x.page === caption.page && Math.abs(x.y0 - caption.y0) < 1);
+  assert.ok(opener && Math.abs(opener.x0 - margin) < 1, "the caption is not flush left: " + JSON.stringify(opener) + " against " + margin);
+  // A table's caption keeps the class's centring, where the page sets it:
+  // its line centred on the column, which the look centres on the sheet.
+  const paper = /<page width="([\d.]+)"/.exec(spawnSync("pdftotext", ["-bbox", pdf, "-"], { encoding: "utf8" }).stdout);
+  const middle = Number(paper[1]) / 2;
+  const label = word("Table");
+  const row = words.filter((x) => x.page === label.page && Math.abs(x.y0 - label.y0) < 1);
+  const centre = (Math.min(...row.map((x) => x.x0)) + Math.max(...row.map((x) => x.x1))) / 2;
+  assert.ok(
+    Math.abs(centre - middle) < 2,
+    "the table's caption is centred on " + centre.toFixed(1) + " where the column's middle is " + middle.toFixed(1)
+  );
+
+  // The picture flush left: the 100 x 70 grey of png() starts at the margin.
+  const band = spawnSync("pdftoppm", ["-r", "72", "-f", String(caption.page), "-l", String(caption.page), pdf], {
+    maxBuffer: 1 << 30,
+  }).stdout;
+  const head = band.toString("latin1", 0, 32).split(/\s+/);
+  const w = Number(head[1]);
+  const h = Number(head[2]);
+  const start = band.length - w * h * 3;
+  let left = Infinity;
+  for (let y = Math.ceil(prose.y1); y < Math.floor(caption.y0) && y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = start + (y * w + x) * 3;
+      if (band[i] === 0xc8 && band[i + 1] === 0xc8 && band[i + 2] === 0xc8) {
+        left = Math.min(left, x);
+        break;
+      }
+    }
+  }
+  assert.ok(Math.abs(left - margin) <= 1.5, "the picture starts at " + left + " bp, the text at " + margin);
+
+  // The air: baselines of words with no descender, in ems of the article's
+  // 10 pt text.
+  const sheet = pageRaster(pdf, caption.page, 300);
+  const them = word("them.");
+  const next = words.find((x) => x.text === "The" && x.page === caption.page && x.y0 > caption.y1);
+  assert.ok(next, "the paragraph after the figure is not on its page");
+  const picture = sheet.rowsOf([0xc8, 0xc8, 0xc8], them.y1, caption.y0);
+  assert.ok(picture, "no picture between the prose and the caption");
+  const air = {
+    over: (picture.top - sheet.baseline(them)) / 10,
+    caption: (sheet.baseline(caption) - picture.bottom) / 10,
+    under: (sheet.baseline(next) - sheet.baseline(caption)) / 10,
+  };
+  const editor = { over: 1.383, caption: 1.883, under: 2.609 };
+  const where = { over: "over the picture", caption: "over the caption", under: "under the caption" };
+  for (const key of Object.keys(editor)) {
+    assert.ok(
+      Math.abs(air[key] - editor[key]) < 0.2,
+      "the air " + where[key] + " is " + air[key].toFixed(3) + " em on paper, " + editor[key] + " in the editor"
+    );
+  }
+
+  // The ink, and no black: the caption's letters are painted in the dark
+  // side's #d4d4d4, the colour of the prose.
+  const ink = [0xd4, 0xd4, 0xd4];
+  for (const [label, box] of [["prose", prose], ["caption", caption]]) {
+    const painted = paintedIn(pdf, box.page, box, 600);
+    const near = (rgb, want) => rgb.every((c, i) => Math.abs(c - want[i]) <= 2);
+    const inked = painted.colours.filter((c) => near(c.rgb, ink)).reduce((n, c) => n + c.n, 0);
+    const black = painted.colours.filter((c) => c.rgb.every((v) => v < 24)).reduce((n, c) => n + c.n, 0);
+    assert.ok(inked > 50, "the " + label + " is not painted in the ink: " + JSON.stringify(painted.colours.slice(0, 6)));
+    assert.equal(black, 0, "the " + label + " has black in it");
+  }
+});
+
 const RULE_DOC = `---
 title: "Rules"
 format:
@@ -3207,3 +3476,4 @@ test("on paper a card of code leaves the page's air over its first line and unde
     }
   }
 });
+

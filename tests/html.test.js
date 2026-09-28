@@ -2515,10 +2515,12 @@ test("the page reads a setext heading with an indented underline as the editor d
 // on both surfaces: the size the sub or sup is drawn at and how far its box
 // stands below or above the box of the prose beside it (a Range over the
 // word `Water`, so the line box's padding on either surface is left out);
-// the caption's size and colour, the gap between the picture and its
-// caption, the width the picture is drawn at, and the air on either side
-// of the figure, from the block of prose above it (the page's `p`, the
-// editor's line) to the picture and from the caption to the block below.
+// the caption's size and colour beside the colour of the prose, the gap
+// between the picture and its caption, the width the picture is drawn at,
+// and the air on either side of the figure, from the block of prose above
+// it (the page's `p`, the editor's line) to the picture and from the caption
+// to the block below. The colour of a table's caption too, where there is
+// one (the editor draws none, so only the page is asked).
 function inlineMeasures(root, sel) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const holding = (word) => {
@@ -2528,7 +2530,11 @@ function inlineMeasures(root, sel) {
       const range = document.createRange();
       range.setStart(n, i);
       range.setEnd(n, i + word.length);
-      return { text: range.getBoundingClientRect(), block: n.parentElement.closest(sel.block).getBoundingClientRect() };
+      return {
+        text: range.getBoundingClientRect(),
+        block: n.parentElement.closest(sel.block).getBoundingClientRect(),
+        color: getComputedStyle(n.parentElement).color,
+      };
     }
     return null;
   };
@@ -2539,6 +2545,7 @@ function inlineMeasures(root, sel) {
   const sup = root.querySelector(sel.sup);
   const img = root.querySelector(sel.img);
   const caption = root.querySelector(sel.caption);
+  const tableCaption = sel.tableCaption ? root.querySelector(sel.tableCaption) : null;
   const box = (el) => el.getBoundingClientRect();
   const size = (el) => +parseFloat(getComputedStyle(el).fontSize).toFixed(2);
   return {
@@ -2548,6 +2555,8 @@ function inlineMeasures(root, sel) {
     supRise: Math.round(prose.top - box(sup).top),
     captionSize: size(caption),
     captionColor: getComputedStyle(caption).color,
+    proseColor: above.color,
+    tableCaptionColor: tableCaption ? getComputedStyle(tableCaption).color : null,
     gap: Math.round(box(caption).top - box(img).bottom),
     picture: Math.round(box(img).width),
     above: Math.round(box(img).top - above.block.bottom),
@@ -2561,76 +2570,87 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
   // on the page and in the folder the harness is told is the document's.
   fs.copyFileSync(path.join(ROOT, "vscode-mdm", "media", "icon.png"), path.join(DIR, "icon.png"));
   const text =
-    "Water is H~2~O and E = mc^2^ in prose.\n\n![A caption under the picture.](icon.png)\n\nAfter the figure.\n";
-  const name = "inline-figure";
-  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
-  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:roman"], {
-    cwd: DIR,
-    encoding: "utf8",
-  });
-  assert.equal(r.status, 0, r.stderr);
+    "Water is H~2~O and E = mc^2^ in prose.\n\n![A caption under the picture.](icon.png)\n\nAfter the figure.\n\n" +
+    "| a | b |\n|---|---|\n| 1 | 2 |\n\n: A caption at the table.\n";
 
-  const browser = await puppeteer.launch({
-    executablePath: CHROME,
-    args: ["--no-sandbox", "--allow-file-access-from-files"],
-    defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
-  });
-  OPEN_BROWSERS.add(browser);
-  const page = await browser.newPage();
-  await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
-  await page.evaluate(() => document.fonts.ready);
-  const exported = await page.evaluate(
-    (fn) =>
-      new Function("root", "sel", fn)(document.querySelector("main.content"), {
-        block: "p",
-        sub: "sub",
-        sup: "sup",
-        img: "figure img",
-        caption: "figure figcaption",
-      }),
-    inlineMeasures.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
-  );
-  await browser.close();
-  OPEN_BROWSERS.delete(browser);
-
-  const base = "file://" + DIR + "/";
-  const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: "roman" }, docBase: base } });
-  let editor;
-  try {
-    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
-    await h.page.evaluate(() => {
-      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  // The page, rendered with the look of either side and measured.
+  async function exportedAs(name, look) {
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:roman"].concat(look), {
+      cwd: DIR,
+      encoding: "utf8",
     });
-    await h.page.mouse.click(2, 2);
-    await h.page.waitForFunction(() => {
-      const img = document.querySelector("#app .mdm-figure img");
-      return img && img.complete && img.naturalWidth > 0;
+    assert.equal(r.status, 0, r.stderr);
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
     });
-    await h.page.evaluate(() => document.fonts.ready);
-    await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
-    editor = await h.page.evaluate(
-      (fn) =>
-        new Function("root", "sel", fn)(document.querySelector("#app .cm-content"), {
-          block: ".cm-line",
-          sub: "sub.mdm-sub",
-          sup: "sup.mdm-sup",
-          img: ".mdm-figure img",
-          caption: ".mdm-figcaption",
-        }),
-      inlineMeasures.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
-    );
-  } finally {
-    await h.close();
+    OPEN_BROWSERS.add(browser);
+    try {
+      const page = await browser.newPage();
+      await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      await page.evaluate(() => document.fonts.ready);
+      return await page.evaluate(
+        (fn) =>
+          new Function("root", "sel", fn)(document.querySelector("main.content"), {
+            block: "p",
+            sub: "sub",
+            sup: "sup",
+            img: "figure img",
+            caption: "figure figcaption",
+            tableCaption: "table caption",
+          }),
+        inlineMeasures.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
+      );
+    } finally {
+      await browser.close();
+      OPEN_BROWSERS.delete(browser);
+    }
   }
+
+  // The editor, on the side asked for.
+  async function editorAs(theme) {
+    const base = "file://" + DIR + "/";
+    const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: "roman", theme }, docBase: base } });
+    try {
+      await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+      await h.page.evaluate(() => {
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      });
+      await h.page.mouse.click(2, 2);
+      await h.page.waitForFunction(() => {
+        const img = document.querySelector("#app .mdm-figure img");
+        return img && img.complete && img.naturalWidth > 0;
+      });
+      await h.page.evaluate(() => document.fonts.ready);
+      await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+      return await h.page.evaluate(
+        (fn) =>
+          new Function("root", "sel", fn)(document.querySelector("#app .cm-content"), {
+            block: ".cm-line",
+            sub: "sub.mdm-sub",
+            sup: "sup.mdm-sup",
+            img: ".mdm-figure img",
+            caption: ".mdm-figcaption",
+          }),
+        inlineMeasures.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
+      );
+    } finally {
+      await h.close();
+    }
+  }
+
+  const exported = await exportedAs("inline-figure", []);
+  const editor = await editorAs("light");
   // Bootstrap's reboot on the page: three quarters of the size, a quarter
   // em down and half an em up (12px, 3 and 6 at 16px); Quarto's caption at
-  // 0.9rem of its 17px root, 15.3px, in its grey (measured 2026-09-16);
-  // and the paragraph's 16px of margin on either side of the figure, which
-  // in the editor is the blank line and nothing else (measured 2026-09-17).
+  // 0.9rem of its 17px root, 15.3px (measured 2026-09-16); and the
+  // paragraph's 16px of margin on either side of the figure, which in the
+  // editor is the blank line and nothing else (measured 2026-09-17).
   assert.equal(editor.subSize, 12, "the editor's subscript: " + JSON.stringify(editor));
   assert.equal(editor.supSize, 12, "the editor's superscript: " + JSON.stringify(editor));
   assert.equal(editor.captionSize, 15.3, "the editor's caption: " + JSON.stringify(editor));
-  assert.equal(editor.captionColor, "rgb(90, 101, 112)", "the editor's caption colour");
   assert.equal(editor.above, 16, "the air over the figure in the editor: " + JSON.stringify(editor));
   for (const key of ["subSize", "subDrop", "supSize", "supRise", "captionSize", "gap", "picture", "above", "below"]) {
     assert.ok(
@@ -2638,7 +2658,96 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
       key + " is " + exported[key] + " on the page and " + editor[key] + " in the editor"
     );
   }
-  assert.equal(exported.captionColor, editor.captionColor, "the caption's colour");
+  // The caption in the ink of the prose, on either side and on both
+  // surfaces, and a table's caption on the page with it: B on
+  // design/design-caption-colour.html, the owner's pick of 2026-09-27. It
+  // was Quarto's grey, rgb(90, 101, 112) on every side and 2.71:1 on the
+  // dark page, and only the light side was held.
+  const dark = await exportedAs("inline-figure-dark", DARK_LOOK);
+  const editorDark = await editorAs("dark");
+  const sides = [
+    ["light", "rgb(36, 41, 46)", exported, editor],
+    ["dark", "rgb(212, 212, 212)", dark, editorDark],
+  ];
+  for (const [side, ink, page, own] of sides) {
+    assert.equal(own.proseColor, ink, "the editor's prose on the " + side + " side");
+    assert.equal(own.captionColor, ink, "the editor's caption on the " + side + " side");
+    assert.equal(page.proseColor, ink, "the page's prose on the " + side + " side");
+    assert.equal(page.captionColor, ink, "the page's caption on the " + side + " side");
+    assert.equal(page.tableCaptionColor, ink, "the page's table caption on the " + side + " side");
+  }
+});
+
+// A caption printed without TeX keeps the size the editor gives it, 0.956
+// of the text. The page printed by Chrome sets its root at 11pt and leaves the
+// prose at 16px, so Quarto's 0.9rem made a caption 0.825 of the text on paper,
+// a figure's and a table's alike (13.2px, measured 2026-09-28), where the
+// screen had it right; mdm-look.css sets it in ems of the text. Printed with
+// the extension's flags and read off pdftotext's word boxes, which grow with
+// the size a face is set at.
+test("printed without TeX, a caption keeps the editor's size beside the text", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, () => {
+  fs.copyFileSync(path.join(ROOT, "vscode-mdm", "media", "icon.png"), path.join(DIR, "icon.png"));
+  fs.writeFileSync(
+    path.join(DIR, "printed-caption.mdm"),
+    [
+      "---",
+      "format:",
+      "  html:",
+      "    embed-resources: true",
+      "filters:",
+      "  - mdm",
+      "---",
+      "",
+      "Water is prose, a paragraph of it.",
+      "",
+      "![A caption under the picture.](icon.png)",
+      "",
+      "| a | b |",
+      "|---|---|",
+      "| 1 | 2 |",
+      "",
+      ": A caption at the table.",
+      "",
+    ].join("\n")
+  );
+  const r = spawnSync(MDM, ["render", "printed-caption.mdm", "--to", "html", "-M", "mdm-text-font:roman"], {
+    cwd: DIR,
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const pdf = path.join(DIR, "printed-caption.pdf");
+  fs.rmSync(pdf, { force: true });
+  const profile = fs.mkdtempSync(path.join(DIR, "profile-"));
+  const c = spawnSync(
+    CHROME,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-pdf-header-footer",
+      "--virtual-time-budget=6000",
+      "--no-sandbox",
+      "--user-data-dir=" + profile,
+      "--print-to-pdf=" + pdf,
+      path.join(DIR, "printed-caption.html"),
+    ],
+    { encoding: "utf8", timeout: 60000 }
+  );
+  fs.rmSync(profile, { recursive: true, force: true });
+  assert.ok(fs.existsSync(pdf), "Chrome printed nothing: " + c.stderr);
+  const t = spawnSync("pdftotext", ["-bbox", pdf, "-"], { encoding: "utf8" });
+  assert.equal(t.status, 0, t.stderr);
+  const height = (text) => {
+    const m = new RegExp('yMin="([\\d.]+)" xMax="[\\d.]+" yMax="([\\d.]+)">' + text.replace(/\./g, "\\.") + "</word>").exec(t.stdout);
+    assert.ok(m, text + " is not in the printed PDF");
+    return Number(m[2]) - Number(m[1]);
+  };
+  const prose = height("Water");
+  for (const word of ["picture.", "table."]) {
+    const ratio = height(word) / prose;
+    assert.ok(Math.abs(ratio - 0.956) < 0.01, "the caption holding " + word + " is printed at " + ratio.toFixed(3) + " of the text");
+  }
 });
 
 // A highlight is one colour on both surfaces. Both draw it as a wash with an
@@ -2711,3 +2820,4 @@ test("the page marks a word in the same colour the editor marks it", { skip }, a
     "the page is back on a pure yellow: " + exported.painted);
   assert.equal(exported.ink, editor.ink, "the words in a mark are not the same ink on the two surfaces");
 });
+

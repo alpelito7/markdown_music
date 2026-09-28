@@ -1475,9 +1475,13 @@ body {
   top: -0.5em;
 }
 /* A figure: the picture over its caption, the caption on the page's
-   measures (Quarto's figcaption: 0.9rem of a 17px root, 15.3px, in its
-   grey; the picture's half rem of margin under it), read off the exported
-   page on 2026-09-16 and held there by html.test.js. */
+   measures (Quarto's figcaption: 0.9rem of a 17px root, 15.3px; the
+   picture's half rem of margin under it), read off the exported page on
+   2026-09-16 and held there by html.test.js. The caption is in the ink of
+   the prose, B on design/design-caption-colour.html (the owner's pick of
+   2026-09-27), and the page and the PDF are given the same ink: it used to
+   be Quarto's grey, rgb(90, 101, 112) on every theme, which read at 2.71:1
+   on MDM Dark. */
 #app .mdm-figure {
   margin: 0;
   /* No padding of its own: the blank line on either side is the air, the
@@ -1494,7 +1498,7 @@ body {
 }
 #app .mdm-figcaption {
   font-size: 0.956em;
-  color: rgb(90, 101, 112);
+  color: var(--mdm-ink);
 }
 #app .mdm-link:hover {
   text-decoration: underline;

@@ -272,11 +272,31 @@ body p {
    holding theirs as paragraphs. Headings and table cells are neither, and
    stay ragged on both surfaces. Chromium chooses where a line breaks before
    it justifies it, so the words each line ends on are the editor's either way
-   (html.test.js, line by line). Classes of Quarto's own that align a
-   paragraph, a centred figure's for one, outrank this and keep their say. */
+   (html.test.js, line by line). It outranks Quarto's centring of a figure's
+   paragraph (`.quarto-figure-center > figure > p`, a class and two elements
+   against a class and three), so a picture stands flush left under the text,
+   where the editor draws it; mdm.lua stands it there on paper too (measured
+   2026-09-27, a comment here had said the centring won). */
 body main.content p,
 body main.content li {
   text-align: var(--mdm-text-align);
+}
+/* A caption, under a figure or at a table, in the ink of the prose, as the
+   editor draws it (`#app .mdm-figcaption`) and the PDF sets it (look_tex in
+   mdm.lua): B on design/design-caption-colour.html, the owner's pick of
+   2026-09-27. Quarto's is a grey made for its light theme and given to every
+   side, 2.71:1 on the dark page. `body` in front outranks Quarto's bare
+   `figcaption` and `caption`, on screen and in its print rules alike, and
+   reaches the caption of a cross-referenced figure, a figcaption whose
+   classes Quarto gives no colour. The size is the editor's 0.956 of the
+   text, in ems of it: Quarto's 0.9rem is 15.3px on screen, but the page
+   printed without TeX sets its root at 11pt and the prose stays at 16px,
+   so the caption came out of the print at 0.825 of the text (13.2px,
+   measured in the PDF and in the page under print media, 2026-09-28). */
+body figcaption,
+body caption {
+  color: var(--mdm-ink);
+  font-size: 0.956em;
 }
 body .mdm-hyphen::after {
   content: "\00ad";

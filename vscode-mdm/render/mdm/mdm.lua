@@ -610,6 +610,17 @@ local function look_tex(l)
   put("\\pagecolor{mdmpage}")
   put("\\colorlet{shadecolor}{mdmcard}")
   put("\\AtBeginDocument{\\color{mdmink}}")
+  -- The colour a float goes back to. The colour package takes LaTeX's
+  -- default at the start of the document, before the ink above is set, and
+  -- every float resets to it: a figure's caption came out pure black on both
+  -- looks, on the dark page too, and so did a table's caption and the rule
+  -- over the footnotes (sampled at 600 dpi, 2026-09-27). Taken again once the
+  -- ink is set, the default is the ink, which is the colour the editor and
+  -- the page give a caption (B on design/design-caption-colour.html, the
+  -- owner's pick of 2026-09-27).
+  put("\\makeatletter")
+  put("\\AtBeginDocument{\\let\\default@color\\current@color}")
+  put("\\makeatother")
   put("\\AtBeginDocument{\\hypersetup{colorlinks=true,linkcolor=mdmlink," ..
       "urlcolor=mdmlink,citecolor=mdmlink,filecolor=mdmlink}}")
 
@@ -988,6 +999,31 @@ local function look_tex(l)
   put("\\colorlet{mdmhrrule}{mdmink!16!mdmpage}")
   put("\\newcommand{\\mdmthematicbreak}{\\par\\vspace{0.6\\mdmem}" ..
       "{\\color{mdmhrrule}\\hrule height 0.125\\mdmem}\\vspace{0.6\\mdmem}}")
+  -- A caption the way the editor draws one (`#app .mdm-figcaption`) and the
+  -- page with it: at 0.956 of the text (15.3 px on the 16 px body), its lines
+  -- 1.7 of its own size apart, and a figure's flush left and ragged even where
+  -- the prose is justified. The class set every caption at the size of the
+  -- text, centred when it fitted on one line and justified when it did not
+  -- (pdftotext gave a word of the caption the box of a word of the prose). A
+  -- table's caption keeps the class's centring, which is where the page sets
+  -- it (Quarto centres a table's caption, on screen and printed; the editor
+  -- draws none). The leading is written
+  -- as drawn, \\linespread{1} ahead of it as in the headings; the colour is
+  -- the default one above. Under a picture the editor leaves the 0.53em of
+  -- its margin and the half leading of the caption's line, which puts the
+  -- caption's baseline 1.883 ems of the text under the picture in the roman
+  -- and 1.680 in the sans; the class's 10 pt put it at 2.136 in an article,
+  -- and 0.747 of the text puts it at 1.884 in the roman, 1.896 in the sans
+  -- and 1.898 under KOMA (baselines off the pixels, 2026-09-27). Quarto
+  -- loads the caption package for every PDF, figure or no figure; a
+  -- template that does not keeps its own captions.
+  put("\\makeatletter")
+  put("\\@ifpackageloaded{caption}{%")
+  put("  \\DeclareCaptionFont{mdmcaption}{\\linespread{1}\\fontsize{0.956\\mdmem}{1.6252\\mdmem}\\selectfont}%")
+  put("  \\captionsetup{font+=mdmcaption}%")
+  put("  \\captionsetup[figure]{justification=raggedright,singlelinecheck=false,skip=0.747\\mdmem}%")
+  put("}{}")
+  put("\\makeatother")
 
   -- The fill a score can be given (mdm.scoreFill), one colour per side, as a
   -- box the block below puts the engraving in. With no fill the box is the
@@ -2622,6 +2658,59 @@ end
 -- level (look.heads, from heading_commands) it goes out as the preamble's
 -- \mdmheadsix with its label, so that a link to it still lands; under a class
 -- with chapters it is \subparagraph, a heading already, and is left to it.
+-- A figure on paper as the editor and the page set it. A figure that is not
+-- a cross-reference (no `fig-` label) has no number on either of them, which
+-- print its alt and nothing else, and LaTeX numbered it: "Figure 1: Figure
+-- 1. Construction of..." for a caption that carried its number already, and
+-- the first labelled figure came out as Figure 2 where the page says Figure 1
+-- (measured, Quarto 1.9.37). `quarto-caption-env` is the attribute Quarto's
+-- renderer reads for the command it writes a caption with, and \caption* is
+-- the caption package's caption with no number, no step of the counter and
+-- no line in a list of figures. The picture stands where it is written and
+-- flush left, as in the editor and on the page (whose paragraph rule
+-- outranks Quarto's `.quarto-figure-center`), unless the figure or its
+-- picture asks for a place or an alignment of its own. Quarto holds only
+-- the figure with no label at all in place, so one with a plain anchor
+-- (`{#name}`) floated off to the top of a page. A `fig-align` for the whole
+-- document never reaches a filter: Quarto keeps it out of the metadata
+-- (measured), and neither the editor nor the page follows it.
+--
+-- A figure held in place leaves \intextsep under it as well as over it, and
+-- the paragraph after it adds its \parskip to that: 3.972 ems of the text
+-- from the caption's baseline to the next line's in an article, where the
+-- editor, which leaves the blank line and nothing more, has 2.609 in the
+-- roman and 2.688 in the sans. Without the second \intextsep that is 2.772
+-- in the roman, 2.760 in the sans and 2.815 under KOMA (measured on the
+-- pixels, 2026-09-27). It is taken back with \vspace rather than \vskip,
+-- which ends on a skip of nothing, so a heading after the figure still
+-- adds its own skip whole, as it did before.
+local function figure_on_paper(el)
+  if not quarto.doc.is_format("latex") or el.identifier:match("^fig%-") then
+    return nil
+  end
+  el.attributes["quarto-caption-env"] = "caption*"
+  local own = {}
+  for key in pairs(el.attributes) do own[key] = true end
+  el:walk({
+    Image = function(img)
+      for key in pairs(img.attributes) do own[key] = true end
+    end,
+  })
+  if not own["fig-align"] then el.attributes["fig-align"] = "left" end
+  if not own["fig-pos"] then el.attributes["fig-pos"] = "H" end
+  -- Where it ends up: the figure's own word, or its picture's, except that
+  -- Quarto holds a figure with no label in place whatever its picture asks.
+  local pos = el.attributes["fig-pos"]
+  if not pos and el.identifier == "" then pos = "H" end
+  if not pos then
+    el:walk({
+      Image = function(img) pos = pos or img.attributes["fig-pos"] end,
+    })
+  end
+  if pos ~= "H" then return el end
+  return { el, pandoc.RawBlock("latex", "\\vspace{-\\intextsep}") }
+end
+
 local function sixth_heading(el)
   if el.level ~= 6 or not quarto.doc.is_format("latex") then return nil end
   if look and look.heads and look.heads[6] then return nil end
@@ -2639,5 +2728,5 @@ end
 return {
   { Meta = Meta },
   { CodeBlock = CodeBlock, Header = sixth_heading, HorizontalRule = horizontal_rule,
-    Image = Image, Math = Math, Pandoc = document },
+    Figure = figure_on_paper, Image = Image, Math = Math, Pandoc = document },
 }
