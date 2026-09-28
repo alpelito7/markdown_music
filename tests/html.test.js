@@ -2821,3 +2821,45 @@ test("the page marks a word in the same colour the editor marks it", { skip }, a
   assert.equal(exported.ink, editor.ink, "the words in a mark are not the same ink on the two surfaces");
 });
 
+// The head of a table in the weight of its body, on the page as in the
+// editor, and bold where a cell asks for it with `**` (the owner's word of
+// 2026-09-27). The page's head was the browser's own bold, 700, and the
+// editor's 600; the .tex has always written it as it is written
+// (render.test.js).
+test("the page sets a table's head in the weight of its body, as the editor does", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const text = "| index and type | **bold head** |\n| --- | --- |\n| 0, sink | basic attractor |\n";
+  const name = "table-head-weight";
+  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // The head, the body and the words in `**` in the head, read the same way
+  // on both surfaces.
+  const weights = (table) => {
+    const weight = (el) => getComputedStyle(el).fontWeight;
+    const cells = (sel) => Array.from(document.querySelectorAll(table + " " + sel));
+    return { head: cells("th").map(weight), body: cells("tbody td").map(weight), strong: cells("th strong").map(weight) };
+  };
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+  });
+  OPEN_BROWSERS.add(browser);
+  const page = await browser.newPage();
+  await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+  const exported = await page.evaluate(weights, "main.content table");
+  await browser.close();
+  OPEN_BROWSERS.delete(browser);
+
+  const h = await openEditor({ text, scores: 0 });
+  let editor;
+  try {
+    editor = await h.page.evaluate(weights, "#app .mdm-table");
+  } finally {
+    await h.close();
+  }
+  assert.deepEqual(exported.head, exported.body, "the page's head is not in the weight of its body");
+  assert.deepEqual(exported.strong, ["700"], "a head cell written in `**` is not bold on the page");
+  assert.deepEqual(exported, editor, "the page and the editor weigh the table differently");
+});

@@ -1759,8 +1759,14 @@ body {
 #app .mdm-table td:last-child {
   padding-right: 0;
 }
+/* The head is set in the weight of the body, as the PDF has always set it
+   (Pandoc's longtable writes a head cell as it is written), and the stronger
+   rule under it is what tells it from the rows: a head cell is bold when it
+   asks for it with `**`, the owner's word of 2026-09-27. It was 600 here and
+   700 on the page. Named and not left out, because the browser's own sheet
+   makes a th bold, and that is where the page's 700 came from. */
 #app .mdm-table thead th {
-  font-weight: 600;
+  font-weight: inherit;
   border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 34%, transparent);
 }
 #app .mdm-table tbody tr:last-child td {

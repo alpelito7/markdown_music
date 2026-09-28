@@ -298,6 +298,14 @@ body caption {
   color: var(--mdm-ink);
   font-size: 0.956em;
 }
+/* A table's head in the weight of its body, as the editor draws it
+   (`#app .mdm-table thead th`) and the PDF sets it: a head cell is bold when
+   it asks for it with `**`, the owner's word of 2026-09-27. The 700 the page
+   drew it at was the browser's own sheet; neither Quarto nor Bootstrap names
+   a weight for a th (read off the page's matched rules, 2026-09-27). */
+body main.content th {
+  font-weight: inherit;
+}
 body .mdm-hyphen::after {
   content: "\00ad";
 }

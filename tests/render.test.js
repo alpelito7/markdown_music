@@ -3489,3 +3489,20 @@ test("on paper a card of code leaves the page's air over its first line and unde
   }
 });
 
+// A table's head as it is written: in the weight of its body, and bold where
+// a cell asks for it with `**` (the owner's word of 2026-09-27; the editor
+// and the page are held to the same in webview-look.test.js and
+// html.test.js). Written to .tex alone, with no TeX run: the head is
+// Pandoc's longtable either way, and this row of it is what decides.
+test("the .tex writes a table's head as it is written, bold only where a cell asks for it", () => {
+  const dir = freshDir("table-head-weight");
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    "---\nfilters:\n  - mdm\n---\n\n| index and type | **bold head** |\n| --- | --- |\n| 0, sink | basic attractor |\n"
+  );
+  const r = runMdm(["render", "doc.mdm", "--to", "latex"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const head = /\\toprule\\noalign\{\}\n([\s\S]*?)\\midrule/.exec(texOf(dir));
+  assert.ok(head, "no table head in the .tex");
+  assert.equal(head[1].trim(), "index and type & \\textbf{bold head} \\\\");
+});

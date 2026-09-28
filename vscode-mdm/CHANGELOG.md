@@ -141,6 +141,10 @@
   `Page Down`, `Home` and `End` to it, as a click on the volume leaves them
   to the slider: the toolbar the player's row stands in kept the focus from
   it.
+- A table's head is set in the weight of its rows, as a PDF typeset with
+  TeX has always set it, with the stronger rule under it to set it apart; a
+  head cell written in `**` is bold. The editor, the exported page and a PDF
+  printed without TeX drew the whole head in bold.
 
 ## 0.7.0
 

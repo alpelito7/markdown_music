@@ -3753,6 +3753,31 @@ test("a table is drawn, with the alignment of its columns and the maths in its c
   await h.close();
 });
 
+// The head of a table is set in the weight of its body, as the PDF sets it,
+// and a head cell is bold when it asks for it with `**` (the owner's word of
+// 2026-09-27; it was 600 here, and 700 on the page). The page is held to the
+// same by html.test.js and the .tex by render.test.js.
+test("a table's head is drawn in the weight of its body, and bold where a cell asks for it", { skip }, async () => {
+  const h = await open({
+    text: "| index and type | **bold head** |\n| --- | --- |\n| 0, sink | basic attractor |\n",
+    scores: 0,
+  });
+  const weights = await h.page.evaluate(() => {
+    const weight = (el) => getComputedStyle(el).fontWeight;
+    const cells = (sel) => Array.from(document.querySelectorAll("#app .mdm-table " + sel));
+    return {
+      head: cells("th").map(weight),
+      body: cells("tbody td").map(weight),
+      strong: cells("th strong").map(weight),
+    };
+  });
+  assert.deepEqual(weights.body, ["400", "400"]);
+  assert.deepEqual(weights.head, weights.body, "the head is not in the weight of the body");
+  assert.deepEqual(weights.strong, ["700"], "a head cell written in `**` is not bold");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a caret in a table shows the pipes, and the drawing stays as its preview", { skip }, async () => {
   const h = await open({ text: TABLE_DOC, scores: 0 });
   const at = await posOf(h.page, "0, sink");
