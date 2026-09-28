@@ -177,7 +177,7 @@ Pandoc's own dialect and none of the copy's corrections.
   nothing, and an SVG is printed to PDF by the same Chrome, since LaTeX
   cannot read one and Quarto's own converter (`rsvg-convert`) is a program
   neither it nor this extension ships. Results are cached by a hash of the
-  content in `mdm_cache/`. Without a Chrome (or without
+  content in `mdm_cache/`. Without Chrome or Edge (or without
   `pdfcrop`) the filter names in the render log the tool it missed and falls
   back: the scores to `abcm2ps`, which draws with glyphs of its own and
   reads differently, and the equations to LaTeX's own setting.
@@ -265,17 +265,18 @@ put it in.
 
 - Quarto >= 1.4 and a TeX installation (for PDF; `pdfcrop`, `epstopdf` and
   the ghostscript they and the filter lean on all ship with TeX Live).
-- Chrome or Chromium (for PDF): it is what draws the scores and the
-  equations with the editor's own abcjs and KaTeX. The filter looks for it
-  under its common names in the PATH (and in `/Applications` on macOS);
-  another binary can be named in the YAML header, and `mdm-engraver:
-  abcm2ps` picks the fallbacks outright:
+- Chrome, Chromium or Microsoft Edge (for PDF): it is what draws the scores
+  and the equations with the editor's own abcjs and KaTeX. The filter looks
+  for Chrome under its common names in the PATH, then for Edge, and then in
+  the folders their installers use on macOS and Windows; another binary can
+  be named in the YAML header, and `mdm-engraver: abcm2ps` picks the
+  fallbacks outright:
 
   ```yaml
   mdm:
     chrome: /path/to/chrome
   ```
-- `abcm2ps` (for PDF on a machine without a Chrome). Not included: install
+- `abcm2ps` (for PDF with neither Chrome nor Edge). Not included: install
   it from the system's packages (Debian and Ubuntu `apt install abcm2ps`,
   macOS `brew install abcm2ps`) or build it from
   [https://github.com/lewdlime/abcm2ps](https://github.com/lewdlime/abcm2ps). The filter looks for
@@ -307,10 +308,12 @@ into `~/.vscode/extensions/alpelito7.mdm-editor` and a reload (`Developer:
 Reload Window`) does the same. The folder name carries no version: VS Code
 reads the version out of the manifest, so a name without one is a name that
 does not go stale at the next release. The editor needs nothing else; an
-export needs Quarto, and a PDF of a document with scores in it needs TeX and
-a Chrome (or abcm2ps, the fallback engraver). To go back to the plain text
-editor: right click the file, `Open With...`. Both can be open at once on the
-same file (Reopen Editor With... in a second group): they share the document.
+export needs Quarto, and a PDF needs TeX or, where there is none, Chrome,
+Chromium or Microsoft Edge to print the exported page; with TeX, the scores
+are engraved by that browser or by abcm2ps, the fallback engraver. To go
+back to the plain text editor: right click the file, `Open With...`. Both
+can be open at once on the same file (Reopen Editor With... in a second
+group): they share the document.
 
 What it does:
 
@@ -741,7 +744,7 @@ words a document is divided at come from the hyph-utf8 patterns, which are
 MIT but for Portuguese (BSD-3-Clause) and Russian (LPPL 1.3c).
 
 The one program that is not vendored is abcm2ps, which engraves the scores
-of a PDF on a machine without a Chrome: somebody else's work
+of a PDF on a machine with neither Chrome nor Edge: somebody else's work
 (LGPL-3.0-or-later, copyright Jean-Francois Moine, adapted from Michael
 Methfessel's abc2ps), called as a separate process and never linked into
 anything here. Neither the repository nor the `.vsix` carries the binary;

@@ -83,6 +83,8 @@
   beside the document. A PDF printed without TeX that a viewer holds open,
   as Acrobat does, is said to be held open, where the notice said TeX or
   Chrome was missing.
+- Where Chrome is not installed, Microsoft Edge prints the PDF: every
+  Windows 10 and 11 has it. It has not been tried on Windows yet.
 - A music symbol button leads the buttons that close the toolbar's first
   row, before the equation. Its panel holds the notes from the breve to the
   128th, the dotted notes from the whole to the sixteenth, the two beamed

@@ -137,10 +137,11 @@ themselves, apart from this collection, does so under CC BY-SA 3.0.
 
 ## abcm2ps 8.14.15
 
-Engraves the scores of a PDF export when no Chrome is at hand (the default
-engraver is the vendored abcjs, which the filter loads into a Chrome or
-Chromium found on the machine; the browser is somebody else's separate
-program too and is not distributed here). Called as a separate program.
+Engraves the scores of a PDF export when neither Chrome nor Edge is at
+hand (the default engraver is the vendored abcjs, which the filter loads
+into a Chrome, Chromium or Microsoft Edge found on the machine; the
+browser is somebody else's separate program too and is not distributed
+here). Called as a separate program.
 Copyright (C) 1998-2019 Jean-Francois Moine, <http://moinejf.free.fr>,
 adapted from abc2ps, Copyright (C) 1996-1998 Michael Methfessel.
 

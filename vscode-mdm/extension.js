@@ -624,31 +624,36 @@ const FILTER = path.join(__dirname, "render", "mdm", "mdm.lua");
 // per-user installation as missing. macOS likewise keeps the application out
 // of PATH; include both its system-wide and per-user Applications folders.
 function chromeInstalls(platform, env) {
+  // Microsoft Edge after Chrome, everywhere: it is Chromium, it prints a page
+  // with the same flags, and every Windows 10 and 11 has it, where a machine
+  // with no Chrome and no TeX made no PDF at all.
   if (platform === "darwin") {
-    const out = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"];
-    if (env.HOME) {
-      out.push(
-        path.posix.join(
-          env.HOME,
-          "Applications",
-          "Google Chrome.app",
-          "Contents",
-          "MacOS",
-          "Google Chrome"
-        )
-      );
-    }
+    const out = [];
+    [
+      ["Google Chrome.app", "Google Chrome"],
+      ["Microsoft Edge.app", "Microsoft Edge"],
+    ].forEach(function (app) {
+      out.push(path.posix.join("/Applications", app[0], "Contents", "MacOS", app[1]));
+      if (env.HOME) {
+        out.push(path.posix.join(env.HOME, "Applications", app[0], "Contents", "MacOS", app[1]));
+      }
+    });
     return out;
   }
   if (platform === "win32") {
-    const roots = [
-      env.LOCALAPPDATA,
-      env.ProgramFiles || "C:\\Program Files",
-      env["ProgramFiles(x86)"],
-    ].filter(Boolean);
-    return Array.from(new Set(roots)).map(function (root) {
-      return path.win32.join(root, "Google", "Chrome", "Application", "chrome.exe");
-    });
+    const roots = Array.from(
+      new Set(
+        [env.LOCALAPPDATA, env.ProgramFiles || "C:\\Program Files", env["ProgramFiles(x86)"]].filter(Boolean)
+      )
+    );
+    const under = function (parts) {
+      return roots.map(function (root) {
+        return path.win32.join.apply(path.win32, [root].concat(parts));
+      });
+    };
+    return under(["Google", "Chrome", "Application", "chrome.exe"]).concat(
+      under(["Microsoft", "Edge", "Application", "msedge.exe"])
+    );
   }
   return [];
 }
@@ -656,6 +661,7 @@ function chromeInstalls(platform, env) {
 function findChrome() {
   const names = [
     "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome",
+    "microsoft-edge", "microsoft-edge-stable",
   ];
   for (const name of names) {
     const hit = onPath(name);
@@ -907,8 +913,9 @@ function scoresMissing(lack, dir, printed, page) {
     );
   }
   lines.push(
-    "Looked for Chrome as google-chrome, google-chrome-stable, chromium and " +
-      "chromium-browser or chrome in every folder of the PATH" +
+    "Looked for Chrome, or Microsoft Edge, as google-chrome, google-chrome-stable, " +
+      "chromium, chromium-browser, chrome, microsoft-edge or microsoft-edge-stable " +
+      "in every folder of the PATH" +
       (installs.length ? ", and at:" : ".")
   );
   installs.forEach(function (p) {
@@ -3716,6 +3723,7 @@ module.exports = {
   renderArgs,
   quartoInstalls,
   chromeInstalls,
+  findChrome,
   texPage,
   FILTER,
   READER,

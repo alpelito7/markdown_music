@@ -133,12 +133,13 @@ themselves, apart from this collection, does so under CC BY-SA 3.0.
 
 ## Not shipped, but needed for an export
 
-An export calls Quarto, and a PDF of a document with scores calls a Chrome
-or Chromium, into which the filter loads the vendored abcjs and KaTeX so
-the PDF shows the very drawings the editor does; on a machine without one
-it calls abcm2ps instead. None of the three is part of this package: they
-are looked for on the machine when an export is asked for (Chrome by its
-common names on the PATH, or at a path the document's YAML names in
+An export calls Quarto, and a PDF of a document with scores calls a Chrome,
+Chromium or Microsoft Edge, into which the filter loads the vendored abcjs
+and KaTeX so the PDF shows the very drawings the editor does; on a machine
+without one it calls abcm2ps instead. None of the three is part of this
+package: they are looked for on the machine when an export is asked for
+(Chrome, then Edge, by their common names on the PATH and in the folders
+their installers use, or at a path the document's YAML names in
 `mdm.chrome`; abcm2ps at a path named in the document's YAML header, then
 at `tools/bin/abcm2ps` beside the document, then on the PATH), and the
 editor works without them. abcm2ps is

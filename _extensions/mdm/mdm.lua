@@ -1372,31 +1372,39 @@ end
 -- Chrome by any of its common names, where its installer puts it, or wherever
 -- the document points (mdm.chrome in the YAML header). macOS and Windows keep
 -- a normal installation out of the PATH.
+-- Microsoft Edge after Chrome, in the order the extension looks for them
+-- (chromeInstalls in extension.js): it is Chromium and prints a page with the
+-- same flags, and the export takes it where there is no Chrome, so the filter
+-- has to find the same one.
 local CHROME_NAMES = {
   "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
-  "chrome",
+  "chrome", "microsoft-edge", "microsoft-edge-stable",
 }
-local CHROME_INSTALLS = {
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-}
+local CHROME_INSTALLS = {}
 local home = os.getenv("HOME")
-if home then
-  table.insert(CHROME_INSTALLS,
-    home .. "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+for _, app in ipairs({ { "Google Chrome.app", "Google Chrome" }, { "Microsoft Edge.app", "Microsoft Edge" } }) do
+  table.insert(CHROME_INSTALLS, "/Applications/" .. app[1] .. "/Contents/MacOS/" .. app[2])
+  if home then
+    table.insert(CHROME_INSTALLS, home .. "/Applications/" .. app[1] .. "/Contents/MacOS/" .. app[2])
+  end
 end
 if package.config:sub(1, 1) == "\\" then
   CHROME_INSTALLS = {}
-  local seen = {}
-  local function add_windows_chrome(root)
+  local roots, seen = {}, {}
+  -- One at a time: a variable that is not set is nil, and ipairs over a
+  -- list of them stops at the first.
+  local function add_root(root)
     if root and not seen[root] then
       seen[root] = true
-      table.insert(CHROME_INSTALLS,
-        root .. "\\Google\\Chrome\\Application\\chrome.exe")
+      table.insert(roots, root)
     end
   end
-  add_windows_chrome(os.getenv("LOCALAPPDATA"))
-  add_windows_chrome(os.getenv("ProgramFiles") or "C:\\Program Files")
-  add_windows_chrome(os.getenv("ProgramFiles(x86)"))
+  add_root(os.getenv("LOCALAPPDATA"))
+  add_root(os.getenv("ProgramFiles") or "C:\\Program Files")
+  add_root(os.getenv("ProgramFiles(x86)"))
+  for _, exe in ipairs({ "\\Google\\Chrome\\Application\\chrome.exe", "\\Microsoft\\Edge\\Application\\msedge.exe" }) do
+    for _, root in ipairs(roots) do table.insert(CHROME_INSTALLS, root .. exe) end
+  end
 end
 
 local function command_exists(name)

@@ -5488,6 +5488,18 @@ missing*, the lock played by the rename throwing EBUSY).
 - **EX9** the cache made by `mkdir -p` again → the filter makes a folder
   through a shell.
 
+Microsoft Edge after Chrome, in the extension's lookup and the filter's in
+the same order, since Edge is Chromium and every Windows 10 and 11 has it
+(*Quarto and Chrome are looked for in their installer folders*, which also
+finds Edge in a Mac user's own Applications folder where there is no
+Chrome). Whether Edge prints the page as Chrome does is not verified on
+Windows.
+
+- **EX8** no Edge in the Mac's lookup → the installer folders are not the
+  ones expected.
+
+All caught, each mutated in place and undone in place.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -5575,3 +5587,9 @@ missing*, the lock played by the rename throwing EBUSY).
    choice. And under a pane of about 320px the symbol panel is cut at the
    right edge (18px at 300, measured), since it cannot move past the left
    one either.
+10. Windows, read and not run (*The export on a computer without TeX,
+    reviewed*): Quarto and Chrome started without a console window,
+    Chrome's `debug.log` inside its own profile, the filter's folders made
+    without a shell, and a PDF held open by a viewer, whose EBUSY is
+    injected as in item 6. Microsoft Edge is looked for after Chrome and
+    has not printed a page on Windows yet.

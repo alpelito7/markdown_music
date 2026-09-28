@@ -1745,9 +1745,14 @@ test("Quarto and Chrome are looked for in their installer folders", () => {
   // A system Quarto ships no installer for has nowhere to look but the PATH.
   assert.deepEqual(ext.quartoInstalls("freebsd", { HOME: "/home/u" }), []);
 
+  // Microsoft Edge after Chrome: it prints a page with the same flags, and
+  // every Windows 10 and 11 has it, where a machine with no Chrome and no TeX
+  // made no PDF at all (2026-09-28).
   assert.deepEqual(ext.chromeInstalls("darwin", { HOME: "/Users/u" }), [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Users/u/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/Users/u/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
   ]);
   assert.deepEqual(
     ext.chromeInstalls("win32", {
@@ -1759,12 +1764,35 @@ test("Quarto and Chrome are looked for in their installer folders", () => {
       "C:\\Users\\u\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
       "D:\\Programs\\Google\\Chrome\\Application\\chrome.exe",
       "E:\\Programs (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Users\\u\\AppData\\Local\\Microsoft\\Edge\\Application\\msedge.exe",
+      "D:\\Programs\\Microsoft\\Edge\\Application\\msedge.exe",
+      "E:\\Programs (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     ]
   );
   assert.deepEqual(ext.chromeInstalls("win32", {}), [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
   ]);
   assert.deepEqual(ext.chromeInstalls("linux", { HOME: "/home/u" }), []);
+
+  // And Edge is what a machine with no Chrome prints with. A Mac user's own
+  // Applications folder is the one place of the list a test can write to;
+  // on a Mac with Chrome in /Applications that Chrome is taken first.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-home-"));
+  const edge = path.join(home, "Applications", "Microsoft Edge.app", "Contents", "MacOS", "Microsoft Edge");
+  fs.mkdirSync(path.dirname(edge), { recursive: true });
+  fs.writeFileSync(edge, "#!/bin/sh\nexit 0\n");
+  fs.chmodSync(edge, 0o755);
+  const restoreMachine = useMachine("darwin", { HOME: home });
+  const restorePath = usePath(path.join(home, "no-bin"));
+  try {
+    const system = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    assert.equal(ext.findChrome(), fs.existsSync(system) ? system : edge);
+  } finally {
+    restorePath();
+    restoreMachine();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 // What the filter needs to draw the scores of a PDF, and what the notice asks
