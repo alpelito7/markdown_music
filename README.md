@@ -136,12 +136,31 @@ and never inside code, maths, an address, a tag or an escape. A `[text]`
 whose label has no definition is text, as Pandoc has it, and `:tada:` is
 text too, the export having no emoji extension.
 
+A citation is drawn as the page prints it, "Knuth (1984)", and the list of
+works cited stands where the page sets it (at the end, or in a `::: {#refs}`
+div), in a document with a bibliography on a computer with Quarto: the
+editor asks the Pandoc that comes with Quarto, the one the export runs, over
+every citation of the document at once, since what one prints depends on the
+others (a number by first appearance, a year's letter, "Ibid."). A key the
+bibliography has not got prints as "(key?)" and is underlined. A style
+named in the header (`csl: ieee.csl`, the file beside the document) is the
+one the editor asks for, a numbered one included. A citation's tooltip
+shows the entry it cites, `Ctrl+click` on it goes to the entry in the list,
+and a click on the entry opens the `.bib` beside the document at that
+entry.
+On the page the notes and the list stay in the flow of the text, in its
+face and its colours, and on paper a citation links to its entry as it
+does on the page. Two entries stand a quarter of a line apart where the
+style asks for a line, on all three.
+
 Differences that are left standing, each on the record in `tests/README.md`:
 the page's callouts are Quarto's, with a heading and an icon; a numbered list
 written `3)` keeps its delimiter in the editor where Pandoc prints a point; a
 setext heading written over several lines is a heading in the editor and a
 paragraph to Pandoc; Pandoc reads the inside of a `<div>` as Markdown and the
-editor draws it as raw lines; a `www.` address with no scheme is text on both
+editor draws it as raw lines; a cross-reference (`@fig-x`) is drawn as written
+in the editor, where the page prints the number Quarto gives it, and so is
+every citation on a computer without Quarto; a `www.` address with no scheme is text on both
 surfaces; and the ways Pandoc's emphasis parts from CommonMark's
 (`**Tempo:**Allegro`) are not replicated. Definition lists, line blocks,
 lists lettered `a.` or `i.`, grid and simple tables, raw `{=latex}` blocks

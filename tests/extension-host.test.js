@@ -79,6 +79,8 @@ function openPanel(provider, initialText, uri) {
         receive = handler;
       },
     },
+    // The first group, where a document opens in a window of one.
+    viewColumn: 1,
     onDidDispose(handler) {
       disposed = handler;
     },
@@ -1371,9 +1373,11 @@ test("the copy is read in the dialect of the editor, and a document that names o
   const none = ext.withReader("plain body\n", from);
   assert.equal(none, "---\nfrom: markdown-x\n---\n\nplain body\n");
 
-  // A header: the dialect joins it and the rest of it is left alone.
+  // A header: the dialect joins it at its foot and the rest of it is left
+  // alone, every line of the author's on the line it is on in the file,
+  // where an error in the header names it (withHeaderLines).
   const some = ext.withReader("---\ntitle: T\n---\n\nb\n", from);
-  assert.equal(some, "---\nfrom: markdown-x\ntitle: T\n---\n\nb\n");
+  assert.equal(some, "---\ntitle: T\nfrom: markdown-x\n---\n\nb\n");
 
   // A document that names a dialect itself is obeyed, at the top level and
   // under a format, and is not given a second `from`.
@@ -1384,7 +1388,7 @@ test("the copy is read in the dialect of the editor, and a document that names o
 
   // Only the header is read: a body line that opens with `from:` is prose.
   const prose = "---\ntitle: T\n---\n\nfrom: the top\n";
-  assert.ok(ext.withReader(prose, from).startsWith("---\nfrom: markdown-x\ntitle: T\n"));
+  assert.ok(ext.withReader(prose, from).startsWith("---\ntitle: T\nfrom: markdown-x\n"));
 
   // What the export actually asks for: Pandoc's Markdown without the two
   // rules that make it disagree with the CommonMark the editor reads, and
@@ -1394,9 +1398,401 @@ test("the copy is read in the dialect of the editor, and a document that names o
   // The header as Pandoc reads it (G040): a `...` closer and an empty header
   // are the header, and a `---` over a blank line is a rule, over which the
   // copy gets a header of its own.
-  assert.equal(ext.withReader("---\ntitle: T\n...\nb\n", from), "---\nfrom: markdown-x\ntitle: T\n---\nb\n");
+  assert.equal(ext.withReader("---\ntitle: T\n...\nb\n", from), "---\ntitle: T\nfrom: markdown-x\n---\nb\n");
   assert.equal(ext.withReader("---\n---\nb\n", from), "---\nfrom: markdown-x\n---\nb\n");
   assert.equal(ext.withReader("---\n\nb\n", from), "---\nfrom: markdown-x\n---\n\n---\n\nb\n");
+});
+
+// ---------- Bibliographies through the export ----------
+
+// Every key the copy gains goes at the foot of its header, so that a YAML
+// error names the line of the file it is on. With `from:` and `pagetitle:`
+// at the top, `nocite: @k` on line 3 of the file was reported at line 5
+// (Quarto's own excerpt, measured 2026-09-29).
+test("the copy's own keys go at the foot of its header, where every line of the author's keeps its number", () => {
+  const text = "---\ntitle: T\nnocite: @k\nlang: es\n---\n\nBody\n";
+  const copy = ext.withPageKeys(ext.withPageTitle(ext.withReader(text, "markdown-x"), "doc"));
+  assert.deepEqual(copy.split("\n").slice(0, 4), text.split("\n").slice(0, 4));
+  assert.match(
+    copy,
+    /\nlang: es\nfrom: markdown-x\npagetitle: 'doc'\nappendix-style: none\nhtml-math-method: gladtex\n---\n\nBody\n$/
+  );
+});
+
+// The notes and the reference list in the flow of the page, where the editor
+// keeps them, and not in Quarto's appendix, a white card that stayed white
+// under the dark look (1.42:1); and a formula citeproc writes from a .bib as
+// its own LaTeX in an <eq>, which mdm-math.js sets, where the page fetched
+// MathJax from a CDN and KaTeX drew it in red (both measured 2026-09-29).
+test("the page keeps its notes and its references in the flow and citeproc's formulas as LaTeX, unless the document says otherwise", () => {
+  assert.equal(
+    ext.withPageKeys("Body\n"),
+    "---\nappendix-style: none\nhtml-math-method: gladtex\n---\n\nBody\n"
+  );
+  // Named anywhere in the header, under a format as well: kept, and only
+  // the other key added.
+  const own = "---\nformat:\n  html:\n    appendix-style: default\n---\nb\n";
+  assert.equal(
+    ext.withPageKeys(own),
+    "---\nformat:\n  html:\n    appendix-style: default\nhtml-math-method: gladtex\n---\nb\n"
+  );
+  const both = "---\nappendix-style: plain\nhtml-math-method: mathjax\n---\nb\n";
+  assert.equal(ext.withPageKeys(both), both);
+  // Only the header is read.
+  assert.match(ext.withPageKeys("---\ntitle: T\n---\n\nappendix-style: prose\n"), /^---\ntitle: T\nappendix-style: none\n/);
+});
+
+test("the copy the export renders carries the page's two keys", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp));
+  const doc = path.join(tmp, "doc.mdm");
+  const text = "---\ntitle: T\nbibliography: refs.bib\n---\n\nAs [@knuth1984].\n";
+  fs.writeFileSync(doc, text);
+  const h = boot(text, {}, null, "file://" + doc);
+  await h.receive({ type: "export", to: "html" });
+  restore();
+  const copy = fs.readFileSync(path.join(tmp, "copy.qmd"), "utf8");
+  assert.match(copy, /^appendix-style: none$/m);
+  assert.match(copy, /^html-math-method: gladtex$/m);
+  assert.equal(copy.split("\n")[2], "bibliography: refs.bib", "the author's line moved");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// A key citeproc did not find prints as "(nokey2020?)" in bold and a
+// cross-reference Quarto could not resolve as "?@fig-x", and neither stops
+// the render: the notice said "exported" and the reader found them by
+// reading the page (2026-09-29).
+test("the citations a render went through without are named, with what to do about them", () => {
+  assert.equal(ext.citationWarnings("Output created: doc.html\n"), null);
+  const one = ext.citationWarnings("\u001b[33m[WARNING] Citeproc: citation nokey2020 not found\u001b[39m\n");
+  assert.equal(one.summary, "@nokey2020 is not in the bibliography and came out as \u201c(nokey2020?)\u201d");
+  assert.match(one.detail, /^Not in the bibliography: @nokey2020\. .*backslash in front: \\@nokey2020\.$/);
+  const log =
+    "[WARNING] Citeproc: citation b not found\n[WARNING] Citeproc: citation a not found\n" +
+    "[WARNING] Citeproc: citation b not found\n[WARNING] Citeproc: citation c not found\n" +
+    "[WARNING] Citeproc: citation d not found\n" +
+    "WARNING (/opt/quarto/share/filters/main.lua:14920) Unable to resolve crossref @fig-missing\n";
+  const many = ext.citationWarnings(log);
+  assert.equal(
+    many.summary,
+    "@b, @a, @c and 1 more are not in the bibliography and came out as \u201c(b?)\u201d, and " +
+      "@fig-missing points at nothing in the document and came out as \u201c?@fig-missing\u201d"
+  );
+  assert.match(many.detail, /Not in the bibliography: @b, @a, @c, @d\./);
+  assert.match(many.detail, /Cross-references that point at nothing: @fig-missing\./);
+});
+
+test("an export that went through without some citations says which in its notice, and the log says more", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const restore = usePath(fakeBin(tmp, { say: "[WARNING] Citeproc: citation nokey2020 not found" }));
+  const doc = path.join(tmp, "doc.mdm");
+  const text = "---\nbibliography: refs.bib\n---\n\nAs [@nokey2020].\n";
+  fs.writeFileSync(doc, text);
+  const h = boot(text, {}, null, "file://" + doc);
+  await h.receive({ type: "export", to: "html" });
+  restore();
+  assert.deepEqual(vscode._state.infoMessages, []);
+  assert.equal(vscode._state.warningMessages.length, 1);
+  assert.equal(
+    vscode._state.warningMessages[0].message,
+    "MDM: exported doc.html, but @nokey2020 is not in the bibliography and came out as \u201c(nokey2020?)\u201d."
+  );
+  assert.deepEqual(vscode._state.warningMessages[0].buttons, ["Open HTML", "Show log"]);
+  const ch = vscode._state.outputChannels.find((c) => c.name === "MDM");
+  assert.ok(ch.lines.some((l) => /^Not in the bibliography: @nokey2020\./.test(l)), ch.lines.join("\n"));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// What stopped a render, named when it is something of the document's own.
+// The notice was "the export of doc.mdm failed" for all of these, over a log
+// that spoke of a "resource path", about a header the editor hides.
+test("a render stopped by the bibliography, its style or the header says which, and where", () => {
+  const dir = "/home/me/songs";
+  const missing = ext.exportTrouble("File missing.bib not found in resource path\n", "doc.mdm", dir, "");
+  assert.equal(missing.summary, "the export of doc.mdm failed: the bibliography missing.bib is not in its folder.");
+  assert.match(missing.detail, /names missing\.bib, and there is no such file in \/home\/me\/songs\. .*Show YAML header/);
+  const style = ext.exportTrouble("File nostyle.csl not found in resource path\n", "doc.mdm", dir, "");
+  assert.match(style.summary, /the citation style nostyle\.csl is not in its folder\.$/);
+  // Pandoc places the fault where it gave up reading, which is past it: an
+  // unclosed brace on line 3 was reported at line 7, the next entry.
+  const broken = ext.exportTrouble(
+    "Error reading bibliography file refs.bib:\n(line 7, column 1):\nunexpected '@'\n",
+    "doc.mdm", dir, ""
+  );
+  assert.equal(broken.summary, "the export of doc.mdm failed: refs.bib could not be read, near its line 7.");
+  assert.match(broken.detail, /line 7, column 1 \(unexpected '@'\)\. The fault is usually in the entry above that line/);
+  // A header that is not YAML: the line is the file's (withHeaderLines), and
+  // a value that starts with @ is the usual cause, named when it is.
+  const text = "---\ntitle: T\nnocite: @shannon1948\n---\n\nb\n";
+  const yaml = ext.exportTrouble("ERROR: YAMLException: bad indentation of a mapping entry (3:9)\n", "doc.mdm", dir, text);
+  assert.equal(yaml.summary, "the export of doc.mdm failed: its header could not be read, at line 3.");
+  assert.match(yaml.detail, /line 3, column 9: bad indentation of a mapping entry\. A value that starts with @/);
+  assert.equal(ext.exportTrouble("ERROR: something else\n", "doc.mdm", dir, text), null);
+});
+
+// And a failed page takes away the empty `_files/mediabag` Quarto made before
+// it gave up, as a failed PDF does: an export stopped by a missing .bib left
+// one beside the document (measured on Quarto 1.9.37, 2026-09-29).
+test("an export stopped by a bibliography that is not there says so in its notice, and leaves nothing beside the document", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+  const bin = fakeBin(tmp, { say: "File missing.bib not found in resource path", code: 1 });
+  // What Quarto makes before it reads the bibliography: the page's folder,
+  // with its empty mediabag. mkdir by its full path, the PATH being the
+  // fake's folder alone (usePath).
+  const quarto = path.join(bin, "quarto");
+  const mkdir = ["/bin/mkdir", "/usr/bin/mkdir"].find((p) => fs.existsSync(p));
+  fs.writeFileSync(
+    quarto,
+    fs.readFileSync(quarto, "utf8").replace("#!/bin/sh\n", '#!/bin/sh\n' + mkdir + ' -p "' + path.join(tmp, "doc_files", "mediabag") + '"\n')
+  );
+  const restore = usePath(bin);
+  const doc = path.join(tmp, "doc.mdm");
+  const text = "---\nbibliography: missing.bib\n---\n\nAs [@knuth1984].\n";
+  fs.writeFileSync(doc, text);
+  const h = boot(text, {}, null, "file://" + doc);
+  await h.receive({ type: "export", to: "html" });
+  restore();
+  assert.equal(vscode._state.errorMessages.length, 1);
+  assert.equal(
+    vscode._state.errorMessages[0].message,
+    "MDM: the export of doc.mdm failed: the bibliography missing.bib is not in its folder."
+  );
+  assert.ok(!fs.existsSync(path.join(tmp, "doc_files")), "the failed page left its folder beside the document");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------- Citations, as the page will print them ----------
+
+test("the files a header names for citeproc are read as YAML writes them", () => {
+  assert.deepEqual(ext.citationFiles("---\nbibliography: refs.bib\ncsl: 'ieee.csl'\n---\n"), ["refs.bib", "ieee.csl"]);
+  assert.deepEqual(ext.citationFiles("---\nbibliography: [a.bib, \"b c.bib\"]\n---\n"), ["a.bib", "b c.bib"]);
+  assert.deepEqual(ext.citationFiles("---\nbibliography:\n  - a.bib\n  - 'b.json'\nlang: es\n---\n"), ["a.bib", "b.json"]);
+  // Under a format it is not the document's: only the top level is read.
+  assert.deepEqual(ext.citationFiles("---\nformat:\n  html:\n    csl: x.csl\n---\n"), []);
+});
+
+// A Quarto whose Pandoc, beside it in tools/ as Quarto carries it, answers
+// with what it was given, which says which body an answer is for. `slow`
+// holds it back, so that a second request comes in while it works. Shell
+// builtins only, but for the sleep: the PATH of these tests is the fake's
+// own folder (usePath).
+function fakePandoc(tmp, slow) {
+  const bin = path.join(tmp, "bin");
+  fs.mkdirSync(path.join(bin, "tools"), { recursive: true });
+  fs.writeFileSync(path.join(bin, "quarto"), "#!/bin/sh\nexit 0\n");
+  fs.chmodSync(path.join(bin, "quarto"), 0o755);
+  const sleep = ["/bin/sleep", "/usr/bin/sleep"].find((p) => fs.existsSync(p));
+  fs.writeFileSync(
+    path.join(bin, "tools", "pandoc"),
+    "#!/bin/sh\n" +
+      'printf "%s\\n" "$*" > "' + tmp + '/pandoc-args.txt"\n' +
+      (slow ? sleep + " 0.4\n" : "") +
+      'while IFS= read -r line; do printf "%s\\n" "$line"; done\n' +
+      'printf "%s\\n" "[WARNING] Citeproc: citation nokey2020 not found" >&2\n'
+  );
+  fs.chmodSync(path.join(bin, "tools", "pandoc"), 0o755);
+  return bin;
+}
+
+function waitFor(check, ms) {
+  const until = Date.now() + (ms || 5000);
+  return new Promise(function (resolve, reject) {
+    (function poll() {
+      if (check()) resolve();
+      else if (Date.now() > until) reject(new Error("waited in vain"));
+      else setTimeout(poll, 20);
+    })();
+  });
+}
+
+test("the editor is told what the page will print for its citations, by the export's own Pandoc under the document's header", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-cites-"));
+  const restore = usePath(fakePandoc(tmp));
+  t.after(restore);
+  const doc = path.join(tmp, "doc.mdm");
+  const text = "---\nlang: es\nbibliography: refs.bib\n---\n\nAs [@knuth1984].\n";
+  fs.writeFileSync(doc, text);
+  const h = boot(text, {}, null, "file://" + doc);
+  const answers = () => h.posted.filter((m) => m.type === "cites");
+  await h.receive({ type: "cites", seq: 1, body: "[[@knuth1984]]{#mdmcite-0}\n" });
+  await waitFor(() => answers().length === 1);
+  const a = answers()[0];
+  assert.equal(a.seq, 1);
+  assert.equal(a.state, "ok");
+  // The header first, the body under it, as the export has them.
+  assert.equal(a.html, "---\nlang: es\nbibliography: refs.bib\n---\n\n[[@knuth1984]]{#mdmcite-0}\n");
+  assert.deepEqual(a.missing, ["nokey2020"]);
+  const args = fs.readFileSync(path.join(tmp, "pandoc-args.txt"), "utf8").trim();
+  assert.equal(
+    args,
+    "-f " + ext.READER + " -t html --citeproc --katex --wrap=none -M link-citations=true"
+  );
+  // The same body again is answered out of what was kept.
+  await h.receive({ type: "cites", seq: 2, body: "[[@knuth1984]]{#mdmcite-0}\n" });
+  await waitFor(() => answers().length === 2);
+  assert.equal(answers()[1].seq, 2);
+  assert.equal(answers()[1].html, a.html);
+  h.dispose();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("an answer goes out under the number of the request it answers", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-cites-"));
+  t.after(usePath(fakePandoc(tmp, true)));
+  const doc = path.join(tmp, "doc.mdm");
+  const text = "---\nbibliography: refs.bib\n---\n\nAs [@a] and [@b].\n";
+  fs.writeFileSync(doc, text);
+  const h = boot(text, {}, null, "file://" + doc);
+  const answers = () => h.posted.filter((m) => m.type === "cites");
+  await h.receive({ type: "cites", seq: 1, body: "one\n" });
+  await h.receive({ type: "cites", seq: 2, body: "two\n" });
+  await waitFor(() => answers().length === 2, 8000);
+  assert.deepEqual(
+    answers().map((m) => [m.seq, /one|two/.exec(m.html)[0]]),
+    [[1, "one"], [2, "two"]]
+  );
+  h.dispose();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("citations are left as written with no bibliography, no Quarto, or a bibliography named by an address", async (t) => {
+  if (fs.existsSync(MAC_QUARTO)) {
+    t.skip("this machine has a Quarto at " + MAC_QUARTO);
+    return;
+  }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-cites-"));
+  const doc = path.join(tmp, "doc.mdm");
+  // Where no Quarto can be: the PATH of the fake's folder or of none, on a
+  // Mac whose home has none (the Linux install folder is this machine's).
+  const ask = async (text, bin) => {
+    const restorePath = usePath(bin || path.join(tmp, "nothing"));
+    const restoreMachine = useMachine("darwin", { HOME: tmp });
+    try {
+      fs.writeFileSync(doc, text);
+      const h = boot(text, {}, null, "file://" + doc);
+      await h.receive({ type: "cites", seq: 1, body: "[[@k]]{#mdmcite-0}\n" });
+      await waitFor(() => h.posted.some((m) => m.type === "cites"));
+      const answer = h.posted.find((m) => m.type === "cites");
+      h.dispose();
+      return answer;
+    } finally {
+      restoreMachine();
+      restorePath();
+    }
+  };
+  assert.equal((await ask("---\ntitle: T\n---\n\nAs [@k].\n")).state, "none");
+  assert.equal((await ask("---\nbibliography: refs.bib\n---\n\nAs [@k].\n")).state, "noquarto");
+  const ch = vscode._state.outputChannels.find((c) => c.name === "MDM");
+  assert.ok(ch.lines.some((l) => /^Citations are drawn as written: .* Quarto was not found/.test(l)));
+  const remote = await ask("---\nbibliography: https://example.org/refs.bib\n---\n\nAs [@k].\n", fakePandoc(tmp));
+  assert.equal(remote.state, "remote");
+  assert.ok(!fs.existsSync(path.join(tmp, "pandoc-args.txt")), "Pandoc ran for an address");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// A click on an entry of the editor's list opens the file it is written in,
+// beside the document and at its key, and one written in the header opens
+// the header; the editor is told, with the list, which entries it can open
+// and where each is (the owner, 2026-09-29). The fake Pandoc hands back the
+// body it is given, so a body of entries is the list it answers.
+test("an entry of the list is found where it is written, and a click on it opens it there", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-cites-"));
+  t.after(usePath(fakePandoc(tmp)));
+  fs.writeFileSync(
+    path.join(tmp, "refs.bib"),
+    "@comment{Keys below.}\n\n@book{knuth1984,\n  title = {T}\n}\n@article{ shannon1948 ,\n}\n"
+  );
+  fs.writeFileSync(path.join(tmp, "more.json"), '[{"id": "partch1949", "type": "book"}]\n');
+  const header =
+    "---\nbibliography: [refs.bib, more.json]\nreferences:\n  - id: doe99\n    title: X\nlang: es\n---\n";
+  assert.deepEqual(ext.entryPlaces(tmp, header), {
+    knuth1984: { file: path.join(tmp, "refs.bib"), line: 2, character: 6 },
+    shannon1948: { file: path.join(tmp, "refs.bib"), line: 5, character: 10 },
+    partch1949: { file: path.join(tmp, "more.json"), line: 0, character: 9 },
+    doe99: { file: null, line: 3, character: 8 },
+  });
+  // An `id:` of the header outside `references:` is no entry's, and a
+  // header written with CRLF is read the same (a multiline `$` stops before
+  // a \r as before a \n).
+  assert.deepEqual(Object.keys(ext.entryPlaces(tmp, "---\r\nreferences:\r\n  - id: doe99\r\nid: other\r\n---\r\n")), ["doe99"]);
+
+  const doc = path.join(tmp, "doc.mdm");
+  const text = header + "\nAs [@knuth1984].\n";
+  fs.writeFileSync(doc, text);
+  const h = boot(text, {}, null, "file://" + doc);
+  const entry = (key) => '<div id="ref-' + key + '" class="csl-entry" role="listitem">' + key + "</div>";
+  await h.receive({
+    type: "cites",
+    seq: 1,
+    body: ["knuth1984", "partch1949", "doe99", "nowhere"].map(entry).join("\n") + "\n",
+  });
+  await waitFor(() => h.posted.some((m) => m.type === "cites"));
+  assert.deepEqual(h.posted.find((m) => m.type === "cites").sources, {
+    knuth1984: "refs.bib",
+    partch1949: "more.json",
+    doe99: "The header of this document",
+  });
+
+  // The document in the first group, the file open nowhere: the group to
+  // the right of the document's.
+  await h.receive({ type: "openEntry", key: "knuth1984" });
+  await h.receive({ type: "openEntry", key: "doe99" });
+  const shown = vscode._state.shownDocuments.map((d) => [d.uri, d.options.viewColumn, d.options.selection.start]);
+  assert.deepEqual(shown, [
+    [path.join(tmp, "refs.bib"), 2, { line: 2, character: 6 }],
+    [doc, 2, { line: 3, character: 8 }],
+  ]);
+  // Gone from its file since the list was drawn: said, and nothing opened.
+  await h.receive({ type: "openEntry", key: "nowhere" });
+  assert.equal(vscode._state.shownDocuments.length, 2);
+  assert.deepEqual(vscode._state.infoMessages.map((m) => m.message), [
+    "The entry @nowhere was not found in the bibliography files the header names.",
+  ]);
+  h.dispose();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// A second entry opens in the tab the first one opened (the owner,
+// 2026-09-30): the click on the list leaves the file's group the active one,
+// and "beside" it was a new group on every click, three clicks and three
+// groups in VS Code. The tab it has in any group but the document's is the
+// one; one behind the document, in its own group, would hide the list if it
+// were shown there; the document's own tab is the MDM editor's and not the
+// text the header is written in.
+test("an entry opens in the tab its file has already, and beside the document otherwise", () => {
+  vscode._reset();
+  const bib = vscode.Uri.file("/w/refs.bib");
+  const doc = vscode.Uri.file("/w/doc.mdm");
+  const text = (uri) => ({ input: { uri } });
+  const mdm = { input: { uri: doc, viewType: "mdm.editor" } };
+  const other = { input: { uri: vscode.Uri.file("/w/notes.txt") } };
+  // Open nowhere: the group to the right of the document's, wherever that is.
+  vscode._state.tabGroups = [{ viewColumn: 1, tabs: [mdm] }];
+  assert.equal(ext.entryColumn(bib, 1), 2);
+  assert.equal(ext.entryColumn(bib, 2), 3);
+  // Open in another group, active or not, to the left or to the right.
+  vscode._state.tabGroups = [
+    { viewColumn: 1, tabs: [mdm] },
+    { viewColumn: 2, tabs: [other] },
+    { viewColumn: 3, tabs: [other, text(bib)] },
+  ];
+  assert.equal(ext.entryColumn(bib, 1), 3);
+  vscode._state.tabGroups = [{ viewColumn: 1, tabs: [text(bib)] }, { viewColumn: 2, tabs: [mdm] }];
+  assert.equal(ext.entryColumn(bib, 2), 1);
+  // Only behind the document, in its own group: beside it instead.
+  vscode._state.tabGroups = [{ viewColumn: 1, tabs: [mdm, text(bib)] }];
+  assert.equal(ext.entryColumn(bib, 1), 2);
+  // The header's entry: the document's MDM tab is not its text.
+  vscode._state.tabGroups = [{ viewColumn: 1, tabs: [mdm] }, { viewColumn: 2, tabs: [other] }];
+  assert.equal(ext.entryColumn(doc, 1), 2);
+  vscode._state.tabGroups = [{ viewColumn: 1, tabs: [mdm] }, { viewColumn: 3, tabs: [text(doc)] }];
+  assert.equal(ext.entryColumn(doc, 1), 3);
+  // A document whose group is not known: beside the active one, and its
+  // own MDM tab is not taken for the header's text there either.
+  vscode._state.tabGroups = [];
+  assert.equal(ext.entryColumn(bib, undefined), vscode.ViewColumn.Beside);
+  vscode._state.tabGroups = [{ viewColumn: 1, tabs: [mdm] }];
+  assert.equal(ext.entryColumn(doc, undefined), vscode.ViewColumn.Beside);
 });
 
 test("a rule with a line straight under it gets the blank line the copy needs", () => {

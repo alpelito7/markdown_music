@@ -33,6 +33,8 @@ const state = {
   appliedEdits: [],
   openedExternal: [],
   executed: [], // {command, args} of every commands.executeCommand
+  shownDocuments: [], // {uri, options} of every window.showTextDocument
+  tabGroups: [], // {viewColumn, tabs: [{input}]}, served as window.tabGroups.all
   dirtyDocuments: new Set(), // uris whose mock document reports isDirty
   workspaceFolder: null, // fsPath served by getWorkspaceFolder
   registeredProviders: [],
@@ -69,6 +71,8 @@ function reset() {
   state.appliedEdits = [];
   state.openedExternal = [];
   state.executed = [];
+  state.shownDocuments = [];
+  state.tabGroups = [];
   state.dirtyDocuments = new Set();
   state.workspaceFolder = null;
   state.registeredProviders = [];
@@ -348,6 +352,18 @@ const Uri = {
 };
 
 const window = {
+  // A file opened in a text editor, at a place: kept as the path (or the
+  // uri's string) and the options, for a test to read.
+  showTextDocument(target, options) {
+    state.shownDocuments.push({ uri: target.fsPath || target.toString(), options });
+    return Promise.resolve(undefined);
+  },
+  // The groups of tabs and what each tab shows (its input: a text tab has a
+  // uri, the MDM editor's a uri and a viewType), seeded through
+  // _state.tabGroups.
+  get tabGroups() {
+    return { all: state.tabGroups };
+  },
   registerCustomEditorProvider(viewType, provider, options) {
     state.registeredProviders.push({ viewType, provider, options });
     return { dispose() {} };
@@ -483,6 +499,7 @@ const extensions = {
 };
 
 const ProgressLocation = { Notification: 15 };
+const ViewColumn = { Active: -1, Beside: -2, One: 1, Two: 2 };
 
 const env = {
   // What the notices call the editor to quit.
@@ -531,6 +548,7 @@ module.exports = {
   env,
   commands,
   ProgressLocation,
+  ViewColumn,
   WorkspaceEdit,
   Range,
   Uri,

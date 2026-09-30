@@ -1265,7 +1265,9 @@ body {
    of the flow. An image in a line is a place where Chrome may break it, and
    the page has no image there: a period after bold words went down to a row
    of its own, "(LEI)**." broken between ")" and "." (2026-09-27), and a word
-   could break at the curly apostrophe drawn inside it. Out of the flow the
+   could break at the curly apostrophe drawn inside it, and a citation drawn
+   as the page prints it (CiteWidget) had its period after it on a row of
+   its own, "Partch (1949, 5)" and "." under it (2026-09-29). Out of the flow the
    buffers stay where CodeMirror put them, and the characters on either side
    meet as they meet on the page, so the line breaks where the page breaks
    it, after a dash and never before a period. A picture, an equation and a
@@ -1279,8 +1281,8 @@ body {
    tall, which is what the buffers gave it at every size. */
 #app .cm-line img.cm-widgetBuffer:has(+ span[contenteditable="false"]:empty),
 #app .cm-line span[contenteditable="false"]:empty + img.cm-widgetBuffer,
-#app .cm-line img.cm-widgetBuffer:has(+ :is(.mdm-smart, .mdm-entity, .mdm-note-ref)),
-#app .cm-line :is(.mdm-smart, .mdm-entity, .mdm-note-ref) + img.cm-widgetBuffer {
+#app .cm-line img.cm-widgetBuffer:has(+ :is(.mdm-smart, .mdm-entity, .mdm-note-ref, .mdm-cited)),
+#app .cm-line :is(.mdm-smart, .mdm-entity, .mdm-note-ref, .mdm-cited) + img.cm-widgetBuffer {
   position: absolute;
 }
 #app .cm-line {
@@ -1457,11 +1459,95 @@ body {
 #app .mdm-underline {
   text-decoration: underline;
 }
-/* A citation or a cross-reference (PX04): the page resolves it into a
-   reference or a link; here it is drawn in the link colour, as written. */
+/* A citation or a cross-reference (PX04) as written: under the caret, before
+   the host has said what the page prints for it, and wherever it cannot (no
+   bibliography, no Quarto, a cross-reference), in the link colour. */
 #app .mdm-cite,
 #app .mdm-cite * {
   color: var(--mdm-link);
+}
+/* A citation as the page prints it (CiteWidget in main.js): in the ink of the
+   prose, and the part the page makes a link of in the link blue, as the page
+   draws it ("Knuth (1984)" with the year blue). The spaces are the page's:
+   normal white space, where the line around it is pre-wrap. A key the
+   bibliography has not got prints as "(key?)" in bold, on the page too;
+   here it is underlined as an equation that does not compile is. */
+#app .mdm-cited {
+  color: var(--mdm-ink);
+  white-space: normal;
+}
+#app .mdm-cited .mdm-cite-link {
+  color: var(--mdm-link);
+}
+#app .mdm-cited--missing {
+  text-decoration: underline wavy #c94f4f;
+  text-decoration-skip-ink: none;
+}
+/* The list of works cited (RefsWidget in main.js), set as the page sets it
+   (mdm-look.css, "Notes and the reference list"): the face, the size and the
+   leading of a paragraph, justified when the prose is, the style's hanging
+   indent at the PDF's 1.5em (\cslhangindent), and between two entries a
+   quarter of a line where the style asks for a line, none where Pandoc
+   marked the list data-entry-spacing="0" (IEEE does). The whole line the
+   style asks for was the owner's "too far apart" (2026-09-29, B on
+   design/design-bib-spacing.html); mdm-look.css and the PDF (look_tex in
+   mdm.lua) leave the same quarter. A numbered style's label stands in a
+   column of its own (below). A heading of Pandoc's own over it
+   (`reference-section-title`) is a level one heading of the document. */
+#app .mdm-refs {
+  white-space: normal;
+  padding-bottom: 1em;
+}
+#app .mdm-refs-list > .csl-entry + .csl-entry {
+  margin-top: 0.25lh;
+}
+#app .mdm-refs-list[data-entry-spacing="0"] > .csl-entry + .csl-entry {
+  margin-top: 0;
+}
+#app .mdm-refs-list--hang > .csl-entry {
+  padding-left: 1.5em;
+  text-indent: -1.5em;
+}
+#app.mdm-text--justify .mdm-refs .csl-entry {
+  text-align: justify;
+}
+/* A numbered style (IEEE, Vancouver) prints each entry as its number and
+   its text in two boxes of their own. They stand in two columns: the
+   numbers' as wide as the widest number of the list, each number flush
+   right, so the closing brackets of [9] and [10] fall in one line, and the
+   text half an em after it, every line of it. It is how LaTeX sets its own
+   bibliography, and C on design/design-bib-numbers.html, the owner's pick
+   of 2026-09-30. Pandoc's stylesheet, which the page carries and this
+   copied, gave the numbers a column of 2em and the text 3em whatever the
+   numbers, and "[1]" stood 1.71em from its text. Each entry is a row of
+   the list's grid through a subgrid, so it keeps a box of its own: the
+   space between two entries, the blue under the pointer and the entry
+   brought into view (showEntry in main.js) are the entry's as before.
+   mdm-look.css sets the page's list the same way and look_tex in mdm.lua
+   the paper's. */
+#app .mdm-refs-list:has(> .csl-entry > .csl-left-margin) {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 0.5em;
+}
+#app .mdm-refs-list:has(> .csl-entry > .csl-left-margin) > .csl-entry {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+}
+#app .mdm-refs .csl-left-margin {
+  text-align: right;
+}
+#app .mdm-refs .mdm-cite-link {
+  color: var(--mdm-link);
+}
+#app .mdm-refs-title {
+  font-size: 2em;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 0.4em 0 0.2em;
+  margin-bottom: 0.5em;
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
 }
 /* A footnote (PX01): the reference raised in the link colour, as the page
    raises the number it gives the note; a note written inline in a small
@@ -1534,13 +1620,17 @@ body {
    being written and takes the caret of the text back, as the source of an
    open equation does, and so does the address inside it, which is a link of
    its own (the URL a GFM autolink finds there); no underline under the
-   pointer either. The number of a note the same.
+   pointer either. The number of a note the same, and a citation drawn as the
+   page prints it (CiteWidget), which a click opens to its source and which
+   the page makes a link of; drawn as written, as it is under the caret and
+   wherever nothing resolves it, it is text and keeps the text's caret.
    The key that follows a link (followKeys in main.js: Ctrl, Cmd on a Mac,
    Alt when editor.multiCursorModifier is ctrlCmd) brings the pointer and the
    underline back over any link, open or shut, since that click is the one
    that follows it, as VS Code's own editor shows under Ctrl. */
 #app .mdm-link,
-#app .mdm-note-ref {
+#app .mdm-note-ref,
+#app .mdm-cited {
   cursor: pointer;
 }
 #app .mdm-link--open,
@@ -1555,6 +1645,28 @@ body {
 #app.mdm--follow .mdm-link:hover {
   cursor: pointer;
   text-decoration: underline;
+}
+/* The same key over a citation underlines the part of it that goes to the
+   entry (showEntry in main.js), the part the page makes a link of, and
+   over a link inside an entry of the list (a DOI, a URL) the link it
+   follows. An entry the host found in a file opens there on a plain click
+   (openEntry), and carries the pointer for it; one it did not find is only
+   words. */
+#app.mdm--follow .mdm-cited .mdm-cite-link[data-mdm-ref]:hover,
+#app.mdm--follow .mdm-refs .mdm-cite-link[data-mdm-href]:hover {
+  cursor: pointer;
+  text-decoration: underline;
+}
+#app .mdm-refs .mdm-refs-entry--source {
+  cursor: pointer;
+}
+/* Under the pointer such an entry takes the link blue, the colour of what a
+   click follows, as the owner asked (2026-09-29): a line of the list gives
+   no sign of its own that it opens anything. The whole entry and not an
+   underline, since the click is taken anywhere on it. The page has no
+   counterpart: there is no file behind its list to open. */
+#app .mdm-refs .mdm-refs-entry--source:hover {
+  color: var(--mdm-link);
 }
 /* ---------- Lists ----------
 

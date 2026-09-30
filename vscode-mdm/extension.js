@@ -752,6 +752,130 @@ function exportNeeds(summary, detail, pages, files) {
     });
 }
 
+// ---------- What a render's log has to tell the reader ----------
+
+// Quarto colours its log (six escapes in one failed render, 2026-09-29), and
+// what is read out of it is the words.
+function plainLog(log) {
+  return String(log || "").replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+// "a", "a and b", "a, b and c", "a, b, c and 2 more".
+function namesOf(list) {
+  const shown = list.slice(0, 3);
+  const more = list.length - shown.length;
+  if (more > 0) return shown.join(", ") + " and " + more + " more";
+  if (shown.length < 2) return shown.join("");
+  return shown.slice(0, -1).join(", ") + " and " + shown[shown.length - 1];
+}
+
+// The citations a render went through without. A key citeproc did not find
+// prints as "(nokey2020?)" in bold and a cross-reference Quarto could not
+// resolve as "?@fig-x"; neither stops the render, and the notice said
+// "exported" over both, so the reader found them by reading the page
+// (2026-09-29). A word written with an @ in front of it is one of them in a
+// document with a bibliography: `@alpelito7` is a citation of a key that is
+// not there. Null when there is nothing to say; otherwise the words for the
+// notice and, at more length, for the log.
+function citationWarnings(log) {
+  const text = plainLog(log);
+  const keys = [];
+  const refs = [];
+  const collect = function (re, list) {
+    let m;
+    while ((m = re.exec(text))) {
+      if (list.indexOf(m[1]) === -1) list.push(m[1]);
+    }
+  };
+  collect(/\[WARNING\] Citeproc: citation (\S+) not found/g, keys);
+  collect(/Unable to resolve crossref @(\S+)/g, refs);
+  if (!keys.length && !refs.length) return null;
+  const at = function (key) {
+    return "@" + key;
+  };
+  const said = [];
+  const told = [];
+  if (keys.length) {
+    said.push(
+      namesOf(keys.map(at)) +
+        (keys.length === 1 ? " is" : " are") +
+        " not in the bibliography and came out as “(" + keys[0] + "?)”"
+    );
+    told.push(
+      "Not in the bibliography: " + keys.map(at).join(", ") + ". A key is written as the " +
+        "bibliography spells it. An @ that is not meant as a citation (a name, an " +
+        "address) keeps it as text with a backslash in front: \\@" + keys[0] + "."
+    );
+  }
+  if (refs.length) {
+    said.push(
+      namesOf(refs.map(at)) +
+        (refs.length === 1 ? " points" : " point") +
+        " at nothing in the document and came out as “?@" + refs[0] + "”"
+    );
+    told.push(
+      "Cross-references that point at nothing: " + refs.map(at).join(", ") + ". A " +
+        "cross-reference names the label a figure, a table or an equation of the " +
+        "document carries, such as {#fig-name}."
+    );
+  }
+  return { summary: said.join(", and "), detail: told.join("\n") };
+}
+
+// What stopped a render, when it is something in the reader's own document
+// that the notice can name: a bibliography or a style the header names and
+// the folder has not got, a bibliography Pandoc could not read, a header that
+// is not YAML. The notice was "the export of doc.mdm failed" for all of them,
+// over a log that said "File missing.bib not found in resource path" about a
+// line of a header the editor keeps hidden (measured 2026-09-29). Pandoc
+// places a fault in a .bib where it gave up reading, which is past it: an
+// unclosed brace on line 3 was reported at line 7, the start of the next
+// entry, and a comma missing on line 7 at line 8. Null for anything else,
+// which keeps the plain notice and the log.
+function exportTrouble(log, pretty, dir, text) {
+  const words = plainLog(log);
+  const shows = "The toolbar's Show YAML header button shows the header.";
+  let m = /File (.+?) not found in resource path/.exec(words);
+  if (m) {
+    const what = /\.csl$/i.test(m[1]) ? "citation style" : "bibliography";
+    return {
+      summary:
+        "the export of " + pretty + " failed: the " + what + " " + m[1] + " is not in its folder.",
+      detail:
+        "The header of " + pretty + " names " + m[1] + ", and there is no such file in " + dir +
+        ". Put the file there, or correct the name in the header. " + shows,
+    };
+  }
+  m = /Error reading bibliography file (.+?):\s*\(line (\d+), column (\d+)\):\s*([^\n]*)/.exec(words);
+  if (m) {
+    return {
+      summary:
+        "the export of " + pretty + " failed: " + m[1] + " could not be read, near its line " +
+        m[2] + ".",
+      detail:
+        "Pandoc stopped reading " + m[1] + " at line " + m[2] + ", column " + m[3] + " (" + m[4] +
+        "). The fault is usually in the entry above that line: a brace left open, or the " +
+        "comma missing after an entry's key.",
+    };
+  }
+  m = /YAMLException: ([^\n]*?) \((\d+):(\d+)\)/.exec(words);
+  if (m) {
+    const line = String(text || "").split(/\r?\n/)[Number(m[2]) - 1] || "";
+    const quote = /:[ \t]*@/.test(line)
+      ? " A value that starts with @, a key under nocite: for one, is written in " +
+        "quotes: nocite: \"@key\"."
+      : "";
+    return {
+      summary:
+        "the export of " + pretty + " failed: its header could not be read, at line " + m[2] + ".",
+      detail:
+        "The YAML header of " + pretty + " could not be read at line " + m[2] + ", column " +
+        m[3] + ": " + m[1] + "." + quote + " " + shows,
+    };
+  }
+  return null;
+}
+
 // The pages a notice sends its reader to, each seen to answer on 2026-09-12.
 const QUARTO_PAGE = "https://quarto.org/docs/get-started/";
 const CHROME_PAGE = "https://www.google.com/chrome/";
@@ -1298,18 +1422,69 @@ const READER = "markdown-blank_before_header-blank_before_blockquote+autolink_ba
 // or under a format; only the header is searched, so a line of prose or of
 // code that opens with `from:` is not mistaken for that.
 function withReader(text, from) {
-  const line = "from: " + from;
-  // The header as Pandoc reads it (transforms.js), so that a `...` closer, a
-  // closer with a space after it and an empty header are the header and a
-  // leading rule is not one (G040).
   const fm = splitFrontMatter(text)[0];
-  if (!fm) return "---\n" + line + "\n---\n\n" + text;
-  const inner = fm
+  if (fm && /^[ \t]*from[ \t]*:/m.test(headerInner(fm))) return text;
+  return withHeaderLines(text, ["from: " + from]);
+}
+
+// What is between a header's two fences. The header is taken as Pandoc
+// reads it (splitFrontMatter in transforms.js), so that a `...` closer, a
+// closer with a space after it and an empty header are the header and a
+// leading rule is not one (G040).
+function headerInner(fm) {
+  return fm
     .replace(/^---[ \t]*\r?\n/, "")
     .replace(/(?:---|\.\.\.)[ \t]*(?:\r?\n|$)$/, "")
     .replace(/\r?\n$/, "");
-  if (/^[ \t]*from[ \t]*:/m.test(inner)) return text;
-  return "---\n" + line + (inner ? "\n" + inner : "") + "\n---\n" + text.slice(fm.length);
+}
+
+// The copy's header with `lines` added at its foot, where every line of the
+// author's keeps the number it has in the file. They went in at the top
+// until 2026-09-29, and an error in the header came back two lines below the
+// line it was about ("bad indentation of a mapping entry (5:9)" for line 3),
+// with the `from:` and the `pagetitle:` of the copy over it. A document with
+// no header is given one, with a blank line under it.
+function withHeaderLines(text, lines) {
+  const fm = splitFrontMatter(text)[0];
+  if (!fm) return "---\n" + lines.join("\n") + "\n---\n\n" + text;
+  const inner = headerInner(fm);
+  return (
+    "---\n" + (inner ? inner + "\n" : "") + lines.join("\n") + "\n---\n" + text.slice(fm.length)
+  );
+}
+
+// Two settings of the page that every export asks for, unless the document
+// names its own, anywhere in its header:
+//
+// - `appendix-style: none`. The notes and the reference list stay where
+//   Pandoc puts them, in the flow of the page, as the editor keeps them in
+//   the document. Quarto's appendix took them into a white card under
+//   headings of its own making ("References", "Notes"), at 0.9 of the text
+//   and 0.9 opacity, and the card stayed white under the dark look while the
+//   ink went pale: 1.42:1 (measured 2026-09-29). It has to be in the header:
+//   a `-M appendix-style:none` does not reach the step that builds the
+//   appendix, which went on building it (measured on Quarto 1.9.37).
+// - `html-math-method: gladtex`. Citeproc runs after every filter, so a
+//   formula it writes out of a BibTeX title never becomes the filter's
+//   `span.math` (Math in mdm.lua). The writer set it for Quarto's default,
+//   MathJax, which the page then fetched from cdn.jsdelivr.net, and which
+//   KaTeX drew in red. GladTeX's markup keeps the formula's own LaTeX in an
+//   `<eq>` and brings no engine at all; mdm-math.js sets it. Only citeproc's
+//   formulas ever meet it, since the prose's are the filter's spans by then.
+const PAGE_KEYS = [
+  ["appendix-style", "none"],
+  ["html-math-method", "gladtex"],
+];
+
+function withPageKeys(text) {
+  const fm = splitFrontMatter(text)[0];
+  const inner = fm ? headerInner(fm) : "";
+  const lines = PAGE_KEYS.filter(function (kv) {
+    return !new RegExp("^[ \\t]*" + kv[0] + "[ \\t]*:", "m").test(inner);
+  }).map(function (kv) {
+    return kv[0] + ": " + kv[1];
+  });
+  return lines.length ? withHeaderLines(text, lines) : text;
 }
 
 // The name the page goes by, when the document itself gives it none: the
@@ -1327,13 +1502,9 @@ function withReader(text, from) {
 // that has a title keeps that, since the filter copies the title over this
 // (page_name in mdm.lua).
 function withPageTitle(text, name) {
-  const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
-  if (header && /^[ \t]*pagetitle[ \t]*:/m.test(header[1])) return text;
-  const line = "pagetitle: " + quoteYaml(name);
-  if (!header) return "---\n" + line + "\n---\n\n" + text;
-  return (
-    "---\n" + line + "\n" + header[1] + "\n---\n" + text.slice(header[0].length)
-  );
+  const fm = splitFrontMatter(text)[0];
+  if (fm && /^[ \t]*pagetitle[ \t]*:/m.test(headerInner(fm))) return text;
+  return withHeaderLines(text, ["pagetitle: " + quoteYaml(name)]);
 }
 
 // ---------- The rules the copy draws ----------
@@ -1988,6 +2159,9 @@ async function runExport(document, to) {
     const scratchFiles = scratch + "_files";
     const stagedPdf = scratch + ".pdf";
     const htmlPath = wantsHtml ? base + ".html" : scratchHtml;
+    // The page's own render, when this is what renders it, for the notices
+    // that read the log (citationWarnings).
+    let log = "";
     try {
       if (!htmlReady) {
         const htmlCopy = wantsHtml ? copy : scratchCopy;
@@ -1998,7 +2172,8 @@ async function runExport(document, to) {
           EXPORT_TARGETS.html.args.concat(exportLook(document, text))
         );
         const step = await runQuartoStep(htmlArgs);
-        if (step.code !== 0) return { ok: false, why: "render", code: step.code };
+        log = step.log;
+        if (step.code !== 0) return { ok: false, why: "render", code: step.code, log: log };
         if (!isFile(htmlPath)) return { ok: false, why: "nohtml" };
       } else if (!isFile(htmlPath)) {
         // Both renders its page in a step of its own before the PDF is tried
@@ -2022,7 +2197,7 @@ async function runExport(document, to) {
         // That is said as what it is, and not as a program that is missing.
         return { ok: false, why: "write", code: e.code || "" };
       }
-      return { ok: true };
+      return { ok: true, log: log };
     } catch (e) {
       channel().appendLine("Printing the HTML fallback failed: " + String(e.message || e));
       return { ok: false, why: "print" };
@@ -2101,9 +2276,11 @@ async function runExport(document, to) {
         try {
           fs.writeFileSync(
             copy,
-            withPageTitle(
-              withReader(withFilter(withBreaks(text), FILTER), READER),
-              path.basename(base)
+            withPageKeys(
+              withPageTitle(
+                withReader(withFilter(withBreaks(text), FILTER), READER),
+                path.basename(base)
+              )
             )
           );
         } catch (e) {
@@ -2115,8 +2292,8 @@ async function runExport(document, to) {
         }
         if (printLack) {
           const print = await printInstead(false);
-          if (print.ok) return { code: 0, printed: true, printLack: printLack };
-          if (print.why === "render") return { code: print.code };
+          if (print.ok) return { code: 0, printed: true, printLack: printLack, log: print.log };
+          if (print.why === "render") return { code: print.code, log: print.log };
           if (print.why === "write") return { code: -1, pdfHeld: print.code };
           if (print.why === "nohtml") {
             return {
@@ -2130,23 +2307,30 @@ async function runExport(document, to) {
         }
         let primary;
         let failed = null;
+        // Every step's log, for what the notices read out of it at the end
+        // (citationWarnings, exportTrouble): a "both" warns in each.
+        let log = "";
         for (const step of steps) {
           primary = await runQuartoStep(step.args);
+          log += primary.log;
           if (primary.code !== 0) {
             failed = step.name;
             break;
           }
         }
-        if (primary.code === 0) return { code: 0 };
+        if (primary.code === 0) return { code: 0, log: log };
         if (failed === "pdf" && NO_TEX.test(primary.log)) {
           const print = await printInstead(wantsHtml);
           cleanFailedLatex();
-          if (print.ok) return { code: 0, printed: true };
+          if (print.ok) return { code: 0, printed: true, log: log + (print.log || "") };
           if (print.why === "write") return { code: -1, pdfHeld: print.code };
           return { code: primary.code, noTex: true };
         }
-        if (failed === "pdf") removeFailedFolders();
-        return { code: primary.code };
+        // A failed page leaves its empty `_files/mediabag` as a failed PDF
+        // does (a bibliography that is not there, measured 2026-09-29), and
+        // the same care takes it away.
+        removeFailedFolders();
+        return { code: primary.code, log: log };
       }
     );
   } finally {
@@ -2189,18 +2373,22 @@ async function runExport(document, to) {
     return;
   }
   if (outcome.code !== 0) {
+    const trouble = exportTrouble(outcome.log, pretty, dir, text);
     exportFailed(
-      "the export of " + pretty + " failed.",
+      trouble ? trouble.summary : "the export of " + pretty + " failed.",
       outcome.detail ||
-        (outcome.code === -1
-          ? "Quarto did not run to the end; the reason is above."
-          : "Quarto exited with " + outcome.code + ".")
+        (trouble
+          ? trouble.detail
+          : outcome.code === -1
+            ? "Quarto did not run to the end; the reason is above."
+            : "Quarto exited with " + outcome.code + ".")
     );
     return;
   }
   const produced = target.outputs.map(function (ext) {
     return base + ext;
   });
+  const warned = citationWarnings(outcome.log);
   if (outcome.printed) {
     printedNotice(
       pretty,
@@ -2208,6 +2396,16 @@ async function runExport(document, to) {
       wantsHtml ? base + ".html" : null,
       outcome.printLack
     );
+    // The printed notice has its own news to give; what went wrong in the
+    // citations comes after it, on its own.
+    if (warned) {
+      channel().appendLine(warned.detail);
+      vscode.window
+        .showWarningMessage("MDM: in " + pretty + ", " + warned.summary + ".", "Show log")
+        .then(function (choice) {
+          if (choice === "Show log") channel().show(true);
+        });
+    }
     return;
   }
   const names = produced.map(function (p) {
@@ -2216,12 +2414,25 @@ async function runExport(document, to) {
   const buttons = produced.map(function (p) {
     return "Open " + path.extname(p).slice(1).toUpperCase();
   });
+  const opened = function (choice) {
+    const i = buttons.indexOf(choice);
+    if (i !== -1) vscode.env.openExternal(vscode.Uri.file(produced[i]));
+    else if (choice === "Show log") channel().show(true);
+  };
+  if (warned) {
+    channel().appendLine(warned.detail);
+    vscode.window
+      .showWarningMessage(
+        "MDM: exported " + names.join(" and ") + ", but " + warned.summary + ".",
+        ...buttons,
+        "Show log"
+      )
+      .then(opened);
+    return;
+  }
   vscode.window
     .showInformationMessage("MDM: exported " + names.join(" and "), ...buttons)
-    .then(function (choice) {
-      const i = buttons.indexOf(choice);
-      if (i !== -1) vscode.env.openExternal(vscode.Uri.file(produced[i]));
-    });
+    .then(opened);
 }
 
 
@@ -3292,6 +3503,401 @@ function restorePictures(document) {
   }
 }
 
+// ---------- Citations, as the page will print them ----------
+//
+// The page prints what citeproc makes of a citation, "Knuth (1984)", and a
+// list of the works cited; the editor drew `@knuth1984` as written and no
+// list at all. Every paragraph that held a citation broke on other words in
+// the editor than on the page (one holding three, on every line; a single
+// citation 111 px wide in the editor and 221 px on the page, 13 % of the
+// measure; measured 2026-09-29), which is the difference the export rule is
+// stated in. The editor asks this side what the page will print, and this
+// side asks the engine the export asks, the Pandoc that comes with Quarto,
+// run with citeproc under the document's own header: the bibliography, the
+// style and the language are the export's.
+//
+// The same engine, and over every citation at once and in order, because
+// what a citation prints depends on the others: a numeric style numbers by
+// first appearance, a year takes a letter when an author has two works in it
+// (2001a), names are added after "et al." to tell two works apart, and a note
+// style writes "Ibid." after a citation of the same work. Of twenty
+// citations formatted one at a time, four came out otherwise than in their
+// document. Another engine differs from Pandoc where it matters: citeproc-js,
+// the one other editors draw with, matched it in Chicago and APA and not in
+// IEEE or OSCOLA, and hayagriva told works apart otherwise (measured against
+// Pandoc 3.8.3). The webview writes the citations out in their order and in
+// their notes (citationBody in media/main.js), each in a span that names it,
+// and reads back what Pandoc printed in each span.
+//
+// Without Quarto nothing is resolved and the editor draws the citations as
+// written, as it always has: the editor runs as though export did not exist.
+// Nor is a bibliography or a style named by an address, which citeproc
+// would fetch: nothing here goes to the network.
+
+// The Pandoc Quarto carries beside its launcher: bin/tools/pandoc, a link to
+// bin/tools/<arch>/pandoc (both on Linux, Quarto 1.9.37), or the file in
+// bin/tools/<arch>; pandoc.exe on Windows. Run directly it starts in about
+// 9 ms. Where neither is there, `quarto pandoc` runs the same program after
+// starting Quarto, about 250 ms later (measured 2026-09-29).
+function findPandoc() {
+  const quarto = findQuarto();
+  if (!quarto) return null;
+  let bin = path.dirname(quarto);
+  try {
+    bin = path.dirname(fs.realpathSync(quarto));
+  } catch (e) {
+    // a launcher that does not resolve: its own folder is the guess
+  }
+  const exe = process.platform === "win32" ? "pandoc.exe" : "pandoc";
+  const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+  const own = [path.join(bin, "tools", exe), path.join(bin, "tools", arch, exe)].find(isFile);
+  return own ? { cmd: own, args: [] } : { cmd: quarto, args: ["pandoc"] };
+}
+
+// A name that is an address and not a file of the folder.
+const REMOTE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+// The files a header names for citeproc to read, `bibliography` (one, or a
+// list, in either of YAML's two ways of writing one) and `csl`, at its top
+// level and as written.
+function citationFiles(header) {
+  const files = [];
+  const bare = function (v) {
+    return v.trim().replace(/^(['"])(.*)\1$/, "$2");
+  };
+  const lines = header.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(?:bibliography|csl)[ \t]*:[ \t]*(.*?)[ \t]*$/.exec(lines[i]);
+    if (!m) continue;
+    if (m[1].startsWith("[")) {
+      m[1]
+        .replace(/^\[|\]$/g, "")
+        .split(",")
+        .forEach(function (v) {
+          if (bare(v)) files.push(bare(v));
+        });
+    } else if (m[1]) {
+      files.push(bare(m[1]));
+    } else {
+      for (let j = i + 1; j < lines.length && /^[ \t]+-/.test(lines[j]); j++) {
+        files.push(bare(lines[j].replace(/^[ \t]+-[ \t]*/, "")));
+      }
+    }
+  }
+  return files;
+}
+
+// Where each entry of the bibliography is written, for a click on it in the
+// editor's list to open it there: the key of every entry in the files the
+// header names, a BibTeX or BibLaTeX `@book{key,`, a CSL JSON `"id": "key"`,
+// a CSL YAML `id: key` and a RIS `ID  - key`, and of the references written
+// in the header itself (`references:`), each with the file and the place its
+// key stands at. Found with patterns and not parsed: what a click needs is
+// the line the key is written on, and an entry not found this way stays
+// words in the list (RefsWidget in main.js) rather than opening somewhere
+// else. A key written twice opens where it is first found.
+const ENTRY_KEYS = [
+  { file: /\.(?:bib|bibtex)$/i, re: /^[ \t]*@[A-Za-z]+[ \t]*[{(][ \t]*(?<key>[^\s,{}()"]+)[ \t]*,/dgm },
+  { file: /\.json$/i, re: /"id"[ \t]*:[ \t]*"(?<key>[^"\\]+)"/dg },
+  { file: /\.ya?ml$/i, re: /^[ \t]*(?:-[ \t]+)?id[ \t]*:[ \t]*(['"]?)(?<key>[^'"\s#]+)\1[ \t]*$/dgm },
+  { file: /\.ris$/i, re: /^ID  - (?<key>\S+)[ \t]*$/dgm },
+];
+function entryPlaces(dir, header) {
+  const places = {};
+  const note = function (text, re, file, offset) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      const key = m.groups.key;
+      if (Object.prototype.hasOwnProperty.call(places, key)) continue;
+      const at = offset + m.indices.groups.key[0];
+      const all = file ? text : header;
+      const before = all.slice(0, at);
+      const line = (before.match(/\n/g) || []).length;
+      places[key] = { file: file, line: line, character: at - (before.lastIndexOf("\n") + 1) };
+    }
+  };
+  citationFiles(header)
+    .filter(function (f) {
+      return !REMOTE.test(f) && !/\.csl$/i.test(f);
+    })
+    .forEach(function (f) {
+      const kind = ENTRY_KEYS.find(function (k) {
+        return k.file.test(f);
+      });
+      if (!kind) return;
+      const full = path.resolve(dir, f);
+      let text;
+      try {
+        text = fs.readFileSync(full, "utf8");
+      } catch (e) {
+        return;
+      }
+      note(text, kind.re, full, 0);
+    });
+  // The header's own references, from `references:` to the next key of the
+  // header's top level: an `id:` anywhere else in it is not an entry's.
+  const refs = /^references[ \t]*:.*$/m.exec(header);
+  if (refs) {
+    const start = refs.index + refs[0].length;
+    const rest = header.slice(start);
+    const end = /\n(?=[^\s#-])/.exec(rest);
+    note(rest.slice(0, end ? end.index : rest.length), ENTRY_KEYS[2].re, null, start);
+  }
+  return places;
+}
+
+// Which group an entry opens in. The tab the file already has in another
+// group than the document's, so that a second entry opens in the tab the
+// first one did: opened "beside" the active group, every click after the
+// first opened one more group to the right, since the click on the list
+// leaves the file's group the active one (three clicks, three groups, seen
+// in VS Code 1.133 on 2026-09-30). Otherwise the group to the right of the
+// document's, whichever group is active. A tab of the file behind the
+// document, in its own group, is passed over: shown there, it would hide
+// the list that was clicked. A text tab only: the document's own tab is a
+// custom editor on the same address, and is never the one to show.
+function entryColumn(target, own) {
+  const same = function (uri) {
+    return !!uri && uri.toString() === target.toString();
+  };
+  const groups = (vscode.window.tabGroups && vscode.window.tabGroups.all) || [];
+  const holding = groups.find(function (g) {
+    return (
+      g.viewColumn !== own &&
+      g.tabs.some(function (t) {
+        const input = t.input;
+        return !!input && same(input.uri) && !input.viewType && !input.notebookType;
+      })
+    );
+  });
+  if (holding) return holding.viewColumn;
+  return own ? own + 1 : vscode.ViewColumn.Beside;
+}
+
+// The keys of the entries Pandoc listed, and what the editor's tooltip on
+// each names as where a click opens it: the file's name, or the header.
+function citationSources(html, places) {
+  const sources = {};
+  const re = /<div id="ref-([^"]+)" class="csl-entry"/g;
+  let m;
+  while ((m = re.exec(html))) {
+    const key = m[1].replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    const place = places[key];
+    if (place) sources[key] = place.file ? path.basename(place.file) : "The header of this document";
+  }
+  return sources;
+}
+
+// Pandoc over the header and the webview's citations: the export's reader,
+// the links a page gives its citations (Quarto sets link-citations for HTML,
+// and mdm.lua for the paper), each formula as its own LaTeX for KaTeX
+// (--katex writes no engine into a fragment), and no wrapping, so a span is
+// never cut. Its warnings name the keys the bibliography has not got.
+function runPandoc(pandoc, dir, input) {
+  return new Promise(function (resolve) {
+    const args = pandoc.args.concat([
+      "-f", READER, "-t", "html", "--citeproc", "--katex", "--wrap=none",
+      "-M", "link-citations=true",
+    ]);
+    let out = "";
+    let err = "";
+    let child;
+    try {
+      child = cp.spawn(pandoc.cmd, args, { cwd: dir, windowsHide: true });
+    } catch (e) {
+      resolve({ state: "error", message: String(e.message || e) });
+      return;
+    }
+    // A bibliography of thousands of entries is read in under a second; a
+    // Pandoc still at work after this is not coming back.
+    const timer = setTimeout(function () {
+      try {
+        child.kill();
+      } catch (e) {
+        // already gone
+      }
+    }, 20000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", function (d) {
+      out += d;
+    });
+    child.stderr.on("data", function (d) {
+      err += d;
+    });
+    child.on("error", function (e) {
+      clearTimeout(timer);
+      resolve({ state: "error", message: String(e.message || e) });
+    });
+    child.on("close", function (code) {
+      clearTimeout(timer);
+      if (code !== 0) {
+        resolve({ state: "error", message: plainLog(err).trim() });
+        return;
+      }
+      const missing = [];
+      const re = /\[WARNING\] Citeproc: citation (\S+) not found/g;
+      let m;
+      while ((m = re.exec(plainLog(err)))) {
+        if (missing.indexOf(m[1]) === -1) missing.push(m[1]);
+      }
+      resolve({ state: "ok", html: out, missing: missing });
+    });
+    child.stdin.on("error", function () {
+      // a Pandoc that died before reading all of it answers in "close"
+    });
+    child.stdin.end(input, "utf8");
+  });
+}
+
+// One document's citations, for the editor that shows it: the last body the
+// webview sent, what Pandoc made of it, and the files the header names,
+// watched so that an entry corrected in the .bib reaches the editor without a
+// keystroke in the document. A header edited (a style named, a file added)
+// asks again with the same body.
+function citationService(document, webview, column) {
+  let last = null; // { body, seq }, the webview's latest
+  let key = null; // what `answer` was made from
+  let answer = null;
+  let working = false;
+  let again = false;
+  let watched = [];
+  let timer = null;
+  let header = null;
+  let toldNoQuarto = false;
+  const dir = document.uri.scheme === "file" ? path.dirname(document.uri.fsPath) : null;
+
+  // An answer goes out under the number of the request it answers: one asked
+  // while Pandoc was still at work on an earlier body waits its turn, and the
+  // earlier answer must not pass for its.
+  const post = function (reply, seq) {
+    if (last) webview.postMessage(Object.assign({ type: "cites", seq: seq }, reply));
+  };
+  const onFile = function () {
+    schedule();
+  };
+  const watch = function (files) {
+    const full = files
+      .filter(function (f) {
+        return !REMOTE.test(f);
+      })
+      .map(function (f) {
+        return path.resolve(dir, f);
+      });
+    if (full.join("\n") === watched.join("\n")) return;
+    watched.forEach(function (p) {
+      fs.unwatchFile(p, onFile);
+    });
+    watched = full;
+    watched.forEach(function (p) {
+      fs.watchFile(p, { interval: 1500, persistent: false }, onFile);
+    });
+  };
+  const schedule = function () {
+    if (!last) return;
+    clearTimeout(timer);
+    timer = setTimeout(run, 300);
+  };
+
+  async function run() {
+    if (!last) return;
+    if (working) {
+      again = true;
+      return;
+    }
+    const asked = last;
+    header = frontMatter(document.getText());
+    if (!dir || !/^(?:bibliography|references)[ \t]*:/m.test(header)) {
+      watch([]);
+      post({ state: "none" }, asked.seq);
+      return;
+    }
+    const files = citationFiles(header);
+    watch(files);
+    if (files.some(function (f) {
+      return REMOTE.test(f);
+    })) {
+      post({ state: "remote" }, asked.seq);
+      return;
+    }
+    const pandoc = findPandoc();
+    if (!pandoc) {
+      if (!toldNoQuarto) {
+        toldNoQuarto = true;
+        channel().appendLine(
+          "Citations are drawn as written: resolving them as the page will print them " +
+            "takes the Pandoc that comes with Quarto, and Quarto was not found (" +
+            QUARTO_PAGE + ")."
+        );
+      }
+      post({ state: "noquarto" }, asked.seq);
+      return;
+    }
+    const stamps = files.map(function (f) {
+      try {
+        return fs.statSync(path.resolve(dir, f)).mtimeMs;
+      } catch (e) {
+        return -1;
+      }
+    });
+    const input = header + "\n" + asked.body;
+    const made = input + "\u0000" + stamps.join(",");
+    if (made !== key || !answer) {
+      working = true;
+      try {
+        answer = await runPandoc(pandoc, dir, input);
+        if (answer.state === "ok") answer.sources = citationSources(answer.html, entryPlaces(dir, header));
+        key = made;
+      } finally {
+        working = false;
+      }
+    }
+    post(answer, asked.seq);
+    if (again) {
+      again = false;
+      run();
+    }
+  }
+
+  return {
+    request(body, seq) {
+      last = { body: String(body || ""), seq: seq };
+      clearTimeout(timer);
+      run();
+    },
+    documentChanged() {
+      if (last && frontMatter(document.getText()) !== header) schedule();
+    },
+    // A click on an entry of the editor's list: the file it is written in,
+    // at its key, or the document's own header for an entry written there,
+    // which opens in the text editor since the header is what this editor
+    // keeps out of sight. Looked for again, so that a file saved since the
+    // list was drawn opens where it is now. Where it opens is entryColumn's.
+    openEntry(entryKey) {
+      if (!dir || typeof entryKey !== "string" || !entryKey) return;
+      const place = entryPlaces(dir, frontMatter(document.getText()))[entryKey];
+      if (!place) {
+        vscode.window.showInformationMessage(
+          "The entry @" + entryKey + " was not found in the bibliography files the header names."
+        );
+        return;
+      }
+      const at = new vscode.Range(place.line, place.character, place.line, place.character);
+      const target = place.file ? vscode.Uri.file(place.file) : document.uri;
+      return vscode.window.showTextDocument(target, {
+        viewColumn: entryColumn(target, column && column()),
+        selection: at,
+      });
+    },
+    dispose() {
+      clearTimeout(timer);
+      last = null;
+      watch([]);
+    },
+  };
+}
+
 // How long a save is held for the webview to post the edit it was holding
 // back. VS Code gives a save participant a short while and then writes the
 // file regardless, and the edit is one message and one write away, so a
@@ -3389,11 +3995,18 @@ class MdmEditorProvider {
     const eol = () =>
       document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
 
+    // What the page will print for the citations (citationService).
+    const cites = citationService(document, webview, function () {
+      return webviewPanel.viewColumn;
+    });
+
     const changeSub = vscode.workspace.onDidChangeTextDocument((e) => {
-      if (
-        e.document.uri.toString() === document.uri.toString() &&
-        applyingFromWebview === 0
-      ) {
+      if (e.document.uri.toString() !== document.uri.toString()) return;
+      // Every change, the webview's own included: a header typed in the
+      // editor changes what the citations print as much as one written in
+      // the text editor beside it.
+      cites.documentChanged();
+      if (applyingFromWebview === 0) {
         externalVersion = document.version;
         const msg = updateMsg();
         const changes = editorChanges(e.contentChanges, msg.hiddenLines);
@@ -3474,6 +4087,7 @@ class MdmEditorProvider {
     });
     webviewPanel.onDidDispose(() => {
       changeSub.dispose();
+      cites.dispose();
       configSub.dispose();
       themeSub.dispose();
       saveSub.dispose();
@@ -3573,6 +4187,10 @@ class MdmEditorProvider {
         }
       } else if (msg.type === "exportAudio") {
         exportAudioStep(document, webview, msg);
+      } else if (msg.type === "cites") {
+        cites.request(msg.body, msg.seq);
+      } else if (msg.type === "openEntry") {
+        cites.openEntry(msg.key);
       } else if (msg.type === "edit") {
         await inTurn(async () => {
           // Written without knowing of a change made here since: the
@@ -3719,6 +4337,15 @@ module.exports = {
   changedSpan,
   editorChanges,
   withPageTitle,
+  withPageKeys,
+  exportTrouble,
+  citationWarnings,
+  citationFiles,
+  citationService,
+  entryPlaces,
+  citationSources,
+  entryColumn,
+  findPandoc,
   hasScores,
   renderArgs,
   quartoInstalls,

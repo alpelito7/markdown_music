@@ -20,6 +20,64 @@
   heading, for all of these. The name is matched as the browser matches
   it, capitals and all, so `#Intro` no longer reaches `# Intro` in the
   editor, as it never did on the page.
+- Citations read as the page prints them. In a document with a
+  bibliography, on a computer with Quarto, `@knuth1984` is drawn
+  "Knuth (1984)" and the list of works cited stands where the page sets it,
+  at the end or in a `::: {#refs}` div, with the style's hanging indent:
+  the editor asks the Pandoc that comes with Quarto, the one the export
+  runs, so a paragraph that cites breaks on the same words in the editor
+  and on the page (it broke on other words on every line). A numbered
+  style (`csl: ieee.csl`) numbers the citations in the order they come and
+  lists the works in that order, each number flush right in a column as
+  wide as the widest and half an em before its text, as LaTeX sets a
+  bibliography (it stood in a column of 3em whatever the numbers, in the
+  editor, on the page and on paper). A citation carries the pointer a link
+  carries, a click opens it to its source, as a link's does, its tooltip
+  shows the entry it cites, and `Ctrl+click` goes to that entry in the
+  list, as the page's link does. A click on that entry opens the `.bib`
+  beside the document at it, in the tab it already has if it is open; an
+  entry that opens turns blue under the pointer, and its tooltip names the
+  file. One in a table, a caption or a
+  note is drawn the same way; a key the bibliography has not got prints as
+  "(key?)" and is underlined. A `.bib` saved beside the document is read
+  again without a keystroke in it. Without Quarto, or without a
+  bibliography, citations are drawn as written, as before, and a
+  cross-reference (`@fig-x`) is drawn as written still.
+- Two entries of the list of works cited are a quarter of a line apart
+  where the style asks for a line, in the editor, on the page and on
+  paper. Pandoc's own style, Chicago's 18th edition, asks for a line, and
+  set whole it left the list looking like a column of separate
+  paragraphs. A style that asks for none (IEEE) keeps its entries
+  together.
+- An export that went through with citations it could not resolve says so:
+  a key the bibliography has not got, a word written with an `@` in front of
+  it, a cross-reference that points at nothing. The notice names them and
+  the log says what to do, where it said "exported" over them. An export
+  stopped by a bibliography or a style that is not in the document's folder,
+  by a bibliography that cannot be read or by a header that is not YAML says
+  which and where, and an error in the header names the line of the
+  document it is on (it was two lines off).
+- The page keeps its notes and its list of works cited in the flow of the
+  text, in the face, the size and the colours of the prose. They were in a
+  white card at nine tenths of the size, which could not be read under the
+  dark look, on screen or printed without TeX. The box that opens over a
+  citation takes the look's colours and shows its entry whole. A formula in
+  a title of the bibliography is set by KaTeX, and the page no longer
+  fetches MathJax from the internet for it (it drew the formula in red). A
+  failed export no longer leaves an empty `_files` folder beside the
+  document.
+- On paper a citation is a link to its entry in the link blue, as on the
+  page, where it was ink with nothing to follow.
+- The tooltip of a citation drawn as written calls a cross-reference a
+  cross-reference and a citation a citation, whatever the brackets.
+- The editor reads a citation where Pandoc reads one: `@knuth1984 [p. 33]`
+  is one citation with its page, a key with accents (`@núñez2020`) is
+  whole, a citation broken over two lines of the source is one, `@{...}`
+  and `@*` are citations, `[see @knuth1984](url)` is a link and
+  `[@knuth1984]{.mark}` a highlight with the citation inside them, and
+  `café@knuth1984` is no citation. A line holding a `[` that nothing closes
+  no longer takes seconds to read on every keystroke (a line of 60,000
+  characters took 3.4 s, and takes 16 ms).
 
 ## 0.7.1
 

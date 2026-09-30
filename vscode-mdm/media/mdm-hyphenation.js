@@ -105,12 +105,18 @@
     return spans;
   }
 
+  // A citation is not divided: the editor draws what citeproc printed for it
+  // whole (CiteWidget in media/main.js), as it draws the reference list, and
+  // a division the page alone offered inside "Shannon 1948" broke that
+  // paragraph on another word than the editor (14 division marks inside the
+  // citations of one paragraph, measured 2026-09-29). The entries of the list
+  // are divs and were never divided.
   function decorate(main) {
     const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT), nodes = [];
     while (walker.nextNode()) {
       const node = walker.currentNode, el = node.parentElement;
       if (el.closest("p, li, blockquote") &&
-        !el.closest("pre, code, kbd, samp, script, style, svg, math, .math, .katex, .mdm-hyphen, h1, h2, h3, h4, h5, h6")) nodes.push(node);
+        !el.closest("pre, code, kbd, samp, script, style, svg, math, .math, .katex, .mdm-hyphen, .citation, h1, h2, h3, h4, h5, h6")) nodes.push(node);
     }
     nodes.forEach(function (node) {
       const el = node.parentElement.closest("[lang]");

@@ -12,15 +12,30 @@
 (function () {
   "use strict";
 
+  // A formula citeproc wrote out of the bibliography comes in two other
+  // shapes. It runs after the filter and hands its formulas to the writer
+  // (mdm.lua, bibliography_has_math): through the export they are GladTeX's
+  // `<eq>` with their LaTeX inside (withPageKeys in extension.js), and a page
+  // rendered without the export gets Pandoc's MathJax span, whose LaTeX is
+  // wrapped in `\(...\)` or `\[...\]`. KaTeX read those delimiters as part of
+  // the formula and drew it as an error, in red (measured on a BibTeX title
+  // holding `$3/2$`, 2026-09-29).
+  function source(el) {
+    var tex = el.textContent;
+    var wrapped = /^\s*\\([([])([\s\S]*)\\([)\]])\s*$/.exec(tex);
+    return wrapped ? wrapped[2] : tex;
+  }
+
   function render() {
     if (typeof katex === "undefined") return; // nothing to set them with
-    var nodes = document.querySelectorAll("span.math, div.math");
+    var nodes = document.querySelectorAll("span.math, div.math, eq");
     for (var i = 0; i < nodes.length; i++) {
       var el = nodes[i];
-      var tex = el.textContent;
+      var tex = source(el);
       try {
         katex.render(tex, el, {
-          displayMode: el.classList.contains("display"),
+          displayMode:
+            el.classList.contains("display") || el.getAttribute("env") === "displaymath",
           throwOnError: false,
         });
       } catch (e) {

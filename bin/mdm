@@ -36,18 +36,27 @@ fi
 # Plus the bare addresses the editor draws as links (extension.js, READER).
 reader='markdown-blank_before_header-blank_before_blockquote+autolink_bare_uris'
 # The header as Pandoc reads it: a `---` opener that is not followed by a
-# blank line, closed by `---` or `...` (transforms.js, splitFrontMatter).
-names_reader() {
+# blank line, closed by `---` or `...` (transforms.js, splitFrontMatter). The
+# number of the line that closes it, or nothing when there is none. A CRLF
+# line ends in a \r, which [[:space:]] takes and [[:blank:]] does not.
+header_end() {
   awk '
-    NR == 1 && $0 !~ /^---[[:blank:]]*$/ { exit }
-    NR == 2 && $0 ~ /^[[:blank:]]*$/ { exit }
-    NR > 1 && /^(---|\.\.\.)[[:blank:]]*$/ { exit }
-    NR > 1 && /^[[:blank:]]*from[[:blank:]]*:/ { named = 1; exit }
-    END { if (named) exit 0; exit 1 }
+    NR == 1 && $0 !~ /^---[[:space:]]*$/ { exit }
+    NR == 2 && $0 ~ /^[[:space:]]*$/ { exit }
+    NR > 1 && /^(---|\.\.\.)[[:space:]]*$/ { print NR; exit }
   ' "$1"
 }
-has_header() {
-  head -n 1 "$1" | grep -qE '^---[[:blank:]]*$' && sed -n 2p "$1" | grep -q '[^[:blank:]]'
+# Whether the header names a key, at the top level or under a format. Only
+# the header is searched, so a line of prose that opens with `from:` is not
+# mistaken for one.
+names_key() {
+  awk -v key="$2" '
+    NR == 1 && $0 !~ /^---[[:space:]]*$/ { exit }
+    NR == 2 && $0 ~ /^[[:space:]]*$/ { exit }
+    NR > 1 && /^(---|\.\.\.)[[:space:]]*$/ { exit }
+    NR > 1 && $0 ~ ("^[[:blank:]]*" key "[[:blank:]]*:") { named = 1; exit }
+    END { if (named) exit 0; exit 1 }
+  ' "$1"
 }
 # The blank line a thematic break needs under it. The MDM editor reads a line
 # of dashes as a rule and nothing else; Pandoc reads it as the opening fence of
@@ -259,12 +268,23 @@ breaks() {
   '
 }
 
-if names_reader "$file"; then
-  breaks < "$file" > "$tmp"
-elif has_header "$file"; then
-  { head -n 1 "$file"; printf 'from: %s\n' "$reader"; tail -n +2 "$file"; } | breaks > "$tmp"
+# What the copy's header gains: the dialect, and the two settings of the page
+# the export asks for (withPageKeys in extension.js: the notes and the
+# reference list kept in the flow of the page, and the formulas citeproc
+# writes as GladTeX's markup, which mdm-math.js sets), each unless the
+# document names its own. They go at the foot of the header, so that a line
+# of the author's keeps its number in an error about it: `from:` went in at
+# the top until 2026-09-29, and a YAML error on line 4 of the .mdm came back
+# as line 5.
+keys=""
+names_key "$file" from || keys+="from: $reader"$'\n'
+names_key "$file" appendix-style || keys+=$'appendix-style: none\n'
+names_key "$file" html-math-method || keys+=$'html-math-method: gladtex\n'
+end=$(header_end "$file")
+if [[ -n "$end" ]]; then
+  { head -n $((end - 1)) "$file"; printf '%s' "$keys"; tail -n +"$end" "$file"; } | breaks > "$tmp"
 else
-  { printf -- '---\nfrom: %s\n---\n\n' "$reader"; cat "$file"; } | breaks > "$tmp"
+  { printf -- '---\n%s---\n\n' "$keys"; cat "$file"; } | breaks > "$tmp"
 fi
 trap 'rm -f "$tmp"' EXIT
 

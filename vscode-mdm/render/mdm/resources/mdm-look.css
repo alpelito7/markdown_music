@@ -456,6 +456,190 @@ body mark {
   border-radius: 2px;
 }
 
+/* ---------- Notes and the reference list ----------
+   Both stay where Pandoc puts them, in the flow of the page, as the editor
+   keeps them in the document: the export writes `appendix-style: none` into
+   the copy (withPageKeys in extension.js, and bin/mdm). Quarto's appendix
+   took them into a white card of its own, set at 0.9 of the text and at 0.9
+   opacity under headings it made up ("References", "Notes"), and the card
+   stayed white under the dark look while the ink went pale: 1.42:1 there,
+   against 10.89:1 for the prose (measured 2026-09-29). */
+
+/* The list is set as the prose is: the face, the size and the leading of a
+   paragraph, justified when the prose is, and never divided (the entries are
+   divs, which mdm-hyphenation.js leaves alone, and the editor's list,
+   RefsWidget in media/main.js, divides nothing either; on paper TeX divides
+   an entry as it divides the prose, which is the one way the PDF's list
+   parts from the page's). The hanging indent
+   is the style's, which Pandoc says with the class, and measures what the
+   PDF's does (\cslhangindent, 1.5em). Quarto's own rule hung it by 2em and
+   from a margin of 2em, so the first line of every entry stood 32px in from
+   the prose (measured 2026-09-29), which neither the paper nor the editor
+   does. */
+body main.content div.csl-bib-body {
+  margin: 0 0 1em;
+  text-indent: 0;
+}
+body main.content div.csl-entry {
+  margin-left: 0;
+  text-align: var(--mdm-text-align);
+}
+body main.content div.csl-bib-body.hanging-indent {
+  margin-left: 0;
+}
+body main.content div.hanging-indent > div.csl-entry {
+  padding-left: 1.5em;
+  text-indent: -1.5em;
+}
+/* The space between two entries: a quarter of a line where the style asks
+   for space, and none where it asks for none. CSL's default is a line
+   (entry-spacing="1"), and it is what Pandoc's own style leaves: its
+   Chicago author-date is the 18th edition, which names no spacing, where
+   the 17th said 0. Set whole, on the three surfaces, it was the owner's "too
+   far apart" (2026-09-29), and the quarter is B of the four widths on
+   design/design-bib-spacing.html. Pandoc marks the list with
+   `data-entry-spacing` only for a style that says other than a line (IEEE
+   says 0, measured on Pandoc 3.8.3); a value other than 0 and 1 is rare and
+   takes the quarter too. The editor leaves the same (style.css), and the
+   PDF, whose template sets the style's count of lines, is given the quarter
+   by look_tex in mdm.lua. */
+body main.content div.csl-entry + div.csl-entry {
+  margin-top: 0.25lh;
+}
+body main.content div.csl-bib-body[data-entry-spacing="0"] > div.csl-entry + div.csl-entry {
+  margin-top: 0;
+}
+/* A numbered style's list: each number in a column as wide as the widest
+   number, flush right, and the text half an em after it on every line, as
+   the editor sets it (style.css, where the reason is) and look_tex sets
+   the paper. Pandoc's stylesheet, inlined in this page, floated the number
+   in 2em and set the text at 3em whatever the numbers; "[1]" stood 1.71em
+   from its text. Each entry is a row of the list's grid through a subgrid,
+   keeping a box of its own for the space between entries. */
+body main.content div.csl-bib-body:has(> div.csl-entry > div.csl-left-margin) {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 0.5em;
+}
+body main.content div.csl-bib-body:has(> div.csl-entry > div.csl-left-margin) > div.csl-entry {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+}
+body main.content div.csl-bib-body div.csl-left-margin {
+  float: none;
+  min-width: 0;
+  text-align: right;
+}
+body main.content div.csl-bib-body div.csl-right-inline {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+/* The notes, at the foot of the page where Pandoc writes them, under its
+   rule: in the ink the editor gives a note's own lines (`[^1]: text`,
+   .mdm-note-line, 70 %) and at the size of the text, each opening on its
+   number raised in the link blue, the way the editor raises the label in
+   place of the `[^1]:` (.mdm-note-ref and .mdm-sup in style.css), flush with
+   the column rather than hung in the gap of a list. */
+body main.content section.footnotes {
+  color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
+  font-size: 1em;
+}
+body main.content section.footnotes ol {
+  padding-left: 0;
+}
+body main.content section.footnotes ol > li::before {
+  content: none;
+}
+body main.content section.footnotes ol > li > p:first-child::before {
+  content: counter(list-item);
+  position: relative;
+  top: -0.5em;
+  margin-right: 0.3em;
+  font-size: 0.75em;
+  line-height: 0;
+  color: var(--mdm-link);
+}
+/* The arrow back to the call, which neither the editor nor the paper has.
+   Pandoc writes it as ↩ with the text selector, and Chrome drew it as a
+   coloured emoji in a box all the same, whatever the page asked
+   (font-variant-emoji: text did nothing in Chrome 151; only a face that has
+   the glyph draws it as text, and which faces a reader has is theirs); it
+   went onto the paper too, from the page printed without TeX. The number of
+   the call shows the note under the pointer, and leads to it. */
+body main.content .footnote-back {
+  display: none;
+}
+
+/* The box the page opens over a citation or the number of a note (Quarto's
+   tippy, in its theme "quarto"): white with Bootstrap's ink on either side,
+   so a white card stood over the dark page (measured 2026-09-29). It takes
+   the look's card instead, the ground the page gives code, with the look's
+   ink and edge, and it is set ragged: it is a few words in a box, and had
+   inherited the justification of the paragraph it opens from. */
+body .tippy-box[data-theme~="quarto"] {
+  background-color: var(--mdm-syn-card);
+  border-color: var(--mdm-syn-edge);
+  color: var(--mdm-ink);
+}
+body .tippy-box[data-theme~="quarto"] > .tippy-backdrop {
+  background-color: var(--mdm-syn-card);
+}
+body .tippy-box[data-theme~="quarto"] .tippy-content {
+  text-align: left;
+}
+/* The entry the box shows is a copy of the list's, opened inside the
+   paragraph of the citation, carrying `hanging-indent` on itself: Pandoc's
+   rule for that class gave it the hang, the list's rules above reached it
+   through main.content, and its first line started a hang's width left of
+   the box, the first letter of the author cut off (measured 2026-09-29). */
+body main.content .tippy-content div.csl-entry {
+  margin-left: 0;
+  padding-left: 0;
+  text-indent: 0;
+  text-align: left;
+}
+/* A numbered entry in the box: its number and its text side by side, half
+   an em apart, as in the list, where Pandoc's float put the text at 3em. */
+body main.content .tippy-content div.csl-entry:has(> div.csl-left-margin) {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 0.5em;
+}
+body main.content .tippy-content div.csl-left-margin {
+  float: none;
+  min-width: 0;
+}
+body main.content .tippy-content div.csl-right-inline {
+  margin-left: 0;
+  padding-left: 0;
+}
+body .tippy-box[data-theme~="quarto"][data-placement^="top"] > .tippy-arrow::before {
+  border-top-color: var(--mdm-syn-card);
+}
+body .tippy-box[data-theme~="quarto"][data-placement^="top"] > .tippy-arrow::after {
+  border-top-color: var(--mdm-syn-edge);
+}
+body .tippy-box[data-theme~="quarto"][data-placement^="bottom"] > .tippy-arrow::before {
+  border-bottom-color: var(--mdm-syn-card);
+}
+body .tippy-box[data-theme~="quarto"][data-placement^="bottom"] > .tippy-arrow::after {
+  border-bottom-color: var(--mdm-syn-edge);
+}
+body .tippy-box[data-theme~="quarto"][data-placement^="left"] > .tippy-arrow::before {
+  border-left-color: var(--mdm-syn-card);
+}
+body .tippy-box[data-theme~="quarto"][data-placement^="left"] > .tippy-arrow::after {
+  border-left-color: var(--mdm-syn-edge);
+}
+body .tippy-box[data-theme~="quarto"][data-placement^="right"] > .tippy-arrow::before {
+  border-right-color: var(--mdm-syn-card);
+}
+body .tippy-box[data-theme~="quarto"][data-placement^="right"] > .tippy-arrow::after {
+  border-right-color: var(--mdm-syn-edge);
+}
+
 /* ---------- Code: the card and the ten slots ---------- */
 
 /* Inline code, the `like this` inside a sentence: a chip of the card

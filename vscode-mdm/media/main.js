@@ -3624,6 +3624,421 @@
     },
   });
 
+  // ---------- Citations, as the page prints them ----------
+  //
+  // A citation is drawn as what the page prints for it, "Knuth (1984)", and
+  // the list of works cited stands where the page sets it, whenever the
+  // document has a bibliography and Quarto is on this computer: the host runs
+  // the export's own Pandoc over the citations of the document
+  // (citationService in extension.js), all of them and in their order, since
+  // what one citation prints depends on the others. Where no answer can come
+  // (no bibliography, no Quarto) and until one does, a citation is drawn as
+  // written, in the link colour, as it always was; under the caret it is its
+  // source, as a link is.
+  //
+  // The answers are held by where each citation stands, carried through the
+  // edits made since and let go of when the citation's own text changes: one
+  // being typed is drawn as written until the answer for its new text comes
+  // back. `version` moves only when an answer lands, which is what makes the
+  // rendering draw every citation again (rebuilt, remember).
+  const setCites = CM.StateEffect.define();
+  const NO_CITES = { version: 0, items: new Map(), refs: null };
+  let citesVersion = 0;
+  const citesField = StateField.define({
+    create: function () {
+      return NO_CITES;
+    },
+    update: function (value, tr) {
+      for (let i = 0; i < tr.effects.length; i++) {
+        if (tr.effects[i].is(setCites)) return tr.effects[i].value;
+      }
+      if (!tr.docChanged || !value.items.size) return value;
+      const items = new Map();
+      value.items.forEach(function (item, from) {
+        const a = tr.changes.mapPos(from, 1);
+        const b = tr.changes.mapPos(item.to, -1);
+        if (b - a === item.to - from && tr.state.doc.sliceString(a, b) === item.src) {
+          items.set(a, { to: b, src: item.src, html: item.html, missing: item.missing });
+        }
+      });
+      return { version: value.version, items: items, refs: value.refs };
+    },
+  });
+
+  // The answers the rendering under way draws from, for the builders it does
+  // not hand the state to (cellParts: a table's cells, a figure's caption).
+  // buildDecorations sets it as it starts.
+  let citesNow = NO_CITES;
+  function citedAt(from, to) {
+    const item = citesNow.items.get(from);
+    return item && item.to === to ? item : null;
+  }
+
+  // The labels Quarto resolves itself, as cross-references, before citeproc
+  // is run: its figures, tables, listings, equations and sections, and the
+  // kinds of theorem and of callout it numbers (read off the filters of
+  // Quarto 1.9.37). A citation of one of them is not the bibliography's.
+  const CROSSREF = /^(?:fig|tbl|lst|eq|sec|thm|lem|cor|prp|cnj|def|exm|exr|sol|rem|alg|prf|nte|wrn|cau|tip|imp)-/i;
+
+  // The keys of a citation as written, `@key`, `-@key` and `@{key}`, read the
+  // way Pandoc reads one: letters and digits of any script, an underscore,
+  // and punctuation only between two of them.
+  const CITE_KEY = /(?:^|[^\p{L}\p{N}_])-?@(?:\{([^}\s]*)\}|([\p{L}\p{N}_*](?:[\p{L}\p{N}_]|[:.#$%&+?<>~\/-](?=[\p{L}\p{N}_])|[:\/](?=\/))*))/gu;
+  function citationKeys(raw) {
+    const keys = [];
+    let m;
+    CITE_KEY.lastIndex = 0;
+    while ((m = CITE_KEY.exec(raw))) keys.push(m[1] !== undefined ? m[1] : m[2]);
+    return keys;
+  }
+  function isCrossref(raw) {
+    const keys = citationKeys(raw);
+    return keys.length > 0 && keys.every(function (k) {
+      return CROSSREF.test(k);
+    });
+  }
+
+  // The citations of the document as the host is to hand them to Pandoc: in
+  // the order the page prints them, a note's where the note is called from
+  // (its text goes there, and its definition may stand anywhere), each a
+  // paragraph of its own in a span that names it, and every note the page
+  // numbers kept as a note, since a note style numbers its citations among
+  // them. A cross-reference is left out: Quarto resolves it, and Pandoc
+  // alone would print it as a citation of a key it has not got. A note
+  // called twice is Pandoc's twice, and its citations are drawn from the
+  // first call.
+  function citationBody(state) {
+    const doc = state.doc;
+    const tree = CM.syntaxTree(state);
+    const nodes = [];
+    const defs = new Map();
+    tree.iterate({
+      enter: function (n) {
+        if (n.name !== "FootnoteDef") return;
+        const mark = n.node.getChild("FootnoteMark");
+        if (mark) {
+          const label = doc.sliceString(mark.from + 2, mark.to - 2);
+          if (!defs.has(label)) defs.set(label, n.node);
+        }
+        return false;
+      },
+    });
+    const wrap = function (from, to) {
+      const src = doc.sliceString(from, to);
+      if (isCrossref(src)) return null;
+      nodes.push({ from: from, to: to, src: src });
+      return "[" + src + "]{#mdmcite-" + (nodes.length - 1) + "}";
+    };
+    const within = function (from, to) {
+      const out = [];
+      tree.iterate({
+        from: from,
+        to: to,
+        enter: function (n) {
+          if (n.name !== "Citation" || n.from < from || n.to > to) return;
+          const one = wrap(n.from, n.to);
+          if (one) out.push(one);
+          return false;
+        },
+      });
+      return "^[" + (out.join(" ") || "x") + "]";
+    };
+    const paragraphs = [];
+    const called = new Set();
+    tree.iterate({
+      enter: function (n) {
+        if (n.name === "FootnoteDef") return false;
+        if (n.name === "Citation") {
+          const one = wrap(n.from, n.to);
+          if (one) paragraphs.push(one);
+          return false;
+        }
+        if (n.name === "FootnoteInline") {
+          paragraphs.push(within(n.from, n.to));
+          return false;
+        }
+        if (n.name === "FootnoteRef") {
+          const marks = n.node.getChildren("FootnoteMark");
+          if (marks.length < 2) return false;
+          const label = doc.sliceString(marks[0].to, marks[1].from);
+          const def = defs.get(label);
+          if (!def) return false;
+          if (called.has(label)) paragraphs.push("^[x]");
+          else paragraphs.push(within(def.from, def.to));
+          called.add(label);
+          return false;
+        }
+      },
+    });
+    return { body: nodes.length ? paragraphs.join("\n\n") + "\n" : "", nodes: nodes };
+  }
+
+  // What Pandoc printed, built again out of the elements this editor draws and
+  // nothing else: the text, its emphasis, small capitals and quotation, a link
+  // as the page draws one (a span, followed by showEntry or the host), a
+  // formula set by KaTeX as the prose's are, and the divisions of an entry of
+  // the list. No attribute but a class comes across, and no raw piece of HTML
+  // a prefix may carry: the words are the document's, and the editor runs
+  // none of them. Two things are read off what the page links, as data: the
+  // key a citation's link leads to (`#ref-key`) and the key of an entry
+  // (its `ref-key` id), which is what Ctrl+click on a citation goes to; and
+  // the address of a link inside an entry (a DOI, a URL), which Ctrl+click
+  // opens as it opens any link.
+  const CITE_TAGS = new Set([
+    "SPAN", "EM", "STRONG", "I", "B", "SUP", "SUB", "SMALL", "U", "S", "DEL", "CODE", "Q", "BR", "DIV", "P",
+  ]);
+  function citedKey(target) {
+    if (!/^#?ref-/.test(target)) return "";
+    const key = target.replace(/^#?ref-/, "");
+    try {
+      return decodeURIComponent(key);
+    } catch (e) {
+      return key;
+    }
+  }
+  function citeCopy(node) {
+    const out = document.createDocumentFragment();
+    node.childNodes.forEach(function (c) {
+      if (c.nodeType === 3) {
+        out.appendChild(document.createTextNode(c.data));
+        return;
+      }
+      if (c.nodeType !== 1) return;
+      if (c.matches("span.math")) {
+        const hit = renderTex(c.textContent, c.classList.contains("display"));
+        const math = document.createElement("span");
+        // The class an inline formula of a cell is drawn with (paintParts).
+        math.className = "mdm-math";
+        if (hit.html) math.innerHTML = hit.html;
+        else math.textContent = c.textContent;
+        out.appendChild(math);
+        return;
+      }
+      let el;
+      if (c.tagName === "A") {
+        el = document.createElement("span");
+        el.className = "mdm-cite-link";
+        const href = c.getAttribute("href") || "";
+        if (citedKey(href)) el.setAttribute("data-mdm-ref", citedKey(href));
+        else if (/^(?:https?|mailto):/i.test(href)) el.setAttribute("data-mdm-href", href);
+      } else if (CITE_TAGS.has(c.tagName)) {
+        el = document.createElement(c.tagName.toLowerCase());
+        const cls = (c.getAttribute("class") || "")
+          .split(/\s+/)
+          .filter(function (k) {
+            return /^[\w-]+$/.test(k);
+          })
+          .join(" ");
+        if (cls) el.className = cls;
+        if (c.classList.contains("csl-entry") && citedKey(c.id || "")) el.setAttribute("data-mdm-ref", citedKey(c.id));
+      } else {
+        out.appendChild(citeCopy(c));
+        return;
+      }
+      el.appendChild(citeCopy(c));
+      out.appendChild(el);
+    });
+    return out;
+  }
+  function citeMarkup(node) {
+    const holder = document.createElement("span");
+    holder.appendChild(citeCopy(node));
+    return holder.innerHTML;
+  }
+
+  // An answer of the host, read against the citations it was asked about.
+  // A citation that became a note (a note style) is drawn with the note's
+  // text in the small card an inline note is drawn in, since the page sets
+  // that text at the foot and the editor has no foot. The list comes with
+  // the heading Pandoc puts over it when the header asks for one
+  // (`reference-section-title`), the style's hanging indent and the space
+  // it leaves between entries (`data-entry-spacing`, which Pandoc writes
+  // only for a style that does not leave a line).
+  function readCites(msg, built) {
+    const items = new Map();
+    let refs = null;
+    if (msg.state === "ok" && msg.html) {
+      const page = new DOMParser().parseFromString("<!doctype html><body>" + msg.html, "text/html");
+      const missing = msg.missing || [];
+      built.nodes.forEach(function (n, i) {
+        const span = page.getElementById("mdmcite-" + i);
+        if (!span) return;
+        const copy = span.cloneNode(true);
+        copy.querySelectorAll("a.footnote-ref").forEach(function (a) {
+          const note = page.getElementById((a.getAttribute("href") || "").replace(/^#/, ""));
+          const card = page.createElement("span");
+          card.className = "mdm-note-inline";
+          if (note) {
+            note.querySelectorAll("a.footnote-back").forEach(function (b) {
+              b.remove();
+            });
+            note.querySelectorAll("p").forEach(function (p, k) {
+              if (k) card.appendChild(page.createTextNode(" "));
+              while (p.firstChild) card.appendChild(p.firstChild);
+            });
+          }
+          a.replaceWith(card);
+        });
+        // What the tooltip says (citeTitle): the entry of each key, as the
+        // box the page opens over a citation shows it, and a key the
+        // bibliography has not got by name.
+        const keys = citationKeys(n.src);
+        const about = [];
+        let listed = false;
+        keys.forEach(function (k) {
+          const entry = page.getElementById("ref-" + k);
+          if (entry && entry.classList.contains("csl-entry")) {
+            about.push(entry.textContent.replace(/\s+/g, " ").trim());
+            listed = true;
+          } else if (missing.indexOf(k) !== -1) {
+            about.push("@" + k + ": not in the bibliography");
+          }
+        });
+        items.set(n.from, {
+          to: n.to,
+          src: n.src,
+          html: citeMarkup(copy),
+          missing: keys.some(function (k) {
+            return missing.indexOf(k) !== -1;
+          }),
+          about: about.join("\n"),
+          listed: listed,
+        });
+      });
+      const list = page.getElementById("refs");
+      if (list && list.querySelector(".csl-entry")) {
+        const title = list.previousElementSibling;
+        refs = {
+          title: title && title.id === "bibliography" && /^H[1-6]$/.test(title.tagName) ? citeMarkup(title) : "",
+          html: citeMarkup(list),
+          hanging: list.classList.contains("hanging-indent"),
+          spacing: list.getAttribute("data-entry-spacing") || "1",
+          // The file each entry was found in, by the host (citationSources
+          // in extension.js): a click on the entry opens it there.
+          sources: msg.sources && typeof msg.sources === "object" ? msg.sources : {},
+          // The keys it lists, which are what Ctrl+click can go to
+          // (showEntry) while the list is not drawn.
+          keys: Array.from(list.querySelectorAll(".csl-entry"))
+            .map(function (e) {
+              return citedKey(e.id || "");
+            })
+            .filter(Boolean),
+        };
+      }
+    }
+    citesVersion += 1;
+    return { version: citesVersion, items: items, refs: refs };
+  }
+
+  // The request, some time after the last keystroke: the body only changes
+  // when a citation or a note does, and the host answers a body it has
+  // answered already out of what it kept (citationService). An answer is
+  // taken only for the body it was asked about, read against the citations
+  // as they stand then: whatever was typed since has sent a body of its own.
+  let citeSeq = 0;
+  let citeAsked = null; // { seq, body }
+  let citeTimer = null;
+  function askCitesSoon() {
+    clearTimeout(citeTimer);
+    citeTimer = setTimeout(askCites, 400);
+  }
+  function askCites() {
+    if (!view) return;
+    const built = citationBody(view.state);
+    if (!built.body) {
+      citeAsked = null;
+      if (view.state.field(citesField, false) !== NO_CITES) {
+        view.dispatch({ effects: setCites.of(NO_CITES) });
+      }
+      return;
+    }
+    if (citeAsked && citeAsked.body === built.body) return;
+    citeSeq += 1;
+    citeAsked = { seq: citeSeq, body: built.body };
+    vscode.postMessage({ type: "cites", seq: citeSeq, body: built.body });
+  }
+  function takeCites(msg) {
+    if (!view || !citeAsked || msg.seq !== citeAsked.seq) return;
+    const built = citationBody(view.state);
+    if (built.body !== citeAsked.body) return;
+    view.dispatch({ effects: setCites.of(readCites(msg, built)) });
+  }
+
+  // A citation as the page prints it, in place of its source.
+  // A citation's tooltip: the entries it cites, and the click that goes to
+  // them in the list (followHint), as a link's tooltip names its destination
+  // and the click that follows it. Nothing to go to, no click named.
+  function citeTitle(item) {
+    if (!item.about) return "";
+    return item.about + (item.listed ? "\n" + followHint() : "");
+  }
+
+  class CiteWidget extends WidgetType {
+    constructor(item) {
+      super();
+      this.html = item.html;
+      this.missing = item.missing;
+      // Taken now, as the link widgets take theirs: the modifier that
+      // follows can change, and a widget told apart by it is drawn again.
+      this.title = citeTitle(item);
+    }
+    eq(other) {
+      return other.html === this.html && other.missing === this.missing && other.title === this.title;
+    }
+    toDOM() {
+      const el = document.createElement("span");
+      el.className = "mdm-cited" + (this.missing ? " mdm-cited--missing" : "");
+      el.innerHTML = this.html;
+      if (this.title) el.title = this.title;
+      return el;
+    }
+    ignoreEvent() {
+      return false;
+    }
+  }
+
+  // The list of works cited, where the page sets it: in the document's
+  // `::: {#refs}` when it has one, and at its end when not.
+  class RefsWidget extends WidgetType {
+    constructor(refs) {
+      super();
+      this.refs = refs;
+    }
+    eq(other) {
+      return other.refs === this.refs;
+    }
+    toDOM() {
+      const el = document.createElement("div");
+      el.className = "mdm-refs";
+      if (this.refs.title) {
+        const title = document.createElement("div");
+        title.className = "mdm-refs-title";
+        title.innerHTML = this.refs.title;
+        el.appendChild(title);
+      }
+      const list = document.createElement("div");
+      list.className = "mdm-refs-list" + (this.refs.hanging ? " mdm-refs-list--hang" : "");
+      list.setAttribute("data-entry-spacing", this.refs.spacing);
+      list.innerHTML = this.refs.html;
+      // An entry the host found in a file opens there on a click
+      // (handleMouseDown), and says where and with which click, as a
+      // citation's tooltip does. Its source is the file, as a link's is the
+      // text it is written in.
+      const sources = this.refs.sources || {};
+      list.querySelectorAll(".csl-entry[data-mdm-ref]").forEach(function (entry) {
+        const from = sources[entry.getAttribute("data-mdm-ref")];
+        if (typeof from !== "string" || !from) return;
+        entry.classList.add("mdm-refs-entry--source");
+        entry.title = from + "\nClick to open";
+      });
+      el.appendChild(list);
+      return el;
+    }
+    ignoreEvent() {
+      return false;
+    }
+  }
+
   // The carets the rendering answers to: none at all while the document is
   // unfocused, which is the whole of visual mode.
   const NO_RANGES = [];
@@ -3773,6 +4188,7 @@
       // the widget draws it under the equation, painted as a cell of a
       // table is (G052). `key` is its source, for eq; `parts` its content.
       this.tail = tail || null;
+      this.cited = citedSignature(this.tail);
       // The click the tooltips of its links name (followHint), which moves
       // with editor.multiCursorModifier; a drawing keeps its links as it
       // painted them, so a change of it has to draw them again.
@@ -3788,7 +4204,8 @@
         other.open === this.open &&
         frameKey(other.frame) === frameKey(this.frame) &&
         (other.tail ? other.tail.key : "") === (this.tail ? this.tail.key : "") &&
-        (other.tail ? other.tip : "") === (this.tail ? this.tip : "")
+        (other.tail ? other.tip : "") === (this.tail ? this.tip : "") &&
+        other.cited === this.cited
       );
     }
     className() {
@@ -3849,7 +4266,8 @@
         this.block && from && from.block && !from.preview &&
         from.tex === this.tex && from.display === this.display &&
         (from.tail ? from.tail.key : "") === (this.tail ? this.tail.key : "") &&
-        (from.tail ? from.tip : "") === (this.tail ? this.tip : "")
+        (from.tail ? from.tip : "") === (this.tail ? this.tip : "") &&
+        from.cited === this.cited
       ) {
         const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
         if (!chrome) return false;
@@ -4232,6 +4650,7 @@
       super();
       this.src = src;
       this.caption = caption;
+      this.cited = citedSignature(caption);
       this.key = key;
       this.frame = frame || null;
       // The width the image's attribute asks for (`{width=30%}`), which the
@@ -4244,6 +4663,7 @@
       return (
         other.src === this.src &&
         other.key === this.key &&
+        other.cited === this.cited &&
         other.width === this.width &&
         other.tip === this.tip &&
         frameKey(other.frame) === frameKey(this.frame)
@@ -4419,6 +4839,27 @@
   // caller that wants the source as written leaves it out. `refs` are the
   // document's link definitions (definitionsOf), so a link or an image
   // written by reference finds where it goes here as it does in the prose.
+  // What the citations in a drawing print (the parts cellParts made them),
+  // for the widgets that tell two drawings apart by their source: a table, a
+  // figure and the words after an equation keep their text when an answer
+  // about their citations comes in, and were kept as first drawn, the
+  // citation as written, beside a prose already resolved (seen 2026-09-29).
+  function citedSignature(value) {
+    let out = "";
+    const walk = function (v) {
+      if (Array.isArray(v)) {
+        v.forEach(walk);
+      } else if (v && typeof v === "object") {
+        if (v.kind === "cited") out += v.html + (v.missing ? "!" : "") + "\u0001" + v.title + "\u0000";
+        else Object.keys(v).forEach(function (k) {
+          walk(v[k]);
+        });
+      }
+    };
+    walk(value);
+    return out;
+  }
+
   function cellParts(node, text, skip, marks, refs) {
     const parts = [];
     const push = function (s) {
@@ -4498,13 +4939,23 @@
           title: "Footnote, written inline",
           parts: cellParts(child, text, skip, marks, refs),
         });
+      } else if (name === "Citation" && citedAt(child.from, child.to)) {
+        // As the page prints it, in a cell or a caption as in the prose.
+        const item = citedAt(child.from, child.to);
+        parts.push({
+          kind: "cited",
+          html: item.html,
+          missing: item.missing,
+          title: citeTitle(item),
+          source: text(child.from, child.to),
+        });
       } else if (name === "Citation") {
         const raw = text(child.from, child.to);
         parts.push({
           kind: "mark",
           tag: "span",
           cls: "mdm-cite",
-          title: (raw.charAt(0) === "[" ? "Citation " : "Reference ") + raw,
+          title: (isCrossref(raw) ? "Cross-reference " : "Citation ") + raw,
           parts: [{ kind: "text", text: raw }],
         });
       } else if (name === "RawTeX") {
@@ -4533,7 +4984,13 @@
   function partsText(parts) {
     return parts
       .map(function (p) {
-        return p.kind === "text" ? p.text : p.kind === "math" ? p.source : p.parts ? partsText(p.parts) : "";
+        return p.kind === "text"
+          ? p.text
+          : p.kind === "math" || p.kind === "cited"
+            ? p.source
+            : p.parts
+              ? partsText(p.parts)
+              : "";
       })
       .join("");
   }
@@ -4564,6 +5021,15 @@
       }
       if (p.kind === "br") {
         el.appendChild(document.createElement("br"));
+        return;
+      }
+      if (p.kind === "cited") {
+        // Built out of what Pandoc printed and nothing else (citeCopy).
+        const cited = document.createElement("span");
+        cited.className = "mdm-cited" + (p.missing ? " mdm-cited--missing" : "");
+        cited.innerHTML = p.html;
+        if (p.title) cited.title = p.title;
+        el.appendChild(cited);
         return;
       }
       if (p.kind === "image") {
@@ -4700,6 +5166,7 @@
       super();
       this.source = source;
       this.model = model;
+      this.cited = citedSignature(model);
       this.frame = frame || null;
       this.active = !!active;
       this.open = !!open;
@@ -4709,6 +5176,7 @@
     eq(other) {
       return (
         other.source === this.source &&
+        other.cited === this.cited &&
         other.active === this.active &&
         other.open === this.open &&
         other.tip === this.tip &&
@@ -4716,7 +5184,7 @@
       );
     }
     updateDOM(dom, view, from) {
-      if (!from || from.source !== this.source || from.tip !== this.tip || frameKey(from.frame) !== frameKey(this.frame)) return false;
+      if (!from || from.source !== this.source || from.cited !== this.cited || from.tip !== this.tip || frameKey(from.frame) !== frameKey(this.frame)) return false;
       const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
       if (!chrome) return false;
       switchChrome(chrome, this);
@@ -5315,6 +5783,7 @@
   function buildDecorations(state, region) {
     const doc = state.doc;
     const ranges = activeRanges(state);
+    citesNow = state.field(citesField, false) || NO_CITES;
     // What the host kept back, which every number counts from (hiddenLines).
     const hidden = state.field(hiddenLinesField, false) || 0;
     const tree = CM.syntaxTree(state);
@@ -6303,17 +6772,38 @@
         }
 
         if (name === "Citation") {
-          // A citation or a Quarto cross-reference (PX04): the page
-          // resolves it into a reference or a link, which the editor cannot
-          // (the bibliography is not here); it is drawn in the link colour,
-          // as written, with what it is in the tooltip.
+          // A citation (PX04): as the page prints it once the host has
+          // answered (citesField, CiteWidget), and its source under the
+          // caret. Before an answer, where none can come (no bibliography,
+          // no Quarto), and for a Quarto cross-reference, which Quarto
+          // resolves and the editor does not (the figure's number is the
+          // page's), it is drawn as written, in the link colour, with what it
+          // is in the tooltip.
           const raw = text(n.from, n.to);
+          const item = citedAt(n.from, n.to);
+          if (item && !touched(n.from, n.to)) {
+            decos.push(
+              Decoration.replace({ widget: new CiteWidget(item) }).range(n.from, n.to)
+            );
+            return false;
+          }
           decos.push(
             Decoration.mark({
               class: "mdm-cite",
-              attributes: { title: (raw.charAt(0) === "[" ? "Citation " : "Reference ") + raw },
+              attributes: { title: (isCrossref(raw) ? "Cross-reference " : "Citation ") + raw },
             }).range(n.from, n.to)
           );
+          // A citation broken over two lines of a quote holds the > of the
+          // second (pandoc.js reads one over a line break, as Pandoc does),
+          // where the walk never goes: put away on a line the caret is not
+          // on, as a fence and a table do with theirs (G033).
+          node.getChildren("QuoteMark").forEach(function (m) {
+            const line = doc.lineAt(m.from);
+            if (!touched(line.from, line.to)) {
+              const r = markWithSpace(m);
+              hide(r.from, r.to);
+            }
+          });
           return false;
         }
 
@@ -6461,8 +6951,37 @@
       decos.push(lineNumber(n + hidden).range(line.from));
     }
 
+    // The list of works cited, where the page sets it (RefsWidget).
+    if (citesNow.refs) {
+      const at = refsPlace(doc, tree);
+      if (!region || (at.pos >= region.from && at.pos <= region.to)) {
+        decos.push(
+          Decoration.widget({ widget: new RefsWidget(citesNow.refs), block: true, side: at.side }).range(at.pos)
+        );
+      }
+    }
+
     const all = decos.concat(lines.decorations());
     return region ? all : Decoration.set(all, true);
+  }
+
+  // Where the page sets the list: inside the document's `::: {#refs}`, under
+  // what the div already holds (Pandoc fills the div after its contents),
+  // and at the end of the document when it has none.
+  function refsPlace(doc, tree) {
+    let place = null;
+    tree.iterate({
+      enter: function (n) {
+        if (place) return false;
+        if (n.name !== "Callout") return;
+        const marks = n.node.getChildren("CalloutMark");
+        if (!marks.length || !/\{[^}]*#refs(?![\w-])[^}]*\}/.test(doc.sliceString(marks[0].from, marks[0].to))) return;
+        const closer = marks.length > 1 ? marks[marks.length - 1] : null;
+        place = closer ? { pos: doc.lineAt(closer.from).from, side: -1 } : { pos: n.to, side: 1 };
+        return false;
+      },
+    });
+    return place || { pos: doc.length, side: 1 };
   }
 
   // ---- Rebuilding no more than what changed ----
@@ -6496,6 +7015,7 @@
       tree: CM.syntaxTree(state),
       hidden: state.field(hiddenLinesField, false) || 0,
       lines: state.doc.lines,
+      cites: (state.field(citesField, false) || NO_CITES).version,
     });
     return set;
   }
@@ -6575,7 +7095,9 @@
     // of link definitions (links.js): what is a link changes inside blocks
     // that keep their place and their size, which no comparison of blocks
     // sees.
-    if (!built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines) {
+    // An answer about the citations redraws every one of them, and the list.
+    const cites = (state.field(citesField, false) || NO_CITES).version;
+    if (!built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines || built.cites !== cites) {
       rebuilds.whole++;
       return remember(buildDecorations(state), state);
     }
@@ -6709,6 +7231,7 @@
       const byContent =
         tr.docChanged ||
         tr.state.field(hiddenLinesField) !== tr.startState.field(hiddenLinesField) ||
+        tr.state.field(citesField).version !== tr.startState.field(citesField).version ||
         CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState) ||
         // The configuration, which is how a changed editor.multiCursorModifier
         // comes in (gestures), and with it the click a link's tooltip names.
@@ -9968,6 +10491,42 @@
     view.focus();
   }
 
+  // The entry a citation cites, brought to the middle of the pane where the
+  // list stands (refsPlace), as the page's link goes to it. A list far down
+  // the document is not drawn until it is near, so CodeMirror is asked for
+  // the list's place first, and the entry is brought in from the next frame
+  // on, once CodeMirror has scrolled: brought in at once, it was drawn
+  // already and CodeMirror's own scroll to the place, which comes after,
+  // took it out of the pane again (measured in the test, the list 300
+  // paragraphs down). Looked for half a second at most. The caret stays
+  // where it was: an entry is no place to write, and the next keystroke
+  // brings the view back to the sentence it came from. A key the list has
+  // not got (not in the bibliography, or a list the header suppresses) goes
+  // nowhere.
+  function showEntry(key) {
+    const cites = view.state.field(citesField, false);
+    if (!cites || !cites.refs || cites.refs.keys.indexOf(key) === -1) return;
+    const find = function () {
+      return Array.from(view.dom.querySelectorAll(".mdm-refs .csl-entry[data-mdm-ref]")).find(function (el) {
+        return el.getAttribute("data-mdm-ref") === key;
+      });
+    };
+    const now = find();
+    if (now) {
+      now.scrollIntoView({ block: "center" });
+      return;
+    }
+    const place = refsPlace(view.state.doc, CM.syntaxTree(view.state));
+    view.dispatch({ effects: CM.EditorView.scrollIntoView(place.pos, { y: "center" }) });
+    let frames = 0;
+    const look = function () {
+      const entry = find();
+      if (entry) entry.scrollIntoView({ block: "center" });
+      else if (++frames < 30) requestAnimationFrame(look);
+    };
+    requestAnimationFrame(look);
+  }
+
   // Mousedown on the chrome of a block (copy, player toggle), on a list
   // marker, and on a link with the follow modifier. Caught on the content
   // DOM in the capture phase: CodeMirror ignores events inside the widgets
@@ -9992,6 +10551,35 @@
       if (!href) return;
       if (href.charAt(0) === "#") jumpToHeading(href.slice(1));
       else vscode.postMessage({ type: "openLink", href: href });
+      return;
+    }
+    // Ctrl+click on a citation goes to its entry in the list, as the page's
+    // link does: the key under the pointer, or the citation's first.
+    const cited = e.button === 0 && e.target.closest(".mdm-cited");
+    if (cited && followsLink(e)) {
+      e.preventDefault();
+      const part = e.target.closest("[data-mdm-ref]") || cited.querySelector("[data-mdm-ref]");
+      if (part) showEntry(part.getAttribute("data-mdm-ref"));
+      return;
+    }
+    // An entry of the list is not text of the document: a click on it opens
+    // the file the host found it in, at the entry (openEntry), as a click on
+    // a link opens its source. A plain click only: Ctrl+click opened it as
+    // well for a round, and two clicks for one thing made no sense to the
+    // owner (2026-09-29). On a link inside the entry (a DOI, a URL)
+    // Ctrl+click follows the link.
+    const entry = e.button === 0 && e.target.closest(".mdm-refs .csl-entry");
+    if (entry) {
+      e.preventDefault();
+      if (followsLink(e)) {
+        const out = e.target.closest(".mdm-cite-link[data-mdm-href]");
+        if (out) vscode.postMessage({ type: "openLink", href: out.getAttribute("data-mdm-href") });
+        return;
+      }
+      if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (entry.classList.contains("mdm-refs-entry--source")) {
+        vscode.postMessage({ type: "openEntry", key: entry.getAttribute("data-mdm-ref") });
+      }
       return;
     }
     const marker = e.target.closest(".mdm-li-marker");
@@ -11784,6 +12372,7 @@
         // configured ahead of it already updated.
         focusField,
         hiddenLinesField,
+        citesField,
         renderField,
         hyphenationField,
         EditorView.lineWrapping,
@@ -11803,6 +12392,12 @@
             // A `lang:` typed into the header on screen lights or darkens
             // the hyphenation button at once, as it moves the cuts.
             updateHyphenationButton();
+          }
+          // The citations the host is asked about (askCites), once the text
+          // has rested, and again when a longer document's parse reaches
+          // further into it.
+          if (update.docChanged || CM.syntaxTree(update.state) !== CM.syntaxTree(update.startState)) {
+            askCitesSoon();
           }
           refreshRailPointer();
           placeOpenRails();
@@ -11826,6 +12421,8 @@
     startSync(text);
     // applyHyphenation ran above with no view to read the header from.
     updateHyphenationButton();
+    // The citations of the document as it opens.
+    askCitesSoon();
     // For the test harness and for poking at a live editor: the view itself,
     // and the open player, which is the only way in to the synth controller
     // (abcjs keeps it on no element of the bar it builds).
@@ -12962,6 +13559,11 @@
   window.addEventListener("message", function (e) {
     const msg = e.data;
     if (!msg) return;
+    if (msg.type === "cites") {
+      // What the page will print for the citations (askCites).
+      takeCites(msg);
+      return;
+    }
     if (msg.type === "exportAudio") {
       // The host's side of a run: the answer to a start, the acknowledgement
       // of a file, or the reader cancelling the progress notification. A

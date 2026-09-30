@@ -21,7 +21,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { open, skip, rows } = require("./webview/helpers.js");
+const { open, skip, rows, setSelection, postSettings } = require("./webview/helpers.js");
 
 // Puts the document in the reading state: the focus leaves the editor the
 // way a click on a bare stretch of the page takes it, which is what makes
@@ -548,10 +548,13 @@ const CASES = [
   },
   {
     id: "CT01",
+    // Named by what it cites and not by its brackets: the bare `@knuth1984`
+    // was called a "Reference" and `[@fig-x]` a "Citation" (isCrossref in
+    // main.js, the kinds Quarto numbers; 2026-09-29).
     name: "a citation and a cross-reference are drawn as written, in the link colour, with what they are in the tooltip (PX04)",
-    text: "As shown by [@knuth1984, p. 33] and in @fig-brass, mail me@example.org.\n",
+    text: "As shown by [@knuth1984, p. 33], by @knuth1984 and in @fig-brass, mail me@example.org.\n",
     rows: [
-      [1, "", "As shown by [@knuth1984, p. 33] and in @fig-brass, mail me@example.org."],
+      [1, "", "As shown by [@knuth1984, p. 33], by @knuth1984 and in @fig-brass, mail me@example.org."],
       [2, "mdm-blank", ""],
     ],
     dom: (page) =>
@@ -560,7 +563,11 @@ const CASES = [
           .filter((e) => !e.parentElement.closest(".mdm-cite"))
           .map((e) => e.textContent + "|" + e.title)
       ),
-    domExpected: ["[@knuth1984, p. 33]|Citation [@knuth1984, p. 33]", "@fig-brass|Reference @fig-brass"],
+    domExpected: [
+      "[@knuth1984, p. 33]|Citation [@knuth1984, p. 33]",
+      "@knuth1984|Citation @knuth1984",
+      "@fig-brass|Cross-reference @fig-brass",
+    ],
   },
   {
     id: "FN01",
@@ -1475,3 +1482,475 @@ for (const c of CASES) {
     }
   });
 }
+
+// ---------- Citations, as the page prints them ----------
+//
+// The host runs the export's own Pandoc over the citations of the document
+// (citationService in extension.js); here it is played by an answer written
+// out in the shape Pandoc 3.8.3 gives it (read off a real run, 2026-09-29),
+// so that what is tested is the editor's side: what it asks, and what it
+// draws of the answer.
+
+const CITED =
+  "As @knuth1984 says, and [@shannon1948, p. 380] too, with a note.[^1] And a key it has not got [@nokey2020].\n\n" +
+  "[^1]: A note citing [@rameau1722].\n\n" +
+  "| Work | Cited |\n|---|---|\n| TeXbook | [@knuth1984, p. 3] |\n\n" +
+  "::: {#refs}\n:::\n\nAfter the list.\n";
+
+// In the order the page prints them, a note's where it is called from, each
+// in a span that names it; the table's last.
+const CITED_BODY =
+  "[@knuth1984]{#mdmcite-0}\n\n[[@shannon1948, p. 380]]{#mdmcite-1}\n\n^[[[@rameau1722]]{#mdmcite-2}]\n\n" +
+  "[[@nokey2020]]{#mdmcite-3}\n\n[[@knuth1984, p. 3]]{#mdmcite-4}\n";
+
+const link = (key, text) => '<a href="#ref-' + key + '" role="doc-biblioref">' + text + "</a>";
+const CITED_HTML =
+  '<p><span id="mdmcite-0"><span class="citation" data-cites="knuth1984">Knuth (' + link("knuth1984", "1984") + ")</span></span></p>\n" +
+  // What a prefix may carry into the answer, and must not reach the page:
+  // raw HTML with a handler on it.
+  '<p><span id="mdmcite-1"><span class="citation" data-cites="shannon1948">(<img src="x" onerror="window.__ran = 1">' +
+  link("shannon1948", "Shannon 1948, 380") + ")</span></span></p>\n" +
+  '<p><a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></p>\n' +
+  '<p><span id="mdmcite-3"><span class="citation" data-cites="nokey2020">(' + link("nokey2020", "<strong>nokey2020?</strong>") + ")</span></span></p>\n" +
+  '<p><span id="mdmcite-4"><span class="citation" data-cites="knuth1984">(' + link("knuth1984", "Knuth 1984, 3") + ")</span></span></p>\n" +
+  '<div id="refs" class="references csl-bib-body hanging-indent" role="list">\n' +
+  '<div id="ref-knuth1984" class="csl-entry" role="listitem">\nKnuth, Donald E. 1984. <em>The <span>TeX</span>book</em>. Addison-Wesley.\n</div>\n' +
+  '<div id="ref-partch1949" class="csl-entry" role="listitem">\nPartch, Harry. 1949. <span>“Tuning by the Ratio <span class="math inline">3/2</span>.”</span> <em>Journal of Tuning</em>.\n</div>\n' +
+  '<div id="ref-rameau1722" class="csl-entry" role="listitem">\nRameau, Jean-Philippe. 1722. <em>Traité de l’harmonie</em>. Ballard.\n</div>\n' +
+  "</div>\n" +
+  '<section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes">\n<hr />\n<ol>\n' +
+  '<li id="fn1"><p><span id="mdmcite-2"><span class="citation" data-cites="rameau1722">(' + link("rameau1722", "Rameau 1722") +
+  ')</span></span><a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>\n</ol>\n</section>\n';
+
+async function citesAsked(page, count) {
+  await page.waitForFunction(
+    (n) => window.__posts.filter((m) => m.type === "cites").length >= n,
+    { timeout: 10000 },
+    count || 1
+  );
+  return page.evaluate(() => window.__posts.filter((m) => m.type === "cites").pop());
+}
+
+function answerCites(page, msg) {
+  return page.evaluate((m) => window.postMessage(m, "*"), Object.assign({ type: "cites" }, msg));
+}
+
+async function citedNow(page) {
+  await new Promise((r) => setTimeout(r, 200));
+  return page.evaluate(() => ({
+    cited: Array.from(document.querySelectorAll("#app .mdm-cited")).map(
+      (e) => e.textContent + (e.classList.contains("mdm-cited--missing") ? " !" : "")
+    ),
+    raw: Array.from(document.querySelectorAll("#app .mdm-cite")).map((e) => e.textContent),
+  }));
+}
+
+test("the host is asked about the citations in their order and in their notes, and each is drawn as the page prints it, the list where the page sets it", { skip }, async () => {
+  const h = await open({ text: CITED, scores: 0, height: 1200 });
+  try {
+    const asked = await citesAsked(h.page);
+    assert.equal(asked.body, CITED_BODY);
+    await answerCites(h.page, { seq: asked.seq, state: "ok", html: CITED_HTML, missing: ["nokey2020"] });
+    await reading(h.page);
+    const seen = await citedNow(h.page);
+    assert.deepEqual(seen.cited, [
+      "Knuth (1984)",
+      "(Shannon 1948, 380)",
+      "(nokey2020?) !",
+      "(Rameau 1722)",
+      "(Knuth 1984, 3)",
+    ]);
+    assert.deepEqual(seen.raw, []);
+    const drawn = await h.page.evaluate(() => {
+      const first = document.querySelector("#app .mdm-cited");
+      const year = first.querySelector(".mdm-cite-link");
+      const fences = Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => l.textContent === ":::" || l.textContent === "::: {#refs}");
+      const list = document.querySelector("#app .mdm-refs");
+      return {
+        // In the ink of the prose, the part the page links in the link blue.
+        ink: getComputedStyle(first).color === getComputedStyle(document.querySelector("#app .cm-line")).color,
+        blue: getComputedStyle(year).color !== getComputedStyle(first).color,
+        // The pointer a link and the number of a note carry, since a click
+        // opens it; it had the caret of the text (the owner, 2026-09-29).
+        pointer: Array.from(document.querySelectorAll("#app .mdm-cited"))
+          .map((e) => getComputedStyle(e).cursor)
+          .filter((c, i, all) => all.indexOf(c) === i),
+        entries: Array.from(list.querySelectorAll(".csl-entry")).map((e) => e.textContent.trim().slice(0, 12)),
+        // Between the fences of the document's `::: {#refs}`.
+        inside:
+          list.getBoundingClientRect().top >= fences[0].getBoundingClientRect().bottom - 1 &&
+          list.getBoundingClientRect().bottom <= fences[1].getBoundingClientRect().top + 1,
+        maths: list.querySelectorAll(".katex").length,
+        // Nothing of the raw HTML came across, and nothing of it ran.
+        images: document.querySelectorAll("#app .mdm-cited img").length,
+        ran: window.__ran === 1,
+        same: window.__mdm.checkDecorations(),
+        // The buffers CodeMirror sets beside a widget, out of the flow: in
+        // it, one was a place to break the line, and a period went down to
+        // a row of its own after "Partch (1949, 5)" (2026-09-29).
+        buffers: Array.from(document.querySelectorAll("#app .cm-line img.cm-widgetBuffer"))
+          .filter((b) => [b.previousElementSibling, b.nextElementSibling].some((e) => e && e.classList.contains("mdm-cited")))
+          .map((b) => getComputedStyle(b).position)
+          .filter((p, i, all) => all.indexOf(p) === i),
+      };
+    });
+    assert.deepEqual(drawn, {
+      ink: true,
+      blue: true,
+      pointer: ["pointer"],
+      entries: ["Knuth, Donal", "Partch, Harr", "Rameau, Jean"],
+      inside: true,
+      maths: 1,
+      images: 0,
+      ran: false,
+      same: null,
+      buffers: ["absolute"],
+    });
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a citation under the caret is its source, one being typed is drawn as written until its own answer, and an answer about another text is not taken", { skip }, async () => {
+  const h = await open({ text: CITED, scores: 0, height: 1200 });
+  try {
+    const asked = await citesAsked(h.page);
+    await answerCites(h.page, { seq: asked.seq, state: "ok", html: CITED_HTML, missing: ["nokey2020"] });
+    await reading(h.page);
+    // The caret in `[@shannon1948, p. 380]`.
+    const at = CITED.indexOf("[@shannon1948") + 3;
+    await setSelection(h.page, at);
+    let seen = await citedNow(h.page);
+    assert.deepEqual(seen.raw, ["[@shannon1948, p. 380]"]);
+    assert.equal(seen.cited.length, 4);
+    // Open, it is text being written, and has the text's caret back.
+    assert.equal(await h.page.evaluate(() => getComputedStyle(document.querySelector("#app .mdm-cite")).cursor), "text");
+    // Typed into: its answer is let go of, the rest stand. Read with the
+    // caret moved on to another paragraph, where the citation is untouched
+    // and an answer kept for it would be drawn (a click on the corner lands
+    // on the toolbar, which keeps the document's caret where it was).
+    await h.page.keyboard.type("x");
+    seen = await citedNow(h.page);
+    assert.deepEqual(seen.raw, ["[@sxhannon1948, p. 380]"]);
+    await setSelection(h.page, CITED.length - 2);
+    seen = await citedNow(h.page);
+    assert.deepEqual(seen.raw, ["[@sxhannon1948, p. 380]"]);
+    assert.equal(seen.cited.length, 4);
+    // Asked again, for the new text; the answer to the old request is not
+    // taken for it.
+    const again = await citesAsked(h.page, 2);
+    assert.ok(again.body.includes("[[@sxhannon1948, p. 380]]{#mdmcite-1}"), again.body);
+    await answerCites(h.page, { seq: asked.seq, state: "ok", html: CITED_HTML, missing: [] });
+    seen = await citedNow(h.page);
+    assert.deepEqual(seen.raw, ["[@sxhannon1948, p. 380]"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("without a bibliography, or without Quarto, the citations stay as written", { skip }, async () => {
+  const h = await open({ text: CITED, scores: 0, height: 1200 });
+  try {
+    for (const state of ["none", "noquarto", "error"]) {
+      const asked = await citesAsked(h.page);
+      await answerCites(h.page, { seq: asked.seq, state: state });
+      await reading(h.page);
+      const seen = await citedNow(h.page);
+      assert.deepEqual(seen.cited, [], state);
+      assert.equal(seen.raw.length, 5, state);
+      assert.equal(await h.page.evaluate(() => document.querySelectorAll("#app .mdm-refs").length), 0, state);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+// The list is set as the page sets it (mdm-look.css): the prose's size and
+// leading, the style's hang at the PDF's 1.5em, a quarter of a line between
+// two entries unless the style says none (the style's whole line was too far
+// apart, 2026-09-29), justified when the prose is.
+test("the list of works cited is set as the prose is, with the style's hang and the style's space between entries", { skip }, async () => {
+  const h = await open({ text: "As [@knuth1984].\n\nProse after it.\n", scores: 0, height: 1200 });
+  try {
+    for (const spacing of ["", ' data-entry-spacing="0"']) {
+      const asked = await citesAsked(h.page);
+      const html =
+        '<p><span id="mdmcite-0"><span class="citation" data-cites="knuth1984">(' + link("knuth1984", "Knuth 1984") + ")</span></span></p>\n" +
+        '<div id="refs" class="references csl-bib-body hanging-indent"' + spacing + ' role="list">\n' +
+        '<div id="ref-a" class="csl-entry" role="listitem">\nAaa, A. 2001. <em>A title long enough to be set on two lines of the column of the editor, and a few words more to be sure of it</em>. Press.\n</div>\n' +
+        '<div id="ref-b" class="csl-entry" role="listitem">\nBbb, B. 2002. A title. Press.\n</div>\n</div>\n';
+      await answerCites(h.page, { seq: asked.seq, state: "ok", html: html, missing: [] });
+      await reading(h.page);
+      await new Promise((r) => setTimeout(r, 200));
+      const set = await h.page.evaluate(() => {
+        const prose = getComputedStyle(document.querySelector("#app .cm-line"));
+        const entries = document.querySelectorAll("#app .mdm-refs .csl-entry");
+        const a = getComputedStyle(entries[0]);
+        const b = getComputedStyle(entries[1]);
+        return {
+          size: a.fontSize === prose.fontSize,
+          leading: a.lineHeight === prose.lineHeight,
+          face: a.fontFamily === prose.fontFamily,
+          hang: [parseFloat(a.paddingLeft) / parseFloat(a.fontSize), parseFloat(a.textIndent) / parseFloat(a.fontSize)],
+          gap: parseFloat(b.marginTop) / parseFloat(b.lineHeight),
+          align: a.textAlign,
+        };
+      });
+      // A margin in lh reads a hair under the line height (27.1875 against
+      // 27.2 px at 16px): the gap is a quarter of a line to a thousandth.
+      assert.ok(Math.abs(set.gap - (spacing ? 0 : 0.25)) < 0.001, spacing + ": gap " + set.gap);
+      delete set.gap;
+      assert.deepEqual(set, { size: true, leading: true, face: true, hang: [1.5, -1.5], align: "justify" }, spacing);
+      // The second answer goes to the same request, as the host's answer
+      // does when a .bib it watches changes.
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+// A numbered style (IEEE, Vancouver) prints each entry as its number and its
+// text in two boxes, which stand in two columns: the numbers' as wide as the
+// widest number, each flush right, and the text half an em after it on every
+// line, as LaTeX sets its own bibliography (C on
+// design/design-bib-numbers.html, the owner's pick of 2026-09-30). Pandoc's
+// stylesheet set the text at 3em whatever the numbers, and "[1]" stood
+// 1.71em from it. Ten entries, for a number of two figures; written in the
+// shape Pandoc 3.8.3 gives a list whose style aligns its second field (read
+// off a real run), with no space between entries, which such a style asks.
+test("a numbered list sets its numbers flush right in a column as wide as the widest, and the text half an em after it", { skip }, async () => {
+  const keys = Array.from({ length: 10 }, (_, i) => "k" + (i + 1));
+  const h = await open({ text: "As " + keys.map((k) => "[@" + k + "]").join(" ") + ".\n\nProse after it.\n", scores: 0, height: 1200 });
+  try {
+    const asked = await citesAsked(h.page);
+    const entry = (key, n, title) =>
+      '<div id="ref-' + key + '" class="csl-entry" role="listitem">\n<div class="csl-left-margin">[' + n +
+      '] </div><div class="csl-right-inline">' + title + "</div>\n</div>\n";
+    const html =
+      keys.map((k, i) => '<p><span id="mdmcite-' + i + '"><span class="citation" data-cites="' + k + '">[' + link(k, String(i + 1)) + "]</span></span></p>\n").join("") +
+      '<div id="refs" class="references csl-bib-body" data-entry-spacing="0" role="list">\n' +
+      keys
+        .map((k, i) =>
+          entry(k, i + 1, i ? "Title " + (i + 1) : "A title long enough to be set on two lines of the column of the editor, and a few words more to be sure of it")
+        )
+        .join("") +
+      "</div>\n";
+    await answerCites(h.page, { seq: asked.seq, state: "ok", html, missing: [] });
+    await reading(h.page);
+    await new Promise((r) => setTimeout(r, 200));
+    const set = await h.page.evaluate(() => {
+      const list = document.querySelector("#app .mdm-refs-list").getBoundingClientRect();
+      const entries = Array.from(document.querySelectorAll("#app .mdm-refs .csl-entry"));
+      const em = parseFloat(getComputedStyle(entries[0]).fontSize);
+      const at = (x) => Math.round(((x - list.left) / em) * 100) / 100;
+      // The ink of a number, and of every row of an entry's text.
+      const ink = (el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return Array.from(range.getClientRects()).filter((r) => r.width > 0);
+      };
+      const number = (e) => ink(e.querySelector(".csl-left-margin"))[0];
+      const rows = ink(entries[0].querySelector(".csl-right-inline"));
+      const widest = number(entries[9]);
+      return {
+        numbers: entries.map((e) => e.querySelector(".csl-left-margin").textContent.trim()),
+        // Every number ends where the widest does, and the widest starts at
+        // the list's edge.
+        ends: Array.from(new Set(entries.map((e) => at(number(e).right)))).length,
+        widestAt: at(widest.left),
+        // Every row of the text, of every entry, starts half an em after the
+        // widest number.
+        text: Array.from(new Set(rows.concat(entries.map((e) => ink(e.querySelector(".csl-right-inline"))[0])).map((r) => at(r.left)))),
+        column: Math.round((at(widest.right) + 0.5) * 100) / 100,
+        rows: new Set(rows.map((r) => Math.round(r.top))).size,
+        gap: Math.round(entries[1].getBoundingClientRect().top - entries[0].getBoundingClientRect().bottom),
+      };
+    });
+    assert.deepEqual(set.numbers, ["[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]", "[10]"]);
+    assert.equal(set.ends, 1, "the numbers do not end in one line");
+    assert.equal(set.widestAt, 0, "the widest number does not start at the list's edge");
+    assert.equal(set.text.length, 1, "the text starts at more than one place: " + set.text);
+    assert.ok(Math.abs(set.text[0] - set.column) < 0.02, "the text at " + set.text[0] + "em, not half an em after the numbers (" + set.column + "em)");
+    assert.equal(set.rows, 2);
+    assert.equal(set.gap, 0);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+// A citation says in its tooltip what it cites, the entry as the box the
+// page opens over it shows it, and the click that goes there; Ctrl+click
+// goes, as the page's link does, leaving the caret where it was. An entry
+// the host found in a file opens there on a plain click, and says so, and
+// Ctrl+click on it does not (one click for one thing, the owner said); one
+// it did not find is words; a link inside an entry is followed with
+// Ctrl+click (the owner, 2026-09-29).
+test("a citation names its entries and Ctrl+click goes to them in the list, and a click on an entry opens it where it is written", { skip }, async () => {
+  // Far enough for the list not to be drawn at all until it is gone to:
+  // CodeMirror draws a margin past the pane, and a list inside it was found
+  // at once, which left the second look of showEntry untried.
+  const filler = Array.from({ length: 300 }, (_, i) => "Paragraph " + i + " standing between the citations and the list.").join("\n\n");
+  const text = CITED.replace("::: {#refs}", filler + "\n\n::: {#refs}");
+  // A list long enough that the place it stands at, brought into the pane,
+  // does not bring its first entry with it: the entry is looked for again
+  // once the list is drawn.
+  const more = Array.from({ length: 60 }, (_, i) => '<div id="ref-zz' + i + '" class="csl-entry" role="listitem">\nZzz, Z. ' + (1900 + i) + ". A title. Press.\n</div>\n").join("");
+  const html = CITED_HTML.replace(
+    "Rameau, Jean-Philippe. 1722. <em>Traité de l’harmonie</em>. Ballard.",
+    'Rameau, Jean-Philippe. 1722. <em>Traité de l’harmonie</em>. Ballard. <a href="https://doi.org/10.1/x">https://doi.org/10.1/x</a>.'
+  ).replace("</div>\n</div>\n<section", "</div>\n" + more + "</div>\n<section");
+  const h = await open({ text, scores: 0, height: 600 });
+  try {
+    const asked = await citesAsked(h.page);
+    await answerCites(h.page, {
+      seq: asked.seq,
+      state: "ok",
+      html,
+      missing: ["nokey2020"],
+      sources: { knuth1984: "refs.bib", rameau1722: "refs.bib" },
+    });
+    await reading(h.page);
+    await new Promise((r) => setTimeout(r, 200));
+    const titles = await h.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-cited")).map((e) => e.title));
+    assert.deepEqual(titles, [
+      "Knuth, Donald E. 1984. The TeXbook. Addison-Wesley.\nCtrl+click to open",
+      // Answered, but not in the list the answer carries: nothing to say.
+      "",
+      "@nokey2020: not in the bibliography",
+      "Rameau, Jean-Philippe. 1722. Traité de l’harmonie. Ballard. https://doi.org/10.1/x.\nCtrl+click to open",
+      "Knuth, Donald E. 1984. The TeXbook. Addison-Wesley.\nCtrl+click to open",
+    ]);
+    // An entry corrected in its file, the citations printing the same as
+    // before: the tooltips follow it, the table's with them, which is told
+    // apart from its last drawing by what its citations print (citedSignature).
+    await answerCites(h.page, {
+      seq: asked.seq,
+      state: "ok",
+      html: html.replace("Addison-Wesley.\n</div>", "Addison-Wesley, 1986.\n</div>"),
+      missing: ["nokey2020"],
+      sources: { knuth1984: "refs.bib", rameau1722: "refs.bib" },
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const again = await h.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-cited")).map((e) => e.title));
+    assert.equal(again[0], "Knuth, Donald E. 1984. The TeXbook. Addison-Wesley, 1986.\nCtrl+click to open");
+    assert.equal(again[4], again[0], "the table's citation kept the tooltip it was first drawn with");
+
+    // Ctrl+click on a citation whose key the list has not got: nothing to
+    // go to, and the view stays. Then on the first citation: its entry, far
+    // below and not yet drawn, comes into the pane, and the caret has not
+    // moved. The caret stands after the first citation, outside it, which
+    // would otherwise be its source.
+    await setSelection(h.page, CITED.indexOf(" says") + 2);
+    const before = await h.page.evaluate(() => window.__mdm.view.state.selection.main.head);
+    const entryShown = () =>
+      h.page.evaluate(() => {
+        const e = document.querySelector('#app .mdm-refs .csl-entry[data-mdm-ref="knuth1984"]');
+        if (!e) return false;
+        const b = e.getBoundingClientRect();
+        return b.top >= 0 && b.bottom <= window.innerHeight;
+      });
+    const scrolled = () => h.page.evaluate(() => window.__mdm.view.scrollDOM.scrollTop);
+    const ctrlClick = async (index) => {
+      const at = await h.page.evaluate((i) => {
+        const b = document.querySelectorAll("#app .mdm-cited")[i].querySelector(".mdm-cite-link").getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      }, index);
+      await h.page.keyboard.down("Control");
+      await h.page.mouse.click(at.x, at.y);
+      await h.page.keyboard.up("Control");
+      await new Promise((r) => setTimeout(r, 300));
+    };
+    assert.equal(await entryShown(), false, "the entry was in sight already");
+    assert.equal(
+      await h.page.evaluate(() => document.querySelectorAll("#app .mdm-refs").length),
+      0,
+      "the list was drawn before it was gone to"
+    );
+    const top = await scrolled();
+    await ctrlClick(1);
+    assert.equal(await scrolled(), top, "a key the list has not got moved the view");
+    await ctrlClick(0);
+    assert.equal(await entryShown(), true, "Ctrl+click did not bring the entry into sight");
+    assert.equal(await h.page.evaluate(() => window.__mdm.view.state.selection.main.head), before);
+
+    // The entries: which open, what they say, and what a click posts.
+    const entries = await h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-refs .csl-entry")).slice(0, 3).map((e) => [
+        e.getAttribute("data-mdm-ref"),
+        e.title,
+        getComputedStyle(e).cursor,
+      ])
+    );
+    assert.deepEqual(entries, [
+      ["knuth1984", "refs.bib\nClick to open", "pointer"],
+      ["partch1949", "", "text"],
+      ["rameau1722", "refs.bib\nClick to open", "pointer"],
+    ]);
+    // Under the pointer an entry that opens takes the link blue; one that
+    // does not keeps the ink.
+    const hovered = async (key) => {
+      const b = await h.page.evaluate((k) => {
+        const e = document.querySelector('#app .mdm-refs .csl-entry[data-mdm-ref="' + k + '"]');
+        e.scrollIntoView({ block: "center" });
+        const r = e.getBoundingClientRect();
+        return { x: r.left + 20, y: r.top + r.height / 2 };
+      }, key);
+      await h.page.mouse.move(b.x, b.y);
+      await new Promise((r) => setTimeout(r, 100));
+      return h.page.evaluate((k) => {
+        const e = document.querySelector('#app .mdm-refs .csl-entry[data-mdm-ref="' + k + '"]');
+        const link = getComputedStyle(document.querySelector("#app .mdm-cited .mdm-cite-link")).color;
+        const ink = getComputedStyle(document.querySelector("#app .cm-line")).color;
+        const c = getComputedStyle(e).color;
+        return c === link ? "blue" : c === ink ? "ink" : c;
+      }, key);
+    };
+    assert.equal(await hovered("knuth1984"), "blue");
+    assert.equal(await hovered("partch1949"), "ink");
+    const clickOn = async (selector, ctrl) => {
+      const b = await h.page.evaluate((sel) => {
+        const e = document.querySelector(sel);
+        e.scrollIntoView({ block: "center" });
+        const r = e.getBoundingClientRect();
+        return { x: r.left + 4, y: r.top + r.height / 2 };
+      }, selector);
+      if (ctrl) await h.page.keyboard.down("Control");
+      await h.page.mouse.click(b.x, b.y);
+      if (ctrl) await h.page.keyboard.up("Control");
+      await new Promise((r) => setTimeout(r, 100));
+    };
+    const posted = () =>
+      h.page.evaluate(() =>
+        window.__posts.filter((m) => m.type === "openEntry" || m.type === "openLink").map((m) => m.type + " " + (m.key || m.href))
+      );
+    // A plain click opens an entry the host found, and Ctrl+click on it
+    // does nothing, but on the DOI inside it follows the DOI.
+    await clickOn('#app .mdm-refs .csl-entry[data-mdm-ref="knuth1984"]');
+    await clickOn('#app .mdm-refs .csl-entry[data-mdm-ref="partch1949"]');
+    await clickOn("#app .mdm-refs .mdm-cite-link[data-mdm-href]", true);
+    await clickOn('#app .mdm-refs .csl-entry[data-mdm-ref="rameau1722"]', true);
+    await clickOn('#app .mdm-refs .csl-entry[data-mdm-ref="partch1949"]', true);
+    assert.deepEqual(await posted(), ["openEntry knuth1984", "openLink https://doi.org/10.1/x"]);
+    // Nothing of the list became a caret in the document.
+    assert.equal(await h.page.evaluate(() => window.__mdm.view.state.selection.main.head), before);
+    // With Ctrl+click adding a caret (editor.multiCursorModifier ctrlCmd),
+    // Alt+click is the one that follows, and a citation's tooltip says so;
+    // an entry's names the plain click that opens it either way.
+    await postSettings(h.page, { multiCursorModifier: "ctrlCmd" });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual(
+      await h.page.evaluate(() => [
+        document.querySelector("#app .mdm-cited").title.split("\n").pop(),
+        document.querySelector('#app .mdm-refs .csl-entry[data-mdm-ref="knuth1984"]').title,
+      ]),
+      ["Alt+click to open", "refs.bib\nClick to open"]
+    );
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});

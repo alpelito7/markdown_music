@@ -85,6 +85,182 @@ test("mdm refuses a file that is not .mdm", () => {
   assert.match(r.stderr, /expected a \.mdm file/);
 });
 
+// ---------- The header of the copy, and bibliographies ----------
+
+// The copy Quarto is handed, kept by a quarto that stands in front of the
+// real one on the PATH and only saves it.
+function copyOf(dir, text) {
+  const bin = path.join(dir, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, "quarto"), '#!/bin/sh\ncp "$2" "' + path.join(dir, "copy.qmd") + '"\n');
+  fs.chmodSync(path.join(bin, "quarto"), 0o755);
+  fs.writeFileSync(path.join(dir, "doc.mdm"), text);
+  const r = spawnSync(MDM, ["render", "doc.mdm"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: Object.assign({}, process.env, { PATH: bin + path.delimiter + process.env.PATH }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return fs.readFileSync(path.join(dir, "copy.qmd"), "utf8");
+}
+
+// What bin/mdm adds goes at the foot of the header, as the export's does
+// (withHeaderLines in extension.js): `from:` at the top put every line of the
+// header one lower in an error about it. And the page's two keys: the notes
+// and the list in the flow (appendix-style), citeproc's formulas as their
+// LaTeX (html-math-method), each unless the document names its own.
+test("the command line's copy gains the dialect and the page's two keys at the foot of its header", () => {
+  const dir = freshDir("cli-copy-keys");
+  const text = "---\ntitle: T\nbibliography: refs.bib\n---\n\nBody [@k].\n";
+  const copy = copyOf(dir, text);
+  assert.equal(
+    copy,
+    "---\ntitle: T\nbibliography: refs.bib\nfrom: markdown-blank_before_header-blank_before_blockquote+autolink_bare_uris\n" +
+      "appendix-style: none\nhtml-math-method: gladtex\n---\n\nBody [@k].\n"
+  );
+  // Named by the document, under a format as well: kept, and not doubled.
+  const own = copyOf(dir, "---\nformat:\n  html:\n    appendix-style: default\nfrom: gfm\n---\n\nBody.\n");
+  assert.equal(own, "---\nformat:\n  html:\n    appendix-style: default\nfrom: gfm\nhtml-math-method: gladtex\n---\n\nBody.\n");
+  // No header: one is made, with the three in it.
+  assert.match(copyOf(dir, "Body.\n"), /^---\nfrom: [^\n]+\nappendix-style: none\nhtml-math-method: gladtex\n---\n\nBody\.\n$/);
+  // A header written with CRLF is found, its closer ending in a \r.
+  const crlf = copyOf(dir, "---\r\ntitle: T\r\n---\r\n\r\nBody.\r\n");
+  assert.match(crlf, /^---\r\ntitle: T\r\nfrom: [^\n]+\nappendix-style: none\nhtml-math-method: gladtex\n---\r\n/);
+});
+
+test("a header that is not YAML is reported at the line of the .mdm it is on", () => {
+  const dir = freshDir("cli-yaml-line");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), "---\ntitle: T\nnocite: @shannon1948\nfilters:\n  - mdm\n---\n\nBody.\n");
+  const r = runMdm(["render", "doc.mdm", "--to", "html"], dir);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /YAMLException: [^\n]*\(3:\d+\)/, r.stderr);
+});
+
+// Quarto asks citeproc for links only when it writes HTML, so the paper set
+// every citation in ink with nothing to follow, beside a page whose years are
+// links in the link blue (mdm.lua, Meta, 2026-09-29). And the list is told
+// the space the style leaves between entries, a line for Pandoc's default
+// style, which look_tex brings down to a quarter (the test after this one).
+test("on paper the citations link to the list, as on the page, and a document that says no keeps its word", () => {
+  const dir = freshDir("pdf-link-citations");
+  fs.writeFileSync(
+    path.join(dir, "refs.bib"),
+    "@book{knuth1984, author = {Knuth, Donald E.}, title = {The {\\TeX}book}, publisher = {Addison-Wesley}, year = {1984}}\n"
+  );
+  const head = "---\nbibliography: refs.bib\nformat:\n  pdf:\n    documentclass: article\nfilters:\n  - mdm\n";
+  const tex = (name, extra) => {
+    fs.writeFileSync(path.join(dir, name + ".mdm"), head + (extra || "") + "---\n\nAs @knuth1984 shows [@knuth1984, p. 3].\n");
+    const r = runMdm(["render", name + ".mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+    assert.equal(r.status, 0, r.stderr);
+    return fs.readFileSync(path.join(dir, name + ".tex"), "utf8");
+  };
+  const linked = tex("linked");
+  assert.match(linked, /\\citeproc\{ref-knuth1984\}\{1984\}/);
+  assert.match(linked, /\\begin\{CSLReferences\}\{1\}\{1\}/);
+  const plain = tex("plain", "link-citations: false\n");
+  assert.doesNotMatch(plain, /\\citeproc\{ref-knuth1984\}/);
+});
+
+// The smallest style that asks for no space between entries, as IEEE does.
+const TIGHT_CSL = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info><title>Tight</title><id>tight</id><updated>2026-09-29T00:00:00+00:00</updated></info>
+  <citation><layout><text value="x"/></layout></citation>
+  <bibliography entry-spacing="0"><layout><names variable="author"><name name-as-sort-order="all"/></names><text value=". "/><text variable="title"/></layout></bibliography>
+</style>
+`;
+
+// The space between two entries of the list: a quarter of a line where the
+// style asks for a line, as the editor and the page leave it, and none where
+// it asks for none. Pandoc's default style asks for a whole line, which the
+// template set as it was and the owner found too far apart (2026-09-29).
+// Read off the word boxes: the step from one entry of a line to the next,
+// against the step between the two lines of one entry.
+test("on paper the list leaves a quarter of a line between entries, and none where the style asks for none", {
+  skip: spawnSync("pdftotext", ["-v"]).status !== 0 && "needs pdftotext",
+}, () => {
+  const dir = freshDir("pdf-entry-spacing");
+  fs.writeFileSync(
+    path.join(dir, "refs.bib"),
+    "@book{a, author = {Aaa, Anna}, title = {Alpha " + "long words ".repeat(12) + "end}, publisher = {Press}, year = {2001}}\n" +
+      "@book{b, author = {Bbb, Bert}, title = {Beta}, publisher = {Press}, year = {2002}}\n" +
+      "@book{c, author = {Ccc, Carl}, title = {Gamma}, publisher = {Press}, year = {2003}}\n"
+  );
+  fs.writeFileSync(path.join(dir, "tight.csl"), TIGHT_CSL);
+  const steps = (name, extra) => {
+    fs.writeFileSync(
+      path.join(dir, name + ".mdm"),
+      "---\nbibliography: refs.bib\n" + (extra || "") + "format:\n  pdf:\n    documentclass: article\nfilters:\n  - mdm\n---\n\nAs [@a; @b; @c].\n"
+    );
+    const r = runMdm(["render", name + ".mdm", "--to", "pdf", "-M", "mdm-text-font:roman"], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const words = pdfWordBoxes(path.join(dir, name + ".pdf"));
+    const at = (text) => words.findIndex((w) => w.text === text);
+    const a = at("Aaa,");
+    const b = at("Bbb,");
+    const c = at("Ccc,");
+    assert.ok(a !== -1 && b > a && c > b, JSON.stringify(words.map((w) => w.text)));
+    // The rows of the first entry, told apart by more than a point: its
+    // italic title stands 0.02pt lower than the roman beside it.
+    const rows = [];
+    words.slice(a, b).forEach((w) => {
+      if (!rows.length || w.y0 - rows[rows.length - 1] > 1) rows.push(w.y0);
+    });
+    assert.ok(rows.length >= 2, "the first entry is set on one line");
+    return Math.round(((words[c].y0 - words[b].y0) / (rows[1] - rows[0])) * 100) / 100;
+  };
+  assert.equal(steps("spaced"), 1.25, "Pandoc's default style");
+  assert.equal(steps("tight", "csl: tight.csl\n"), 1, "a style that asks for none");
+});
+
+// A numbered style's list on paper, as the editor and the page set it: the
+// numbers in a column as wide as the widest, each flush right, and the text
+// half an em after it (C on design/design-bib-numbers.html, the owner's pick
+// of 2026-09-30). The template gave the numbers \csllabelwidth, 3em,
+// whatever they were; look_tex measures them before the list is set. Read
+// off the word boxes: every number ends at one x, the widest starts at the
+// prose's margin, and every entry's text starts at one x, half an em of the
+// scaled roman (6.1pt, measured) after the numbers.
+const NUMBERED_CSL = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info><title>Numbered</title><id>numbered</id><updated>2026-09-30T00:00:00+00:00</updated></info>
+  <citation><layout prefix="[" suffix="]" delimiter=", "><text variable="citation-number"/></layout></citation>
+  <bibliography entry-spacing="0" second-field-align="flush"><layout><text variable="citation-number" prefix="[" suffix="]"/><text variable="title" prefix=" "/></layout></bibliography>
+</style>
+`;
+
+test("on paper a numbered list sets its numbers flush right in a column as wide as the widest, and the text half an em after it", {
+  skip: spawnSync("pdftotext", ["-v"]).status !== 0 && "needs pdftotext",
+}, () => {
+  const dir = freshDir("pdf-numbered-list");
+  const keys = Array.from({ length: 10 }, (_, i) => "k" + (i + 1));
+  fs.writeFileSync(path.join(dir, "refs.bib"), keys.map((k, i) => "@book{" + k + ", title = {Title " + (i + 1) + "}, year = 2002}\n").join(""));
+  fs.writeFileSync(path.join(dir, "numbered.csl"), NUMBERED_CSL);
+  fs.writeFileSync(
+    path.join(dir, "doc.mdm"),
+    "---\nbibliography: refs.bib\ncsl: numbered.csl\nformat:\n  pdf:\n    documentclass: article\nfilters:\n  - mdm\n---\n\nAs " +
+      keys.map((k) => "[@" + k + "]").join(" ") + ".\n"
+  );
+  const r = runMdm(["render", "doc.mdm", "--to", "pdf", "-M", "mdm-text-font:roman"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const words = pdfWordBoxes(path.join(dir, "doc.pdf"));
+  const margin = words.find((w) => w.text === "As").x0;
+  // The list's number is the last "[n]" of the document, the text's
+  // citation being the first.
+  const entries = keys.map((k, i) => {
+    const number = words.filter((w) => w.text === "[" + (i + 1) + "]").pop();
+    const text = number && words.find((w) => w.text === "Title" && Math.abs(w.y0 - number.y0) < 2);
+    assert.ok(text, "entry " + (i + 1) + " not found");
+    return { left: number.x0, right: number.x1, text: text.x0 };
+  });
+  const round = (x) => Math.round(x * 10) / 10;
+  assert.equal(new Set(entries.map((e) => round(e.right))).size, 1, "the numbers do not end at one x: " + JSON.stringify(entries));
+  assert.equal(new Set(entries.map((e) => round(e.text))).size, 1, "the text does not start at one x: " + JSON.stringify(entries));
+  assert.ok(Math.abs(entries[9].left - margin) < 0.5, "[10] starts at " + entries[9].left + ", the prose at " + margin);
+  const gap = entries[0].text - entries[0].right;
+  assert.ok(gap > 5.5 && gap < 6.7, "the text starts " + gap + "pt after the numbers, not half an em (6.1pt)");
+});
+
 test("mdm refuses to overwrite an existing .qmd twin", () => {
   const dir = freshDir("cli-collision");
   fs.writeFileSync(path.join(dir, "doc.mdm"), "hola\n");

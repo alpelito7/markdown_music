@@ -31,8 +31,13 @@
 // delimiters are private objects, told apart here by what they are not:
 // a delimiter with no resolve and no mark, one character long for a link
 // and two for an image.
+//
+// A closing bracket may also end a citation (`[@key, p. 33]`, and the
+// locator of `@key [p. 33]`), which Pandoc's reader tries before a span or
+// a link; pandoc.js reads it, here, where the inside of the bracket has
+// been parsed and a `]` in code or maths has closed nothing.
 
-import {attributeEnd} from "./pandoc.js"
+import {attributeEnd, citationEnd, destinationStop, isolateLabel, locatorEnd} from "./pandoc.js"
 
 const CLOSE_BRACKET = 93, OPEN_BRACKET = 91, OPEN_PAREN = 40, CLOSE_PAREN = 41, OPEN_BRACE = 123
 const BACKSLASH = 92
@@ -100,15 +105,11 @@ function parseURL(cx, text, start, offset) {
     }
     return null
   }
-  let depth = 0, pos = start
-  for (let escaped = false; pos < text.length; pos++) {
-    let ch = text.charCodeAt(pos)
-    if (space(ch)) break
-    else if (escaped) escaped = false
-    else if (ch == OPEN_PAREN) depth++
-    else if (ch == CLOSE_PAREN) { if (!depth) break; depth-- }
-    else if (ch == BACKSLASH) escaped = true
-  }
+  // Up to a space or a `)` that no `(` in it opens, read off a table made
+  // once per section (pandoc.js, destinationStop): scanned from every `](`
+  // it cost a long paragraph of them the square of its length.
+  let stop = destinationStop(cx, start + offset)
+  let pos = Math.min(stop.space, stop.paren) - offset
   return pos > start ? cx.elt("URL", start + offset, pos + offset) : pos == text.length ? null : false
 }
 
@@ -180,12 +181,18 @@ function linkEnd(cx, next, start) {
     let part = cx.parts[i]
     let kind = openerKind(cx, part)
     if (!kind) continue
+    let after = tail(cx, part.to, start + 1)
+    let defined = after.label != null && definitionsFor(cx).has(normalizeLabel(after.label))
+    // Pandoc's reader tries a citation before a span or a link: `[@key,
+    // p. 33]` is one unless a destination, an attribute block or a label
+    // follows it (pandoc.js). A citation may hold a link, so an opener set
+    // invalid below can still close one.
+    let cite = citationEnd(cx, i, start, kind, after, defined)
+    if (cite >= 0) return cite
     // An opener set invalid (it would hold a link), or an empty `[]` with
     // no tail: both brackets are text.
-    if (!part.side || cx.skipSpace(part.to) == start && !/[(\[]/.test(cx.slice(start + 1, start + 2))) {
-      cx.parts[i] = null
-      return -1
-    }
+    if (!part.side || cx.skipSpace(part.to) == start && !/[(\[]/.test(cx.slice(start + 1, start + 2)))
+      return textBrackets(cx, i, start, kind)
     // `[text]{.class}`: Pandoc's bracketed span, an attribute block straight
     // after the closing bracket (pandoc.js). Not an image.
     if (kind == "Link" && cx.char(start + 1) == OPEN_BRACE) {
@@ -199,12 +206,12 @@ function linkEnd(cx, next, start) {
         return span.to
       }
     }
-    let after = tail(cx, part.to, start + 1)
-    if (after.label != null && !definitionsFor(cx).has(normalizeLabel(after.label))) {
+    if (after.label != null && !defined) {
       // A reference with no definition: the brackets are text, the opener
-      // is spent, and an opener outside them stays live (G003).
-      cx.parts[i] = null
-      return -1
+      // is spent, and an opener outside them stays live (G003). Its label,
+      // if it has one, Pandoc reads again on its own (pandoc.js).
+      if (after.elts.length) isolateLabel(cx, after.elts[0].from)
+      return textBrackets(cx, i, start, kind)
     }
     let content = cx.takeContent(i)
     content.unshift(cx.elt("LinkMark", part.from, part.to))
@@ -220,6 +227,16 @@ function linkEnd(cx, next, start) {
       }
     return link.to
   }
+  return -1
+}
+
+// Brackets that make no link: text, their opener spent, unless they are
+// the locator of a citation's key straight before them, `@key [p. 33]`
+// (pandoc.js), which a picture's `![` never is.
+function textBrackets(cx, i, start, kind) {
+  let cite = kind == "Link" ? locatorEnd(cx, i, start) : -1
+  if (cite >= 0) return cite
+  cx.parts[i] = null
   return -1
 }
 

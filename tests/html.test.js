@@ -2863,3 +2863,398 @@ test("the page sets a table's head in the weight of its body, as the editor does
   assert.deepEqual(exported.strong, ["700"], "a head cell written in `**` is not bold on the page");
   assert.deepEqual(exported, editor, "the page and the editor weigh the table differently");
 });
+
+// ---------- Bibliographies ----------
+
+const BIB = `@book{knuth1984,
+  author = {Knuth, Donald E.}, title = {The {\\TeX}book}, publisher = {Addison-Wesley}, year = {1984}
+}
+@article{shannon1948,
+  author = {Shannon, Claude E.}, title = {A Mathematical Theory of Communication},
+  journal = {Bell System Technical Journal}, volume = {27}, pages = {379--423}, year = {1948}
+}
+@article{partch1949,
+  author = {Partch, Harry}, title = {Tuning by the ratio $3/2$ and the fifth $\\sqrt[12]{2^7}$},
+  journal = {Journal of Tuning}, year = {1949}
+}
+@book{rameau1722,
+  author = {Rameau, Jean-Philippe}, title = {Traité de l'harmonie réduite à ses principes naturels},
+  publisher = {Ballard}, year = {1722}, langid = {french}
+}
+`;
+
+// A paragraph long enough to break over several rows, with a citation of
+// every shape in it, a note that cites, and the heading the list goes under.
+const CITING = `The theory of consonance has a long history, from the ratios of Pythagoras to the measured intervals of the nineteenth century, and @knuth1984 is not usually counted among its sources, although the typesetting of music owes him a great deal [@knuth1984, p. 12]. The information carried by a melody was measured much later [see @shannon1948, pp. 379--423], and the tuning debates of the twentieth century [@partch1949; @rameau1722] went back to the same numbers once more.[^1]
+
+[^1]: A note that cites [@rameau1722] as well.
+
+## References
+`;
+
+function renderCiting(name, extra) {
+  fs.writeFileSync(path.join(DIR, "refs.bib"), BIB);
+  fs.writeFileSync(
+    path.join(DIR, name + ".mdm"),
+    "---\ntitle: Citations\nlang: en\nbibliography: refs.bib\nformat:\n  html:\n    embed-resources: true\nfilters:\n  - mdm\n---\n\n" + CITING
+  );
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"].concat(extra || []), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return "file://" + path.join(DIR, name + ".html");
+}
+
+// A page read at the side-by-side width, once its fonts are in; pageAt waits
+// for a score, and these pages have none.
+async function readCiting(url, read, arg) {
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+  });
+  OPEN_BROWSERS.add(browser);
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    return await page.evaluate(read, arg);
+  } finally {
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+  }
+}
+
+// Quarto's appendix took the notes and the list into a white card at 0.9 of
+// the text and 0.9 opacity, under headings of its own, and the card stayed
+// white under the dark look while the ink went pale: 1.42:1 (2026-09-29).
+// They stay in the flow of the page now (appendix-style: none, which the
+// export writes into the copy), set as the prose is.
+test("the notes and the reference list stay in the flow of the page, set as the prose is and readable on either side", { skip }, async () => {
+  for (const side of ["light", "dark"]) {
+    const url = renderCiting("bib-" + side, ["-M", "mdm-look:" + side, "-M", "mdm-text-font:roman"]);
+    const read = await readCiting(url, () => {
+      // A computed colour as channels from 0 to 1 and its alpha: rgb() and
+      // rgba() count to 255, and a colour-mix comes back as color(srgb ...),
+      // which counts to 1 and carries its alpha after a slash.
+      const channels = (c) => {
+        const n = c.match(/[\d.]+/g).map(Number);
+        if (/^color\(/.test(c)) return { rgb: n.slice(0, 3), a: n.length > 3 ? n[3] : 1 };
+        return { rgb: n.slice(0, 3).map((x) => x / 255), a: n.length > 3 ? n[3] : 1 };
+      };
+      const lum = (rgb) => {
+        const v = rgb.map((s) => (s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)));
+        return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+      };
+      const ground = (el) => {
+        for (let e = el; e; e = e.parentElement) {
+          const bg = getComputedStyle(e).backgroundColor;
+          if (bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(bg)) return bg;
+        }
+        return "rgb(255, 255, 255)";
+      };
+      // WCAG's contrast of the text, laid over what is behind it.
+      const contrast = (el) => {
+        const fg = channels(getComputedStyle(el).color);
+        const bg = channels(ground(el)).rgb;
+        const a = lum(fg.rgb.map((x, i) => fg.a * x + (1 - fg.a) * bg[i]));
+        const b = lum(bg);
+        return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100;
+      };
+      const p = document.querySelector("main.content p");
+      const entry = document.querySelector("#refs .csl-entry");
+      const second = document.querySelectorAll("#refs .csl-entry")[1];
+      const e = getComputedStyle(entry);
+      const heading = document.querySelector("#refs").previousElementSibling;
+      return {
+        appendix: !!document.querySelector("#quarto-appendix"),
+        underHeading: heading && heading.tagName + " " + heading.textContent.trim(),
+        size: e.fontSize === getComputedStyle(p).fontSize,
+        leading: e.lineHeight === getComputedStyle(p).lineHeight,
+        align: e.textAlign === getComputedStyle(p).textAlign,
+        opacity: e.opacity,
+        hang: [parseFloat(e.paddingLeft) / parseFloat(e.fontSize), parseFloat(e.textIndent) / parseFloat(e.fontSize)],
+        left: Math.round(entry.getBoundingClientRect().left - p.getBoundingClientRect().left),
+        gap: Math.round((parseFloat(getComputedStyle(second).marginTop) / parseFloat(e.lineHeight)) * 100) / 100,
+        readable: contrast(entry) >= 4.5 && contrast(document.querySelector("section.footnotes li p")) >= 4.5,
+        noteSize: getComputedStyle(document.querySelector("section.footnotes")).fontSize === getComputedStyle(p).fontSize,
+        back: getComputedStyle(document.querySelector(".footnote-back")).display,
+      };
+    });
+    assert.deepEqual(
+      read,
+      {
+        appendix: false,
+        underHeading: "H2 References",
+        size: true,
+        leading: true,
+        align: true,
+        opacity: "1",
+        hang: [1.5, -1.5],
+        left: 0,
+        // A quarter of a line where the style asks for one (Pandoc's default
+        // does), which the editor and the PDF leave too (2026-09-29).
+        gap: 0.25,
+        readable: true,
+        noteSize: true,
+        back: "none",
+      },
+      side
+    );
+  }
+});
+
+// Citeproc runs after every filter, so a formula it writes from a .bib never
+// was the filter's; the page fetched MathJax from a CDN for it and KaTeX drew
+// it in red. The export asks for GladTeX's markup, and mdm-math.js sets it.
+test("a formula in the bibliography is set by KaTeX, and the page fetches nothing for it", { skip }, async () => {
+  const url = renderCiting("bib-maths", []);
+  const browser = await puppeteer.launch({ executablePath: CHROME, args: ["--no-sandbox", "--allow-file-access-from-files"] });
+  OPEN_BROWSERS.add(browser);
+  try {
+    const page = await browser.newPage();
+    const fetched = [];
+    page.on("request", (req) => {
+      if (/^https?:/.test(req.url())) fetched.push(req.url());
+    });
+    await page.goto(url, { waitUntil: "networkidle0" });
+    const read = await page.evaluate(() => ({
+      set: document.querySelectorAll("#refs eq .katex").length,
+      errors: document.querySelectorAll(".katex-error").length,
+      scripts: Array.from(document.scripts).filter((s) => /mathjax/i.test(s.src)).length,
+    }));
+    assert.deepEqual(read, { set: 2, errors: 0, scripts: 0 });
+    assert.deepEqual(fetched, []);
+  } finally {
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+  }
+});
+
+// The box the page opens over a citation was white on either side, and the
+// entry in it started a hang's width left of the box, its first letter cut.
+test("the box over a citation takes the look's colours and shows its entry whole", { skip }, async () => {
+  const url = renderCiting("bib-box", ["-M", "mdm-look:dark", "-M", "mdm-text-align:justify"]);
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 900 },
+  });
+  OPEN_BROWSERS.add(browser);
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "networkidle0" });
+    const a = (await page.$$(".citation a"))[2];
+    const box = await a.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForSelector(".tippy-box", { timeout: 5000 });
+    const read = await page.evaluate(() => {
+      const t = document.querySelector(".tippy-box");
+      const entry = t.querySelector(".csl-entry");
+      const range = document.createRange();
+      range.selectNodeContents(entry);
+      const card = getComputedStyle(document.body).getPropertyValue("--mdm-syn-card").trim();
+      const probe = document.createElement("div");
+      probe.style.color = card;
+      document.body.appendChild(probe);
+      const cardColour = getComputedStyle(probe).color;
+      probe.remove();
+      return {
+        ground: getComputedStyle(t).backgroundColor === cardColour,
+        align: getComputedStyle(entry).textAlign,
+        whole: range.getClientRects()[0].left >= t.getBoundingClientRect().left,
+      };
+    });
+    assert.deepEqual(read, { ground: true, align: "left", whole: true });
+  } finally {
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+  }
+});
+
+// The line-break test of the export rule, for a paragraph that cites: with
+// the citations drawn as written, every row of it ended on another word in
+// the editor than on the page (2026-09-29). The editor asks the real host,
+// which asks the Pandoc of the Quarto these tests render with.
+test("a paragraph that cites breaks on the same words in the editor as on the page", { skip }, async () => {
+  const MOCK = path.join(__dirname, "mocks", "vscode.js");
+  const Module = require("node:module");
+  const resolve = Module._resolveFilename;
+  Module._resolveFilename = function (request, ...rest) {
+    return request === "vscode" ? MOCK : resolve.call(this, request, ...rest);
+  };
+  const vscode = require("vscode");
+  const ext = require("../vscode-mdm/extension.js");
+  const { open: openEditor } = require("./webview/helpers.js");
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
+  const url = renderCiting("bib-lines", look);
+  const docPath = path.join(DIR, "bib-lines.mdm");
+  const uri = "file://" + docPath;
+  vscode._reset();
+  vscode._state.documents.set(uri, fs.readFileSync(docPath, "utf8"));
+  ext.activate({ subscriptions: [], extensionUri: vscode.Uri.file("/ext"), globalState: vscode._memento() });
+  const provider = vscode._state.registeredProviders[vscode._state.registeredProviders.length - 1].provider;
+  let page = null;
+  let receive = null;
+  let dispose = null;
+  const panel = {
+    webview: {
+      asWebviewUri: (u) => u,
+      cspSource: "vscode-resource:",
+      postMessage(msg) {
+        if (!page) return Promise.resolve(false);
+        return page.evaluate((m) => window.postMessage(m, "*"), msg).then(() => true, () => false);
+      },
+      onDidReceiveMessage(handler) {
+        receive = handler;
+      },
+    },
+    onDidDispose(handler) {
+      dispose = handler;
+    },
+  };
+  provider.resolveCustomTextEditor(vscode._makeDocument(uri), panel);
+  const settings = Object.assign(JSON.parse(/window\.MDM_SETTINGS = (\{.*?\});/.exec(panel.webview.html)[1]), {
+    frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light",
+  });
+  const h = await openEditor({ seed: { settings }, scores: 0, toHost: (msg, p) => { page = p; return receive(msg); } });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+    await h.page.waitForFunction(() => document.querySelectorAll("#app .mdm-cited").length >= 5, { timeout: 20000 });
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await new Promise((r) => setTimeout(r, 500));
+    editor = await h.page.evaluate(
+      (fn) => eval("(" + fn + ")")(Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => l.querySelector(".mdm-cited") && l.textContent.length > 200)),
+      LINE_ENDS
+    );
+  } finally {
+    dispose();
+    await h.close();
+    Module._resolveFilename = resolve;
+  }
+  const pageRead = await readCiting(
+    url,
+    (fn) => eval("(" + fn + ")")(Array.from(document.querySelectorAll("main.content p")).filter((q) => q.querySelector(".citation") && q.textContent.length > 200)),
+    LINE_ENDS
+  );
+  const ed = Object.values(editor);
+  const pg = Object.values(pageRead);
+  assert.equal(ed.length, 1, "the paragraph was not found in the editor");
+  assert.equal(pg.length, 1, "the paragraph was not found on the page");
+  assert.equal(ed[0].text, pg[0].text, "the editor prints other words than the page");
+  assert.ok(ed[0].ends.length >= 3, "the paragraph is not long enough to test: " + JSON.stringify(ed[0].ends));
+  assert.deepEqual(ed[0].ends, pg[0].ends);
+});
+
+// A numbered style on the page: the numbers in a column as wide as the widest
+// of them, each flush right, and the text half an em after it on every line,
+// as the editor sets the same list (webview-markdown.test.js) and look_tex the
+// paper (C on design/design-bib-numbers.html, the owner's pick of
+// 2026-09-30); Pandoc's stylesheet, inlined in the page, set the text at 3em.
+// The box the page opens over a citation shows its entry the same way. The
+// smallest style that numbers and aligns its second field, as IEEE and
+// Vancouver do; ten works for a number of two figures, cited in order.
+const NUMBERED_CSL = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info><title>Numbered</title><id>numbered</id><updated>2026-09-30T00:00:00+00:00</updated></info>
+  <citation><layout prefix="[" suffix="]" delimiter=", "><text variable="citation-number"/></layout></citation>
+  <bibliography entry-spacing="0" second-field-align="flush"><layout><text variable="citation-number" prefix="[" suffix="]"/><text variable="title" prefix=" "/></layout></bibliography>
+</style>
+`;
+
+test("a numbered list on the page sets its numbers flush right in a column as wide as the widest, and the text half an em after it", { skip }, async () => {
+  fs.writeFileSync(path.join(DIR, "numbered.csl"), NUMBERED_CSL);
+  const keys = Array.from({ length: 10 }, (_, i) => "k" + (i + 1));
+  fs.writeFileSync(
+    path.join(DIR, "numbered.bib"),
+    keys
+      .map((k, i) => "@book{" + k + ", title = {" + (i ? "Title " + (i + 1) : "A title long enough to be set on two lines of the column of the page, and a few words more to be sure of it, and more") + "}, year = 2002}\n")
+      .join("")
+  );
+  fs.writeFileSync(
+    path.join(DIR, "bib-numbered.mdm"),
+    "---\nlang: en\nbibliography: numbered.bib\ncsl: numbered.csl\nformat:\n  html:\n    embed-resources: true\nfilters:\n  - mdm\n---\n\nAs " +
+      keys.map((k) => "[@" + k + "]").join(" ") + ".\n"
+  );
+  const r = spawnSync(MDM, ["render", "bib-numbered.mdm", "--to", "html", "-M", "mdm-text-font:roman"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+  });
+  OPEN_BROWSERS.add(browser);
+  try {
+    const page = await browser.newPage();
+    await page.goto("file://" + path.join(DIR, "bib-numbered.html"), { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    const set = await page.evaluate(() => {
+      const list = document.querySelector("#refs").getBoundingClientRect();
+      const entries = Array.from(document.querySelectorAll("#refs .csl-entry"));
+      const em = parseFloat(getComputedStyle(entries[0]).fontSize);
+      const at = (x) => Math.round(((x - list.left) / em) * 100) / 100;
+      const ink = (el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return Array.from(range.getClientRects()).filter((x) => x.width > 0);
+      };
+      const number = (e) => ink(e.querySelector(".csl-left-margin"))[0];
+      const rows = ink(entries[0].querySelector(".csl-right-inline"));
+      const widest = number(entries[9]);
+      return {
+        cited: Array.from(document.querySelectorAll("main.content p .citation")).map((c) => c.textContent),
+        numbers: entries.map((e) => e.querySelector(".csl-left-margin").textContent.trim()),
+        ends: Array.from(new Set(entries.map((e) => at(number(e).right)))).length,
+        widestAt: at(widest.left),
+        text: Array.from(new Set(rows.concat(entries.map((e) => ink(e.querySelector(".csl-right-inline"))[0])).map((x) => at(x.left)))),
+        column: Math.round((at(widest.right) + 0.5) * 100) / 100,
+        rows: new Set(rows.map((x) => Math.round(x.top))).size,
+        gap: Math.round(entries[1].getBoundingClientRect().top - entries[0].getBoundingClientRect().bottom),
+      };
+    });
+    const numbers = keys.map((k, i) => "[" + (i + 1) + "]");
+    assert.deepEqual(set.cited, numbers);
+    assert.deepEqual(set.numbers, numbers);
+    assert.equal(set.ends, 1, "the numbers do not end in one line");
+    assert.equal(set.widestAt, 0, "the widest number does not start at the list's edge");
+    assert.equal(set.text.length, 1, "the text starts at more than one place: " + set.text);
+    assert.ok(Math.abs(set.text[0] - set.column) < 0.02, "the text at " + set.text[0] + "em, not half an em after the numbers (" + set.column + "em)");
+    assert.equal(set.rows, 2);
+    assert.equal(set.gap, 0);
+    // The box over the first citation: its number and its text side by
+    // side, half an em apart.
+    const a = await page.$(".citation a");
+    const box = await a.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForSelector(".tippy-box .csl-entry", { timeout: 5000 });
+    const tip = await page.evaluate(() => {
+      const e = document.querySelector(".tippy-box .csl-entry");
+      const em = parseFloat(getComputedStyle(e).fontSize);
+      const ink = (el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return Array.from(range.getClientRects()).filter((x) => x.width > 0)[0];
+      };
+      const n = ink(e.querySelector(".csl-left-margin"));
+      const t = ink(e.querySelector(".csl-right-inline"));
+      return { row: Math.abs(n.top - t.top) < 2, gap: Math.round(((t.left - n.right) / em) * 100) / 100 };
+    });
+    assert.equal(tip.row, true, "the box sets the number above its text");
+    assert.ok(Math.abs(tip.gap - 0.5) < 0.05, "the box sets the text " + tip.gap + "em after its number");
+  } finally {
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+  }
+});
+
+// The page divided the words of what citeproc printed ("Sha-nnon") where the
+// editor, which draws a citation whole (CiteWidget), divides none: 14 marks
+// in the citations of one paragraph (2026-09-29).
+test("the page divides the words of a paragraph that cites and none inside its citations", { skip }, async () => {
+  const url = renderCiting("bib-divide", ["-M", "mdm-hyphenation:auto"]);
+  const read = await readCiting(url, () => ({
+    inCitations: document.querySelectorAll("main.content .citation .mdm-hyphen").length,
+    inProse: document.querySelectorAll("main.content p .mdm-hyphen").length,
+  }));
+  assert.equal(read.inCitations, 0);
+  assert.ok(read.inProse > 10, "the prose is not divided at all: " + read.inProse);
+});

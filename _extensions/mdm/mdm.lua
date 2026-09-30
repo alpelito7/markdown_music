@@ -623,6 +623,46 @@ local function look_tex(l)
   put("\\makeatother")
   put("\\AtBeginDocument{\\hypersetup{colorlinks=true,linkcolor=mdmlink," ..
       "urlcolor=mdmlink,citecolor=mdmlink,filecolor=mdmlink}}")
+  -- The list of works cited, set as the editor and the page set it
+  -- (style.css and mdm-look.css, where the reasons are). The template's
+  -- CSLReferences is written again, the template having defined it above
+  -- these lines (citations.tex comes before header-includes in Quarto
+  -- 1.9.37's pandoc.tex), and only for a document that has a list:
+  -- - between two entries a quarter of a line where the style asks for
+  --   space and none where it asks for none, where the template set the
+  --   style's count of lines (`#2\baselineskip`, a whole line for Pandoc's
+  --   default style);
+  -- - a numbered style's numbers in a column as wide as the widest of them,
+  --   each flush right and half an em before its text, where the template
+  --   gave them 3em whatever they were (\csllabelwidth). The list is taken
+  --   whole (a `b` argument) and its numbers measured in a box that is
+  --   thrown away before it is set, the entries' text and their \bibitem
+  --   left out of the measuring, so the column is known before the first
+  --   entry is set. A list with no numbers measures nothing and keeps the
+  --   template's width, which nothing then reads.
+  put("\\ifcsname CSLReferences\\endcsname")
+  put("  \\newlength{\\mdmcslnumber}")
+  put("  \\newlength{\\mdmcslwidest}")
+  put("  \\renewcommand{\\CSLLeftMargin}[1]{\\makebox[\\csllabelwidth][r]{#1\\unskip\\hspace{0.5em}}}")
+  put("  \\RenewDocumentEnvironment{CSLReferences}{m m +b}{%")
+  put("    \\global\\mdmcslwidest=0pt")
+  put("    \\begingroup")
+  put("      \\renewcommand{\\CSLLeftMargin}[1]{\\settowidth{\\mdmcslnumber}{##1\\unskip}%")
+  put("        \\ifdim\\mdmcslnumber>\\mdmcslwidest \\global\\mdmcslwidest=\\mdmcslnumber\\fi}%")
+  put("      \\renewcommand{\\CSLRightInline}[1]{}%")
+  put("      \\renewcommand{\\bibitem}[2][]{}%")
+  put("      \\setbox0=\\vbox{#3}%")
+  put("    \\endgroup")
+  put("    \\ifdim\\mdmcslwidest>0pt \\setlength{\\csllabelwidth}{\\dimexpr\\mdmcslwidest+0.5em\\relax}\\fi")
+  put("    \\begin{list}{}{%")
+  put("      \\setlength{\\itemindent}{0pt}%")
+  put("      \\setlength{\\leftmargin}{0pt}%")
+  put("      \\setlength{\\parsep}{0pt}%")
+  put("      \\ifodd #1 \\setlength{\\leftmargin}{\\cslhangindent}\\setlength{\\itemindent}{-1\\cslhangindent}\\fi")
+  put("      \\ifnum #2>0 \\setlength{\\itemsep}{0.25\\baselineskip}\\else\\setlength{\\itemsep}{0pt}\\fi}%")
+  put("    #3%")
+  put("    \\end{list}}{}")
+  put("\\fi")
 
   put("\\makeatletter")
   -- The heading sizes are the editor's, which are multiples of the body size:
@@ -2471,6 +2511,54 @@ local function page_name(meta)
   return true
 end
 
+-- Whether the bibliography can bring a formula to the page. Citeproc runs
+-- after every filter, whatever the document's `filters` say (resolveFilters
+-- in Quarto 1.9.37 puts it behind the main filter), so a formula it writes
+-- out of a BibTeX title (`$3/2$`) never reaches Math below and goes to the
+-- writer as it is. The export asks the writer for GladTeX's markup
+-- (withPageKeys in extension.js, and bin/mdm), which keeps the formula's own
+-- LaTeX in an `<eq>` and brings no engine with it, and mdm-math.js sets it
+-- with KaTeX like the rest. KaTeX has to ride on the page for that even when
+-- the prose has no formula, and only the bibliography can say so. A BibTeX
+-- file is read for a `$`, which is what its reader makes a formula of (CSL
+-- JSON has no maths); references written in the header are Markdown and are
+-- walked for a Math element.
+local function bibliography_has_math(meta)
+  local found = false
+  local function walk(v)
+    if found or type(v) ~= "table" then return end
+    local kind = pandoc.utils.type(v)
+    if kind == "Inlines" or kind == "Blocks" then
+      v:walk({ Math = function() found = true end })
+    else
+      for _, item in pairs(v) do walk(item) end
+    end
+  end
+  walk(meta.references)
+  if found then return true end
+  local bib = meta.bibliography
+  if bib == nil then return false end
+  local paths = {}
+  if pandoc.utils.type(bib) == "List" then
+    for _, item in ipairs(bib) do paths[#paths + 1] = pandoc.utils.stringify(item) end
+  else
+    paths[1] = pandoc.utils.stringify(bib)
+  end
+  local dir = quarto.doc.input_file and pandoc.path.directory(quarto.doc.input_file) or "."
+  for _, p in ipairs(paths) do
+    if p:match("%.bib$") or p:match("%.bibtex$") then
+      local full = pandoc.path.is_absolute(p) and p or pandoc.path.join({ dir, p })
+      local f = io.open(full, "r")
+      if f then
+        local text = f:read("a") or ""
+        f:close()
+        if text:find("$", 1, true) then return true end
+      end
+    end
+  end
+  return false
+end
+
 function Meta(meta)
   local opt = meta.mdm
   if opt and opt.abcm2ps then
@@ -2487,6 +2575,24 @@ function Meta(meta)
     has_pdfcrop = command_exists("pdfcrop")
   end
   look = read_look(meta)
+  local changed = false
+  if meta.bibliography or meta.references then
+    -- Citations linked to their entries on paper as they are on the page.
+    -- Quarto asks citeproc for the links only when it writes HTML (it is in
+    -- the HTML format's defaults and not in the PDF's, measured on 1.9.37),
+    -- so the PDF set every citation in ink with nothing to follow, beside a
+    -- page whose years are links in the link blue, and the `citecolor` of
+    -- the preamble (look_tex) had no citation to colour. Citeproc runs after
+    -- this filter and reads the metadata as it leaves here. A document that
+    -- says `link-citations: false` keeps it.
+    if quarto.doc.is_format("latex") and meta["link-citations"] == nil then
+      meta["link-citations"] = true
+      changed = true
+    end
+    if quarto.doc.is_format("html") and bibliography_has_math(meta) then
+      ensure_katex_dep()
+    end
+  end
   -- Which command each level of heading is written as, for the paper to size
   -- the headings by level (heading_commands, over look_tex). A page has h1 to
   -- h6 and nothing to ask.
@@ -2506,7 +2612,7 @@ function Meta(meta)
     for _, key in ipairs(TITLE_BLOCK) do meta[key] = nil end
     return meta
   end
-  if named then return meta end
+  if named or changed then return meta end
   return nil
 end
 

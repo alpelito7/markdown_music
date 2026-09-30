@@ -7,7 +7,7 @@ import {readFileSync} from "node:fs"
 import {fileURLToPath} from "node:url"
 import {dirname, resolve} from "node:path"
 import {parser} from "@lezer/markdown"
-import {markdownLanguage} from "@codemirror/lang-markdown"
+import {markdown, markdownLanguage} from "@codemirror/lang-markdown"
 import {TreeFragment} from "@lezer/common"
 import {mdmMath, mdmFrontMatter, mdmCallout, mdmLinks, mdmTable, mdmMarkdownExtensions, calloutKind, closedOpeners, LONG_RUN, scanDefinitions, normalizeLabel} from "../src/markdown/index.js"
 import {GFM, Superscript} from "@lezer/markdown"
@@ -699,10 +699,441 @@ test("attributes: taken after an image, a link, a code span, a `$$` closer and a
 })
 
 test("citations: bracketed and bare, Quarto's cross-references among them, and never inside a word", () => {
-  assert.deepEqual(nodes(parse("As shown by [@knuth1984, p. 33] and in @fig-brass."), /Citation/), ["Citation@12-31", "Citation@39-49"])
-  assert.deepEqual(nodes(parse("[see @a; -@b]"), /Citation/), ["Citation@0-13"])
-  assert.deepEqual(nodes(parse("mail me@example.org today"), /Citation/), [])
-  assert.deepEqual(nodes(parse("[text](url) and [no cite] and @"), /Citation/), [])
+  assert.deepEqual(nodes(parse("As shown by [@knuth1984, p. 33] and in @fig-brass."), /^Citation$/), ["Citation@12-31", "Citation@39-49"])
+  assert.deepEqual(nodes(parse("[see @a; -@b]"), /^Citation$/), ["Citation@0-13"])
+  assert.deepEqual(nodes(parse("mail me@example.org today"), /^Citation$/), [])
+  assert.deepEqual(nodes(parse("[text](url) and [no cite] and @"), /^Citation$/), [])
+})
+
+// ---------- citations as Pandoc reads them ----------
+
+// The parser the editor runs (main.js, markdownLanguage()): lang-markdown's
+// markdown() over its GFM base, with the MDM extensions. The code languages
+// main.js gives it as well parse only inside fences.
+const editor = markdown({base: markdownLanguage, extensions: mdmMarkdownExtensions, addKeymap: false, pasteURLAsLink: false}).language.parser
+
+// Each Citation of a parse, parents before children, as its text, "=>" and
+// the ids of its CitationKey children (`@{x}` read as x), after "> " for
+// each Citation it stands in.
+function cites(text) {
+  let out = []
+  editor.parse(text).iterate({enter(n) {
+    if (n.name != "Citation") return
+    let depth = 0
+    for (let p = n.node.parent; p; p = p.parent) if (p.name == "Citation") depth++
+    let ids = n.node.getChildren("CitationKey").map(k => text.slice(k.from, k.to).replace(/^@\{([^]*)\}$|^@/, "$1"))
+    out.push("> ".repeat(depth) + text.slice(n.from, n.to) + " => " + ids.join(", "))
+  }})
+  return out
+}
+
+// Rows of a text and the citations in it, as cites() writes them. Every
+// reading is Pandoc's: pandoc 3.8.3 (quarto pandoc) with the export's
+// reader, markdown-blank_before_header-blank_before_blockquote
+// +autolink_bare_uris, read off its JSON on 2026-09-29, each citation
+// found where its content, which Pandoc builds from the text as written,
+// stands in the text.
+function assertCites(rows) {
+  for (let [text, want] of rows) assert.deepEqual(cites(text), want, JSON.stringify(text))
+}
+
+// The 73 cases of the comparison of 2026-09-29 but the example list,
+// `(@good)`, which Pandoc numbers and the editor still reads as citations.
+test("citations: the cases compared with Pandoc (PX04)", () => {
+  assertCites([
+    ["As @knuth1984 shows.", ["@knuth1984 => knuth1984"]],
+    ["As @knuth1984 [p. 33] shows.", ["@knuth1984 [p. 33] => knuth1984"]],
+    ["As @knuth1984[p. 33] shows.", ["@knuth1984[p. 33] => knuth1984"]],
+    ["As @knuth1984\n[p. 33] shows.", ["@knuth1984\n[p. 33] => knuth1984"]],
+    ["As @knuth1984 [p. 33; @shannon1948] shows.", ["@knuth1984 [p. 33; @shannon1948] => knuth1984, shannon1948"]],
+    ["As @knuth1984 [@shannon1948] shows.", ["@knuth1984 [@shannon1948] => knuth1984, shannon1948"]],
+    ["As @knuth1984 [the book](http://x.org) shows.", ["@knuth1984 => knuth1984"]],
+    ["As @knuth1984[^1] shows.\n\n[^1]: A note.", ["@knuth1984 => knuth1984"]],
+    ["It is known [@knuth1984].", ["[@knuth1984] => knuth1984"]],
+    ["Known [@knuth1984, p. 33].", ["[@knuth1984, p. 33] => knuth1984"]],
+    ["He wrote \"@knuth1984\" there.", ["@knuth1984 => knuth1984"]],
+    ["A snake_@knuth1984 form.", []],
+    ["Known (@knuth1984, p. 33) here.", ["@knuth1984 => knuth1984"]],
+    ["It is known[@knuth1984].", ["[@knuth1984] => knuth1984"]],
+    ["Knuth says so [-@knuth1984].", ["[-@knuth1984] => knuth1984"]],
+    ["Knuth says so -@knuth1984 too.", ["-@knuth1984 => knuth1984"]],
+    ["Known [see @knuth1984, pp. 33-35; also @shannon1948, chap. 1].", ["[see @knuth1984, pp. 33-35; also @shannon1948, chap. 1] => knuth1984, shannon1948"]],
+    ["Known [@knuth1984;@shannon1948].", ["[@knuth1984;@shannon1948] => knuth1984, shannon1948"]],
+    ["Known [@knuth1984, pp. 33--35].", ["[@knuth1984, pp. 33--35] => knuth1984"]],
+    ["Known [@knuth1984 p. 33].", ["[@knuth1984 p. 33] => knuth1984"]],
+    ["Known [@knuth1984 and @shannon1948].", ["[@knuth1984 and @shannon1948] => knuth1984", "> @shannon1948 => shannon1948"]],
+    ["Known [see (@knuth1984)].", ["[see (@knuth1984)] => knuth1984"]],
+    ["Known (as @knuth1984 says) and (@shannon1948).", ["@knuth1984 => knuth1984", "@shannon1948 => shannon1948"]],
+    ["As @doe:2020 says.", ["@doe:2020 => doe:2020"]],
+    ["As @Doe_2020.a says.", ["@Doe_2020.a => Doe_2020.a"]],
+    ["As @a-b says.", ["@a-b => a-b"]],
+    ["As @a--b says.", ["@a => a"]],
+    ["As @a.-b says.", ["@a => a"]],
+    ["As said by @doe.", ["@doe => doe"]],
+    ["As @doe: it holds.", ["@doe => doe"]],
+    ["In @knuth1984's book.", ["@knuth1984 => knuth1984"]],
+    ["As @1984book says.", ["@1984book => 1984book"]],
+    ["Como dice @núñez2020 aquí.", ["@núñez2020 => núñez2020"]],
+    ["As @müller1999 says.", ["@müller1999 => müller1999"]],
+    ["As @https://x.org/a says.", ["@https://x.org/a => https://x.org/a"]],
+    ["As @{https://x.org/a} says.", ["@{https://x.org/a} => https://x.org/a"]],
+    ["Known [@{https://x.org/a}, p. 3].", ["[@{https://x.org/a}, p. 3] => https://x.org/a"]],
+    ["Wildcard @* here.", ["@* => *"]],
+    ["Write to me@example.org today.", []],
+    ["The a@b and x@knuth1984 forms.", []],
+    ["Un café@knuth1984 aquí.", []],
+    ["Not a cite: \\@knuth1984 here.", []],
+    ["Follow @alpelito7 on the forum.", ["@alpelito7 => alpelito7"]],
+    ["Meet me @ the hall, at 5.", []],
+    ["Text <!-- @knuth1984 --> more.", []],
+    ["As \\cite{knuth1984} shows.", []],
+    ["Read [see @knuth1984](http://x.org) now.", ["@knuth1984 => knuth1984"]],
+    ["Read [@knuth1984](http://x.org) now.", ["@knuth1984 => knuth1984"]],
+    ["Read *as @knuth1984 says* and **[@shannon1948]**.", ["@knuth1984 => knuth1984", "[@shannon1948] => shannon1948"]],
+    ["Code `@knuth1984` and `[@shannon1948]`.", []],
+    ["## On @knuth1984 and [@shannon1948]\n\nText.", ["@knuth1984 => knuth1984", "[@shannon1948] => shannon1948"]],
+    ["| Source | Where |\n|---|---|\n| @knuth1984 | [@shannon1948, p. 3] |\n", ["@knuth1984 => knuth1984", "[@shannon1948, p. 3] => shannon1948"]],
+    ["Text.^[See @knuth1984, p. 3.]", ["@knuth1984 => knuth1984"]],
+    ["Text.[^1]\n\n[^1]: See @knuth1984 and [@shannon1948].", ["@knuth1984 => knuth1984", "[@shannon1948] => shannon1948"]],
+    ["- @knuth1984 says\n- so [@shannon1948]\n", ["@knuth1984 => knuth1984", "[@shannon1948] => shannon1948"]],
+    ["> As @knuth1984 says [p. 3].\n", ["@knuth1984 => knuth1984"]],
+    ["::: {.callout-note}\nAs @knuth1984 says.\n:::\n", ["@knuth1984 => knuth1984"]],
+    ["![Brass, after @knuth1984.](brass.png){#fig-brass}\n", ["@knuth1984 => knuth1984"]],
+    ["Read [see @knuth1984]{.mark} now.", ["@knuth1984 => knuth1984"]],
+    ["Read [@knuth1984]{.class} now.", ["@knuth1984 => knuth1984"]],
+    ["As shown [see @knuth1984,\np. 33] here.", ["[see @knuth1984,\np. 33] => knuth1984"]],
+    ["Known [@knuth1984;\n@shannon1948] here.", ["[@knuth1984;\n@shannon1948] => knuth1984, shannon1948"]],
+    ["Known [see\n@knuth1984] here.", ["[see\n@knuth1984] => knuth1984"]],
+    ["Known [@knuth1984, *passim*].", ["[@knuth1984, *passim*] => knuth1984"]],
+    ["Known [see *The TeXbook*, @knuth1984].", ["[see *The TeXbook*, @knuth1984] => knuth1984"]],
+    ["Known [@knuth1984, eq. $x^2$].", ["[@knuth1984, eq. $x^2$] => knuth1984"]],
+    ["Known [see [the preface] @knuth1984].", ["[see [the preface] @knuth1984] => knuth1984"]],
+    ["Known [@knuth1984, see [here](http://x.org)].", ["[@knuth1984, see [here](http://x.org)] => knuth1984"]],
+    ["See @fig-brass, @tbl-notes, @eq-mass, @sec-intro and @thm-main.", ["@fig-brass => fig-brass", "@tbl-notes => tbl-notes", "@eq-mass => eq-mass", "@sec-intro => sec-intro", "@thm-main => thm-main"]],
+    ["@Fig-brass shows it.", ["@Fig-brass => Fig-brass"]],
+    ["As shown [@fig-brass] and [-@fig-brass].", ["[@fig-brass] => fig-brass", "[-@fig-brass] => fig-brass"]],
+    ["As in [Figure @fig-brass].", ["[Figure @fig-brass] => fig-brass"]],
+  ])
+})
+
+test("citations: a key is Pandoc's: Unicode letters and digits and no combining mark, its punctuation only before more of it, `:` and `/` before a `/`, braces balanced, and the nocite wildcard", () => {
+  assertCites([
+    ["x @a- y", ["@a => a"]],
+    ["x @a::b y", ["@a => a"]],
+    ["x @a:/ y", ["@a: => a:"]],
+    ["x @a//b y", ["@a//b => a//b"]],
+    ["x @_ y", ["@_ => _"]],
+    ["x @*a y", ["@*a => *a"]],
+    ["x @** y", ["@* => *"]],
+    ["x @١٢ y", ["@١٢ => ١٢"]],
+    ["x @n\u0303u y", ["@n => n"]],
+    ["x @nu\u0303 y", ["@nu => nu"]],
+    ["x @\u0303a y", []],
+    ["x @a² y", ["@a² => a²"]],
+    ["x @ǅa y", ["@ǅa => ǅa"]],
+    ["x @a\u200db y", ["@a => a"]],
+    ["x @𝔸b y", ["@𝔸b => 𝔸b"]],
+    ["x @a𝔸 y", ["@a𝔸 => a𝔸"]],
+    ["x @{a{b}c} y", ["@{a{b}c} => a{b}c"]],
+    ["x @{} y", ["@{} => "]],
+    ["x @{a b} y", []],
+    ["x @{a}b y", ["@{a} => a"]],
+    ["x @{a}} y", ["@{a} => a"]],
+    ["x @{{a} y", []],
+    ["x -@{a} y", ["-@{a} => a"]],
+    ["x @{a\u00a0b} y", []],
+    ["x @a#b y", ["@a#b => a#b"]],
+    ["x @a+b y", ["@a+b => a+b"]],
+    ["x @a!b y", ["@a => a"]],
+    ["x @a'b y", ["@a => a"]],
+  ])
+})
+
+test("citations: no key straight after a word, in an email address or after an emphasis that closes there, and a run of dashes leaves suppress-author to the one left over", () => {
+  assertCites([
+    ["x a.@k y", []],
+    ["x .@k y", []],
+    ["x ..@k y", []],
+    ["x ...@k y", ["@k => k"]],
+    ["x ....@k y", []],
+    ["x ......@k y", ["@k => k"]],
+    ["x a...@k y", ["@k => k"]],
+    ["x _@k y", ["@k => k"]],
+    ["x a_@k y", []],
+    ["x a-@k y", []],
+    ["x a+@k y", []],
+    ["x a!@k y", []],
+    ["x a!@_k y", ["@_k => _k"]],
+    ["x a-@* y", ["@* => *"]],
+    ["x a@* y", []],
+    ["x a@{k} y", []],
+    ["x a-@{k} y", ["@{k} => k"]],
+    ["x a.b-@k y", []],
+    ["x a..b@k y", []],
+    ["x a..b-@k y", ["@k => k"]],
+    ["x a.-@k y", ["@k => k"]],
+    ["x n\u0303@k y", ["@k => k"]],
+    ["x ²@k y", []],
+    ["x #a@k y", []],
+    ["x +@k y", ["@k => k"]],
+    ["x …@k y", ["@k => k"]],
+    ["-@k y", ["-@k => k"]],
+    ["x (-@k) y", ["-@k => k"]],
+    ["x .-@k y", ["@k => k"]],
+    ["x --@k y", ["@k => k"]],
+    ["x ---@k y", ["@k => k"]],
+    ["x ----@k y", ["-@k => k"]],
+    ["x -----@k y", ["@k => k"]],
+    ["x a--@k y", []],
+    ["x \\alpha@k y", ["@k => k"]],
+    ["x \\.@k y", ["@k => k"]],
+    ["x `c`@k y", ["@k => k"]],
+    ["x $m$@k y", ["@k => k"]],
+    ["x @a@b y", ["@a => a", "@b => b"]],
+    ["x @a-@b y", ["@a => a", "-@b => b"]],
+    ["x [x](u)@k y", ["@k => k"]],
+    ["x &amp;@k y", ["@k => k"]],
+    ["x &amp@k y", []],
+    ["x http://x.org@k y", []],
+    ["x www.x.org@k y", []],
+    ["x \\_@k y", ["@k => k"]],
+    ["x a@k1@b2 y", ["@b2 => b2"]],
+    ["x a@k1-@b2 y", ["-@b2 => b2"]],
+    ["x a@k1.@c2 y", []],
+    ["x a@k1.-@b2 y", ["@b2 => b2"]],
+    ["x a@k1-b@c2 y", ["@c2 => c2"]],
+    ["x a.@k3@k4 y", ["@k4 => k4"]],
+    ["x \\...@k3@k4 y", ["@k4 => k4"]],
+    ["x \\--@k y", ["-@k => k"]],
+    ["x \\---@k y", ["@k => k"]],
+    ["x ...a-@k y", []],
+    ["x ....a-@k y", ["@k => k"]],
+    ["x *a*@k y", []],
+    ["x *$m$*@k y", []],
+    ["x **$m$**@k y", []],
+    ["x *$m$*-@k y", ["@k => k"]],
+    ["x *a *@k* y", []],
+    ["x *a* @k y", ["@k => k"]],
+    ["x *@k* y", ["@k => k"]],
+    ["x @*@k1**-@k2 y", ["@* => *", "@k1 => k1", "-@k2 => k2"]],
+    ["x *$m$**@k y", ["@k => k"]],
+    ["x **$m$*@k y", ["@k => k"]],
+    ["x ***$m$*@k y", []],
+    ["x ***$m$**@k y", []],
+  ])
+})
+
+test("citations: a key takes the bracket after it, past spaces and one line end, as its locator or as more citations, unless a note, a link, a span, a label or a defined reference has it", () => {
+  assertCites([
+    ["x @k  [p. 3] y", ["@k  [p. 3] => k"]],
+    ["x @k \n [p. 3] y", ["@k \n [p. 3] => k"]],
+    ["x @k\n\n[p. 3] y", ["@k => k"]],
+    ["x @k  \n[p. 3] y", ["@k  \n[p. 3] => k"]],
+    ["x @k\\\n[p. 3] y", ["@k => k"]],
+    ["x @k \\[p. 3] y", ["@k => k"]],
+    ["x @k\u00a0[p. 3] y", ["@k => k"]],
+    ["x @k [^1] y\n\n[^1]: n", ["@k => k"]],
+    ["x @k [^ x] y", ["@k => k"]],
+    ["x @k [p. 3](u) y", ["@k => k"]],
+    ["x @k [p. 3]{.c} y", ["@k => k"]],
+    ["x @k [p. 3]{=html} y", ["@k => k"]],
+    ["x @k [p. 3][r] y", ["@k => k"]],
+    ["x @k [p. 3][ y", ["@k => k"]],
+    ["x @k [p. 3](u y", ["@k => k"]],
+    ["x @k [p. 3; see] y", ["@k => k"]],
+    ["x @k [p. 3; see @b] y", ["@k [p. 3; see @b] => k, b"]],
+    ["x @k [p; 3] y", ["@k => k"]],
+    ["x @k [;@b] y", ["@k [;@b] => k, b"]],
+    ["x @k [] y", ["@k [] => k"]],
+    ["x @k [ ] y", ["@k [ ] => k"]],
+    ["x @k [p. [3]] y", ["@k [p. [3]] => k"]],
+    ["x @k [*p*] y", ["@k [*p*] => k"]],
+    ["x @k [*a;b*] y", ["@k [*a;b*] => k"]],
+    ["x @k [a*b] y", ["@k => k"]],
+    ["x @k [*a] y", ["@k => k"]],
+    ["x @k [see @b] y", ["@k [see @b] => k, b"]],
+    ["x @k [@b, p. 3] y", ["@k [@b, p. 3] => k, b"]],
+    ["x @k [@b; @c] y", ["@k [@b; @c] => k, b, c"]],
+    ["x @k [p. 3] [@b] y", ["@k [p. 3] => k", "[@b] => b"]],
+    ["x -@k [p. 3] y", ["-@k [p. 3] => k"]],
+    ["x @k [@b](u) y", ["@k => k", "@b => b"]],
+    ["x @k [@b]{.c} y", ["@k => k", "@b => b"]],
+    ["x @k [@b][r] y", ["@k => k", "@b => b"]],
+    ["x @k [p. 3] y\n\n[p. 3]: /r", ["@k => k"]],
+    ["x @k [ref] y\n\n[ref]: /r", ["@k => k"]],
+    ["x @{k} [p. 3] y", ["@{k} [p. 3] => k"]],
+    ["x @* [p. 3] y", ["@* [p. 3] => *"]],
+    ["x [see @k [p. 3]](u) y", ["@k [p. 3] => k"]],
+    ["x (@k [p. 3]) y", ["@k [p. 3] => k"]],
+    ["x @k [p. 3]] y", ["@k [p. 3] => k"]],
+    ["x @k [x [p. 3] y", ["@k => k"]],
+    ["x @a [p. 3] [p. 4] y", ["@a [p. 3] => a"]],
+    ["x @a [p. 3][p. 4] y", ["@a => a"]],
+    ["x @k [p. 3 and @b] y", ["@k [p. 3 and @b] => k, b"]],
+    ["x @a [@b] [@c] y", ["@a [@b] => a, b", "[@c] => c"]],
+    ["> x @k\n> [p. 3] y", ["@k\n> [p. 3] => k"]],
+    ["- x @k\n  [p. 3] y", ["@k\n  [p. 3] => k"]],
+    ["x @k's [p. 3] y", ["@k => k"]],
+    ["x @k [see [x](u)] y", ["@k [see [x](u)] => k"]],
+    ["x @k [x](u) y", ["@k => k"]],
+  ])
+})
+
+test("citations: a bracketed citation runs over lines and holds brackets, code, maths and links; a part with no key, or an emphasis opened in it and never closed, makes none", () => {
+  assertCites([
+    ["x [@k; see p. 3] y", ["@k => k"]],
+    ["x [@k, pp. 3; 5] y", ["@k => k"]],
+    ["x [@k;] y", ["@k => k"]],
+    ["x [;@k] y", ["@k => k"]],
+    ["x [@k,] y", ["[@k,] => k"]],
+    ["x [ @k ] y", ["[ @k ] => k"]],
+    ["x [@k ; @b] y", ["[@k ; @b] => k, b"]],
+    ["x [@k;;@b] y", ["@k => k", "@b => b"]],
+    ["x [see a; b @k] y", ["@k => k"]],
+    ["x [see; @k] y", ["@k => k"]],
+    ["x [@k [p. 3]] y", ["[@k [p. 3]] => k"]],
+    ["x [see @a [@b]] y", ["[see @a [@b]] => a", "> [@b] => b"]],
+    ["x [see [@b] @a] y", ["[see [@b] @a] => a", "> [@b] => b"]],
+    ["x [see [@b]] y", ["[@b] => b"]],
+    ["x [see [ @k] y", ["[ @k] => k"]],
+    ["x [@k]] y", ["[@k] => k"]],
+    ["x [[@k] y", ["[@k] => k"]],
+    ["x [see @a [p. 3] and @b] y", ["[see @a [p. 3] and @b] => a", "> @b => b"]],
+    ["x [see @a [p. 3; @b]] y", ["[see @a [p. 3; @b]] => a", "> @b => b"]],
+    ["x [@k\np. 3] y", ["[@k\np. 3] => k"]],
+    ["x [\n@k] y", ["[\n@k] => k"]],
+    ["x [@k\n] y", ["[@k\n] => k"]],
+    ["x [see\n\n@k] y", ["@k => k"]],
+    ["x [see \n @k] y", ["[see \n @k] => k"]],
+    ["x [@k  \np. 3] y", ["[@k  \np. 3] => k"]],
+    ["x [see\nmore\ntext @k] y", ["[see\nmore\ntext @k] => k"]],
+    ["x [see\n@k\n; @b] y", ["[see\n@k\n; @b] => k, b"]],
+    ["> x [see\n> @k] y", ["[see\n> @k] => k"]],
+    ["x [@k, `a]b`] y", ["[@k, `a]b`] => k"]],
+    ["x [@k, $a]b$] y", ["[@k, $a]b$] => k"]],
+    ["x [@k, \\]] y", ["[@k, \\]] => k"]],
+    ["x [@k, <http://a.org/]>] y", ["[@k, <http://a.org/]>] => k"]],
+    ["x [@k, ^[note]] y", ["[@k, ^[note]] => k"]],
+    ["x [@k, [^1]] y\n\n[^1]: n", ["[@k, [^1]] => k"]],
+    ["x [@k, \\textit{a]b}] y", ["[@k, \\textit{a]b}] => k"]],
+    ["x [@k, *a;b*] y", ["[@k, *a;b*] => k"]],
+    ["x [*a;b* @k] y", ["[*a;b* @k] => k"]],
+    ["x [@k, `a;b`] y", ["[@k, `a;b`] => k"]],
+    ["x [@k, [a;b]] y", ["[@k, [a;b]] => k"]],
+    ["x [@k, \\; x] y", ["[@k, \\; x] => k"]],
+    ["x [@k, &amp; x] y", ["[@k, &amp; x] => k"]],
+    ["x [*see @k*] y", ["@k => k"]],
+    ["x [*see* @k] y", ["[*see* @k] => k"]],
+    ["x [see **@k**] y", ["@k => k"]],
+    ["x [see @k*] y", ["@k => k"]],
+    ["x [@k, *a] y", ["@k => k"]],
+    ["x [see *this @k] y", ["@k => k"]],
+    ["x [@k, a*b] y", ["@k => k"]],
+    ["x [@k, a*\nb] y", ["@k => k"]],
+    ["x [@k, a_b] y", ["[@k, a_b] => k"]],
+    ["x [@k, _a] y", ["@k => k"]],
+    ["x [@k, a **b] y", ["@k => k"]],
+    ["x [@k, a ****b] y", ["[@k, a ****b] => k"]],
+    ["x [@k, ***a*] y", ["@k => k"]],
+    ["x [@k, *a*] y", ["[@k, *a*] => k"]],
+    ["x [@k, a * b] y", ["[@k, a * b] => k"]],
+    ["x [see [@b; x] @a] y", ["[see [@b; x] @a] => a", "> @b => b"]],
+    ["x [see -@k] y", ["[see -@k] => k"]],
+    ["x [see a-@k] y", []],
+    ["x [see (-@k)] y", ["[see (-@k)] => k"]],
+    ["x [see me@k.org, @b] y", ["[see me@k.org, @b] => b"]],
+    ["x [see @k's book] y", ["[see @k's book] => k"]],
+  ])
+})
+
+test("citations: a destination, an attribute block or a label after the `]` make a link, a span or a reference of the bracket, and a label or a picture's bracket read again on its own is a citation whatever follows", () => {
+  assertCites([
+    ["x [@k](u) y", ["@k => k"]],
+    ["x [@k] (u) y", ["[@k] => k"]],
+    ["x [@k](u y", ["[@k] => k"]],
+    ["x [@k]{.c} y", ["@k => k"]],
+    ["x [@k]{not attr} y", ["[@k] => k"]],
+    ["x [@k]{=html} y", ["[@k] => k"]],
+    ["x [@k]{} y", ["@k => k"]],
+    ["x [@k]{-} y", ["@k => k"]],
+    ["x [@k]{key=\"a b\"} y", ["@k => k"]],
+    ["x [@k]{key=\" a\"} y", ["[@k] => k"]],
+    ["x [@k]{.1a} y", ["[@k] => k"]],
+    ["x [@k]{#1a} y", ["@k => k"]],
+    ["x [@k]{.a\n.b} y", ["@k => k"]],
+    ["x [@k][ref] y", ["@k => k"]],
+    ["x [@k][] y", ["@k => k"]],
+    ["x [@k][ y", ["[@k] => k"]],
+    ["x [@k][^1] y\n\n[^1]: n", ["[@k] => k"]],
+    ["x [@k][ref] y\n\n[ref]: /r", ["@k => k"]],
+    ["x [@k][@b] y", ["@k => k", "[@b] => b"]],
+    ["x [@k] [@b] y", ["[@k] => k", "[@b] => b"]],
+    ["x [@k][a [b] c] y", ["@k => k"]],
+    ["x [@k][`a]` y", ["[@k] => k"]],
+    ["x [@k][$a]$] y", ["@k => k"]],
+    ["x [@k][a `]` b] y", ["@k => k"]],
+    ["x [@k](<u>) y", ["@k => k"]],
+    ["x [@k](u \"t\") y", ["@k => k"]],
+    ["x [@k](u \"t) y", ["[@k] => k"]],
+    ["x [@k]() y", ["@k => k"]],
+    ["x [@k](a b) y", ["@k => k"]],
+    ["x [@k](a\nb) y", ["@k => k"]],
+    ["x [@k](a(b) y", ["[@k] => k"]],
+    ["x [@k](a(b)c) y", ["@k => k"]],
+    ["x [@k](a \"b\" c) y", ["[@k] => k"]],
+    ["x [@k](a \" t\") y", ["[@k] => k"]],
+    ["x [@k](<a b>) y", ["@k => k"]],
+    ["x [@k](a\n\"t\") y", ["@k => k"]],
+    ["x [x][@b][p. 3] y", ["[@b] => b"]],
+    ["x [x][@b](u) y", ["[@b] => b"]],
+    ["x [@b1][@b2][p. 3] y", ["@b1 => b1", "[@b2] => b2"]],
+    ["x ![@k] y", ["[@k] => k"]],
+    ["x ![@k](i.png) y", ["@k => k"]],
+    ["x ![see @k] y", ["[see @k] => k"]],
+    ["x ![x][@b][p. 3] y", ["[@b] => b"]],
+  ])
+  // A destination longer than pandoc.js looks for its end (SOURCE_LIMIT) is
+  // CommonMark's to decide: a picture's inline data is a link to Pandoc.
+  let data = "(data:image/png;base64," + "A".repeat(2500) + ")"
+  assertCites([
+    ["x [@k]" + data + " y", ["@k => k"]],
+    ["x ![see @k]" + data + " y", ["@k => k"]],
+  ])
+})
+
+test("citations: the tree is Citation(CitationKey...), a citation Pandoc nests in another a Citation inside it, and nothing of a prefix or a suffix", () => {
+  // The key without the `-` of suppress-author; a prefix's emphasis, a
+  // suffix's maths and link are not children (main.js draws a citation as
+  // written).
+  let text = "See [see *The TeXbook*, @k, eq. $x$ and [here](u)] and -@b."
+  assert.equal(editor.parse(text).toString(), "Document(Paragraph(Citation(CitationKey),Citation(CitationKey)))")
+  assert.deepEqual(nodes(editor.parse(text), /^CitationKey$/, text), ["CitationKey[@k]", "CitationKey[@b]"])
+  assert.equal(editor.parse("x [see @a [@b] and @c] y").toString(),
+    "Document(Paragraph(Citation(CitationKey,Citation(CitationKey),Citation(CitationKey))))")
+  assert.equal(editor.parse("x @a [p. 3; see *it* @b] y").toString(), "Document(Paragraph(Citation(CitationKey,CitationKey)))")
+  // Over a line of a quote, the quote's mark hangs inside the citation, as
+  // it does inside a link.
+  assert.equal(editor.parse("> x [see\n> @k] y").toString(), "Document(Blockquote(QuoteMark,Paragraph(Citation(QuoteMark,CitationKey))))")
+  // Without the Pandoc extension a parser has no Citation node, and the
+  // links are read as they were.
+  assert.deepEqual(links("[@k] and [x](u) and @k\n", parser.configure([GFM, mdmLinks])), ["Link[[x](u)]", "URL[u]"])
+})
+
+// The citations were read with a look from every `[` to the end of its
+// line, 3.4 s over a line of 60,000 characters of `[a `, and the link
+// reader looked for a destination from every `](` to the end of the line,
+// 4.3 s over 80,000 of `[x](` (measured 2026-09-29; 16 and 28 ms now). The brackets are
+// closed at their `]` now; a destination's end and a label's are read off
+// tables made once per paragraph, a locator's key is the part before its
+// bracket, and the word before an `@` is read back to the `@` before it.
+test("citations: long lines of unclosed brackets, destinations, labels and spent brackets parse in linear time", () => {
+  for (let text of ["[a ".repeat(20000), "[@a ".repeat(20000), "[x](".repeat(20000), "[@k](".repeat(20000),
+                    "[@k][".repeat(20000), "[a] ".repeat(60000), "a@".repeat(20000)]) {
+    let t0 = Date.now()
+    let tree = editor.parse(text)
+    assert.equal(tree.length, text.length)
+    assert.ok(Date.now() - t0 < 1500, JSON.stringify(text.slice(0, 5)) + " took " + (Date.now() - t0) + " ms")
+  }
 })
 
 test("footnotes: a reference, an inline note and the note itself with its indented paragraphs are nodes, not a link, a superscript and a code block", () => {
