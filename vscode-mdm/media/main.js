@@ -6966,6 +6966,26 @@
     return false;
   }
 
+  // What stands in a line as written, where a mark goes in as a character
+  // and marks nothing: code and maths, an address, a link's title and a
+  // reference's label, a tag, a comment, raw TeX, an attribute, a citation
+  // and a note's call. A position inside one (not at its edge, so a range
+  // holding a whole code span is still wrapped with it) takes no mark: a
+  // mark typed over a selection there types over it, and the mark buttons
+  // leave it alone, as on a line of a fence. Typed `*` over the text of a
+  // code span wrote `*` into it, and `$` over maths in a line doubled its
+  // dollars and broke it (found 2026-09-28).
+  const LITERAL_INLINE = /^(?:InlineCode|InlineMath|InlineBlockMath|URL|Autolink|LinkTitle|LinkLabel|HTMLTag|Comment|ProcessingInstruction|RawTeX|Attribute|Citation|FootnoteRef)$/;
+  function literalAround(tree, pos) {
+    for (let n = tree.resolve(pos, 1); n; n = n.parent) {
+      if (n.from < pos && pos < n.to && LITERAL_INLINE.test(n.name)) return true;
+    }
+    return false;
+  }
+  function literalEnds(tree, from, to) {
+    return literalAround(tree, from) || literalAround(tree, to);
+  }
+
   // The part of [from, to] on one line that a mark can wrap: the line's own
   // text, with the spaces at either end left outside the marks (a `**`
   // after a space cannot close, CommonMark 6.2), or null.
@@ -7104,6 +7124,17 @@
             const set = state.changes(out);
             return { changes: set, range: range.map(set) };
           }
+          // An end in code, maths or an address in a line, or a caret on a
+          // line of a fence: the mark would be a character there
+          // (literalAround), so nothing is written. A run of the key's own
+          // kind came off above, so Ctrl+E inside code still takes the code
+          // off. A caret on a line of a fence wrapped its word in the marks
+          // as prose, where a selection there was already left alone
+          // (wrappablePart, which a selection over several lines still
+          // goes through line by line).
+          if (literalEnds(tree, from, to) || (range.empty && unmarkableLine(tree, state.doc.lineAt(from)))) {
+            return { range: range };
+          }
           // A bare pair around the range, an empty one typed and left: off
           // again. Not the inner stars of a strong run whose text is the
           // range, which are the run's own (Ctrl+I on bold makes it bold
@@ -7231,6 +7262,10 @@
                 : { from: attr.from + m.index, to: attr.from + m.index + cut }
             );
             return { changes: set, range: range.map(set) };
+          }
+          // Nothing written into code, maths or an address, as toggleInline.
+          if (literalEnds(tree, from, to) || (range.empty && unmarkableLine(tree, state.doc.lineAt(from)))) {
+            return { range: range };
           }
           if (range.empty) {
             const line = state.doc.lineAt(from);
@@ -11279,9 +11314,11 @@
   // the backtick, a bracket or a quote): the words stay, selected still, so
   // a second mark goes on outside the first. Pandoc's own pairs are in the
   // list too, the tilde, the caret and the dollar. Not over a selection in
-  // a block no mark belongs on (code, an equation, the header), where the
-  // key types over the selection as ever; an empty range takes the
-  // character as it would, beside the ranges that are wrapped.
+  // a block no mark belongs on (code, an equation, the header), nor one
+  // that starts or ends inside code, maths or an address in a line
+  // (literalEnds), where the key types over the selection as ever; an
+  // empty range takes the character as it would, beside the ranges that
+  // are wrapped.
   const SURROUND = {
     "*": "*",
     _: "_",
@@ -11309,7 +11346,8 @@
     }
     const tree = CM.syntaxTree(state);
     for (let i = 0; i < ranges.length; i++) {
-      if (!ranges[i].empty && unmarkableLine(tree, state.doc.lineAt(ranges[i].from))) return false;
+      const r = ranges[i];
+      if (!r.empty && (unmarkableLine(tree, state.doc.lineAt(r.from)) || literalEnds(tree, r.from, r.to))) return false;
     }
     v.dispatch(
       state.update(

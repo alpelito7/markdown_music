@@ -7,6 +7,12 @@
   the words a link to it: an address is a scheme of two letters or more
   (`https:`, `mailto:`) or `www.`. `Ctrl+K` over one takes it for the
   link's words, as it takes any other text.
+- A mark typed over a selection inside code, maths or an address in a line
+  types over it, as it does in a code block, instead of writing the mark
+  into the code or breaking the equation. The mark keys and buttons
+  (`Ctrl+B`, `Ctrl+I`, highlight and the rest) leave code and maths in a
+  line alone, and a caret in a code block no longer has its word wrapped
+  in marks; `Ctrl+E` inside code still takes the code off.
 
 ## 0.7.1
 

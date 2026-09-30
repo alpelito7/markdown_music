@@ -937,6 +937,31 @@ test("Ctrl+B and Ctrl+I on a selection write marks the readers read as meant (ED
   assert.equal(out.text, "``a`b``\n");
 });
 
+test("the mark keys and buttons write nothing into code or maths in a line, nor at a caret in a fence", { skip }, async () => {
+  // A mark there is a character and marks nothing: Ctrl+B wrote `**` into a
+  // code span over a selection and around the word at a caret, and a caret
+  // on a line of a fence had its word wrapped as prose, where a selection
+  // there was already left alone (found 2026-09-29, the twins of the mark
+  // typed over a selection).
+  const code = "a `let x` b\n";
+  let out = await pressOn(code, [{ anchor: 3, head: 8 }], [B]);
+  assert.equal(out.text, code);
+  out = await pressOn(code, 5, [B]);
+  assert.equal(out.text, code);
+  out = await pressOn("a $x+y$ b\n", 4, [I]);
+  assert.equal(out.text, "a $x+y$ b\n");
+  out = await pressOn("```js\nlet x = 1;\n```\n", 7, [B]);
+  assert.equal(out.text, "```js\nlet x = 1;\n```\n");
+  out = await buttonOn(code, 5, "highlight");
+  assert.equal(out.text, code);
+  // A selection holding a whole code span is wrapped with it, and one that
+  // runs out of a fence into prose still wraps the prose.
+  out = await pressOn(code, [{ anchor: 0, head: 11 }], [B]);
+  assert.equal(out.text, "**a `let x` b**\n");
+  out = await pressOn("```js\nx\n```\n\nProse.\n", [{ anchor: 6, head: 19 }], [B]);
+  assert.equal(out.text, "```js\nx\n```\n\n**Prose.**\n");
+});
+
 test("Ctrl+K edits the link around the caret instead of nesting one, and makes a selected address the destination (ED29)", { skip }, async () => {
   let text = "Read [the standard](https://abcnotation.com/wiki) first.\n";
   let out = await pressOn(text, text.indexOf("standard"), [K]);
@@ -4517,6 +4542,18 @@ test("a mark typed over a selection wraps it, and types over it in code", { skip
   assert.equal(out.text, "```js\nlet * = 1;\n```\n");
   out = await pressOn("---\ntitle: t\n---\n\nBody\n", [{ anchor: 11, head: 12 }], [{ type: '"' }]);
   assert.equal(out.text, '---\ntitle: "\n---\n\nBody\n');
+  // So inside code, maths or an address in a line, where the mark would go
+  // in as a character: `*` over the text of a code span wrote `*` into it,
+  // and `$` over maths doubled its dollars (found 2026-09-28). A whole code
+  // span inside the selection is wrapped with it.
+  out = await pressOn("a `let x` b\n", [{ anchor: 3, head: 8 }], [{ type: "*" }]);
+  assert.equal(out.text, "a `*` b\n");
+  out = await pressOn("a $x+y$ b\n", [{ anchor: 3, head: 6 }], [{ type: "$" }]);
+  assert.equal(out.text, "a $$$ b\n");
+  out = await pressOn("a [w](https://x.org) b\n", [{ anchor: 6, head: 11 }], [{ type: "_" }]);
+  assert.equal(out.text, "a [w](_://x.org) b\n");
+  out = await pressOn("a `let x` b\n", [{ anchor: 2, head: 9 }], [{ type: "*" }]);
+  assert.equal(out.text, "a *`let x`* b\n");
 });
 
 test("Ctrl+H opens the search row with the replace field focused, and stops at the text", { skip }, async () => {

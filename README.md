@@ -459,14 +459,15 @@ What it does:
 - **Typing over a selection, and pasting.** A mark typed over selected
   words wraps them and leaves them selected: `*`, `_`, `~`, `^`, `$`, a
   backtick, a quote or a bracket; in a code block or a score, in an
-  equation on lines of its own and in the header the key types over the
-  selection. An address pasted over selected words makes them a link to
-  it, at every selection at once, with the caret after the link; over an
-  address, inside a link, code or maths, or with nothing selected, it is
-  pasted as text, and a `www.` address is written with the `https://` the
-  page needs. An address is a scheme of two letters or more (`https:`,
-  `mailto:`) or `www.`, so a field of a tune (`K:G`) or a drive (`C:\`) is
-  pasted as the text it is. A picture pasted from the
+  equation on lines of its own, in the header, and inside code, maths or an
+  address in a line the key types over the selection, and the mark buttons
+  leave those alone. An address pasted over selected words makes them a
+  link to it, at every selection at once, with the caret after the link;
+  over an address, inside a link, code or maths, or with nothing selected,
+  it is pasted as text, and a `www.` address is written with the `https://`
+  the page needs. An address is a scheme of two letters or more
+  (`https:`, `mailto:`) or `www.`, so a field of a tune (`K:G`) or a drive
+  (`C:\`) is pasted as the text it is. A picture pasted from the
   clipboard, or dropped on the text with `Shift` held (without it VS Code
   keeps the drop to itself), is written beside the document in a folder
   named after it (`songbook-images` beside `songbook.mdm`), never over a
