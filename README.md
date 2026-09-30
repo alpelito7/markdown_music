@@ -483,7 +483,9 @@ What it does:
   well; `Ctrl+click` on a link follows it (`Alt+click` where
   `editor.multiCursorModifier` gives `Ctrl+click` to the carets): an address
   opens outside, a relative path opens in VS Code, and `#heading` moves the
-  caret to that heading. A click into a document that did not have the focus
+  caret to the heading the page gives that identifier (Pandoc's: without
+  the heading's attributes, `-1` and `-2` for a repeat, the case as
+  written). A click into a document that did not have the focus
   places a caret and selects nothing, and a double click selects the word.
 - **Lists, quotes and callouts are drawn as the page draws them**: an item's
   text hangs under itself with the marker in the gap, numbers are the ones

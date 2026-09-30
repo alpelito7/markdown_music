@@ -13,6 +13,13 @@
   (`Ctrl+B`, `Ctrl+I`, highlight and the rest) leave code and maths in a
   line alone, and a caret in a code block no longer has its word wrapped
   in marks; `Ctrl+E` inside code still takes the code off.
+- `Ctrl+click` on a link to a heading of the document (`#intro`) finds the
+  heading the page gives that name: one written with `{.unnumbered}` or
+  `{-}`, a second heading of the same name (`#intro-1`), and one whose
+  text holds a link, code, maths or a note. It went nowhere, or to another
+  heading, for all of these. The name is matched as the browser matches
+  it, capitals and all, so `#Intro` no longer reaches `# Intro` in the
+  editor, as it never did on the page.
 
 ## 0.7.1
 

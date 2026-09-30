@@ -2145,6 +2145,60 @@ test("Ctrl+click follows a link, Alt+click when Ctrl adds a caret, and a plain c
   await h.close();
 });
 
+test("a link to a heading goes to the heading the page gives that identifier", { skip }, async () => {
+  // Each heading with the identifier Quarto 1.9.37 wrote for it
+  // (2026-09-29): its attributes are not its text, a repeat takes `-1` and
+  // `-2` counted against every identifier before it, one written on a
+  // heading included and matched case and all, a link gives its label and
+  // not its address, code and maths their source, a note's call its label,
+  // and the dashes and the ellipsis of smart punctuation go. The guess
+  // before this kept `{.unnumbered}` in the text and gave no `-1`, so the
+  // first two links went nowhere and the third to the first heading.
+  const heads = [
+    ["# Intro {.unnumbered}", "intro"],
+    ["# Intro", "intro-1"],
+    ["## Intro {-}", "intro-2"],
+    ['## *Scales* and [modes](https://x.org/m "T")', "scales-and-modes"],
+    ["## The `foo_bar` rule and $E=mc^2$", "the-foo_bar-rule-and-emc2"],
+    ["## 1. Allegro -- fast... don't", "allegro-fast-dont"],
+    ["## Own {#MyOwn}", "MyOwn"],
+    ["## MyOwn", "myown"],
+    ["## First {#allegro}", "allegro"],
+    ["## Allegro", "allegro-1"],
+    ["## A call[^1] here", "a-call1-here"],
+    ["## 123", "section"],
+    ["Setext {#set}\n------", "set"],
+  ];
+  let text = "";
+  const starts = [];
+  for (const [line] of heads) {
+    starts.push(text.length + /^(?:#{1,6}[ \t]+)?/.exec(line)[0].length);
+    text += line + "\n\n";
+  }
+  text += heads.map(([, id], i) => "[to" + i + "](#" + id + ")").join(" ") + "\n\n[^1]: The note.\n";
+  const h = await open({ text, scores: 0 });
+  await sleep(200);
+  for (let i = 0; i < heads.length; i++) {
+    await setSelection(h.page, text.length - 3);
+    await sleep(50);
+    const at = await h.page.evaluate((label) => {
+      const el = Array.from(document.querySelectorAll("#app .mdm-link")).find((e) => e.textContent === label);
+      if (!el) return null;
+      el.scrollIntoView({ block: "center" });
+      const b = el.getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }, "to" + i);
+    assert.ok(at, "no link drawn for #" + heads[i][1]);
+    await h.page.keyboard.down("Control");
+    await h.page.mouse.click(at.x, at.y);
+    await h.page.keyboard.up("Control");
+    await sleep(100);
+    assert.deepEqual(await selectionRanges(h.page), [[starts[i], starts[i]]], "#" + heads[i][1]);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a paste that carries no text leaves the selection as it was (G082)", { skip }, async () => {
   const h = await open({ text: "Insert placeholder here\n", scores: 0 });
   await setSelection(h.page, [{ anchor: 7, head: 18 }]);

@@ -9871,48 +9871,100 @@
     return !/^[a-z][a-z0-9+.-]*:/i.test(text) && text.indexOf("@") !== -1 ? "mailto:" + text : text;
   }
 
-  // Pandoc's identifier for a heading, near enough: lowercased, punctuation
-  // dropped, spaces to hyphens, and whatever leads before the first letter
-  // gone; an identifier written on the heading itself (`{#id}`) wins.
-  function headingSlug(text) {
-    const own = /\{#([^}\s]+)[^}]*\}\s*$/.exec(text);
-    if (own) return own[1].toLowerCase();
-    return text
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s_.-]/gu, "")
-      .trim()
-      .replace(/\s+/g, "-")
-      .replace(/^[^\p{L}]+/u, "");
-  }
-
-  // A link to a heading of this document (`#scales`): the caret goes to the
-  // heading, which is what the page does with the fragment. Nothing found,
-  // nothing happens.
-  function jumpToHeading(fragment) {
-    let want;
-    try {
-      want = decodeURIComponent(fragment).toLowerCase();
-    } catch (e) {
-      want = fragment.toLowerCase();
+  // The identifier Pandoc gives each heading, in the order of the document,
+  // which is the fragment a link to it names on the page (auto_identifiers,
+  // read off Pandoc 3.8.3 and Quarto 1.9.37 on 2026-09-29): the heading's
+  // text lowercased, all but letters, digits, `_`, `-` and `.` dropped, its
+  // words joined by hyphens and whatever leads before the first letter gone,
+  // `section` where nothing is left. A heading that comes to an identifier
+  // already given takes `-1`, the next `-2`, counted against every heading
+  // before it, one whose identifier is written on it (`{#id}`, taken as it
+  // stands) included; a div's identifier is not counted. The text is the one
+  // Pandoc reads: without the heading's attributes, a link's label without
+  // its address, a picture's alt, code and maths as written, nothing of a
+  // note written inline, raw TeX or a tag, and `--`, `---` and `...` gone
+  // with the rest of the punctuation, since smart punctuation has made
+  // dashes and an ellipsis of them. A note's call and a reference link keep
+  // the text in their brackets (`[^1]` gives `1`): Pandoc takes the
+  // identifier before it resolves them. The approximation this replaces
+  // kept `{.unnumbered}` in the text and gave no `-1`, so the link to such a
+  // heading went nowhere or to the wrong one.
+  const HEADING_NODE = /^(?:ATXHeading[1-6]|SetextHeading[12])$/;
+  const ID_DROPPED = /^(?:FootnoteInline|RawTeX|HTMLTag|Comment|ProcessingInstruction|LinkTitle|Attribute)$|Mark$/;
+  const ID_VERBATIM = /^(?:InlineCode|InlineMath|InlineBlockMath|FootnoteRef|Citation|URL)$/;
+  const SMART_RUN = /---|--|\.\.\./g;
+  function identifierText(state, node, from, to) {
+    let out = "";
+    let at = from;
+    for (let c = node.firstChild; c && c.from < to; c = c.nextSibling) {
+      if (c.to <= at) continue;
+      out += state.sliceDoc(at, c.from).replace(SMART_RUN, "");
+      at = Math.min(c.to, to);
+      if (ID_DROPPED.test(c.name)) continue;
+      // A link's address, where a bare one is its own label.
+      if (c.name === "URL" && (node.name === "Link" || node.name === "Image")) continue;
+      if (c.name === "Escape") out += state.sliceDoc(c.from + 1, at);
+      else if (c.name === "Entity") out += decodeEntity(state.sliceDoc(c.from, at));
+      else if (ID_VERBATIM.test(c.name)) out += state.sliceDoc(c.from, at);
+      else out += identifierText(state, c, c.from, at);
     }
-    const state = view.state;
-    let target = null;
-    CM.syntaxTree(state).iterate({
+    return out + state.sliceDoc(at, to).replace(SMART_RUN, "");
+  }
+  function headingIds(state) {
+    const tree = CM.ensureSyntaxTree(state, state.doc.length, 2000) || CM.syntaxTree(state);
+    const used = new Set();
+    const out = [];
+    tree.iterate({
       enter: function (n) {
-        if (target !== null) return false;
-        if (!/^(ATXHeading[1-6]|SetextHeading[12])$/.test(n.name)) return;
+        if (!HEADING_NODE.test(n.name)) return;
         let from = n.from;
         let to = n.to;
         n.node.getChildren("HeaderMark").forEach(function (m) {
           if (m.from === from) from = m.to;
           else if (m.to === to || m.from >= from) to = Math.min(to, m.from);
         });
-        if (headingSlug(state.sliceDoc(from, to).trim()) === want) target = from + /^[ \t]*/.exec(state.sliceDoc(from, to))[0].length;
+        while (to > from && /\s/.test(state.sliceDoc(to - 1, to))) to--;
+        let id = null;
+        const attr = /[ \t]+(\{[^{}\n]*\})$/.exec(state.sliceDoc(from, to));
+        if (attr && isAttribute(attr[1])) {
+          to = from + attr.index;
+          attributeItems(attr[1]).forEach(function (item) {
+            if (item.charAt(0) === "#") id = item.slice(1);
+          });
+        }
+        if (id === null) {
+          const words = identifierText(state, n.node, from, to)
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}\s_.-]/gu, "")
+            .split(/\s+/)
+            .filter(Boolean);
+          const base = words.join("-").replace(/^[^\p{L}]+/u, "") || "section";
+          id = base;
+          for (let i = 1; used.has(id); i++) id = base + "-" + i;
+        }
+        used.add(id);
+        out.push({ id: id, pos: from + /^[ \t]*/.exec(state.sliceDoc(from, to))[0].length });
         return false;
       },
     });
-    if (target === null) return;
-    view.dispatch({ selection: { anchor: target }, scrollIntoView: true });
+    return out;
+  }
+
+  // A link to a heading of this document (`#scales`): the caret goes to the
+  // heading, which is what the page does with the fragment, matched as the
+  // browser matches one, case and all. Nothing found, nothing happens.
+  function jumpToHeading(fragment) {
+    let want;
+    try {
+      want = decodeURIComponent(fragment);
+    } catch (e) {
+      want = fragment;
+    }
+    const hit = headingIds(view.state).find(function (h) {
+      return h.id === want;
+    });
+    if (!hit) return;
+    view.dispatch({ selection: { anchor: hit.pos }, scrollIntoView: true });
     view.focus();
   }
 
