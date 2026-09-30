@@ -3534,7 +3534,8 @@ test("the equations are set by the editor's KaTeX when a Chrome is at hand", () 
       "\\{mdm_cache/" + inline + "\\.pdf\\}\\}\\}"),
     "the inline formula is not inserted on the baseline");
   assert.ok(
-    tex.includes("{\\centering\\makebox") && tex.includes(display + ".pdf"),
+    /\\mdmdisplay\{[\d.]+\}\{\\makebox/.test(tex) && tex.includes(display + ".pdf") &&
+      tex.includes("{\\centering#2\\par}"),
     "the display formula is not centred in its band");
   assert.ok(!tex.includes("\\(L\\)"), "the inline formula was left to LaTeX");
 });
@@ -3780,4 +3781,34 @@ test("on paper the header names and counts the equations, and LaTeX sets them wh
   const text = spawnSync("pdftotext", ["-layout", path.join(dir, "abcm2ps.pdf"), "-"], { encoding: "utf8" }).stdout;
   assert.match(text, /\(1\)/);
   assert.match(text, /\(2\)/);
+});
+
+// A display formula in a cell of a pipe table: LaTeX sets the cell as a box
+// of one line, where the band a display formula goes down in has no
+// paragraph to end, and the PDF stopped with "Not allowed in LR mode", with
+// a number or without (2026-09-30; the one without was there before the
+// numbers). In the cell the drawing goes down as it stands, and a number
+// after it.
+test("on paper a display formula in a table's cell goes down in the cell, and a numbered one with its number beside it", {
+  skip: spawnSync("pdftotext", ["-v"]).status !== 0 && "needs pdftotext",
+}, () => {
+  const dir = freshDir("pdf-equations-cell");
+  fs.writeFileSync(
+    path.join(dir, "cell.mdm"),
+    "---\nformat:\n  pdf:\n    documentclass: article\nfilters:\n  - mdm\n---\n\n" +
+      "| Law | Formula |\n|---|---|\n| Newton | $$F = G \\frac{m_1 m_2}{r^2}$$ {#eq-cell} |\n| Plain | $$p = m v$$ |\n\nSee @eq-cell.\n"
+  );
+  const r = runMdm(["render", "cell.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const tex = fs.readFileSync(path.join(dir, "cell.tex"), "utf8");
+  assert.match(tex, /Newton &\s*\\mdmequation\{eq-cell\}\{1\}/);
+  assert.match(tex, /Plain &\s*\\mdmdisplay\{[\d.]+\}\{/);
+  const words = pdfWordBoxes(path.join(dir, "cell.pdf"));
+  const one = words.find((w) => w.text === "(1)");
+  const law = words.find((w) => w.text === "Newton");
+  assert.ok(one && law, "the cell's number is not on the page");
+  // The number, and the formula with it, on the baseline of the row.
+  assert.ok(Math.abs(one.y1 - law.y1) < 0.5, "the number stands at " + one.y1 + " and its row at " + law.y1);
+  const text = spawnSync("pdftotext", ["-layout", path.join(dir, "cell.pdf"), "-"], { encoding: "utf8" }).stdout;
+  assert.match(text, /See Equation 1\./);
 });

@@ -761,6 +761,23 @@ local function look_tex(l)
   put("\\newcommand*{\\mdmheadrule}[1]{\\par\\nobreak" ..
       "\\vskip\\dimexpr #1\\mdmem-\\prevdepth\\relax" ..
       "{\\color{mdmrule}\\hrule height 0.8pt}}")
+  -- A display formula, numbered or not, in a cell of a table set as `l`,
+  -- which LaTeX builds as a box of one line (LR mode), where there is no
+  -- paragraph to end and no space to add: the \par of the band stopped
+  -- the PDF with "Not allowed in LR mode" (a display formula in a pipe
+  -- table's cell, seen on 2026-09-30 and there before the numbers came).
+  -- There the drawing goes down lowered until the formula's own baseline is
+  -- the row's (the drawing's line is a line under the display block, see
+  -- \mdmequation), so that the words of the other cells stand level with
+  -- it, and a number half an em after it on that baseline, which is how the
+  -- page's cell sets them side by side.
+  put("\\newif\\ifmdm@lr")
+  put("\\newcommand{\\mdm@lrtest}{\\mdm@lrfalse\\ifinner\\ifhmode\\mdm@lrtrue\\fi\\fi}")
+  -- A display formula with no number, in the band insert_math sets it in.
+  -- #1 how far the formula's baseline stands above the drawing's, in
+  -- \mdmem, #2 the drawing.
+  put("\\newcommand{\\mdmdisplay}[2]{\\mdm@lrtest\\ifmdm@lr\\lower#1\\mdmem\\hbox{#2}\\else")
+  put("  \\par\\addvspace{0.25\\mdmem}{\\centering#2\\par}\\addvspace{0.25\\mdmem}\\fi}")
   -- A numbered equation (the equations pass): the drawing on a line of its
   -- own and its number in parentheses at the right edge of the column, in
   -- the face of the text and on the formula's baseline, where amsmath sets
@@ -791,14 +808,21 @@ local function look_tex(l)
   -- assigned reads on for a `plus`, expanded the \ifdim on the next line
   -- before the value was in, and compared the width of the equation before;
   -- every formula after the first came out scaled to the whole line (seen
-  -- 2026-09-30). #1 the label, #2 the number, #3 that rise in \mdmem, #4 the
-  -- drawing.
+  -- 2026-09-30). In a cell set as `l` (\ifmdm@lr, above) the drawing and
+  -- the number go down side by side instead. #1 the label, #2 the number,
+  -- #3 that rise in \mdmem, #4 the drawing.
   put("\\newdimen\\mdmeqfree")
   put("\\newdimen\\mdmeqnum")
   put("\\newdimen\\mdmeqlift")
   put("\\newbox\\mdmeqdrawing")
   put("\\newbox\\mdmeqtag")
   put("\\newcommand{\\mdmequation}[4]{%")
+  put("  \\mdm@lrtest")
+  put("  \\ifmdm@lr")
+  put("  {\\setbox\\mdmeqdrawing=\\hbox{#4}\\mdmeqlift=#3\\mdmem")
+  put("   \\phantomsection\\def\\@currentlabel{#2}\\label{#1}%")
+  put("   \\lower\\mdmeqlift\\box\\mdmeqdrawing\\hspace{0.5\\mdmem}\\hbox{\\normalfont(#2)}}%")
+  put("  \\else")
   put("  \\par\\addvspace{0.25\\mdmem}%")
   put("  {\\setbox\\mdmeqdrawing=\\hbox{#4}\\setbox\\mdmeqtag=\\hbox{\\normalfont(#2)}%")
   put("   \\mdmeqlift=#3\\mdmem")
@@ -819,7 +843,7 @@ local function look_tex(l)
   put("   \\noindent\\phantomsection\\def\\@currentlabel{#2}\\label{#1}%")
   put("   \\makebox[\\linewidth][l]{\\hspace*{\\dimexpr\\mdmeqfree+0.5\\mdmem\\relax}\\box\\mdmeqdrawing")
   put("     \\hfill\\smash{\\raise\\mdmeqlift\\box\\mdmeqtag}}\\par}%")
-  put("  \\addvspace{0.25\\mdmem}}")
+  put("  \\addvspace{0.25\\mdmem}\\fi}")
   -- Two ways in, since the class is the document's to choose: KOMA, which is
   -- what Quarto gives a document that names none, restyles through its own
   -- hooks, and a standard class through titlesec, which KOMA is not on
@@ -2249,17 +2273,17 @@ local function math_graphic(digest)
 end
 
 local function insert_math(mathtype, digest)
-  local graphic, w, pdf = math_graphic(digest)
+  local graphic, w, pdf, lift = math_graphic(digest)
   if not graphic then return nil end
   if mathtype == "DisplayMath" then
     -- A display wider than the measure takes the text width instead, the
-    -- shrink the editor's sideways scroll stands in for.
+    -- shrink the editor's sideways scroll stands in for; scaled, and with no
+    -- \raisebox of its own, it keeps its bottom on the line.
     if w / 16 > 51 then
       graphic = string.format("\\includegraphics[width=\\linewidth]{%s}", pdf)
+      lift = 0
     end
-    return pandoc.RawInline("latex", string.format(
-      "\\par\\addvspace{0.25\\mdmem}{\\centering%s\\par}\\addvspace{0.25\\mdmem}",
-      graphic))
+    return pandoc.RawInline("latex", string.format("\\mdmdisplay{%.4f}{%s}", lift, graphic))
   end
   return pandoc.RawInline("latex", graphic)
 end

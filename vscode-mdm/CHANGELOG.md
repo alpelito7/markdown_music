@@ -92,6 +92,9 @@
   is in it. A formula too wide for the column scrolls in its own box with
   its number whole and still at the right. Anything else after a `$$` that
   is no equation's label is drawn as the text the page prints.
+- A display equation in a table's cell no longer stops the PDF with "Not
+  allowed in LR mode": it goes down in its cell, level with the row, its
+  number beside it if it has one.
 
 ## 0.7.1
 
