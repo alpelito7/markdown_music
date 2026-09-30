@@ -4303,6 +4303,7 @@ window.MDM_PALETTE = ${inlineJson(readPalette())};
 <script src="${mediaUri}/hyphenation-patterns.js"></script>
 <script src="${mediaUri}/mdm-hyphenation.js"></script>
 <script src="${mediaUri}/mdm-audio.js"></script>
+<script src="${mediaUri}/mdm-crossref.js"></script>
 </head>
 <body>
 <div id="app"></div>

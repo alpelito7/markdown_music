@@ -78,6 +78,20 @@
   `café@knuth1984` is no citation. A line holding a `[` that nothing closes
   no longer takes seconds to read on every keystroke (a line of 60,000
   characters took 3.4 s, and takes 16 ms).
+- A display equation with a label after its closing `$$`
+  (`$$ {#eq-mass}`) is numbered, its number in parentheses at the right of
+  the column on the formula's baseline, where LaTeX sets one, in the
+  editor, on the page and on paper, and `@eq-mass` reads "Equation 1" and
+  leads to it (`Ctrl+click` in the editor). The page and the paper printed
+  the label as text beside the equation and every reference as
+  "?@eq-mass", and the editor drew the equation with no number.
+  `-@eq-mass`, `[Eq. @eq-mass]`, `@Eq-mass`, the document's language
+  ("Ecuación" under `lang: es`) and the header's `crossref:` settings
+  print what Quarto prints for them. The label shows, small and grey, on
+  the closing line while the equation's source is open, wherever the caret
+  is in it. A formula too wide for the column scrolls in its own box with
+  its number whole and still at the right. Anything else after a `$$` that
+  is no equation's label is drawn as the text the page prints.
 
 ## 0.7.1
 

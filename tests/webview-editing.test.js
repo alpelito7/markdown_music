@@ -2199,6 +2199,48 @@ test("a link to a heading goes to the heading the page gives that identifier", {
   await h.close();
 });
 
+test("Ctrl+click on a reference to an equation brings the equation into view, and so does a link to its label, the caret staying", { skip }, async () => {
+  // The equation far above the reference, out of the pane and out of what
+  // CodeMirror draws, as the page's link goes to it; the caret stays where it
+  // was, since a caret in an equation opens its source (showEquation).
+  const filler = Array.from({ length: 200 }, (_, i) => "Paragraph " + i + " between the equation and the reference.").join("\n\n");
+  const text = "$$\nE = mc^2\n$$ {#eq-mass}\n\n" + filler + "\n\nSee @eq-mass and [the law](#eq-mass).\n";
+  const h = await open({ text, scores: 0, height: 600 });
+  const inView = () =>
+    h.page.evaluate(() => {
+      const eq = document.querySelector("#app .mdm-math--numbered");
+      if (!eq) return false;
+      const b = eq.getBoundingClientRect();
+      return b.top >= 0 && b.bottom <= window.innerHeight;
+    });
+  for (const target of [".mdm-eqref-link", ".mdm-link"]) {
+    const caret = text.length - 2;
+    await setSelection(h.page, caret);
+    await h.page.evaluate(() => {
+      const s = window.__mdm.view.scrollDOM;
+      s.scrollTop = s.scrollHeight;
+    });
+    await sleep(100);
+    assert.equal(await inView(), false, "the equation was in view before the click");
+    const at = await h.page.evaluate((sel) => {
+      const el = document.querySelector("#app " + sel);
+      if (!el) return null;
+      el.scrollIntoView({ block: "center" });
+      const b = el.getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }, target);
+    assert.ok(at, "nothing drawn for " + target);
+    await h.page.keyboard.down("Control");
+    await h.page.mouse.click(at.x, at.y);
+    await h.page.keyboard.up("Control");
+    await sleep(300);
+    assert.equal(await inView(), true, target + " did not bring the equation into view");
+    assert.deepEqual(await selectionRanges(h.page), [[caret, caret]], target);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a paste that carries no text leaves the selection as it was (G082)", { skip }, async () => {
   const h = await open({ text: "Insert placeholder here\n", scores: 0 });
   await setSelection(h.page, [{ anchor: 7, head: 18 }]);

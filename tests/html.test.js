@@ -3258,3 +3258,189 @@ test("the page divides the words of a paragraph that cites and none inside its c
   assert.equal(read.inCitations, 0);
   assert.ok(read.inProse > 10, "the prose is not divided at all: " + read.inProse);
 });
+
+// ---------- Equations by number ----------
+//
+// A display equation with a label after its closing `$$` is numbered at the
+// right of the column on the formula's baseline, and a reference to it reads
+// "Equation 1" and leads to it; Quarto did this itself only for formulas the
+// filter had not written out yet, which on an MDM page was none: the label
+// came out as text and every reference as "?@eq-mass" (2026-09-30). The
+// equations pass in mdm.lua does it now, by the rules the editor draws by
+// (media/mdm-crossref.js), and this holds the two surfaces to one another.
+
+const EQUATIONS = `Before one, a line of prose to measure from.
+
+$$
+E = mc^2
+$$
+
+After one, a line of prose to measure to.
+
+Before two, a line of prose to measure from.
+
+$$
+E = mc^2
+$$ {#eq-mass}
+
+After two, a line of prose to measure to.
+
+$$
+\\frac{a}{b} = \\sum_{i=1}^{n} x_i
+$$ {#eq-sum}
+
+$$
+\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}
+$$ {#eq-pair}
+
+Inline, with no number, $$c = d$$ inside a paragraph.
+
+Inline, with a number, $$c = d$$ {#eq-inline} inside a paragraph.
+
+$$
+x_{1} + x_{2} + x_{3} + x_{4} + x_{5} + x_{6} + x_{7} + x_{8} + x_{9} + x_{10} + x_{11} + x_{12} + x_{13} + x_{14} + x_{15} + x_{16} + x_{17} + x_{18} + x_{19} + x_{20} + x_{21} + x_{22} + x_{23} + x_{24} + x_{25} + x_{26}
+$$ {#eq-long}
+
+The relation between mass and energy, @eq-mass, is the one the sum in -@eq-sum and the pair of [Eq. @eq-pair] were written against, and @Eq-mass is the same equation again, beside [@eq-sum; @eq-pair] and a label nothing carries, [@eq-mass; @eq-zz], all of it in one paragraph long enough to break over several rows of the column on both surfaces, which is what the line ends below compare.
+`;
+
+// The numbered equations of a surface: the number, how far its baseline
+// stands from the formula's, how far it stands in from the right of the
+// column, and whether it is in the prose's face at its size.
+const NUMBERS = function (sel) {
+  const prose = getComputedStyle(document.querySelector(sel.prose));
+  const col = document.querySelector(sel.column).getBoundingClientRect();
+  return Array.from(document.querySelectorAll(sel.equation)).map((eq) => {
+    const num = eq.querySelector(".mdm-eq-number");
+    const disp = eq.querySelector(".katex-display");
+    const bases = disp.querySelectorAll(".katex-html > *");
+    const probe = () => {
+      const s = document.createElement("span");
+      s.style.cssText = "display:inline-block;width:0;height:0";
+      return s;
+    };
+    const m = probe();
+    const n = probe();
+    bases[bases.length - 1].appendChild(m);
+    num.appendChild(n);
+    const out = {
+      number: num.textContent,
+      baseline: Math.round((n.getBoundingClientRect().top - m.getBoundingClientRect().top) * 10) / 10,
+      right: Math.round((col.right - num.getBoundingClientRect().right) * 10) / 10,
+      face: getComputedStyle(num).fontFamily === prose.fontFamily && getComputedStyle(num).fontSize === prose.fontSize,
+      scrolls: disp.scrollWidth > disp.clientWidth,
+      whole: num.getBoundingClientRect().width >= num.scrollWidth - 0.5 && num.getBoundingClientRect().height < parseFloat(getComputedStyle(num).fontSize) * 1.5,
+    };
+    m.remove();
+    n.remove();
+    return out;
+  });
+}.toString();
+
+test("a numbered equation is set as the editor draws it, and a reference to it prints what the editor prints and breaks its paragraph on the same words", { skip }, async () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
+  fs.writeFileSync(
+    path.join(DIR, "equations.mdm"),
+    "---\ntitle: Equations\nformat:\n  html:\n    embed-resources: true\nfilters:\n  - mdm\n---\n\n" + EQUATIONS
+  );
+  const r = spawnSync(MDM, ["render", "equations.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // The one label nothing carries, and nothing else, is warned of.
+  const warned = (r.stderr + r.stdout).replace(/\x1b\[[0-9;]*m/g, "").match(/Unable to resolve crossref @\S+/g) || [];
+  assert.deepEqual(Array.from(new Set(warned)), ["Unable to resolve crossref @eq-zz"]);
+  const url = "file://" + path.join(DIR, "equations.html");
+  const page = await readCiting(
+    url,
+    (arg) => {
+      const numbers = eval("(" + arg.numbers + ")")({ prose: "main.content p", column: "main.content p", equation: "main.content .mdm-eq" });
+      const ps = Array.from(document.querySelectorAll("main.content p"));
+      const line = (t) => ps.find((p) => p.textContent.startsWith(t));
+      const range = (el, last) => {
+        const rg = document.createRange();
+        rg.selectNodeContents(el);
+        const rs = rg.getClientRects();
+        return last ? rs[rs.length - 1] : rs[0];
+      };
+      const gaps = ["one", "two"].map((k) => range(line("After " + k)).top - range(line("Before " + k), true).bottom);
+      // The display maths of a paragraph: the air between its words and the
+      // formula above and below, with a number and without one.
+      const inline = ["no number", "a number"].map((k) => {
+        const p = line("Inline, with " + k);
+        const formula = p.querySelector(".katex-display .katex-html").getBoundingClientRect();
+        const rows = Array.from(p.childNodes).filter((n) => n.nodeType === 3 && n.data.trim());
+        const before = range(rows[0], true);
+        const after = range(rows[rows.length - 1]);
+        return [Math.round((formula.top - before.bottom) * 10) / 10, Math.round((after.top - formula.bottom) * 10) / 10];
+      });
+      return {
+        numbers: numbers,
+        gaps: gaps,
+        inline: inline,
+        refs: Array.from(document.querySelectorAll("main.content a.quarto-xref")).map((a) => a.textContent + " " + a.getAttribute("href")),
+        missing: Array.from(document.querySelectorAll("main.content p strong")).map((s) => s.textContent),
+        labels: /\{#eq-/.test(document.querySelector("main.content").textContent),
+        lines: eval("(" + arg.ends + ")")(ps.filter((p) => p.textContent.startsWith("The relation"))),
+      };
+    },
+    { numbers: NUMBERS, ends: LINE_ENDS }
+  );
+  assert.deepEqual(page.numbers.map((n) => n.number), ["(1)", "(2)", "(3)", "(4)", "(5)"]);
+  for (const n of page.numbers) {
+    assert.ok(Math.abs(n.baseline) < 0.5, n.number + " stands " + n.baseline + " px off the formula's baseline on the page");
+    assert.ok(Math.abs(n.right) < 0.5, n.number + " stands " + n.right + " px in from the right of the column on the page");
+    assert.ok(n.face, n.number + " is not in the prose's face on the page");
+    // Only the formula too wide for the column scrolls, and its number
+    // stands whole beside it.
+    assert.equal(n.scrolls, n.number === "(5)", n.number + (n.scrolls ? " scrolls" : " does not scroll") + " on the page");
+    assert.ok(n.whole, n.number + " is not whole on one row on the page");
+  }
+  assert.ok(Math.abs(page.gaps[0] - page.gaps[1]) < 0.5, "the page's gaps are " + page.gaps.join(" and "));
+  assert.deepEqual(page.inline[1], page.inline[0], "the display maths of a paragraph stands otherwise with a number");
+  assert.equal(page.labels, false, "a label is printed on the page");
+  assert.deepEqual(page.refs, [
+    "Equation 1 #eq-mass",
+    "2 #eq-sum",
+    "Eq. 3 #eq-pair",
+    "Equation 1 #eq-mass",
+    "Equation 2 #eq-sum",
+    "Equation 3 #eq-pair",
+    "Equation 1 #eq-mass",
+  ]);
+  assert.deepEqual(page.missing, ["?@eq-zz"]);
+
+  const { open: openEditor } = require("./webview/helpers.js");
+  const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" };
+  const h = await openEditor({ text: EQUATIONS, seed: { settings }, scores: 0, height: 1200 });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await new Promise((res) => setTimeout(res, 500));
+    editor = await h.page.evaluate(
+      (arg) => ({
+        numbers: eval("(" + arg.numbers + ")")({ prose: "#app .cm-content", column: "#app .cm-content", equation: "#app .mdm-math--numbered" }),
+        refs: Array.from(document.querySelectorAll("#app .mdm-eqref")).map((e) => e.textContent),
+        lines: eval("(" + arg.ends + ")")(Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => l.textContent.startsWith("The relation"))),
+      }),
+      { numbers: NUMBERS, ends: LINE_ENDS }
+    );
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  assert.deepEqual(editor.numbers.map((n) => n.number), page.numbers.map((n) => n.number));
+  for (const n of editor.numbers) {
+    assert.ok(Math.abs(n.baseline) < 0.5, n.number + " stands " + n.baseline + " px off the formula's baseline in the editor");
+    assert.ok(Math.abs(n.right) < 0.5, n.number + " stands " + n.right + " px in from the right of the column in the editor");
+    assert.ok(n.face, n.number + " is not in the prose's face in the editor");
+    assert.equal(n.scrolls, n.number === "(5)", n.number + (n.scrolls ? " scrolls" : " does not scroll") + " in the editor");
+    assert.ok(n.whole, n.number + " is not whole on one row in the editor");
+  }
+  const pageText = Object.values(page.lines)[0];
+  const editorText = Object.values(editor.lines)[0];
+  assert.ok(pageText && editorText, "the paragraph of references was not found");
+  assert.equal(editorText.text, pageText.text, "the editor prints other words than the page");
+  assert.ok(editorText.ends.length >= 3, "the paragraph is not long enough to test: " + JSON.stringify(editorText.ends));
+  assert.deepEqual(editorText.ends, pageText.ends);
+});

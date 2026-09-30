@@ -1482,6 +1482,16 @@ test("the citations a render went through without are named, with what to do abo
   assert.match(many.detail, /Cross-references that point at nothing: @fig-missing\./);
 });
 
+test("a reference to an equation that nothing labels is named, in the words the filter warns with", () => {
+  // The equations pass in mdm.lua resolves the references to equations
+  // itself and warns of a label no equation carries through quarto.log,
+  // whose line is not Quarto's own "WARNING (...)" (read off a render on
+  // 2026-09-30); the notice names it all the same.
+  const warned = ext.citationWarnings("(W) Unable to resolve crossref @eq-zz\n(W) Unable to resolve crossref @eq-zz\n");
+  assert.equal(warned.summary, "@eq-zz points at nothing in the document and came out as “?@eq-zz”");
+  assert.match(warned.detail, /Cross-references that point at nothing: @eq-zz\./);
+});
+
 test("an export that went through without some citations says which in its notice, and the log says more", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
   const restore = usePath(fakeBin(tmp, { say: "[WARNING] Citeproc: citation nokey2020 not found" }));

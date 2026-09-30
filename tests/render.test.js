@@ -64,7 +64,7 @@ function abcjsCacheName(abc, ink, staff, face) {
 // And a KaTeX formula: the recipe, the mode (I inline, D display), the TeX
 // and the ink of the side (the body ink, not the svg ink of an engraving).
 function katexCacheName(mode, tex, ink) {
-  return sha1("katex 2 " + mode + "\n" + tex + "\n" + (ink || "#24292e"));
+  return sha1("katex 3 " + mode + "\n" + tex + "\n" + (ink || "#24292e"));
 }
 
 function runMdm(args, cwd) {
@@ -3516,8 +3516,9 @@ test("the equations are set by the editor's KaTeX when a Chrome is at hand", () 
     assert.ok(fs.existsSync(path.join(cache, h + ".pdf")), h + ".pdf missing");
     assert.ok(fs.existsSync(path.join(cache, h + ".dim")), h + ".dim missing");
   }
-  // The .dim sidecar carries "w h d pw ph" in the editor's pixels, the
-  // pagelet padded to the 8 px grid Chrome prints exactly.
+  // The .dim sidecar carries "w h d pw ph b" in the editor's pixels, the
+  // pagelet padded to the 8 px grid Chrome prints exactly (b, the formula's
+  // own baseline, is what a numbered equation's number rises to).
   const dim = fs.readFileSync(path.join(cache, inline + ".dim"), "utf8");
   const [w, h, d, pw, ph] = dim.trim().split(" ").map(Number);
   assert.ok(w > 1 && h > w && d > 0, "inline dims look wrong: " + dim);
@@ -3548,7 +3549,10 @@ test("mdm-engraver: abcm2ps leaves the equations to LaTeX", () => {
   assert.equal(r.status, 0, r.stderr);
   const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
   assert.ok(tex.includes("\\(L\\)"), "the inline formula is not LaTeX's");
-  assert.ok(!tex.includes("\\makebox["), "a KaTeX insertion slipped through");
+  // Looked for in the body: the preamble defines \mdmequation, which has a
+  // \makebox of its own for the line of a numbered equation.
+  const body = tex.slice(tex.indexOf("\\begin{document}"));
+  assert.ok(!body.includes("\\makebox["), "a KaTeX insertion slipped through");
   assert.ok(
     !fs.existsSync(path.join(dir, "mdm_cache", katexCacheName("I", INLINE_TEX) + ".pdf")),
     "a KaTeX engraving was cached under abcm2ps");
@@ -3681,4 +3685,99 @@ test("the .tex writes a table's head as it is written, bold only where a cell as
   const head = /\\toprule\\noalign\{\}\n([\s\S]*?)\\midrule/.exec(texOf(dir));
   assert.ok(head, "no table head in the .tex");
   assert.equal(head[1].trim(), "index and type & \\textbf{bold head} \\\\");
+});
+
+// ---------- Equations by number ----------
+//
+// A display equation with a label after its closing `$$` is numbered on paper
+// as the editor and the page number it: the number in parentheses at the
+// right of the column, on the formula's baseline, and a reference to it
+// prints "Equation 1" and links to it (the equations pass and \mdmequation in
+// mdm.lua). Quarto's own numbering never saw these equations, the filter
+// having set every formula before it runs: the label was printed and every
+// reference came out as "?@eq-mass" (2026-09-30).
+
+const EQ_DOC =
+  "Before, a paragraph long enough to fill its first line from one margin to the other, so that the right edge of the column can be read off the words of that line, which is where the number of an equation stands.\n\n" +
+  "$$\nE = mc^2\n$$ {#eq-mass}\n\n" +
+  "- $$\n  g = h\n  $$ {#eq-list}\n- An item after it.\n\n" +
+  "As @eq-mass shows, -@eq-list, [Eq. @eq-mass] and [@eq-mass; @eq-zz].\n";
+
+test("on paper a numbered equation has its number at the right of the column on the formula's baseline, and a reference to it prints what the page prints and links to it", {
+  skip:
+    (spawnSync("pdftotext", ["-v"]).status !== 0 || spawnSync("pdftoppm", ["-v"]).status !== 0) &&
+    "needs pdftotext and pdftoppm",
+}, () => {
+  const dir = freshDir("pdf-equations");
+  const head = "---\nformat:\n  pdf:\n    documentclass: article\nfilters:\n  - mdm\n---\n\n";
+  fs.writeFileSync(path.join(dir, "eq.mdm"), head + EQ_DOC);
+  const r = runMdm(["render", "eq.mdm", "--to", "pdf", "-M", "keep-tex:true", "-M", "mdm-text-align:justify"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const tex = fs.readFileSync(path.join(dir, "eq.tex"), "utf8");
+  // Each equation with its label, its number and how far the number rises
+  // to the formula's baseline from the line under the display block that
+  // the engraving measures.
+  const set = /\\mdmequation\{eq-mass\}\{1\}\{([\d.]+)\}\{/.exec(tex);
+  assert.ok(set, "the first equation is not set by \\mdmequation");
+  assert.ok(Number(set[1]) > 0.5, "the number rises " + set[1] + " em");
+  assert.match(tex, /\\mdmequation\{eq-list\}\{2\}\{/);
+  assert.match(tex, /\\hyperref\[eq-mass\]\{Equation~1\}/);
+  assert.match(tex, /\\hyperref\[eq-list\]\{2\}/);
+  assert.match(tex, /\\hyperref\[eq-mass\]\{Eq\.~1\}/);
+  assert.match(tex, /\\hyperref\[eq-mass\]\{Equation~1\}\\textbf\{\?@eq-zz\}/);
+  assert.doesNotMatch(tex, /#eq-/, "a label is printed");
+  const pdf = path.join(dir, "eq.pdf");
+  const words = pdfWordBoxes(pdf);
+  const one = words.find((w) => w.text === "(1)");
+  const two = words.find((w) => w.text === "(2)");
+  assert.ok(one && two, "the numbers are not on the page");
+  // The right of the column: where the justified first line ends.
+  const lineOf = (w) => words.filter((v) => v.page === w.page && Math.abs(v.y1 - w.y1) < 1);
+  const first = lineOf(words[0]);
+  const right = Math.max(...first.map((w) => w.x1));
+  assert.ok(Math.abs(one.x1 - right) < 0.5, "(1) ends at " + one.x1 + " and the column at " + right);
+  assert.ok(Math.abs(two.x1 - right) < 0.5, "(2) ends at " + two.x1 + " and the column at " + right);
+  // On the formula's baseline, read off the pixels: the lowest ink of
+  // E = mc^2, which has nothing below its baseline, against the lowest of
+  // the digit between the parentheses.
+  const raster = pageRaster(pdf, one.page, 300);
+  const digit = (w) => ({ x0: w.x0 + (w.x1 - w.x0) * 0.34, x1: w.x1 - (w.x1 - w.x0) * 0.34, y0: w.y0, y1: w.y1 + 2 });
+  const formula = raster.baseline({ x0: first[0].x0 + 10, x1: one.x0 - 10, y0: one.y0 - 24, y1: one.y1 + 4 });
+  const number = raster.baseline(digit(one));
+  assert.ok(Math.abs(formula - number) < 0.5, "the formula's baseline is at " + formula + " and the number's at " + number);
+  // The bullet of the item the second equation opens stands on its line,
+  // with the number, and the item after it keeps its own.
+  const bullets = words.filter((w) => w.text === "•");
+  assert.equal(bullets.length, 2);
+  assert.ok(Math.abs(bullets[0].y1 - two.y1) < 0.5, "the bullet stands at " + bullets[0].y1 + " and (2) at " + two.y1);
+  const text = spawnSync("pdftotext", ["-layout", pdf, "-"], { encoding: "utf8" }).stdout.replace(/\s+/g, " ");
+  assert.match(text, /As Equation 1 shows, 2, Eq\. 1 and Equation 1\?@eq-zz\./);
+});
+
+test("on paper the header names and counts the equations, and LaTeX sets them where Chrome does not", {
+  skip: spawnSync("pdftotext", ["-v"]).status !== 0 && "needs pdftotext",
+}, () => {
+  const dir = freshDir("pdf-equations-header");
+  const body = "$$\nE = mc^2\n$$ {#eq-mass}\n\n$$\nF = ma\n$$ {#eq-force}\n\nSee @eq-mass and [@eq-mass; @eq-force].\n";
+  const render = (name, head) => {
+    fs.writeFileSync(path.join(dir, name + ".mdm"), "---\n" + head + "filters:\n  - mdm\n---\n\n" + body);
+    const r = runMdm(["render", name + ".mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+    assert.equal(r.status, 0, r.stderr);
+    return fs.readFileSync(path.join(dir, name + ".tex"), "utf8");
+  };
+  // Spanish, numbered in lower-case roman, and no reference a link: what
+  // Quarto printed for the same header (crossref.test.js).
+  const es = render("es", "lang: es\ncrossref:\n  eq-labels: roman i\n  ref-hyperlink: false\n");
+  assert.match(es, /\\mdmequation\{eq-mass\}\{i\}/);
+  assert.match(es, /\\mdmequation\{eq-force\}\{ii\}/);
+  assert.match(es, /See Ecuación~i and Ecuación~i, Ecuación~ii\./);
+  assert.doesNotMatch(es, /\\hyperref\[eq-/);
+  // With abcm2ps no formula goes through Chrome, and LaTeX sets the
+  // numbered ones as equations with the same number.
+  const tex = render("abcm2ps", "mdm-engraver: abcm2ps\n");
+  assert.match(tex, /\\begin\{equation\}\nE = mc\^2\n\\tag\{1\}\\label\{eq-mass\}\\end\{equation\}/);
+  assert.match(tex, /\\hyperref\[eq-force\]\{Equation~2\}/);
+  const text = spawnSync("pdftotext", ["-layout", path.join(dir, "abcm2ps.pdf"), "-"], { encoding: "utf8" }).stdout;
+  assert.match(text, /\(1\)/);
+  assert.match(text, /\(2\)/);
 });

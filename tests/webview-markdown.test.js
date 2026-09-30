@@ -21,7 +21,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { open, skip, rows, setSelection, postSettings } = require("./webview/helpers.js");
+const { open, skip, rows, setSelection, postSettings, update } = require("./webview/helpers.js");
 
 // Puts the document in the reading state: the focus leaves the editor the
 // way a click on a bare stretch of the page takes it, which is what makes
@@ -1379,13 +1379,16 @@ const CASES = [
   },
   {
     id: "M11",
-    name: "a closer with a label after it closes the block, the label drawn under the equation, and the next block is its own (G052)",
+    name: "a closer with a label after it closes the block, the equation numbered in the label's place, and the next block is its own (G052)",
     text: "$$\nE = mc^2\n$$ {#eq-mass}\n$$\nF = ma\n$$\n",
-    // The label is an attribute the page prints none of, so nothing is
-    // drawn under the equation (it was drawn as text until the attributes
-    // came, P6).
+    // The label is the equation's number on the page and none of its text
+    // (the equations pass in mdm.lua), so the number is drawn beside the
+    // equation and nothing under it. Until 2026-09-30 the label was drawn as
+    // nothing and the equation had no number, on the belief that the page
+    // printed none of it; it printed the label as text and "?@eq-mass" for
+    // the references.
     rows: [
-      [1, "mdm-math mdm-math--block", "⟦math:E = mc^2⟧"],
+      [1, "mdm-math mdm-math--block mdm-math--numbered", "⟦math:E = mc^2⟧(1)"],
       [4, "mdm-math mdm-math--block", "⟦math:F = ma⟧"],
       [7, "mdm-blank", ""],
     ],
@@ -1949,6 +1952,360 @@ test("a citation names its entries and Ctrl+click goes to them in the list, and 
       ]),
       ["Alt+click to open", "refs.bib\nClick to open"]
     );
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+// ---------- Equations by number ----------
+//
+// A display equation with a label straight after its closing `$$` is
+// numbered at the right of the column on the formula's baseline, and a
+// reference to it reads as the page prints it (the equations pass in
+// mdm.lua). The rules are media/mdm-crossref.js's, held against what Quarto
+// printed in crossref.test.js; the page is held against the same document
+// in html.test.js, and the paper in render.test.js.
+
+const NUMBERED =
+  "Before one, a line of prose.\n\n$$\nE = mc^2\n$$\n\nAfter one, a line of prose.\n\n" +
+  "Before two, a line of prose.\n\n$$\nE = mc^2\n$$ {#eq-mass}\n\nAfter two, a line of prose.\n\n" +
+  "$$\n\\frac{a}{b} = \\sum_{i=1}^{n} x_i\n$$ {#eq-sum}\n\n" +
+  "$$\n\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}\n$$ {#eq-pair}\n\n" +
+  "Inline display $$c = d$$ {#eq-inline} inside a paragraph.\n\n" +
+  "> $$\n> e = f\n> $$ {#eq-quote}\n\n" +
+  "| Work | Law |\n|---|---|\n| Newton | $$F = ma$$ {#eq-cell} |\n\n" +
+  "Refs: @eq-mass; -@eq-sum; [Eq. @eq-pair]; @Eq-inline; [@eq-quote; @eq-cell]; [@eq-mass; @eq-zz]; [see @eq-mass, p. 3].\n";
+
+// Each numbered equation as it is drawn: its number, how far the number's
+// baseline stands from the formula's, how far it stands in from the right of
+// the equation's box, how far the formula is off the box's centre, and
+// whether the number is in the prose's face at its size.
+async function numberedNow(page) {
+  return page.evaluate(() => {
+    const prose = getComputedStyle(document.querySelector("#app .cm-content"));
+    return Array.from(document.querySelectorAll("#app .mdm-math--numbered")).map((eq) => {
+      const num = eq.querySelector(":scope > .mdm-eq-number");
+      const disp = eq.querySelector(":scope > .katex-display");
+      const bases = disp.querySelectorAll(".katex-html > *");
+      const probe = () => {
+        const s = document.createElement("span");
+        s.style.cssText = "display:inline-block;width:0;height:0";
+        return s;
+      };
+      const m = probe();
+      const n = probe();
+      bases[bases.length - 1].appendChild(m);
+      num.appendChild(n);
+      const box = eq.getBoundingClientRect();
+      const nb = num.getBoundingClientRect();
+      const k = disp.querySelector(".katex-html").getBoundingClientRect();
+      const out = {
+        number: num.textContent,
+        baseline: +(n.getBoundingClientRect().top - m.getBoundingClientRect().top).toFixed(2),
+        right: +(box.right - nb.right).toFixed(2),
+        centre: +((k.left + k.right) / 2 - (box.left + box.right) / 2).toFixed(2),
+        face: getComputedStyle(num).fontFamily === prose.fontFamily,
+        size: getComputedStyle(num).fontSize,
+        cell: !!eq.closest(".mdm-table"),
+        scrolls: disp.scrollWidth > disp.clientWidth,
+      };
+      m.remove();
+      n.remove();
+      return out;
+    });
+  });
+}
+
+function eqRefs(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-eqref")).map((e) => ({
+      text: e.textContent,
+      links: Array.from(e.querySelectorAll(".mdm-eqref-link")).map((l) => l.getAttribute("data-mdm-eq")),
+      missing: Array.from(e.querySelectorAll(".mdm-eqref-missing")).map((l) => l.textContent),
+      title: e.title,
+    }))
+  );
+}
+
+test("a labelled equation is numbered in the order of the document at the right of the column, on the formula's baseline and in the prose's face, and nothing of its label is drawn", { skip }, async () => {
+  const h = await open({ text: NUMBERED, scores: 0, height: 1400 });
+  try {
+    await reading(h.page);
+    const seen = await numberedNow(h.page);
+    // In a block, a fraction, an aligned pair (whose baseline is its axis,
+    // where LaTeX stands the tag of an aligned block too), inside a
+    // paragraph, in a quote and in a table's cell, in that order.
+    assert.deepEqual(seen.map((s) => s.number), ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)"]);
+    for (const s of seen) {
+      assert.ok(Math.abs(s.baseline) < 0.5, s.number + " stands " + s.baseline + " px off the formula's baseline");
+      assert.ok(Math.abs(s.right) < 0.5, s.number + " stands " + s.right + " px in from the right of its equation");
+      assert.ok(s.face, s.number + " is not in the prose's face");
+      assert.equal(s.size, "16px", s.number);
+      if (!s.cell) assert.ok(Math.abs(s.centre) < 1, s.number + "'s formula stands " + s.centre + " px off the centre");
+      // A formula that fits does not scroll: what KaTeX draws past its box
+      // (the bar of a fraction, the limits of a sum) is inside the half em.
+      assert.equal(s.scrolls, false, s.number + " scrolls");
+    }
+    // A block's and a paragraph's equation span the column, as the page's do.
+    const widths = await h.page.evaluate(() => {
+      const col = document.querySelector("#app .cm-content").getBoundingClientRect().width;
+      return Array.from(document.querySelectorAll("#app .mdm-math--numbered"))
+        .filter((e) => !e.closest(".mdm-table, .mdm-block-framed"))
+        .map((e) => Math.round(col - e.getBoundingClientRect().width));
+    });
+    assert.deepEqual(widths, [0, 0, 0, 0]);
+    // Nothing of a label is on screen, and the unlabelled equation has no
+    // number.
+    const shown = await h.page.evaluate(() => document.querySelector("#app .cm-content").innerText);
+    assert.ok(!/\{#eq-/.test(shown), shown);
+    assert.equal(await h.page.evaluate(() => document.querySelectorAll("#app .mdm-math--block:not(.mdm-math--numbered)").length), 1);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a reference to an equation reads as the page prints it, in the link blue, its tooltip the equation, and its source under the caret", { skip }, async () => {
+  const h = await open({ text: NUMBERED, scores: 0, height: 1400 });
+  try {
+    await reading(h.page);
+    const refs = await eqRefs(h.page);
+    assert.deepEqual(refs.map((r) => r.text), [
+      "Equation\u00a01",
+      "2",
+      "Eq.\u00a03",
+      "Equation\u00a04",
+      "Equation\u00a05, Equation\u00a06",
+      "Equation\u00a01?@eq-zz",
+      "see\u00a01",
+    ]);
+    assert.deepEqual(refs[4].links, ["eq-quote", "eq-cell"]);
+    assert.deepEqual(refs[5].missing, ["?@eq-zz"]);
+    assert.equal(refs[0].title, "(1) E = mc^2\nCtrl+click to open");
+    assert.equal(refs[5].title, "(1) E = mc^2\n@eq-zz: no equation carries this label\nCtrl+click to open");
+    // The link blue on what the page links, the ink on the rest, and the
+    // missing label in bold, underlined as a missing citation is.
+    const look = await h.page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--mdm-link)";
+      document.querySelector("#app").appendChild(probe);
+      const blue = getComputedStyle(probe).color;
+      probe.remove();
+      const ref = document.querySelectorAll("#app .mdm-eqref")[5];
+      return {
+        blue: blue,
+        link: getComputedStyle(ref.querySelector(".mdm-eqref-link")).color,
+        missingWeight: getComputedStyle(ref.querySelector(".mdm-eqref-missing")).fontWeight,
+        missingLine: getComputedStyle(ref.querySelector(".mdm-eqref-missing")).textDecorationStyle,
+        cursor: getComputedStyle(ref).cursor,
+      };
+    });
+    assert.equal(look.link, look.blue);
+    assert.ok(Number(look.missingWeight) >= 600, look.missingWeight);
+    assert.equal(look.missingLine, "wavy");
+    assert.equal(look.cursor, "pointer");
+    // Under the caret, the source.
+    await setSelection(h.page, NUMBERED.indexOf("@eq-mass;") + 3);
+    const open1 = await eqRefs(h.page);
+    assert.equal(open1.length, 6);
+    assert.equal(open1[0].text, "2");
+    const raw = await h.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-cite")).map((e) => e.textContent));
+    assert.deepEqual(raw, ["@eq-mass"]);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("an open equation shows its label wherever the caret stands in it", { skip }, async () => {
+  // The label is the equation's number on the page and none of its text, so
+  // shut it is not drawn; open, it stands small and faint on the closer's
+  // line with the caret anywhere in the equation. It showed only once the
+  // caret came onto it, at the end of the `$$` (the owner, 2026-09-30).
+  const h = await open({ text: NUMBERED, scores: 0, height: 1400 });
+  try {
+    await reading(h.page);
+    const at = NUMBERED.indexOf("$$ {#eq-mass}");
+    // The caret in the formula's own line, two lines above the label.
+    await setSelection(h.page, NUMBERED.lastIndexOf("E = mc^2", at) + 2);
+    await new Promise((r) => setTimeout(r, 150));
+    const label = await h.page.evaluate(() => {
+      const el = Array.from(document.querySelectorAll("#app .mdm-attr")).find((e) => e.textContent === "{#eq-mass}");
+      if (!el) return null;
+      const b = el.getBoundingClientRect();
+      return { shown: b.width > 0 && b.height > 0, line: el.closest(".cm-line").textContent };
+    });
+    assert.ok(label, "the label is not drawn with the equation open");
+    assert.equal(label.shown, true);
+    assert.equal(label.line, "$$ {#eq-mass}");
+    // A caret in the paragraph after it shuts the equation again, and the
+    // label goes with its source.
+    await setSelection(h.page, NUMBERED.indexOf("After two") + 2);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(await h.page.evaluate(() => /\{#eq-mass\}/.test(document.querySelector("#app .cm-content").innerText)), false);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a numbered equation too wide for the column scrolls in its own box, its number whole at the right and still", { skip }, async () => {
+  // The owner's ask (2026-09-30): the number always in view, the scroll
+  // bar working, the number not moving with it. The editor's text may be
+  // cut between any two letters, and "(4)" stood as three rows beside a
+  // formula that could not fit, the grid having given the number the width
+  // of one character.
+  const sum = Array.from({ length: 24 }, (_, i) => "x_{" + (i + 1) + "}").join(" + ");
+  const text = "Before.\n\n$$\n" + sum + "\n$$ {#eq-long}\n\nAfter.\n";
+  const h = await open({ text, scores: 0, height: 900 });
+  try {
+    await reading(h.page);
+    const read = () =>
+      h.page.evaluate(() => {
+        const eq = document.querySelector("#app .mdm-math--numbered");
+        const disp = eq.querySelector(":scope > .katex-display");
+        const num = eq.querySelector(":scope > .mdm-eq-number");
+        const col = document.querySelector("#app .cm-content").getBoundingClientRect();
+        const n = num.getBoundingClientRect();
+        return {
+          scrolls: disp.scrollWidth > disp.clientWidth,
+          scrollLeft: disp.scrollLeft,
+          whole: n.width >= num.scrollWidth - 0.5 && n.height < parseFloat(getComputedStyle(num).fontSize) * 1.5,
+          right: Math.round((col.right - n.right) * 10) / 10,
+          left: Math.round(n.left * 10) / 10,
+          clear: n.left >= disp.getBoundingClientRect().right,
+        };
+      });
+    const before = await read();
+    assert.equal(before.scrolls, true, "the formula does not scroll");
+    assert.equal(before.whole, true, "the number is not whole on one row");
+    assert.equal(before.right, 0, "the number is not at the right of the column");
+    assert.equal(before.clear, true, "the formula's box runs under the number");
+    await h.page.evaluate(() => {
+      document.querySelector("#app .mdm-math--numbered > .katex-display").scrollLeft = 300;
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    const after = await read();
+    assert.equal(after.scrollLeft, 300);
+    assert.equal(after.left, before.left, "the number moved with the scroll");
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("an equation leaves the same air above and below with a number as without one", { skip }, async () => {
+  const h = await open({ text: NUMBERED, scores: 0, height: 1400 });
+  try {
+    await reading(h.page);
+    const gaps = await h.page.evaluate(() => {
+      const line = (t) => Array.from(document.querySelectorAll("#app .cm-line")).find((l) => l.textContent.startsWith(t));
+      return ["one", "two"].map((k) => line("After " + k).getBoundingClientRect().top - line("Before " + k).getBoundingClientRect().bottom);
+    });
+    assert.ok(Math.abs(gaps[0] - gaps[1]) < 0.5, "the gaps are " + gaps.join(" and "));
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a label added renumbers the equations after it and every reference to them, as does the header's language, hidden or shown", { skip }, async () => {
+  const h = await open({ text: NUMBERED, scores: 0, height: 1400 });
+  try {
+    await reading(h.page);
+    // A labelled equation put in at the head of the document, far above the
+    // references: every number moves, and the references with them, though
+    // nothing near them changed.
+    await h.page.evaluate(() => window.__mdm.view.dispatch({ changes: { from: 0, insert: "$$\nx = y\n$$ {#eq-first}\n\n" } }));
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual((await numberedNow(h.page)).map((s) => s.number), ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)"]);
+    assert.deepEqual((await eqRefs(h.page)).map((r) => r.text).slice(0, 2), ["Equation\u00a02", "3"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // Its label taken off again: the old numbers come back.
+    await h.page.evaluate(() => {
+      const text = window.__mdm.view.state.doc.toString();
+      const at = text.indexOf(" {#eq-first}");
+      window.__mdm.view.dispatch({ changes: { from: at, to: at + " {#eq-first}".length } });
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual((await eqRefs(h.page)).map((r) => r.text).slice(0, 2), ["Equation\u00a01", "2"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // A header the host keeps out of the text, naming the language and the
+    // numbering: the text does not change, and the references follow it.
+    const text = await h.page.evaluate(() => window.__mdm.view.state.doc.toString());
+    const header = "---\nlang: es\ncrossref:\n  eq-labels: roman i\n---\n";
+    await update(h.page, header + "\n" + text, false, 0, header);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual((await eqRefs(h.page)).map((r) => r.text).slice(0, 2), ["Ecuación\u00a0i", "ii"]);
+    assert.deepEqual((await numberedNow(h.page)).map((s) => s.number).slice(0, 2), ["(i)", "(ii)"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // The language changed in that header and nothing else: the lines kept
+    // back are as many as before, and no other change redraws the document.
+    const french = header.replace("lang: es", "lang: fr");
+    await update(h.page, french + "\n" + text, false, 0, french);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal((await eqRefs(h.page))[0].text, "Équation\u00a0i");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a header shown in the text names the equations as it is typed", { skip }, async () => {
+  const header = "---\ntitle: T\n---\n\n";
+  const h = await open({ text: header + NUMBERED, scores: 0, height: 1400, withFrontMatter: true });
+  try {
+    await reading(h.page);
+    assert.equal((await eqRefs(h.page))[0].text, "Equation\u00a01");
+    await h.page.evaluate(() => {
+      const text = window.__mdm.view.state.doc.toString();
+      const at = text.indexOf("title: T\n") + "title: T\n".length;
+      window.__mdm.view.dispatch({ changes: { from: at, insert: "crossref:\n  eq-prefix: \"eq.\"\n" } });
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const refs = await eqRefs(h.page);
+    assert.equal(refs[0].text, "eq.\u00a01");
+    assert.equal(refs[3].text, "Eq.\u00a04");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("what a closer carries that is no equation's label is drawn as the page prints it", { skip }, async () => {
+  // `{#fig-x}` after a closer, a label with a period after it, and a label
+  // on the line under the closer: Pandoc reads none of them as an attribute
+  // and Quarto numbers none of them, so the page prints them as written,
+  // beside an equation with no number (measured on Quarto 1.9.37); and a
+  // reference to the last prints "?@eq-next".
+  const text = "$$\nk = l\n$$ {#fig-x}\n\n$$\nm = n\n$$ {#eq-dot}.\n\n$$\ni = j\n$$\n{#eq-next}\n\nSee @eq-next.\n";
+  const h = await open({ text, scores: 0, height: 900 });
+  try {
+    await reading(h.page);
+    const drawn = (await rows(h.page)).map((r) => r.text).filter((t) => t);
+    assert.deepEqual(drawn, ["⟦math:k = l⟧{#fig-x}", "⟦math:m = n⟧{#eq-dot}.", "⟦math:i = j⟧", "{#eq-next}", "See ?@eq-next."]);
+    assert.equal(await h.page.evaluate(() => document.querySelectorAll("#app .mdm-math--numbered").length), 0);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a citation that names a cross-reference is Quarto's, and Pandoc is not asked about it", { skip }, async () => {
+  // Quarto takes the whole of `[@knuth1984; @eq-mass]` and drops the key of
+  // the bibliography unprinted, keeping the comma that came before the
+  // equation (", Equation 1", measured), so citeproc, which runs after it,
+  // never counts it; neither is it in what the editor asks about.
+  const text = "$$\nE = mc^2\n$$ {#eq-mass}\n\nSee [@knuth1984; @eq-mass], [@shannon1948; @fig-x] and @knuth1984.\n";
+  const h = await open({ text, scores: 0, height: 900 });
+  try {
+    const asked = await citesAsked(h.page);
+    assert.equal(asked.body, "[@knuth1984]{#mdmcite-0}\n");
+    await reading(h.page);
+    assert.deepEqual((await eqRefs(h.page)).map((r) => r.text), [", Equation\u00a01"]);
     assert.deepEqual(h.errors, []);
   } finally {
     await h.close();

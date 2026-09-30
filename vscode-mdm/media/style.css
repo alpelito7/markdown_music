@@ -1281,8 +1281,8 @@ body {
    tall, which is what the buffers gave it at every size. */
 #app .cm-line img.cm-widgetBuffer:has(+ span[contenteditable="false"]:empty),
 #app .cm-line span[contenteditable="false"]:empty + img.cm-widgetBuffer,
-#app .cm-line img.cm-widgetBuffer:has(+ :is(.mdm-smart, .mdm-entity, .mdm-note-ref, .mdm-cited)),
-#app .cm-line :is(.mdm-smart, .mdm-entity, .mdm-note-ref, .mdm-cited) + img.cm-widgetBuffer {
+#app .cm-line img.cm-widgetBuffer:has(+ :is(.mdm-smart, .mdm-entity, .mdm-note-ref, .mdm-cited, .mdm-eqref)),
+#app .cm-line :is(.mdm-smart, .mdm-entity, .mdm-note-ref, .mdm-cited, .mdm-eqref) + img.cm-widgetBuffer {
   position: absolute;
 }
 #app .cm-line {
@@ -1483,6 +1483,22 @@ body {
   text-decoration: underline wavy #c94f4f;
   text-decoration-skip-ink: none;
 }
+/* A reference to an equation as the page prints it (EqRefWidget in
+   main.js): "Equation 1" is a link on the page, the whole of it, in the
+   link blue; a reference `crossref: ref-hyperlink: false` leaves unlinked
+   is ink; and a label no equation carries prints "?@eq-x" in bold, which
+   is underlined here as a key the bibliography has not got is. */
+#app .mdm-eqref {
+  color: var(--mdm-ink);
+  white-space: normal;
+}
+#app .mdm-eqref .mdm-eqref-link {
+  color: var(--mdm-link);
+}
+#app .mdm-eqref .mdm-eqref-missing {
+  text-decoration: underline wavy #c94f4f;
+  text-decoration-skip-ink: none;
+}
 /* The list of works cited (RefsWidget in main.js), set as the page sets it
    (mdm-look.css, "Notes and the reference list"): the face, the size and the
    leading of a paragraph, justified when the prose is, the style's hanging
@@ -1630,7 +1646,8 @@ body {
    that follows it, as VS Code's own editor shows under Ctrl. */
 #app .mdm-link,
 #app .mdm-note-ref,
-#app .mdm-cited {
+#app .mdm-cited,
+#app .mdm-eqref {
   cursor: pointer;
 }
 #app .mdm-link--open,
@@ -1647,11 +1664,13 @@ body {
   text-decoration: underline;
 }
 /* The same key over a citation underlines the part of it that goes to the
-   entry (showEntry in main.js), the part the page makes a link of, and
+   entry (showEntry in main.js), the part the page makes a link of, over a
+   reference to an equation the reference it goes by (showEquation), and
    over a link inside an entry of the list (a DOI, a URL) the link it
    follows. An entry the host found in a file opens there on a plain click
    (openEntry), and carries the pointer for it; one it did not find is only
    words. */
+#app.mdm--follow .mdm-eqref .mdm-eqref-link:hover,
 #app.mdm--follow .mdm-cited .mdm-cite-link[data-mdm-ref]:hover,
 #app.mdm--follow .mdm-refs .mdm-cite-link[data-mdm-href]:hover {
   cursor: pointer;
@@ -2087,9 +2106,10 @@ body {
   /* What the rail of its copy button is placed against (.mdm-chrome). */
   position: relative;
 }
-/* What the closing line of a block carries after its `$$` (`{#eq-mass}`, a
-   run of prose): under the equation, set as the prose is and starting at
-   the left, where the page runs it on after the display maths. */
+/* What the closing line of a block carries after its `$$` (a run of prose,
+   or an attribute that is no equation's label and is text to Pandoc):
+   under the equation, set as the prose is and starting at the left, where
+   the page runs it on after the display maths. */
 #app .mdm-math--block .mdm-math-tail {
   text-align: left;
   font-family: var(--mdm-text);
@@ -2107,6 +2127,47 @@ body {
   padding: 0.25em 0;
   overflow-x: auto;
   overflow-y: hidden;
+}
+/* A numbered equation (equationIndex in main.js): the formula on the column
+   and its number in parentheses at the right edge, on the formula's
+   baseline, where LaTeX sets a \tag, as the page draws it (.mdm-eq in
+   mdm-look.css, where the columns and the half ems are argued) and the
+   paper sets it (\mdmequation in mdm.lua): centred on the whole column
+   until the formula would reach the number, left of it after that, and
+   scrolling in its own box past that. The number is set in the prose's face
+   and size, and its line box at 1 keeps the row the height of the
+   formula's. The same in a paragraph (`$$c$$ {#eq-b}`) and in a cell. What
+   the closer carries after the label goes under both, the whole width. */
+#app .mdm-math--numbered {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, max-content) 1fr;
+  align-items: baseline;
+}
+#app .mdm-math--numbered > .katex-display {
+  grid-column: 2;
+  min-width: 0;
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#app .mdm-math--numbered > .mdm-eq-number {
+  grid-column: 3;
+  justify-self: end;
+  margin-left: 0.5em;
+  font-family: var(--mdm-text);
+  font-size: 16px;
+  line-height: 1;
+  /* Whole, and as wide as it is. The text of the editor may be cut between
+     any two letters (overflow-wrap), which made the number's least width
+     one character, and beside a formula too wide for the column the grid
+     gave it that: "(4)" stood as three rows, "(", "4" and ")", the formula
+     scrolling under where it should have been (the owner, 2026-09-30). */
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+#app .mdm-math--numbered > .mdm-math-tail {
+  grid-column: 1 / -1;
 }
 #app .mdm-math:not(.mdm-math--block) {
   cursor: pointer;

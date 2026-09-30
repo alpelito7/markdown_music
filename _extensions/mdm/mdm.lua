@@ -761,6 +761,65 @@ local function look_tex(l)
   put("\\newcommand*{\\mdmheadrule}[1]{\\par\\nobreak" ..
       "\\vskip\\dimexpr #1\\mdmem-\\prevdepth\\relax" ..
       "{\\color{mdmrule}\\hrule height 0.8pt}}")
+  -- A numbered equation (the equations pass): the drawing on a line of its
+  -- own and its number in parentheses at the right edge of the column, in
+  -- the face of the text and on the formula's baseline, where amsmath sets
+  -- a \tag; the band of air around it is a display equation's (insert_math).
+  -- The drawing stands centred on the line while half of what it leaves,
+  -- less the half em the page and the editor keep on either side of a
+  -- formula, is as wide as the number and the half em before it; nearer
+  -- than that it moves left to clear the number, which is what their grid
+  -- does with the same widths (.mdm-eq in mdm-look.css, .mdm-math--numbered
+  -- in style.css), and one too wide to stand beside the number is scaled
+  -- down into what the number leaves, the shrink the other two's sideways
+  -- scroll stands in for. The label takes the number for its text, so a
+  -- \ref prints what the page prints, and \phantomsection gives the link to
+  -- it somewhere to land. The drawing and the number are held in boxes of
+  -- their own and not in TeX's scratch boxes: \phantomsection sets its anchor
+  -- through \smash, which writes box 0, and the formulas of every numbered
+  -- equation went missing from the page, their numbers left standing alone
+  -- (seen 2026-09-30). The drawing's line is not the formula's: for a display
+  -- formula the baseline the engraving measures is a line under the display
+  -- block (katex_page), so the number is raised by #3, how far the formula's
+  -- own baseline stands above it (scaled with a drawing that is scaled), and
+  -- smashed so that it adds no height the band of air does not already
+  -- have. A list item that opens on the equation has its bullet raised the
+  -- same way, since the item's label goes onto this line on its baseline
+  -- (it stood under the formula, level with nothing). Lowering the drawing
+  -- instead would have moved the line after it: TeX spaces the next line
+  -- by this one's depth. The lengths are dimens and not \newlength's skips: a skip being
+  -- assigned reads on for a `plus`, expanded the \ifdim on the next line
+  -- before the value was in, and compared the width of the equation before;
+  -- every formula after the first came out scaled to the whole line (seen
+  -- 2026-09-30). #1 the label, #2 the number, #3 that rise in \mdmem, #4 the
+  -- drawing.
+  put("\\newdimen\\mdmeqfree")
+  put("\\newdimen\\mdmeqnum")
+  put("\\newdimen\\mdmeqlift")
+  put("\\newbox\\mdmeqdrawing")
+  put("\\newbox\\mdmeqtag")
+  put("\\newcommand{\\mdmequation}[4]{%")
+  put("  \\par\\addvspace{0.25\\mdmem}%")
+  put("  {\\setbox\\mdmeqdrawing=\\hbox{#4}\\setbox\\mdmeqtag=\\hbox{\\normalfont(#2)}%")
+  put("   \\mdmeqlift=#3\\mdmem")
+  put("   \\mdmeqnum=\\dimexpr\\wd\\mdmeqtag+0.5\\mdmem\\relax")
+  put("   \\mdmeqfree=\\dimexpr\\linewidth-\\wd\\mdmeqdrawing-\\mdmem\\relax")
+  put("   \\ifdim\\mdmeqfree<\\mdmeqnum")
+  put("     \\mdmeqlift=\\dimexpr\\mdmeqlift*\\numexpr\\dimexpr\\linewidth-\\mdmeqnum-\\mdmem\\relax\\relax")
+  put("       /\\numexpr\\wd\\mdmeqdrawing\\relax\\relax")
+  put("     \\setbox\\mdmeqdrawing=\\hbox{\\resizebox{\\dimexpr\\linewidth-\\mdmeqnum-\\mdmem\\relax}{!}{\\box\\mdmeqdrawing}}%")
+  put("     \\mdmeqfree=\\mdmeqnum")
+  put("   \\fi")
+  put("   \\ifdim\\dimexpr2\\mdmeqnum\\relax>\\mdmeqfree")
+  put("     \\advance\\mdmeqfree by -\\mdmeqnum")
+  put("   \\else")
+  put("     \\divide\\mdmeqfree by 2")
+  put("   \\fi")
+  put("   \\if@inlabel\\global\\setbox\\@labels=\\hbox{\\smash{\\raise\\mdmeqlift\\box\\@labels}}\\fi")
+  put("   \\noindent\\phantomsection\\def\\@currentlabel{#2}\\label{#1}%")
+  put("   \\makebox[\\linewidth][l]{\\hspace*{\\dimexpr\\mdmeqfree+0.5\\mdmem\\relax}\\box\\mdmeqdrawing")
+  put("     \\hfill\\smash{\\raise\\mdmeqlift\\box\\mdmeqtag}}\\par}%")
+  put("  \\addvspace{0.25\\mdmem}}")
   -- Two ways in, since the class is the document's to choose: KOMA, which is
   -- what Quarto gives a document that names none, restyles through its own
   -- hooks, and a standard class through titlesec, which KOMA is not on
@@ -1942,7 +2001,7 @@ end
 
 -- Bumped whenever the page below changes shape: a warm cache would
 -- otherwise keep serving formulas measured under the old recipe.
-local KATEX_RECIPE = "katex 2"
+local KATEX_RECIPE = "katex 3"
 
 local katex_assets = nil
 local function read_katex()
@@ -2032,7 +2091,22 @@ local function katex_page(formulas, ink)
     '  mark.style.width = "0";',
     '  mark.style.height = "0";',
     "  span.appendChild(mark);",
-    "  CELLS.push({ div: div, span: span, mark: mark, i: i });",
+    -- A display formula's own baseline, for the number beside it (the
+    -- equations pass): the marker above lands on a line of its own under
+    -- the display block, so a second one goes at the end of the formula's
+    -- last base, where KaTeX's baseline is (the axis of an aligned block).
+    "  var line = null;",
+    '  if (f[0] === "D") {',
+    '    var bases = span.querySelectorAll(".katex-html > .katex-base, .katex-html > .base");',
+    "    if (bases.length) {",
+    '      line = document.createElement("span");',
+    '      line.style.display = "inline-block";',
+    '      line.style.width = "0";',
+    '      line.style.height = "0";',
+    "      bases[bases.length - 1].appendChild(line);",
+    "    }",
+    "  }",
+    "  CELLS.push({ div: div, span: span, mark: mark, line: line, i: i });",
     "});",
     "document.fonts.ready.then(function () {",
     "  var dims = [];",
@@ -2044,7 +2118,8 @@ local function katex_page(formulas, ink)
     "    var m = c.mark.getBoundingClientRect();",
     "    var pw = pad8(r.width);",
     "    var ph = pad8(r.height);",
-    "    dims.push({ w: r.width, h: r.height, d: r.bottom - m.top, pw: pw, ph: ph });",
+    "    var b = c.line ? c.line.getBoundingClientRect().top - r.top : m.top - r.top;",
+    "    dims.push({ w: r.width, h: r.height, d: r.bottom - m.top, pw: pw, ph: ph, b: b });",
     '    c.div.style.width = pw + "px";',
     '    c.div.style.height = ph + "px";',
     '    rules.push("@page m" + c.i + "{size:" + pw + "px " + ph + "px;margin:0}");',
@@ -2069,11 +2144,11 @@ local function parse_dims(dom_line)
   raw = raw:gsub("&quot;", '"'):gsub("&amp;", "&")
   local out = {}
   for token in raw:gsub("null", "{}"):gmatch("%b{}") do
-    local w, h, d, pw, ph = token:match(
-      '"w":([%d%.]+),"h":([%d%.]+),"d":(%-?[%d%.]+),"pw":(%d+),"ph":(%d+)')
+    local w, h, d, pw, ph, b = token:match(
+      '"w":([%d%.]+),"h":([%d%.]+),"d":(%-?[%d%.]+),"pw":(%d+),"ph":(%d+),"b":(%-?[%d%.]+)')
     out[#out + 1] = w and {
       w = tonumber(w), h = tonumber(h), d = tonumber(d),
-      pw = tonumber(pw), ph = tonumber(ph),
+      pw = tonumber(pw), ph = tonumber(ph), b = tonumber(b),
     } or false
   end
   return out
@@ -2121,7 +2196,7 @@ local function engrave_math(formulas, ink)
           local df = io.open(CACHE_DIR .. "/" .. f.digest .. ".dim", "w")
           if df then
             df:write(string.format(
-              "%.6g %.6g %.6g %d %d", dim.w, dim.h, dim.d, dim.pw, dim.ph))
+              "%.6g %.6g %.6g %d %d %.6g", dim.w, dim.h, dim.d, dim.pw, dim.ph, dim.b))
             df:close()
           end
         end
@@ -2143,15 +2218,20 @@ end
 -- editor gives its block a breath of padding; one wider than the measure
 -- takes the text width instead, the shrink the editor's sideways scroll
 -- stands in for.
-local function insert_math(mathtype, digest)
+-- The drawing of a formula from the cache as the line takes it, its width
+-- in the editor's pixels, its file, and how far above the line's baseline
+-- the formula's own baseline stands, in ems (for a display formula the line
+-- sits under the display block; see katex_page); nil when the cache has
+-- not got it.
+local function math_graphic(digest)
   local df = io.open(CACHE_DIR .. "/" .. digest .. ".dim", "r")
   if not df then return nil end
-  local w, h, d, pw, ph = df:read("*a"):match(
-    "([%d%.]+) ([%d%.]+) (%-?[%d%.]+) (%d+) (%d+)")
+  local w, h, d, pw, ph, b = df:read("*a"):match(
+    "([%d%.]+) ([%d%.]+) (%-?[%d%.]+) (%d+) (%d+) (%-?[%d%.]+)")
   df:close()
   if not w then return nil end
   local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
-  w, h, d, pw, ph = tonumber(w), tonumber(h), tonumber(d), tonumber(pw), tonumber(ph)
+  w, h, d, pw, ph, b = tonumber(w), tonumber(h), tonumber(d), tonumber(pw), tonumber(ph), tonumber(b)
   -- The graphic is the padded pagelet; the line is told the truth. The
   -- \makebox takes the formula's own width, so the pagelet's blank slack
   -- overhangs to the right where there is no ink to show; the \raisebox
@@ -2165,6 +2245,12 @@ local function insert_math(mathtype, digest)
     "\\makebox[%.4f\\mdmem][l]{\\raisebox{-%.4f\\mdmem}[%.4f\\mdmem][%.4f\\mdmem]" ..
     "{\\includegraphics[width=%.4f\\mdmem]{%s}}}",
     w / 16, drop, ascent, d / 16, pw / 16, pdf)
+  return graphic, w, pdf, (h - d - b) / 16
+end
+
+local function insert_math(mathtype, digest)
+  local graphic, w, pdf = math_graphic(digest)
+  if not graphic then return nil end
   if mathtype == "DisplayMath" then
     -- A display wider than the measure takes the text width instead, the
     -- shrink the editor's sideways scroll stands in for.
@@ -2178,23 +2264,85 @@ local function insert_math(mathtype, digest)
   return pandoc.RawInline("latex", graphic)
 end
 
+-- The name a numbered equation's anchor goes by on paper, spelt as Pandoc's
+-- writer spells the target of a link to it (toLabel in its LaTeX writer):
+-- ASCII letters and digits and `_-+=:;.` as they are, anything else as `ux`
+-- and its code point in hex, so that `\hyperref[eq-cafuxe9]` finds the
+-- `\label` of `{#eq-café}` (measured on the Pandoc of Quarto 1.9.37).
+local function tex_label(id)
+  local out = {}
+  for _, cp in utf8.codes(id) do
+    local ch = utf8.char(cp)
+    if cp < 128 and ch:match("[%w_%-+=:;.]") then
+      out[#out + 1] = ch
+    else
+      out[#out + 1] = string.format("ux%x", cp)
+    end
+  end
+  return table.concat(out)
+end
+
+-- A number written into TeX as text: an arabic, roman or alphabetic one
+-- needs nothing, but `labels:` may name any word.
+local function tex_text(s)
+  return (s:gsub("[\\{}#$%%&_^~]", function(ch)
+    if ch == "\\" then return "\\textbackslash{}" end
+    if ch == "^" then return "\\^{}" end
+    if ch == "~" then return "\\~{}" end
+    return "\\" .. ch
+  end))
+end
+
+-- A numbered equation (the equations pass, below) set by LaTeX itself,
+-- where the formula has no drawing of Chrome's to go down as: amsmath's
+-- equation with the number as its tag, which is where the tag stands in
+-- every paper, and the label a link to it lands on.
+local function equation_in_tex(span)
+  return pandoc.RawInline("latex",
+    "\\begin{equation}" .. span.attributes["mdm-tex"] ..
+    "\\tag{" .. tex_text(span.attributes["mdm-number"]) .. "}" ..
+    "\\label{" .. tex_label(span.identifier) .. "}\\end{equation}")
+end
+
+-- A numbered equation from the cache: the drawing and its number on the
+-- line \mdmequation of the preamble sets (look_tex), where the reasons are.
+local function insert_equation(span, digest)
+  local graphic, _, _, lift = math_graphic(digest)
+  if not graphic then return nil end
+  return pandoc.RawInline("latex", string.format(
+    "\\mdmequation{%s}{%s}{%.4f}{%s}",
+    tex_label(span.identifier), tex_text(span.attributes["mdm-number"]), lift, graphic))
+end
+
+local function is_equation(span)
+  return span.classes:includes("mdm-eq") and span.attributes["mdm-tex"] ~= nil
+end
+
 -- The maths pass over the whole document: collect what is not yet in the
 -- cache, engrave it all in the one Chrome run, then put every formula the
 -- cache now holds into the page. What the cache has not got (a formula
 -- KaTeX refused, a batch that failed) stays a Math element, and LaTeX sets
--- it as before.
+-- it as before; a numbered equation is LaTeX's equation then. A numbered
+-- one comes to this pass as the Span the equations pass left, which holds
+-- its formula in an attribute and no Math, so the Math of the walk below
+-- never sees it.
 local function render_math_pass(doc)
   local side = SIDES[(look and look.side)] or SIDES.light
   local ink = side.ink
   local jobs, seen = {}, {}
+  local function job(mode, tex)
+    local digest = math_digest(mode, tex, ink)
+    if not seen[digest] and not file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
+      seen[digest] = true
+      jobs[#jobs + 1] = { mode = mode, tex = tex, digest = digest }
+    end
+  end
   doc:walk({
     Math = function(m)
-      local mode = m.mathtype == "DisplayMath" and "D" or "I"
-      local digest = math_digest(mode, m.text, ink)
-      if not seen[digest] and not file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
-        seen[digest] = true
-        jobs[#jobs + 1] = { mode = mode, tex = m.text, digest = digest }
-      end
+      job(m.mathtype == "DisplayMath" and "D" or "I", m.text)
+    end,
+    Span = function(span)
+      if is_equation(span) then job("D", span.attributes["mdm-tex"]) end
     end,
   })
   if #jobs > 0 then
@@ -2209,6 +2357,15 @@ local function render_math_pass(doc)
         return insert_math(m.mathtype, digest)
       end
       return nil
+    end,
+    Span = function(span)
+      if not is_equation(span) then return nil end
+      local digest = math_digest("D", span.attributes["mdm-tex"], ink)
+      if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
+        local drawn = insert_equation(span, digest)
+        if drawn then return drawn end
+      end
+      return equation_in_tex(span)
     end,
   })
 end
@@ -2738,6 +2895,258 @@ function Image(el)
   return copy_figure(el)
 end
 
+-- ---------- Equations by number, and the references to them ----------
+--
+-- A display equation with a label straight after its closing `$$`
+-- (`$$ {#eq-mass}`) is numbered, and `@eq-mass` prints "Equation 1" and
+-- leads to it, the number standing at the right of the column on the
+-- baseline of the formula, where a paper set by LaTeX puts it (the owner's
+-- A, 2026-09-30). Quarto numbers them itself, but it looks for them after
+-- the filters have run, and this filter writes every formula out before
+-- that (Math below, and the maths pass on paper): the label came out as
+-- text beside the equation and every reference as "?@eq-mass" in bold, on
+-- the page and on paper alike (measured on Quarto 1.9.37, 2026-09-30). So
+-- the numbering and the references are done here, by Quarto's own rules
+-- (process_equations and resolveRefs among its filters), and the editor
+-- draws them by the same rules (media/mdm-crossref.js, which lists them
+-- and what each was measured against). The numbers are the text the
+-- document's style gives them on the page and on paper alike; LaTeX's own
+-- counter is not used, so that a label names one number on the three
+-- surfaces. Not followed: `crossref: chapters`, which numbers the
+-- equations of a book by chapter.
+
+-- The kinds of cross-reference Quarto resolves (its valid_ref_types), by
+-- what an identifier starts with before a hyphen.
+local CROSSREF_KINDS = {}
+for kind in ("fig tbl lst eq sec thm lem cor prp cnj def exm exr sol rem alg prf nte wrn cau tip imp"):gmatch("%a+") do
+  CROSSREF_KINDS[kind] = true
+end
+
+local function ref_kind(id)
+  local kind = id:match("^(%a+)%-")
+  return kind and kind:lower() or nil
+end
+
+local function crossref_option(meta, name)
+  local options = meta.crossref
+  if type(options) ~= "table" then return nil end
+  return options[name]
+end
+
+-- The n-th equation's number in the style `crossref:` names (`eq-labels`,
+-- else `labels`), as Quarto's formatNumberOption reads it: arabic, `roman`
+-- (lower case when it ends in an `i`), `alpha x` from the letter x on, and
+-- any other text the words and spaces it is made of, counted through.
+local function eq_number(meta, n)
+  local style = crossref_option(meta, "eq-labels")
+  if style == nil then style = crossref_option(meta, "labels") end
+  if style == nil then return tostring(n) end
+  local text = pandoc.utils.stringify(style)
+  if text == "arabic" then return tostring(n) end
+  if text:match("^alpha ") then
+    local start = text:match("^alpha ([^ ]+)") or "a"
+    return utf8.char(utf8.codepoint(start) + n - 1)
+  end
+  if text:match("^roman") then
+    local r = pandoc.utils.to_roman_numeral(n)
+    if text:sub(-1) == "i" then r = r:lower() end
+    return r
+  end
+  local tokens, rest = {}, text
+  while #rest > 0 do
+    local token = rest:match("^%S+") or rest:match("^%s+")
+    tokens[#tokens + 1] = token:match("^%s+$") and " " or token
+    rest = rest:sub(#token + 1)
+  end
+  if #tokens == 0 then return tostring(n) end
+  return tokens[(n - 1) % #tokens + 1]
+end
+
+-- The word before an equation's number: the header's `crossref: eq-prefix`,
+-- else the one the document's language gives it ("Equation", "Ecuación"),
+-- which Quarto hands a filter with the header's `language:` over it. With
+-- its first letter upper-cased for a key written so (`@Eq-mass`).
+local function eq_prefix(meta, upper)
+  local own = crossref_option(meta, "eq-prefix")
+  local prefix
+  if own ~= nil and type(own) ~= "boolean" then
+    prefix = pandoc.Inlines(own)
+  else
+    local language = quarto.doc.language
+    prefix = pandoc.Inlines(language and language["crossref-eq-prefix"] or "Equation")
+  end
+  if upper then
+    local done = false
+    prefix = prefix:walk({
+      Str = function(s)
+        if done then return nil end
+        done = true
+        return pandoc.Str(pandoc.text.upper(pandoc.text.sub(s.text, 1, 1)) ..
+          pandoc.text.sub(s.text, 2))
+      end,
+    })
+  end
+  return prefix
+end
+
+-- The text of a label after a display equation, gathered across the words
+-- Pandoc split it into (`{#eq-a alt="x"}` is five of them) up to the one
+-- that ends in `}`, and how many words it took; nil when it is no label.
+-- Quarto's collectAttrBlock, which is why `{#eq-a}.` is none: the period is
+-- in the word with the brace.
+local function label_text(inlines, at)
+  local first = inlines[at]
+  if not first or first.t ~= "Str" or not first.text:match("^{#eq%-") then return nil end
+  local text, used = first.text, 1
+  local j = at + 1
+  while not text:match("}$") and j <= #inlines do
+    local el = inlines[j]
+    if el.t == "Str" then
+      text = text .. el.text
+    elseif el.t == "Space" then
+      text = text .. " "
+    elseif el.t == "Quoted" then
+      local q = el.quotetype == "DoubleQuote" and '"' or "'"
+      text = text .. q .. pandoc.utils.stringify(el.content) .. q
+    else
+      break
+    end
+    used = used + 1
+    j = j + 1
+  end
+  if text:match("^{#eq%-[^}]+}$") then return text, used end
+  return nil
+end
+
+-- Every labelled equation of the document in its order, numbered, as
+-- Quarto's process_equations finds them: display maths in a paragraph (a
+-- quote's, a list's, a callout's as well), spaces after it and nothing
+-- else, then the label. On the page the equation becomes a span with the
+-- label for its identifier, holding the formula (which Math below writes
+-- out) and its number; on paper a span with the formula and the number in
+-- its attributes and no Math inside, for the maths pass (render_math_pass)
+-- to set, and for LaTeX to set where there is none (document).
+local function number_equations(doc, html)
+  local meta = doc.meta
+  local numbers = {}
+  local count = 0
+  local function mark(math, label, number)
+    if html then
+      return pandoc.Span({
+        math,
+        pandoc.Span({ pandoc.Str("(" .. number .. ")") }, pandoc.Attr("", { "mdm-eq-number" })),
+      }, pandoc.Attr(label, { "mdm-eq" }))
+    end
+    return pandoc.Span({}, pandoc.Attr(label, { "mdm-eq" },
+      { ["mdm-number"] = number, ["mdm-tex"] = math.text }))
+  end
+  local function block(el)
+    local inlines = el.content
+    local out = pandoc.Inlines({})
+    local changed = false
+    local i = 1
+    while i <= #inlines do
+      local x = inlines[i]
+      local taken = false
+      if x.t == "Math" and x.mathtype == "DisplayMath" then
+        local j = i + 1
+        while j <= #inlines and inlines[j].t == "Space" do j = j + 1 end
+        local text, used = label_text(inlines, j)
+        if text then
+          local label = text:match("^{#([^%s}]+)")
+          count = count + 1
+          local number = eq_number(meta, count)
+          -- A label given twice names the later equation, as in Quarto's
+          -- index; both keep their numbers.
+          numbers[label] = number
+          out:insert(mark(x, label, number))
+          i = j + used
+          taken = true
+          changed = true
+        end
+      end
+      if not taken then
+        out:insert(x)
+        i = i + 1
+      end
+    end
+    if not changed then return nil end
+    el.content = out
+    return el
+  end
+  return doc:walk({ Para = block, Plain = block }), numbers
+end
+
+-- A citation that names an equation, as Quarto's resolveRefs prints it: for
+-- each key of an equation the prefix written in the brackets (`[Eq. @eq-a]`)
+-- or else the document's, a no-break space and the number, the number alone
+-- for `-@eq-a`, all of it a link unless `crossref: ref-hyperlink` is false;
+-- after a comma and a space unless it is the first citation of the
+-- brackets. A key of the bibliography beside it prints nothing, as Quarto
+-- drops it, and a figure's or a table's goes on as a citation of its own
+-- for Quarto to resolve. A label no equation carries prints "?@eq-a" in
+-- bold, with the warning Quarto gives, which the export's notice reads
+-- (citationWarnings in extension.js).
+local function eq_references(doc, numbers)
+  local meta = doc.meta
+  local link = crossref_option(meta, "ref-hyperlink") ~= false
+  return doc:walk({
+    Cite = function(cite)
+      local named = false
+      for _, c in ipairs(cite.citations) do
+        if ref_kind(c.id) == "eq" then
+          named = true
+          break
+        end
+      end
+      if not named then return nil end
+      local out = pandoc.Inlines({})
+      for i, c in ipairs(cite.citations) do
+        local kind = ref_kind(c.id)
+        if kind == "eq" then
+          local label = c.id:sub(1, 1):lower() .. c.id:sub(2)
+          local number = numbers[label]
+          if number then
+            if i > 1 then out:extend({ pandoc.Str(","), pandoc.Space() }) end
+            local ref = pandoc.Inlines({})
+            if #c.prefix > 0 then
+              ref:extend(c.prefix)
+              ref:insert(pandoc.Str("\u{a0}"))
+            elseif c.mode ~= pandoc.SuppressAuthor then
+              local prefix = eq_prefix(meta, c.id:match("^%u") ~= nil)
+              if #prefix > 0 then
+                ref:extend(prefix)
+                ref:insert(pandoc.Str("\u{a0}"))
+              end
+            end
+            ref:insert(pandoc.Str(number))
+            if link then
+              ref = pandoc.Inlines({
+                pandoc.Link(ref, "#" .. label, "", pandoc.Attr("", { "quarto-xref" })),
+              })
+            end
+            out:extend(ref)
+          else
+            quarto.log.warning("Unable to resolve crossref @" .. label)
+            out:insert(pandoc.Strong({ pandoc.Str("?@" .. label) }))
+          end
+        elseif kind and CROSSREF_KINDS[kind] then
+          if i > 1 then out:extend({ pandoc.Str(","), pandoc.Space() }) end
+          out:insert(pandoc.Cite({ pandoc.Str("@" .. c.id) }, { c }))
+        end
+      end
+      return out
+    end,
+  })
+end
+
+local function equations(doc)
+  local html = quarto.doc.is_format("html")
+  if not html and not quarto.doc.is_format("latex") then return nil end
+  local numbered, numbers = number_equations(doc, html)
+  return eq_references(numbered, numbers)
+end
+
 -- The formula as the page carries it: its own LaTeX inside a `span.math`,
 -- which is what mdm-math.js reads and KaTeX sets. Written out here rather
 -- than left to Quarto, whose engines are MathJax from a CDN (the default) and
@@ -2770,8 +3179,15 @@ end
 -- Chrome to run, where every Math element stays LaTeX's.
 local function document(doc)
   if not quarto.doc.is_format("latex") then return nil end
-  if look and look.engraver == "abcm2ps" then return nil end
-  if not chrome_path then return nil end
+  if (look and look.engraver == "abcm2ps") or not chrome_path then
+    -- The numbered equations still have to become equations: the Span the
+    -- equations pass left them in is no LaTeX of its own.
+    return doc:walk({
+      Span = function(span)
+        if is_equation(span) then return equation_in_tex(span) end
+      end,
+    })
+  end
   return render_math_pass(doc)
 end
 
@@ -2847,10 +3263,12 @@ end
 
 -- Meta has to run before the CodeBlocks, since it settles the abcm2ps path,
 -- and before the headings, since it settles which command each level of them
--- is written as (look.heads). Within the second table the Pandoc function
--- runs after the element ones.
+-- is written as (look.heads). The equations are numbered next, before Math
+-- writes any formula out and the maths pass sets them on paper. Within the
+-- last table the Pandoc function runs after the element ones.
 return {
   { Meta = Meta },
+  { Pandoc = equations },
   { CodeBlock = CodeBlock, Header = sixth_heading, HorizontalRule = horizontal_rule,
     Figure = figure_on_paper, Image = Image, Math = Math, Pandoc = document },
 }

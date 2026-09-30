@@ -723,6 +723,66 @@ body .katex-display {
   overflow-y: hidden;
   padding: 0.25em 0;
 }
+/* A numbered display equation (the equations pass in mdm.lua): the formula
+   on the column and its number in parentheses at the right edge, on the
+   formula's baseline, where LaTeX sets a \tag, as the editor draws it
+   (.mdm-math--numbered in media/style.css) and the paper sets it
+   (\mdmequation in mdm.lua). Three columns: the outer two share what the
+   formula leaves and the right one holds the number, so the formula stays
+   centred on the whole column until it would reach the number, moves left
+   to clear it after that, and scrolls in its own box when even that is too
+   narrow. The half em on either side of the formula keeps what KaTeX draws
+   past its box (a fraction's bar, the limits of a sum) inside it: without
+   it a formula that fitted scrolled by the 2 px it overhangs a box its own
+   width (measured). Chrome reads the formula's baseline through its scroll
+   box for the alignment (measured 0 px off, on a fraction and on an
+   aligned block too), and the number's line box at 1 keeps the row the
+   height of the formula's. The number keeps half an em from the formula
+   outside the scroll box, since the half em inside it is only at the end
+   of a formula that scrolls: without it a wide one was cut off against the
+   number's parenthesis. KaTeX's own margin of 1em stays out of the grid,
+   where it could not collapse into the paragraph's as it does beside an
+   equation with no number: the grid carries it instead (measured the same
+   74.4 px from the line above to the line below, with a number or none). */
+body main.content .mdm-eq {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, max-content) 1fr;
+  align-items: baseline;
+  margin: 1em 0;
+}
+body main.content .mdm-eq > .math.display {
+  grid-column: 2;
+  min-width: 0;
+}
+body main.content .mdm-eq > .math.display > .katex-display {
+  margin: 0;
+  padding: 0.25em 0.5em;
+}
+body main.content .mdm-eq > .mdm-eq-number {
+  grid-column: 3;
+  justify-self: end;
+  line-height: 1;
+  margin-left: 0.5em;
+  /* Whole, and as wide as it is, beside a formula that scrolls: the editor's
+     text may be cut anywhere and its "(4)" stood as three rows there
+     (.mdm-math--numbered in media/style.css); the page's may not today, and
+     the rule keeps it so whatever a look sets. */
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+/* The box Quarto opens over a reference to an equation holds a copy of what
+   the equation's span holds, the formula and its number, without the span
+   that lays them out: the number came under the formula at the left. Side
+   by side there too, on the formula's baseline. */
+body main.content .tippy-content:has(> .mdm-eq-number) {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content;
+  column-gap: 1em;
+  align-items: baseline;
+}
+body main.content .tippy-content > .math.display > .katex-display {
+  margin: 0;
+}
 /* Pandoc's own token classes onto the editor's ten slots. The two engines do
    not cut a line into the same tokens (the editor highlights with Lezer,
    Quarto with skylighting), so what is shared is the palette and not the

@@ -153,14 +153,34 @@ face and its colours, and on paper a citation links to its entry as it
 does on the page. Two entries stand a quarter of a line apart where the
 style asks for a line, on all three.
 
+A display equation with a label straight after its closing `$$`
+(`$$ {#eq-mass}`) is numbered in the order of the document, its number in
+parentheses at the right of the column on the formula's baseline, where a
+paper set by LaTeX puts it, in the editor, on the page and on paper alike;
+the label itself shows only while the equation is open. `@eq-mass` reads
+"Equation 1" and `Ctrl+click` on it brings the equation into view;
+`-@eq-mass` is the number alone, `[Eq. @eq-mass]` sets its own word before
+the number, `@Eq-mass` upper-cases the word, and a label no equation
+carries prints "?@eq-mass" in bold and is named in the export's notice. The
+word is the one the document's language gives ("Ecuación" under
+`lang: es`), and `crossref:` in the header names another (`eq-prefix`),
+counts otherwise (`eq-labels: roman`) or leaves the references unlinked
+(`ref-hyperlink: false`), all as Quarto reads them. The filter does the
+numbering itself, by Quarto's rules: Quarto looks for labelled equations
+after the filter has written every formula out, so it found none, and the
+page printed the label as text and every reference as "?@eq-mass".
+`crossref: chapters`, which numbers the equations of a book by chapter, is
+not followed.
+
 Differences that are left standing, each on the record in `tests/README.md`:
 the page's callouts are Quarto's, with a heading and an icon; a numbered list
 written `3)` keeps its delimiter in the editor where Pandoc prints a point; a
 setext heading written over several lines is a heading in the editor and a
 paragraph to Pandoc; Pandoc reads the inside of a `<div>` as Markdown and the
-editor draws it as raw lines; a cross-reference (`@fig-x`) is drawn as written
-in the editor, where the page prints the number Quarto gives it, and so is
-every citation on a computer without Quarto; a `www.` address with no scheme is text on both
+editor draws it as raw lines; a cross-reference to a figure, a table or a
+section (`@fig-x`) is drawn as written in the editor, where the page prints
+the number Quarto gives it, and so is every citation on a computer without
+Quarto; a `www.` address with no scheme is text on both
 surfaces; and the ways Pandoc's emphasis parts from CommonMark's
 (`**Tempo:**Allegro`) are not replicated. Definition lists, line blocks,
 lists lettered `a.` or `i.`, grid and simple tables, raw `{=latex}` blocks
@@ -190,7 +210,8 @@ Pandoc's own dialect and none of the copy's corrections.
   than one staff system goes down as one clipped image per system, stacked
   into the drawing it was cut from, so a page break can fall between two
   systems instead of throwing the whole engraving onto the next page. The
-  equations go the same way, set by the vendored KaTeX. A figure the document
+  equations go the same way, set by the vendored KaTeX, a numbered one with
+  its number at the right of its line (`\mdmequation`). A figure the document
   names is carried across too: one at an absolute path is copied into the
   cache, since Quarto rewrites such a path into a relative one that points at
   nothing, and an SVG is printed to PDF by the same Chrome, since LaTeX
@@ -199,7 +220,8 @@ Pandoc's own dialect and none of the copy's corrections.
   content in `mdm_cache/`. Without Chrome or Edge (or without
   `pdfcrop`) the filter names in the render log the tool it missed and falls
   back: the scores to `abcm2ps`, which draws with glyphs of its own and
-  reads differently, and the equations to LaTeX's own setting.
+  reads differently, and the equations to LaTeX's own setting, a numbered
+  one LaTeX's `equation` with the same number as its tag.
 
 ### The output looks like the editor
 

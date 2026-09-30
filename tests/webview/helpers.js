@@ -599,10 +599,15 @@ function rows(page) {
       clone.querySelectorAll(".cm-widgetBuffer, .mdm-chrome").forEach((x) => x.remove());
       clone.querySelectorAll(".mdm-math").forEach((x) => {
         const ann = x.querySelector("annotation");
-        // The tail a block draws under its equation (`$$ {#eq-mass}`) is
-        // text of the row, after the equation.
+        // The number of a labelled equation (`$$ {#eq-mass}`), then the
+        // tail a block draws under its equation, are text of the row, after
+        // the equation.
+        const number = x.querySelector(":scope > .mdm-eq-number");
         const tail = x.querySelector(".mdm-math-tail");
-        x.replaceWith("⟦math:" + (ann ? ann.textContent : x.textContent) + "⟧" + (tail ? tail.textContent : ""));
+        x.replaceWith(
+          "⟦math:" + (ann ? ann.textContent : x.textContent) + "⟧" +
+            (number ? number.textContent : "") + (tail ? tail.textContent : "")
+        );
       });
       const boxes = Array.from(el.querySelectorAll("input.mdm-task"));
       clone.querySelectorAll("input.mdm-task").forEach((x, i) => {

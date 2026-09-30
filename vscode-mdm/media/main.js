@@ -3697,6 +3697,17 @@
       return CROSSREF.test(k);
     });
   }
+  // Whether Quarto takes a citation for its own: one key of a kind it
+  // resolves is enough, and the rest of the brackets goes with it, a key of
+  // the bibliography dropped unprinted (resolveRefs, read on 1.9.37:
+  // `[@eq-a; @knuth]` prints "Equation 1" and nothing of Knuth). Citeproc,
+  // which runs after it, never sees such a citation, so neither is Pandoc
+  // asked about one here: a numbered style would count it.
+  function namesCrossref(raw) {
+    return citationKeys(raw).some(function (k) {
+      return CROSSREF.test(k);
+    });
+  }
 
   // The citations of the document as the host is to hand them to Pandoc: in
   // the order the page prints them, a note's where the note is called from
@@ -3725,7 +3736,7 @@
     });
     const wrap = function (from, to) {
       const src = doc.sliceString(from, to);
-      if (isCrossref(src)) return null;
+      if (namesCrossref(src)) return null;
       nodes.push({ from: from, to: to, src: src });
       return "[" + src + "]{#mdmcite-" + (nodes.length - 1) + "}";
     };
@@ -4164,6 +4175,182 @@
     return hit;
   }
 
+  // ---------- Equations by number ----------
+  //
+  // A display equation with a label straight after its closing `$$`
+  // (`$$ {#eq-mass}`) is numbered, its number drawn in parentheses at the
+  // right of the column on the formula's baseline, and `@eq-mass` reads
+  // "Equation 1", as the export prints them (the equations pass in mdm.lua)
+  // by Quarto's rules, which media/mdm-crossref.js holds for both. The
+  // label itself is drawn only while it is edited, as the page prints none
+  // of it. What the header says an equation is called and how it is counted
+  // is read where the language is (documentLanguage).
+  let crossrefHeader = null;
+  let crossrefLookNow = null;
+  function crossrefLook(state) {
+    const fm = editorFrontMatter && CM.syntaxTree(state).topNode.getChild("FrontMatter");
+    const header = fm ? state.doc.sliceString(fm.from, fm.to) : headerText;
+    if (header !== crossrefHeader || !crossrefLookNow) {
+      crossrefHeader = header;
+      crossrefLookNow = window.MDM_CROSSREF.look(header);
+    }
+    return crossrefLookNow;
+  }
+
+  // Every labelled equation of the document in its order, numbered: where
+  // its maths and its label stand, its name, its number and its TeX (for
+  // the tooltip of a reference). A label is looked for by its text, which is
+  // rare, and taken where the tree has a display equation ending right
+  // before it on its line, spaces between (a block's `$$` closer, or `$$` in
+  // a paragraph, a quote, a list or a table cell alike), and where
+  // MDM_CROSSREF.labelAfter takes it as Quarto does. A label given twice
+  // names the later equation, as in Quarto's index; each keeps its number.
+  // `key` changes with a label, a number or the header's settings and with
+  // nothing else, which is what redraws the whole document (rebuilt).
+  const NO_EQUATIONS = {
+    look: { prefix: "Equation", labels: "arabic", hyperlink: true },
+    byLabel: new Map(),
+    byMath: new Map(),
+    byLabelAt: new Map(),
+    numbers: new Map(),
+    key: "",
+  };
+  let eqNow = NO_EQUATIONS;
+  const equationsByTree = new WeakMap();
+  function equationIndex(state) {
+    const tree = CM.syntaxTree(state);
+    const look = crossrefLook(state);
+    const held = equationsByTree.get(tree);
+    if (held && held.look === look) return held;
+    const doc = state.doc;
+    const index = {
+      look: look,
+      byLabel: new Map(),
+      byMath: new Map(),
+      byLabelAt: new Map(),
+      numbers: new Map(),
+      key: "",
+    };
+    const keys = [];
+    let count = 0;
+    let pos = 0;
+    const lines = doc.iterLines();
+    for (let step = lines.next(); !step.done; step = lines.next()) {
+      const lineText = lines.value;
+      let at = lineText.indexOf("{#eq-");
+      while (at !== -1) {
+        let q = at;
+        while (q > 0 && (lineText.charAt(q - 1) === " " || lineText.charAt(q - 1) === "\t")) q--;
+        let math = null;
+        if (q > 0) {
+          let node = tree.resolveInner(pos + q, -1);
+          while (node && node.to === pos + q && node.name !== "BlockMath" && node.name !== "InlineBlockMath") node = node.parent;
+          if (node && node.to === pos + q && (node.name === "BlockMath" || node.name === "InlineBlockMath")) math = node;
+        }
+        const found = math && window.MDM_CROSSREF.labelAfter(lineText.slice(q));
+        if (found && q + found.from === at) {
+          count += 1;
+          const content = math.getChild(math.name === "BlockMath" ? "BlockMathContent" : "InlineBlockMathContent");
+          const entry = {
+            label: found.label,
+            number: window.MDM_CROSSREF.number(count, look.labels),
+            mathFrom: math.from,
+            labelFrom: pos + at,
+            labelTo: pos + q + found.to,
+            tex: content
+              ? doc.sliceString(content.from, content.to).split("\n").map(function (l) {
+                  return l.replace(/^[ \t>]*/, "");
+                }).join(" ").trim()
+              : "",
+          };
+          index.byLabel.set(entry.label, entry);
+          index.byMath.set(entry.mathFrom, entry);
+          index.byLabelAt.set(entry.labelFrom, entry);
+          index.numbers.set(entry.label, entry.number);
+          keys.push(entry.label + "=" + entry.number);
+          at = lineText.indexOf("{#eq-", q + found.to);
+        } else {
+          at = lineText.indexOf("{#eq-", at + 5);
+        }
+      }
+      pos += lineText.length + 1;
+    }
+    index.key = [look.prefix, look.labels, look.hyperlink].concat(keys).join("\u0000");
+    equationsByTree.set(tree, index);
+    return index;
+  }
+
+  // A reference to an equation as the page prints it (MDM_CROSSREF.reference):
+  // "Equation 1" in the link blue, as the page's link is, "?@eq-x" in bold
+  // for a label no equation carries, underlined as a citation of a key the
+  // bibliography has not got is. Its tooltip names the equations it leads to
+  // with their numbers and the click that goes to them, as a citation's names
+  // its entry (citeTitle).
+  function eqRefTitle(parts, index) {
+    const lines = [];
+    let leads = false;
+    parts.forEach(function (p) {
+      if (!p.label) return;
+      if (p.kind === "missing") {
+        lines.push("@" + p.label + ": no equation carries this label");
+        return;
+      }
+      const entry = index.byLabel.get(p.label);
+      if (entry) lines.push("(" + entry.number + ") " + entry.tex);
+      if (p.kind === "link") leads = true;
+    });
+    return lines.join("\n") + (leads ? "\n" + followHint() : "");
+  }
+  class EqRefWidget extends WidgetType {
+    constructor(parts, title) {
+      super();
+      this.parts = parts;
+      this.key = JSON.stringify(parts);
+      // Taken now, as the link widgets take theirs: the modifier that
+      // follows can change, and a widget told apart by it is drawn again.
+      this.title = title;
+    }
+    eq(other) {
+      return other.key === this.key && other.title === this.title;
+    }
+    toDOM() {
+      const el = document.createElement("span");
+      el.className = "mdm-eqref";
+      this.parts.forEach(function (p) {
+        if (p.kind === "missing") {
+          const strong = document.createElement("strong");
+          strong.className = "mdm-eqref-missing";
+          strong.textContent = p.text;
+          el.appendChild(strong);
+        } else if (p.kind === "link") {
+          const link = document.createElement("span");
+          link.className = "mdm-eqref-link";
+          link.setAttribute("data-mdm-eq", p.label);
+          link.textContent = p.text;
+          el.appendChild(link);
+        } else {
+          el.appendChild(document.createTextNode(p.text));
+        }
+      });
+      if (this.title) el.title = this.title;
+      return el;
+    }
+    ignoreEvent() {
+      return false;
+    }
+  }
+
+  // The equation a reference leads to, brought to the middle of the pane,
+  // as the page's link goes to it; the caret stays where it was, as it does
+  // for a citation's entry (showEntry), since the caret in an equation
+  // opens its source.
+  function showEquation(label) {
+    const entry = equationIndex(view.state).byLabel.get(label);
+    if (!entry) return false;
+    view.dispatch({ effects: CM.EditorView.scrollIntoView(entry.mathFrom, { y: "center" }) });
+    return true;
+  }
+
   // A rendered equation. Inline ones replace their source; a display one is a
   // block widget that sits under the source lines, which are hidden while no
   // caret is in them (the live preview of the block that is being edited).
@@ -4171,7 +4358,7 @@
   // source is open (`open`) and marked while the main caret is in it
   // (`active`), the same readings as a score's: ScoreWidget below.
   class MathWidget extends WidgetType {
-    constructor(tex, display, block, preview, active, open, frame, tail) {
+    constructor(tex, display, block, preview, active, open, frame, tail, number) {
       super();
       this.tex = tex;
       this.display = display;
@@ -4189,6 +4376,9 @@
       // table is (G052). `key` is its source, for eq; `parts` its content.
       this.tail = tail || null;
       this.cited = citedSignature(this.tail);
+      // The number of a labelled equation, "(1)", drawn at the right of the
+      // column on the formula's baseline (equationIndex), or null.
+      this.number = number || null;
       // The click the tooltips of its links name (followHint), which moves
       // with editor.multiCursorModifier; a drawing keeps its links as it
       // painted them, so a change of it has to draw them again.
@@ -4199,6 +4389,7 @@
         other.tex === this.tex &&
         other.display === this.display &&
         other.block === this.block &&
+        other.number === this.number &&
         other.preview === this.preview &&
         other.active === this.active &&
         other.open === this.open &&
@@ -4211,6 +4402,7 @@
     className() {
       let c = this.block ? "mdm-math mdm-math--block" : "mdm-math";
       if (this.preview) c += " mdm-math--preview";
+      if (this.number) c += " mdm-math--numbered";
       return c;
     }
     paint(el) {
@@ -4218,6 +4410,12 @@
       const out = renderTex(this.tex, this.display);
       if (out.html) {
         el.innerHTML = out.html;
+        if (this.number) {
+          const number = document.createElement("span");
+          number.className = "mdm-eq-number";
+          number.textContent = this.number;
+          el.appendChild(number);
+        }
         if (this.tail) {
           const tail = document.createElement("div");
           tail.className = "mdm-math-tail";
@@ -4265,6 +4463,7 @@
       if (
         this.block && from && from.block && !from.preview &&
         from.tex === this.tex && from.display === this.display &&
+        from.number === this.number &&
         (from.tail ? from.tail.key : "") === (this.tail ? this.tail.key : "") &&
         (from.tail ? from.tip : "") === (this.tail ? this.tip : "") &&
         from.cited === this.cited
@@ -4851,6 +5050,8 @@
         v.forEach(walk);
       } else if (v && typeof v === "object") {
         if (v.kind === "cited") out += v.html + (v.missing ? "!" : "") + "\u0001" + v.title + "\u0000";
+        else if (v.kind === "eqref") out += v.key + "\u0001" + v.title + "\u0000";
+        else if (v.kind === "math" && v.number) out += v.number + "\u0000";
         else Object.keys(v).forEach(function (k) {
           walk(v[k]);
         });
@@ -4883,12 +5084,17 @@
         const content = child.getChild(
           display ? "InlineBlockMathContent" : "InlineMathContent"
         );
+        // A labelled one is numbered here as in the prose (equationIndex),
+        // and its label is not text of the cell.
+        const numbered = display ? eqNow.byMath.get(child.from) : null;
         parts.push({
           kind: "math",
           tex: content ? text(content.from, content.to) : "",
           display: display,
           source: text(child.from, child.to),
+          number: numbered ? "(" + numbered.number + ")" : null,
         });
+        if (numbered) at = Math.max(at, numbered.labelTo);
       } else if (name === "Escape") {
         push(text(child.from + 1, child.to));
       } else if (name === "Entity") {
@@ -4939,6 +5145,16 @@
           title: "Footnote, written inline",
           parts: cellParts(child, text, skip, marks, refs),
         });
+      } else if (name === "Citation" && window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look)) {
+        // A reference to an equation, as in the prose (EqRefWidget).
+        const eqParts = window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look);
+        parts.push({
+          kind: "eqref",
+          parts: eqParts,
+          key: JSON.stringify(eqParts),
+          title: eqRefTitle(eqParts, eqNow),
+          source: text(child.from, child.to),
+        });
       } else if (name === "Citation" && citedAt(child.from, child.to)) {
         // As the page prints it, in a cell or a caption as in the prose.
         const item = citedAt(child.from, child.to);
@@ -4986,7 +5202,7 @@
       .map(function (p) {
         return p.kind === "text"
           ? p.text
-          : p.kind === "math" || p.kind === "cited"
+          : p.kind === "math" || p.kind === "cited" || p.kind === "eqref"
             ? p.source
             : p.parts
               ? partsText(p.parts)
@@ -5010,6 +5226,13 @@
         span.className = "mdm-math";
         if (out.html) {
           span.innerHTML = out.html;
+          if (p.number) {
+            span.className += " mdm-math--numbered";
+            const number = document.createElement("span");
+            number.className = "mdm-eq-number";
+            number.textContent = p.number;
+            span.appendChild(number);
+          }
         } else {
           // A cell whose LaTeX does not compile keeps the source it was
           // written with, the way an inline equation in prose does.
@@ -5021,6 +5244,11 @@
       }
       if (p.kind === "br") {
         el.appendChild(document.createElement("br"));
+        return;
+      }
+      if (p.kind === "eqref") {
+        const widget = new EqRefWidget(p.parts, p.title);
+        el.appendChild(widget.toDOM());
         return;
       }
       if (p.kind === "cited") {
@@ -5784,6 +6012,7 @@
     const doc = state.doc;
     const ranges = activeRanges(state);
     citesNow = state.field(citesField, false) || NO_CITES;
+    eqNow = equationIndex(state);
     // What the host kept back, which every number counts from (hiddenLines).
     const hidden = state.field(hiddenLinesField, false) || 0;
     const tree = CM.syntaxTree(state);
@@ -6209,14 +6438,29 @@
           const next = node.nextSibling;
           const tailNode = next && next.name === "Paragraph" && next.from < blockTo ? next : null;
           let tail = tailNode ? { key: text(tailNode.from, tailNode.to), parts: cellParts(tailNode, text, null, smartMarks(tailNode, tailNode.to, text), refs) } : null;
-          // A label alone after the closer (`$$ {#eq-mass}`) is an attribute
-          // the page prints none of: nothing is drawn under the equation.
+          // The label of a numbered equation (`$$ {#eq-mass}`) is the page's
+          // number and not its text (equationIndex), and nothing of it is
+          // drawn under the equation; the words after it are, from their
+          // first letter, as the page starts its line there. Any other
+          // attribute after the closer is text to Pandoc, which reads none
+          // there (`$$ {#fig-x}`, `{#eq-x}.`), and the page prints it as
+          // written: so is it drawn. It was drawn as nothing, on the belief
+          // that the page printed none of any of them (M11, until 2026-09-30).
+          const numbered = eqNow.byMath.get(n.from) || null;
+          const tailAttr = tailNode && tailNode.firstChild && tailNode.firstChild.name === "Attribute" &&
+            tailNode.firstChild.from === tailNode.from ? tailNode.firstChild : null;
+          if (tail && tailAttr && !(numbered && numbered.labelFrom === tailAttr.from)) {
+            tail.parts = [{ kind: "text", text: text(tailAttr.from, tailAttr.to) }].concat(tail.parts);
+          } else if (tail && tailAttr && tail.parts.length && tail.parts[0].kind === "text") {
+            tail.parts[0] = { kind: "text", text: tail.parts[0].text.replace(/^[ \t]+/, "") };
+          }
           if (tail && !partsText(tail.parts).trim()) tail = null;
           if (open || out.html) {
             decos.push(
               Decoration.widget({
                 widget: new MathWidget(
-                  tex, true, true, false, active, open, frameOf(doc.lineAt(blockFrom).number), tail
+                  tex, true, true, false, active, open, frameOf(doc.lineAt(blockFrom).number), tail,
+                  numbered ? "(" + numbered.number + ")" : null
                 ),
                 block: true,
                 side: 1,
@@ -6243,14 +6487,25 @@
           const content = node.getChild(display ? "InlineBlockMathContent" : "InlineMathContent");
           const tex = content ? text(content.from, content.to) : "";
           const out = renderTex(tex, display);
-          if (!touched(n.from, n.to) && out.html) {
+          // A labelled one inside a paragraph (`$$c = d$$ {#eq-b}`) takes its
+          // label into its drawing, the number standing in its place, as the
+          // page prints it (equationIndex); editing either shows both.
+          const numbered = display ? eqNow.byMath.get(n.from) || null : null;
+          const end = numbered ? numbered.labelTo : n.to;
+          if (!touched(n.from, end) && out.html) {
             decos.push(
-              Decoration.replace({ widget: new MathWidget(tex, display, false) }).range(n.from, n.to)
+              Decoration.replace({
+                widget: new MathWidget(tex, display, false, false, false, false, null, null,
+                  numbered ? "(" + numbered.number + ")" : null),
+              }).range(n.from, end)
             );
           } else {
             decos.push(
               Decoration.mark({ class: "mdm-math-src" + (out.html ? "" : " mdm-math--broken") }).range(n.from, n.to)
             );
+            if (numbered) {
+              decos.push(Decoration.mark({ class: "mdm-attr" }).range(numbered.labelFrom, numbered.labelTo));
+            }
             delim(node, display ? "InlineBlockMathMark" : "InlineMathMark");
             // Editing it: the source stays and, once the LaTeX compiles, the
             // rendered equation appears just after the closing delimiter as a
@@ -6656,6 +6911,25 @@
         }
 
         if (name === "Attribute") {
+          // The one the parser takes at the head of the paragraph after a
+          // `$$` closer is text to Pandoc, which reads no attribute there,
+          // unless it is the label of a numbered equation (equationIndex):
+          // `$$ {#fig-x}`, `{#eq-x}.` and a label on the line under the
+          // closer are printed as written, and drawn so. The widget draws
+          // the one on the closer's line while the block is shut.
+          const para = node.parent;
+          if (para && para.name === "Paragraph" && para.from === n.from && !eqNow.byLabelAt.has(n.from)) {
+            return false;
+          }
+          // A numbered equation's label is only reached here while the
+          // equation's source is open (shut, the widget covers the closer's
+          // line), and then it stands small and faint wherever the caret is:
+          // hidden until the caret came onto it, it had to be looked for at
+          // the end of the `$$` (the owner, 2026-09-30).
+          if (eqNow.byLabelAt.has(n.from)) {
+            decos.push(Decoration.mark({ class: "mdm-attr" }).range(n.from, n.to));
+            return false;
+          }
           // `{#id .class key=val}` after a link, an image, a code span or a
           // `$$` closer (G014): hidden while untouched, since the page
           // prints none of it, and small and faint under the caret.
@@ -6780,6 +7054,16 @@
           // page's), it is drawn as written, in the link colour, with what it
           // is in the tooltip.
           const raw = text(n.from, n.to);
+          // A reference to an equation (`@eq-mass`), which Quarto resolves
+          // and not citeproc: as the page prints it (MDM_CROSSREF.reference,
+          // EqRefWidget), and its source under the caret.
+          const eqParts = window.MDM_CROSSREF.reference(raw, eqNow.numbers, eqNow.look);
+          if (eqParts && !touched(n.from, n.to)) {
+            decos.push(
+              Decoration.replace({ widget: new EqRefWidget(eqParts, eqRefTitle(eqParts, eqNow)) }).range(n.from, n.to)
+            );
+            return false;
+          }
           const item = citedAt(n.from, n.to);
           if (item && !touched(n.from, n.to)) {
             decos.push(
@@ -7016,6 +7300,7 @@
       hidden: state.field(hiddenLinesField, false) || 0,
       lines: state.doc.lines,
       cites: (state.field(citesField, false) || NO_CITES).version,
+      equations: equationIndex(state).key,
     });
     return set;
   }
@@ -7097,7 +7382,13 @@
     // sees.
     // An answer about the citations redraws every one of them, and the list.
     const cites = (state.field(citesField, false) || NO_CITES).version;
-    if (!built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines || built.cites !== cites) {
+    // So does a label or a number of an equation that changed, or the
+    // header's say about them: every number after it and every reference
+    // to one may read otherwise now (equationIndex).
+    if (
+      !built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines ||
+      built.cites !== cites || built.equations !== equationIndex(state).key
+    ) {
       rebuilds.whole++;
       return remember(buildDecorations(state), state);
     }
@@ -7233,6 +7524,10 @@
         tr.state.field(hiddenLinesField) !== tr.startState.field(hiddenLinesField) ||
         tr.state.field(citesField).version !== tr.startState.field(citesField).version ||
         CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState) ||
+        // What the equations were drawn by against what they are now: a
+        // header kept out of the text changes with no change to the text
+        // (applyHyphenation dispatches for it).
+        (builtFrom.get(value) && builtFrom.get(value).equations !== equationIndex(tr.state).key) ||
         // The configuration, which is how a changed editor.multiCursorModifier
         // comes in (gestures), and with it the click a link's tooltip names.
         tr.reconfigured;
@@ -10486,7 +10781,13 @@
     const hit = headingIds(view.state).find(function (h) {
       return h.id === want;
     });
-    if (!hit) return;
+    // The page gives a numbered equation its label for an identifier too
+    // (`[see](#eq-mass)`): a fragment no heading carries is looked for among
+    // the equations.
+    if (!hit) {
+      showEquation(want);
+      return;
+    }
     view.dispatch({ selection: { anchor: hit.pos }, scrollIntoView: true });
     view.focus();
   }
@@ -10551,6 +10852,15 @@
       if (!href) return;
       if (href.charAt(0) === "#") jumpToHeading(href.slice(1));
       else vscode.postMessage({ type: "openLink", href: href });
+      return;
+    }
+    // Ctrl+click on a reference to an equation goes to the equation, as the
+    // page's link does: the one under the pointer, or the reference's first.
+    const eqref = e.button === 0 && e.target.closest(".mdm-eqref");
+    if (eqref && followsLink(e)) {
+      e.preventDefault();
+      const part = e.target.closest("[data-mdm-eq]") || eqref.querySelector("[data-mdm-eq]");
+      if (part) showEquation(part.getAttribute("data-mdm-eq"));
       return;
     }
     // Ctrl+click on a citation goes to its entry in the list, as the page's
