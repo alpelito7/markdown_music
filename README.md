@@ -464,17 +464,19 @@ What it does:
   it, at every selection at once, with the caret after the link; over an
   address, inside a link, code or maths, or with nothing selected, it is
   pasted as text, and a `www.` address is written with the `https://` the
-  page needs. A picture pasted from the clipboard, or dropped on the text
-  with `Shift` held (without it VS Code keeps the drop to itself), is
-  written beside the document in a folder named after it
-  (`songbook-images` beside `songbook.mdm`), never over a file already
-  there, and `![](path)` is written where the caret is; PNG, JPEG, GIF,
-  WebP, SVG and BMP are written, and a document not saved yet is asked to
-  be saved first. A picture taken out of the text stays in its folder until
-  the document is saved without it; then the file goes to the system's
-  trash, the folder is removed once it is empty, and an undo that brings
-  the picture back puts the file back. Only pictures the editor wrote are
-  ever moved.
+  page needs. An address is a scheme of two letters or more (`https:`,
+  `mailto:`) or `www.`, so a field of a tune (`K:G`) or a drive (`C:\`) is
+  pasted as the text it is. A picture pasted from the
+  clipboard, or dropped on the text with `Shift` held (without it VS Code
+  keeps the drop to itself), is written beside the document in a folder
+  named after it (`songbook-images` beside `songbook.mdm`), never over a
+  file already there, and `![](path)` is written where the caret is; PNG,
+  JPEG, GIF, WebP, SVG and BMP are written, and a document not saved yet
+  is asked to be saved first. A picture taken out of the text stays in its
+  folder until the document is saved without it; then the file goes to
+  the system's trash, the folder is removed once it is empty, and an undo
+  that brings the picture back puts the file back. Only pictures the
+  editor wrote are ever moved.
 - **Clicks.** A click on a bullet or a number puts the caret after the
   marker; a task's box is ticked by a click, in a quote and after `1)` as
   well; `Ctrl+click` on a link follows it (`Alt+click` where

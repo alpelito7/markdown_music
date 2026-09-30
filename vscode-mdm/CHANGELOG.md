@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A field of a tune (`K:G`, `M:6/8`, `X:1`) or a Windows path (`C:\Music`)
+  pasted over selected words is pasted as the text it is, where it made
+  the words a link to it: an address is a scheme of two letters or more
+  (`https:`, `mailto:`) or `www.`. `Ctrl+K` over one takes it for the
+  link's words, as it takes any other text.
+
 ## 0.7.1
 
 - A picture pasted from the clipboard (a screenshot) or dropped on the text

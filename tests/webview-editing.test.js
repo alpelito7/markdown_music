@@ -4613,6 +4613,36 @@ test("an address pasted over selected words makes them a link", { skip }, async 
   }
 });
 
+test("a field of a tune or a drive pasted over words is text, and Ctrl+K takes it for the label", { skip }, async () => {
+  // One letter before a colon is no scheme (CommonMark 6.5 wants two to
+  // 32): `K:G`, `M:6/8` and `X:1` are fields of a tune and `C:\` a drive,
+  // and each made the words it was pasted over a link to it (found
+  // 2026-09-28).
+  for (const field of ["K:G", "M:6/8", "X:1", "C:\\Music\\tune.mdm"]) {
+    const h = await open({ text: "the key here\n", scores: 0 });
+    await setSelection(h.page, [{ anchor: 4, head: 7 }]);
+    await pasteInto(h.page, [["text/plain", field]]);
+    await sleep(100);
+    assert.equal(await docText(h.page), "the " + field + " here\n");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+  // A scheme of two letters is an address still.
+  const h = await open({ text: "write to me\n", scores: 0 });
+  await setSelection(h.page, [{ anchor: 9, head: 11 }]);
+  await pasteInto(h.page, [["text/plain", "tel:5550100"]]);
+  await sleep(100);
+  assert.equal(await docText(h.page), "write to [me](tel:5550100)\n");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  // Ctrl+K, whose rule the paste shares: a field selected is the label, the
+  // caret where the address goes, where an address selected is the address.
+  let out = await pressOn("see X:1 here\n", [{ anchor: 4, head: 7 }], [K]);
+  assert.equal(out.text, "see [X:1]() here\n");
+  out = await pressOn("see tel:5550100 here\n", [{ anchor: 4, head: 15 }], [K]);
+  assert.equal(out.text, "see [](tel:5550100) here\n");
+});
+
 test("a picture pasted goes to the host, and comes back as a picture at the caret", { skip }, async () => {
   const h = await open({ text: "See the chart here.\n", scores: 0 });
   await setSelection(h.page, [{ anchor: 8, head: 13 }]);

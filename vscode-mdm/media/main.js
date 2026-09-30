@@ -8080,6 +8080,13 @@
   // label, with the caret where the address goes; the label of a picture is
   // what Quarto prints under the figure as its caption.
   const PICTURE_FILE = /\.(?:png|jpe?g|gif|svg|webp|pdf)$/i;
+  // An address, to this gesture and to a paste over words (pasteLink): a
+  // scheme, two to 32 characters as CommonMark counts one (6.5, and
+  // @lezer/markdown's autolink wants two as well), or `www.`. One letter
+  // before a colon is no scheme: it is a field of a tune (`K:G`, `M:6/8`,
+  // `X:1`) or a drive (`C:\Music`), and pasted over words it made them a
+  // link to it (found 2026-09-28).
+  const ADDRESS = /^(?:[a-z][a-z0-9+.-]{1,31}:|www\.)\S+$/i;
   function linkGesture(bang) {
     return function (v) {
       const state = v.state;
@@ -8104,7 +8111,7 @@
             return { range: range };
           }
           const label = state.sliceDoc(range.from, range.to);
-          if (/^(?:[a-z][a-z0-9+.-]*:|www\.)\S+$/i.test(label) || (bang && !/\s/.test(label) && PICTURE_FILE.test(label))) {
+          if (ADDRESS.test(label) || (bang && !/\s/.test(label) && PICTURE_FILE.test(label))) {
             const insert = bang + "[](" + label + ")";
             return {
               changes: { from: range.from, to: range.to, insert: insert },
@@ -11330,8 +11337,8 @@
   // An address pasted over a selection makes the selection a link to it,
   // `[words](address)`, as GitHub, Notion and Markdown All in One paste
   // one: the words were selected to be linked, not to be replaced. An
-  // address is what the link gesture takes for one (a scheme, or `www.`,
-  // which is written with the `https://` the page needs to follow it),
+  // address is what the link gesture takes for one (ADDRESS: a scheme, or
+  // `www.`, which is written with the `https://` the page needs to follow it),
   // on one line and with nothing else on the clipboard's text but the line
   // ending a browser may copy after it. Pasted as text as ever where the
   // selection is not words to link: an address itself (pasted over to be
@@ -11344,7 +11351,6 @@
   // over three carets does one thing.
   // lang-markdown's own pasteURLAsLink did this for the main selection alone
   // and is turned off in markdownLanguage().
-  const PASTED_ADDRESS = /^(?:[a-z][a-z0-9+.-]*:|www\.)\S+$/i;
   // What a selection may not be inside of, nor hold whole.
   const UNLINKABLE_AROUND = new RegExp(
     "^(?:Link|Image|InlineCode|InlineMath|InlineBlockMath|Autolink|URL|LinkTitle|LinkLabel|HTMLTag|Comment|" +
@@ -11372,7 +11378,7 @@
   }
   function pasteLink(v, text) {
     let address = text.replace(/[\r\n]+$/, "");
-    if (!PASTED_ADDRESS.test(address)) return false;
+    if (!ADDRESS.test(address)) return false;
     if (/^www\./i.test(address)) address = "https://" + address;
     const state = v.state;
     const ranges = state.selection.ranges;
@@ -11383,7 +11389,7 @@
       const line = state.doc.lineAt(r.from);
       if (r.to > line.to || !linkable(tree, r.from, r.to)) return false;
       const label = state.sliceDoc(r.from, r.to);
-      if (PASTED_ADDRESS.test(label.trim()) || /[\[\]]/.test(label)) return false;
+      if (ADDRESS.test(label.trim()) || /[\[\]]/.test(label)) return false;
     }
     v.dispatch(
       state.update(
