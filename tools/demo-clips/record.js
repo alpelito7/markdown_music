@@ -31,6 +31,10 @@ function writeSettings(look, extra) {
     "update.mode": "none",
     "extensions.autoCheckUpdates": false,
     "extensions.autoUpdate": false,
+    // No toast offering an extension for a kind of file a take opens, as
+    // the Markdown clip opens its .bib: a take that ends under a
+    // notification is refused (noToast, below).
+    "extensions.ignoreRecommendations": true,
     "workbench.startupEditor": "none",
     "workbench.tips.enabled": false,
     "workbench.enableExperiments": false,
@@ -111,6 +115,8 @@ async function take(rig, clip, look, keepFrames) {
   const doc = path.basename(docOf(clip));
   fs.mkdirSync(WORKSPACE, { recursive: true });
   fs.copyFileSync(docOf(clip), path.join(WORKSPACE, doc));
+  // What the document reads beside it, the Markdown clip's bibliography.
+  for (const f of clip.files || []) fs.copyFileSync(path.join(HERE, f), path.join(WORKSPACE, f));
   // A picture a take pasted is written beside the copy, and one left there
   // from a take that stopped halfway would make the next paste image-2.png.
   fs.rmSync(picturesOf(doc), { recursive: true, force: true });

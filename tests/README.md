@@ -6085,6 +6085,42 @@ inside a paragraph leaves the space after it at the head of the next row in
 the editor, and on paper the bullet of an item that opens on an equation
 with no number stands under it.
 
+### The Markdown clip ends on an equation and a citation (2026-09-30)
+
+The owner asked for an equation and a reference in the README's second
+clip, to show that the editor handles citations, and left the place and the
+words to the session. After the picture, the take ends on the cent's
+formula, labelled and so numbered at the margin and named "Equation 1" in
+the prose above it, and on a citation typed on camera, `[@ellis1885]`,
+drawn "(Ellis 1885)" with its entry listed under the formula, from
+`tools/demo-clips/markdown.bib` (Ellis's 1885 paper, which introduced the
+cent; checked against IMSLP and Wikipedia). `markdown.mdm` now has a YAML
+header naming the bibliography, and the language the take chooses is added
+to it. One test in `packaging.test.js`, *the Markdown clip ends on a
+numbered equation and a citation its bibliography holds*, which reads the
+clip out of `clips.js`. Each mutated in place and undone in the same
+command, the file checked back by its hash:
+
+- **MC1** the clip copies nothing beside its document → does not copy
+  markdown.bib. **MC2** the entry's key changed in the `.bib` → no entry
+  ellis1885. **MC3** the clip types no citation → types no citation.
+- **MC4** the equation's label taken off → does not end on a labelled
+  equation. **MC5** the citation already written in the document → already
+  cites ellis1885. **MC6** the reference to the equation taken out of the
+  prose → not named by @eq-cents. **MC7** the header naming a title and no
+  bibliography → names no bibliography.
+
+The same day the owner asked for the take to end with a click on the work
+in the list, which opens the `.bib` beside the document at its entry, and
+with that tab closed again. The `.bib` is then on camera, so the note on
+where its details were checked moved from it to `clips.js`, and the test
+holds the file to opening on its entry:
+
+- **MC8** a comment line above the entry → opens on something else than its
+  entry.
+
+All caught.
+
 ### The reader's place when the document gets shorter (2026-10-01)
 
 The take above found it, and it stood in Pending for a day: the `.bib`

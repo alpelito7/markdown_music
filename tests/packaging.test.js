@@ -245,3 +245,35 @@ test("every clip's alt text in the README is at most three sentences", () => {
     assert.ok(sentences >= 1 && sentences <= 3, `clip ${m[1]}'s alt text has ${sentences} sentences`);
   });
 });
+
+// The Markdown clip ends as a paper does, asked for on 2026-09-30 to show
+// that the editor handles citations: after the picture, an equation numbered
+// at the margin and named by its number in the prose, and a citation typed
+// on camera that the editor draws from a bibliography beside the document.
+// The take needs the whole chain, the header naming the file, the file
+// copied beside the copy of the document and the key it types being in it,
+// and a break anywhere in it shows only when the clip is shot again, as a
+// wait that times out halfway through a take.
+test("the Markdown clip ends on a numbered equation and a citation its bibliography holds", () => {
+  const RIG = path.join(ROOT, "tools", "demo-clips");
+  const clip = require(path.join(RIG, "clips.js")).clips.find((c) => c.id === "markdown");
+  const doc = read(RIG, clip.doc);
+  const header = (/^---\n([\s\S]*?)\n---\n/.exec(doc) || [])[1] || "";
+  const bib = (/^bibliography:[ \t]*(\S+)[ \t]*$/m.exec(header) || [])[1];
+  assert.ok(bib, `${clip.doc} names no bibliography in its header`);
+  assert.ok((clip.files || []).includes(bib), `the clip does not copy ${bib} beside its document`);
+  const key = (/^\[@([\w:.-]+)\]$/.exec(clip.cite || "") || [])[1];
+  assert.ok(key, `the clip types no citation: ${clip.cite}`);
+  assert.match(read(RIG, bib), new RegExp(`^@\\w+\\{${key},`, "m"), `${bib} has no entry ${key}`);
+  // The take ends by opening the file at its entry, so it is on camera, and
+  // a note written above the entry is read by everyone who watches the clip.
+  assert.match(read(RIG, bib), /^@/, `${bib} opens on something else than its entry, and the clip shows it`);
+  assert.ok(!doc.includes(`@${key}`), `${clip.doc} already cites ${key}, which the take types`);
+  const body = doc.trimEnd();
+  const label = (/\n\$\$[ \t]*\{#(eq-[\w-]+)\}$/.exec(body) || [])[1];
+  assert.ok(label, `${clip.doc} does not end on a labelled equation`);
+  const picture = body.indexOf("A picture pasted");
+  const cited = body.indexOf(`@${label}`);
+  assert.ok(picture > 0 && cited > picture, `the equation is not named by @${label} after the picture's paragraph`);
+  assert.ok(body.indexOf("$$", picture) > cited, "the equation does not come after the prose that names it");
+});

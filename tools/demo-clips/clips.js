@@ -90,10 +90,16 @@ async function closeAll(rig) {
   // end of every take in record.js should have stopped the run before this.
   // It is in the workbench's DOM only because record.js asks for VS Code's own
   // dialogs (window.dialogStyle): the native one is a window of its own that
-  // nothing here can see.
-  if (await rig.page.evaluate(() => !!document.querySelector(".monaco-dialog-box"))) {
-    throw new Error("VS Code asks to save a document: a take left it edited");
-  }
+  // nothing here can see. The dialog is quoted, since it is not always that
+  // one: a probe that had written the profile's settings without
+  // workbench.enableExperiments left VS Code asking for a restart when
+  // record.js put the setting back, and the run stopped here blaming a take
+  // (2026-10-01).
+  const asked = await rig.page.evaluate(() => {
+    const dialog = document.querySelector(".monaco-dialog-box");
+    return dialog ? dialog.textContent : null;
+  });
+  if (asked) throw new Error(`VS Code is asking before it closes the editors: ${asked.slice(0, 200)}`);
 }
 
 async function openDoc(rig, name) {
@@ -509,6 +515,33 @@ async function atText(rig, needle, opts) {
   return { x: Math.round(off.x + c.x), y: Math.round(off.y + c.y) };
 }
 
+// The window point of the empty line n lines under the one holding needle,
+// a little into it, found as atText finds its text. An empty line is where
+// a click puts the caret outside every paragraph, and where a paste starts
+// a paragraph of its own; one that is not empty, or not in the pane, stops
+// the take.
+async function emptyBelow(rig, needle, n) {
+  const off = await rig.webviewOffset();
+  const c = await rig.evalFrame(
+    (needle, n) => {
+      const view = window.__mdm.view;
+      const doc = view.state.doc;
+      const i = doc.toString().indexOf(needle);
+      if (i < 0) return null;
+      const no = doc.lineAt(i).number + n;
+      if (no > doc.lines || doc.line(no).text !== "") return null;
+      const at = view.coordsAtPos(doc.line(no).from);
+      const pane = document.querySelector("#app .cm-scroller").getBoundingClientRect();
+      if (!at || at.top < pane.top || at.bottom > pane.bottom) return null;
+      return { x: at.left + 120, y: (at.top + at.bottom) / 2 };
+    },
+    needle,
+    n
+  );
+  if (!c) throw new Error(`the line ${n} under ${JSON.stringify(needle)} is not an empty line on screen`);
+  return { x: Math.round(off.x + c.x), y: Math.round(off.y + c.y) };
+}
+
 // The scroll offset that puts the line holding needle a little under the top
 // of the pane, read from CodeMirror's own heights at the moment it is asked
 // for. Measured on camera and not in frame(): by then the take has justified
@@ -524,6 +557,60 @@ async function scrollFor(rig, needle, below) {
     needle,
     below === undefined ? 14 : below
   );
+}
+
+// A scroll offset moved up to the top of the row of text the pane's top edge
+// would cut at it, so the frame opens on a whole row. rig.clearTopEdge does
+// the same by moving down, which a page already at its foot cannot do, and
+// reads only .cm-line: a picture's caption is drawn in its widget, and the
+// first take framed at the foot of markdown.mdm opened on the bottom half of
+// "The extension's icon" (2026-09-30). Reads the rows CodeMirror has drawn,
+// which reach past the pane either side.
+async function wholeRowAt(rig, target) {
+  return rig.evalFrame((t) => {
+    const sc = document.querySelector("#app .cm-scroller");
+    const shift = sc.getBoundingClientRect().top - sc.scrollTop;
+    let top = t;
+    for (const el of document.querySelectorAll("#app .cm-content .cm-line, #app .mdm-figcaption")) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      for (const r of range.getClientRects()) {
+        if (r.height && r.top - shift < t - 0.5 && r.bottom - shift > t + 0.5) top = Math.min(top, Math.floor(r.top - shift) - 2);
+      }
+    }
+    return top;
+  }, target);
+}
+
+// Whether the tab of the file named name is in the workbench's tab bars,
+// found by the label VS Code gives a tab, which opens on the file's name
+// ("markdown.bib" or "markdown.bib, preview"), waited for until it is open
+// (open true) or gone.
+async function waitTab(rig, name, open) {
+  const deadline = Date.now() + 8000;
+  for (;;) {
+    const has = await rig.page.evaluate(
+      (n) => [...document.querySelectorAll(".tabs-container .tab")].some((t) => (t.getAttribute("aria-label") || "").startsWith(n)),
+      name
+    );
+    if (has === open) return;
+    if (Date.now() > deadline) throw new Error(`the tab of ${name} did not ${open ? "open" : "close"}`);
+    await sleep(100);
+  }
+}
+
+// The window point of the close button on the tab of the file named name.
+// Drawn on the tab that is active in its group, as the one a click on an
+// entry opens is.
+async function tabClose(rig, name) {
+  const r = await rig.page.evaluate((n) => {
+    const tab = [...document.querySelectorAll(".tabs-container .tab")].find((t) => (t.getAttribute("aria-label") || "").startsWith(n));
+    const x = tab && tab.querySelector(".tab-actions .action-label");
+    const b = x && x.getBoundingClientRect();
+    return b && b.width ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null;
+  }, name);
+  if (!r) throw new Error(`no close button on the tab of ${name}`);
+  return { x: Math.round(r.x), y: Math.round(r.y) };
 }
 
 // What a take pastes: the extension's own icon, a picture that belongs to the
@@ -607,27 +694,46 @@ async function settleUnderHeading(rig) {
 // language is chosen and the YAML header that choice writes opened and shut
 // again, three words picked with the multicursor and made bold by typing
 // `**` over them, three lines made a list, words highlighted, a table
-// written cell by cell, and a picture pasted with its caption. It opens in
+// written cell by cell, and a picture pasted with its caption. Then, asked
+// for on 2026-09-30 to show that the editor handles citations, the page
+// ends as a paper does: an equation numbered at the margin and named by its
+// number in the prose, and a citation typed as its key, drawn as the page
+// prints it with its work listed under it; a click on the work opens the
+// .bib at its entry, and its tab is closed again. It goes last because it
+// is the furthest from plain Markdown, and because the list of works cited
+// stands at the end of a document that has no `::: {#refs}`. It opens in
 // Latin Modern, the editor's default, on MDM Light.
 //
 // markdown.mdm is the take's guide as demo.mdm is the tour's: every paragraph
 // says what is about to be done to it, and the three lines the list button
 // turns into a list name what the page has done before them.
 //
-// It opens ragged (settings), so that the first press has somewhere to go,
-// and with no YAML header at all, so that choosing a language writes one,
-// hidden, and the YAML button goes from grey to pressable (writeLanguage in
-// extension.js). It ends a long way from where it began, and like the tour
-// it is put back off camera (after) and dissolves into its first frame.
+// It opens ragged (settings), so that the first press has somewhere to go.
+// Its YAML header names the bibliography and nothing else, and is hidden
+// (mdm.frontMatter), so choosing a language adds `lang: en` to it
+// (writeLanguage in extension.js) and the YAML button then shows the two
+// lines, the second of them the one the take just wrote. Until 2026-09-30 the
+// document had no header, and the choice wrote one; a citation needs the
+// header to name its bibliography. It ends a long way from where it began,
+// and like the tour it is put back off camera (after) and dissolves into its
+// first frame.
 const markdown = {
   id: "markdown",
   title: "Markdown in one take",
   doc: "markdown.mdm",
+  // Copied beside the document before every take, as the document is.
+  files: ["markdown.bib"],
   alt:
-    "In Latin Modern on MDM Light, the toolbar justifies the text, and English chosen from the hyphenation menu divides its words and writes lang: en into a YAML header that the YAML button shows and hides. Three words picked with Alt and a double click turn bold as two asterisks are typed, three lines become a bulleted list and a phrase is highlighted. A table is filled cell by cell with Tab, and a pasted picture is saved beside the document and drawn with the caption typed under it.",
+    "In Latin Modern on MDM Light, the toolbar justifies the text, and English chosen from the hyphenation menu divides its words and writes lang: en into the YAML header that the YAML button shows and hides. Three words turn bold as two asterisks are typed over them, three lines become a list, a phrase is highlighted, a table is filled cell by cell and a pasted picture is saved beside the document. Under an equation numbered at the margin, a citation typed as its key is drawn as the page prints it, and a click on its work, listed at the end, opens the bibliography beside the document at its entry.",
   frameRate: 14,
   settings: { "mdm.textAlign": "left" },
   dissolve: 0.6,
+  // The citation the take types: the paper that introduced the cent, whose
+  // formula the page numbers, from markdown.bib. Its details were checked
+  // against IMSLP's record of the paper and Wikipedia's "Cent (music)"
+  // (2026-09-30). They are noted here and not in the .bib, which the take
+  // opens on camera.
+  cite: "[@ellis1885]",
   // What the table button's empty table is filled with, header first, a cell
   // at a time with Tab between them. The rows are the marks the take has just
   // used, as they are drawn and as they are written, so the table says what
@@ -756,21 +862,14 @@ const markdown = {
     await rig.click();
     await sleep(1400);
 
-    // The picture, pasted into the empty line that ends the document, and
-    // its caption typed into the label the paste leaves the caret in
-    // (writePicture in main.js). A click on the paragraph above draws it.
+    // The picture, pasted into the empty line kept for it under its
+    // paragraph, and its caption typed into the label the paste leaves the
+    // caret in (writePicture in main.js). A click on the paragraph above
+    // draws it.
     await rig.smoothScrollTo(await scrollFor(rig, "A picture pasted"), 700);
     await sleep(450);
     const intro = await atText(rig, "where the caret is:", { end: true });
-    const last = await rig.evalFrame(() => {
-      const view = window.__mdm.view;
-      const at = view.coordsAtPos(view.state.doc.length);
-      const pane = document.querySelector("#app .cm-scroller").getBoundingClientRect();
-      return at && at.bottom <= pane.bottom && { x: at.left + 120, y: (at.top + at.bottom) / 2 };
-    });
-    if (!last) throw new Error("the empty line that ends the document is not on screen");
-    const off = await rig.webviewOffset();
-    await rig.moveTo({ x: Math.round(off.x + last.x), y: Math.round(off.y + last.y) }, 620);
+    await rig.moveTo(await emptyBelow(rig, "where the caret is:", 2), 620);
     await sleep(300);
     await rig.click();
     await sleep(600);
@@ -786,18 +885,113 @@ const markdown = {
     await sleep(300);
     await rig.click();
     await sleep(350);
-    // Down to the picture whole, caption and all, as soon as it is drawn. The
-    // scroll before the paste stopped short of it: the document ended on the
-    // empty line then, and the page cannot scroll past its end, so the
-    // picture was drawn with its lower half under the pane (the first take,
-    // 2026-09-28).
+    // Down to the picture whole, caption and all, as soon as it is drawn,
+    // measured again now that it is: the heights the scroll before the paste
+    // was taken from had an empty line where the picture now stands.
     await rig.smoothScrollTo(await scrollFor(rig, "A picture pasted"), 700);
     await rig.moveTo(await rest(rig), 700);
-    // Long enough to read the caption: the screencast drops the frames still
-    // in flight when the camera stops (about 0.85 s, the tour's note) and the
-    // dissolve takes 0.6 s more, so 2.2 s here left the whole picture on
-    // screen for about 1.5 s in the second take.
-    await sleep(3400);
+    await sleep(1800);
+
+    // The end of the page: the equation numbered at the margin and named as
+    // "Equation 1" in the paragraph above it, both drawn from the start, and
+    // the citation typed where the formula is introduced. Held first, so the
+    // number and the reference to it are read before anything moves.
+    //
+    // Short of the foot of the page, where the paragraph's offset put it.
+    // Scrolled to within 4 px of the bottom, CodeMirror anchors the view
+    // on the document's end (scrolledToBottom in its view state), so the
+    // list of works cited, arriving under the equation, pushed the page up
+    // by its own height and took the paragraph that names the equation out
+    // of the frame for the whole of the last hold (the first take,
+    // 2026-09-30).
+    const foot = await rig.evalFrame(() => {
+      const s = window.__mdm.view.scrollDOM;
+      return s.scrollHeight - s.clientHeight;
+    });
+    const toEnd = Math.min(await scrollFor(rig, "An equation given a label"), foot - 12);
+    await rig.smoothScrollTo(await wholeRowAt(rig, toEnd), 800);
+    await sleep(1600);
+    const where = "between two frequencies";
+    await rig.moveTo(await atText(rig, where, { end: true }), 640);
+    await sleep(300);
+    await rig.click();
+    await sleep(350);
+    // The click aims at the end of the word, and a pixel either side of it
+    // is the colon after it; typed there, the key would stand outside the
+    // sentence it cites for.
+    const caret = await rig.evalFrame((n) => {
+      const view = window.__mdm.view;
+      return view.state.selection.main.head - (view.state.doc.toString().indexOf(n) + n.length);
+    }, where);
+    if (caret !== 0) throw new Error(`the caret is ${caret} characters from the end of "${where}"`);
+    // Off the text while it is typed, onto the empty line under the
+    // paragraph where the next click goes, and right of the words so as to
+    // stand over none of them. Not lower down: stepped off as before the
+    // bold and the caption, the pointer stood where the list of works cited
+    // is drawn, and the entry arrived in the blue an entry takes under the
+    // pointer (the first take, 2026-09-30).
+    const off = () => emptyBelow(rig, where, 1).then((p) => ({ x: p.x + 160, y: p.y }));
+    await rig.moveTo(await off(), 380);
+    await sleep(300);
+    await rig.type(" " + markdown.cite, 80);
+    await sleep(900);
+    // The caret out of the paragraph, onto the empty line under it: a line
+    // shows its source while the caret is on it, and the citation is drawn
+    // once it is not. Pandoc prints it in the host (citationService in
+    // extension.js), a round trip waited for rather than slept through, so
+    // the hold after it is a hold on the drawn citation and its entry. The
+    // line is found again, in case the key typed took the paragraph to
+    // another row.
+    await rig.moveTo(await off(), 200);
+    await sleep(300);
+    await rig.click();
+    await rig.waitFor(
+      () => !!document.querySelector("#app .mdm-cited:not(.mdm-cited--missing)") && !!document.querySelector("#app .mdm-refs .csl-entry"),
+      { timeout: 10000 }
+    );
+    await rig.moveTo(await rest(rig), 700);
+    await sleep(1600);
+
+    // The entry clicked, and the bibliography opened at it in the group to
+    // the right (openEntry in extension.js), then its tab closed, which gives
+    // the document the window back (owner, 2026-09-30). A plain click: the
+    // entry opens its file with that and nothing else (handleMouseDown in
+    // main.js), and it does so only once the host has said which file holds
+    // it, the class waited for here. The pointer on it turns it blue with the
+    // hand, which says it is a thing to click before the click does.
+    const bib = markdown.files[0];
+    await rig.waitFor(() => !!document.querySelector("#app .mdm-refs .csl-entry.mdm-refs-entry--source"), {
+      timeout: 8000,
+    });
+    await rig.moveTo(await rig.at("#app .mdm-refs .csl-entry", { fx: 0.35, fy: 0.3 }), 700);
+    await sleep(700);
+    const pageAt = () => rig.evalFrame(() => window.__mdm.view.scrollDOM.scrollTop);
+    const stood = await pageAt();
+    await rig.click();
+    await waitTab(rig, bib, true);
+    // Long enough to read the entry in its file.
+    await sleep(2600);
+    await rig.moveTo(await tabClose(rig, bib), 800);
+    await sleep(500);
+    await rig.click();
+    await waitTab(rig, bib, false);
+    // The document takes the width back, and CodeMirror sets its lines again
+    // at it, before the pointer looks for its corner. It comes back on the
+    // line it was on, and the take is held to that: this close to the foot
+    // of the page it used to come back at the foot, four lines further on,
+    // and the last hold lost the paragraph that names the equation (the
+    // take of 2026-09-30; keepPlace in main.js is what keeps it now).
+    await sleep(500);
+    const back = await pageAt();
+    if (Math.abs(back - stood) > 1) {
+      throw new Error(`the page stood at ${stood} before the .bib opened and is at ${back} after it closed`);
+    }
+    await rig.moveTo(await rest(rig), 700);
+    // Long enough to see the document whole again: the screencast drops the
+    // frames still in flight when the camera stops (about 0.85 s, the tour's
+    // note) and the dissolve takes 0.6 s more, so 2.2 s here left the last
+    // picture of the take on screen for about 1.5 s (2026-09-28).
+    await sleep(2600);
   },
   // Off camera: the division turned off for this document, which the
   // extension keeps per file, the file reverted, and the picture's folder

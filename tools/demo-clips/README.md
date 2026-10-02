@@ -65,6 +65,9 @@ strips `muted` from a `<video>` and Chrome then shows only its poster.
   shares, is never touched; the picture is written into
   `markdown-images/` beside the copy, and that folder is removed before
   every take.
+- `markdown.bib` is the bibliography `markdown.mdm` names in its header, with
+  the one work the Markdown take cites. A clip lists what its document reads
+  beside it in `files`, and those are copied next to the copy with it.
 - `abc-card.mdm` is the score block the README shows as a picture, so that its
   ABC reads in the extension's colours: `abc-card.js` draws it with the
   editor's own stylesheet in the test harness, writes
