@@ -27,7 +27,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { open, posOf, setSelection, skip } = require("./webview/helpers.js");
+const { open, posOf, postSettings, setSelection, skip } = require("./webview/helpers.js");
 
 // One of each kind of block, and three scores: a wide one, one whose two
 // parts are a line each, and one that names its own width. All three are
@@ -757,5 +757,371 @@ test("the bar of a score is drawn under the music and not over it", { skip }, as
     narrow.card.covered <= 0.5,
     "the bar covers " + narrow.card.covered + " px of the card's text"
   );
+  await h.close();
+});
+
+// ---- The reader's place through a rewrap ----
+//
+// The other half of what a pane does to a document: the lines rewrap, the
+// document changes height, and the reader is still on the line they were
+// reading. CodeMirror sees to that by itself except where the document comes
+// out shorter than the place it is scrolled to, which is where a pane that
+// gets its width back near the foot of the document used to leave the reader
+// at the foot instead (The reader's place, in main.js, has the measurements).
+//
+// Thirty paragraphs of one source line each, so that the line at the top of
+// the pane can be read back by its number, and a short pane, so that most of
+// them are out of it.
+
+const PLACE_WORDS =
+  "The text is narrower while another editor stands beside it, so the document is taller, " +
+  "and every paragraph of it takes more rows than it does at the full width of the pane.";
+const PLACE_DOC =
+  Array.from({ length: 30 }, (_, i) => "Paragraph " + (i + 1) + ". " + PLACE_WORDS).join("\n\n") +
+  "\n";
+const PLACE_PANE = 500;
+
+const settled = () => new Promise((r) => setTimeout(r, 400));
+
+// The paragraph at the top of the pane, how far into it the pane begins, and
+// how far the document scrolls.
+function placeOf(page) {
+  return page.evaluate(() => {
+    const view = window.__mdm.view;
+    const s = view.scrollDOM;
+    const block = view.lineBlockAtHeight(s.scrollTop + 8);
+    return {
+      words: (view.state.doc.lineAt(block.from).text.match(/^Paragraph \d+/) || [""])[0],
+      into: s.scrollTop - block.top,
+      top: s.scrollTop,
+      most: s.scrollHeight - s.clientHeight,
+    };
+  });
+}
+
+// The pane begins `into` px inside paragraph `n`.
+async function scrollToParagraph(page, n, into) {
+  await page.evaluate(
+    (n, into) => {
+      const view = window.__mdm.view;
+      const at = view.state.doc.toString().indexOf("Paragraph " + n + ".");
+      view.scrollDOM.scrollTop = view.lineBlockAt(at).top + into;
+    },
+    n,
+    into
+  );
+  await settled();
+  return placeOf(page);
+}
+
+// `from` px short of the foot of the document, moved to 20px inside the
+// paragraph that leaves at the top of the pane.
+async function scrollNearFoot(page, from) {
+  await page.evaluate((from) => {
+    const view = window.__mdm.view;
+    const s = view.scrollDOM;
+    s.scrollTop = s.scrollHeight - s.clientHeight - from;
+  }, from);
+  await settled();
+  const n = await page.evaluate(() => {
+    const view = window.__mdm.view;
+    let line = view.state.doc.lineAt(view.lineBlockAtHeight(view.scrollDOM.scrollTop + 8).from);
+    if (!line.text) line = view.state.doc.line(line.number + 1);
+    return Number(line.text.match(/^Paragraph (\d+)/)[1]);
+  });
+  return scrollToParagraph(page, n, 20);
+}
+
+// Whether the caret is in the pane. Not whether the page is at its head or
+// its foot: CodeMirror brings a caret into the pane with a few px to spare,
+// and the text begins and ends inside the pane's own padding (a caret at the
+// end of the thirty paragraphs leaves the page at 1761 of the 1950 it
+// scrolls, measured).
+function caretInPane(page) {
+  return page.evaluate(() => {
+    const view = window.__mdm.view;
+    const at = view.coordsAtPos(view.state.selection.main.head);
+    const pane = view.scrollDOM.getBoundingClientRect();
+    return !!at && at.top >= pane.top && at.bottom <= pane.bottom;
+  });
+}
+
+async function paneWidth(page, width) {
+  await page.setViewport({ width: width, height: PLACE_PANE });
+  await settled();
+}
+
+// What every frame from here on leaves on screen at the top of the pane,
+// read once the frame is painted (a task queued from its animation callback
+// runs after the rendering it belongs to) and off the DOM alone: asking
+// CodeMirror for a position would run the measure that is being watched.
+function watchFrames(page) {
+  return page.evaluate(() => {
+    const s = window.__mdm.view.scrollDOM;
+    window.__frames = [];
+    const sample = function () {
+      const box = s.getBoundingClientRect();
+      const el = document.elementFromPoint(box.left + box.width / 2, box.top + 12);
+      const line = el && el.closest ? el.closest(".cm-line") : null;
+      window.__frames.push(line ? (line.textContent.match(/^Paragraph \d+/) || ["?"])[0] : "-");
+    };
+    sample();
+    (function next() {
+      requestAnimationFrame(function () {
+        setTimeout(sample, 0);
+        if (window.__frames.length < 600) next();
+      });
+    })();
+  });
+}
+
+async function framesSeen(page) {
+  const frames = await page.evaluate(() => window.__frames);
+  return { count: frames.length, shown: Array.from(new Set(frames)) };
+}
+
+// A rewrap the page hears nothing about: the body held to a width, where a
+// pane resized is a resize event and a panel or a face is the page's own
+// doing. It is what a pane resized looks like from inside VS Code, where
+// the editor is a frame in a frame: the width arrives in a layout, and the
+// resize event a frame later. `after` runs in the same task as the width is
+// given back, with the layout already made, which is the moment the browser
+// has clamped the scroll and CodeMirror has not measured. What comes next in
+// Chrome, measured: the frame's measure first and the scroll event of the
+// clamp in the frame after it (20 ms and 23 ms from the clamp).
+function holdBody(page, width) {
+  return page.evaluate((width) => {
+    document.body.style.width = width + "px";
+  }, width);
+}
+
+function releaseBody(page, after) {
+  return page.evaluate(
+    (after) => {
+      const view = window.__mdm.view;
+      document.body.style.width = "";
+      const most = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
+      const clamped = view.scrollDOM.scrollTop > most - 1;
+      if (after === "caret") {
+        const at = view.state.doc.toString().indexOf("Paragraph 2.");
+        view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+      }
+      return clamped;
+    },
+    after || null
+  );
+}
+
+test("a pane that gets its width back near the foot keeps the line the reader was on", { skip }, async () => {
+  const h = await open({ text: PLACE_DOC, scores: 0, height: PLACE_PANE });
+  const wide = await scrollToParagraph(h.page, 22, 20);
+  assert.equal(wide.words, "Paragraph 22");
+  assert.ok(wide.top < wide.most - 50, "the place is the foot of the document already");
+  // Narrower, with another editor beside it: CodeMirror's own doing, and what
+  // the way back is measured against.
+  await paneWidth(h.page, 450);
+  const narrow = await placeOf(h.page);
+  assert.equal(narrow.words, wide.words, "the split lost the line");
+  // What the test is about: the narrow document is scrolled further than the
+  // wide one goes, so the browser has to move the page on the way back.
+  assert.ok(
+    narrow.top > wide.most + 50,
+    "nothing to clamp: " + narrow.top + " against the " + wide.most + " the wide document scrolls"
+  );
+  await watchFrames(h.page);
+  await paneWidth(h.page, 900);
+  const back = await placeOf(h.page);
+  assert.equal(back.words, wide.words, "the pane came back on another line, at " + back.top + " of " + back.most);
+  assert.ok(
+    Math.abs(back.into - wide.into) < 1,
+    "the line moved in the pane: " + back.into + " into it against " + wide.into
+  );
+  // And on the way: no frame painted with the foot of the document in it.
+  const seen = await framesSeen(h.page);
+  assert.ok(seen.count > 5, "the frames were not watched: " + seen.count);
+  assert.deepEqual(seen.shown, ["Paragraph 22"], "a frame showed another line");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("the outline closing and the face changing keep the line too", { skip }, async () => {
+  const cases = [
+    {
+      what: "the outline closing",
+      width: 760,
+      there: { outline: "shown", outlineWidth: 400 },
+      back: { outline: "hidden", outlineWidth: 400 },
+    },
+    {
+      what: "the sans taking over from the roman",
+      width: 600,
+      there: { textFont: "roman" },
+      back: { textFont: "sans" },
+    },
+  ];
+  for (const c of cases) {
+    const h = await open({ text: PLACE_DOC, scores: 0, height: PLACE_PANE });
+    await paneWidth(h.page, c.width);
+    await postSettings(h.page, c.there);
+    await settled();
+    const before = await scrollNearFoot(h.page, 60);
+    await watchFrames(h.page);
+    await postSettings(h.page, c.back);
+    await settled();
+    const after = await placeOf(h.page);
+    assert.ok(
+      before.top > after.most + 1,
+      c.what + ": nothing to clamp, " + before.top + " against " + after.most
+    );
+    assert.equal(after.words, before.words, c.what + " left the pane on another line");
+    assert.ok(
+      Math.abs(after.into - before.into) < 1,
+      c.what + " moved the line in the pane: " + after.into + " against " + before.into
+    );
+    assert.ok(after.top < after.most - 1, c.what + ": the place kept is the foot");
+    const seen = await framesSeen(h.page);
+    assert.ok(seen.count > 5, c.what + ": the frames were not watched");
+    assert.deepEqual(seen.shown, [before.words], c.what + ": a frame showed another line");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+test("a rewrap nothing announced keeps the line, and paints no frame without it", { skip }, async () => {
+  const h = await open({ text: PLACE_DOC, scores: 0, height: PLACE_PANE });
+  await holdBody(h.page, 450);
+  await settled();
+  const narrow = await scrollToParagraph(h.page, 22, 20);
+  assert.equal(narrow.words, "Paragraph 22");
+  await watchFrames(h.page);
+  assert.equal(await releaseBody(h.page), true, "the browser had nothing to clamp");
+  await settled();
+  const back = await placeOf(h.page);
+  assert.equal(back.words, narrow.words, "the pane came back on another line");
+  assert.ok(Math.abs(back.into - narrow.into) < 1, "the line moved in the pane: " + back.into);
+  assert.ok(back.top < back.most - 50, "the place kept is the foot");
+  // The frame the first take of the clip had: the width in, no resize event
+  // yet, and the page painted at its foot until the event came.
+  const seen = await framesSeen(h.page);
+  assert.ok(seen.count > 5, "the frames were not watched: " + seen.count);
+  assert.deepEqual(seen.shown, ["Paragraph 22"], "a frame showed another line");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a caret put in the text on the way does not lose the place", { skip }, async () => {
+  const h = await open({ text: PLACE_DOC, scores: 0, height: PLACE_PANE });
+  await paneWidth(h.page, 450);
+  const narrow = await scrollToParagraph(h.page, 22, 20);
+  // In the paragraph under the one at the top: in the pane already, so the
+  // scroll the transaction asks for moves nothing.
+  await setSelection(h.page, await posOf(h.page, "Paragraph 23.", 14));
+  await settled();
+  const caret = await placeOf(h.page);
+  assert.ok(Math.abs(caret.top - narrow.top) < 1, "the caret moved the page: " + caret.top);
+  await paneWidth(h.page, 900);
+  const back = await placeOf(h.page);
+  assert.equal(back.words, narrow.words, "the pane came back on another line");
+  assert.ok(Math.abs(back.into - narrow.into) < 1, "the line moved in the pane: " + back.into);
+  await h.close();
+});
+
+test("a place the shorter document cannot reach comes out at the foot, and the foot stays the reader's", { skip }, async () => {
+  const h = await open({ text: PLACE_DOC, scores: 0, height: PLACE_PANE });
+  await paneWidth(h.page, 450);
+  await h.page.evaluate(() => {
+    const s = window.__mdm.view.scrollDOM;
+    s.scrollTop = s.scrollHeight;
+  });
+  await settled();
+  await paneWidth(h.page, 900);
+  const foot = await placeOf(h.page);
+  assert.ok(foot.top > foot.most - 1, "the end of the document left the pane: " + foot.top + " of " + foot.most);
+  // The reader's own scrolls after it: up, and that is where the page stays;
+  // down to the foot again, and nothing takes it back up.
+  const scrollTo = async (top) => {
+    await h.page.evaluate((top) => {
+      window.__mdm.view.scrollDOM.scrollTop = top;
+    }, top);
+    await settled();
+    return placeOf(h.page);
+  };
+  const up = await scrollTo(foot.most - 150);
+  assert.ok(Math.abs(up.top - (foot.most - 150)) < 1, "the scroll up was taken back: " + up.top);
+  const down = await scrollTo(up.most);
+  assert.ok(down.top > down.most - 1, "the scroll to the foot was taken back: " + down.top + " of " + down.most);
+  await h.close();
+});
+
+test("a scroll the editor asks for is not taken back for the place", { skip }, async () => {
+  // Twelve paragraphs, which CodeMirror draws all of at either width, so
+  // that the transaction below redraws nothing and the height of the
+  // document is the browser's alone to change.
+  const short = PLACE_DOC.slice(0, PLACE_DOC.indexOf("Paragraph 13."));
+  const h = await open({ text: short, scores: 0, height: PLACE_PANE });
+  await holdBody(h.page, 450);
+  await settled();
+  await scrollToParagraph(h.page, 6, 20);
+  // The width back and, in the same breath, a caret sent four paragraphs up:
+  // the browser has clamped the page by the time the transaction is made,
+  // and the frame's measure takes the page to the caret before the document
+  // is seen to have changed size. The page is then no longer where the
+  // clamp left it, and the place is not given back over the caret's scroll.
+  assert.equal(await releaseBody(h.page, "caret"), true, "the browser had nothing to clamp");
+  await settled();
+  assert.ok(await caretInPane(h.page), "the caret was left out of the pane, with " + (await placeOf(h.page)).words + " at the top");
+  await h.close();
+});
+
+test("text that changes above the pane moves the place with it", { skip }, async () => {
+  const h = await open({ text: PLACE_DOC, scores: 0, height: PLACE_PANE });
+  await holdBody(h.page, 450);
+  await settled();
+  const narrow = await scrollToParagraph(h.page, 22, 20);
+  // Three hundred spaces at the end of the first paragraph, as the same file
+  // open beside this editor could send them: spaces at the end of a row hang
+  // and wrap nothing, so no line changes height, the page does not move and
+  // no scroll comes to note the place again, while every position under the
+  // change is 300 further on. A place left where it was noted would be a
+  // paragraph and a half above the line.
+  await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    view.dispatch({ changes: { from: view.state.doc.line(1).to, insert: " ".repeat(300) } });
+  });
+  await settled();
+  const edited = await placeOf(h.page);
+  assert.ok(Math.abs(edited.top - narrow.top) < 1, "the spaces moved the page: " + edited.top);
+  assert.equal(await releaseBody(h.page), true, "the browser had nothing to clamp");
+  await settled();
+  const back = await placeOf(h.page);
+  assert.equal(back.words, narrow.words, "the pane came back on another line");
+  assert.ok(Math.abs(back.into - narrow.into) < 1, "the line moved in the pane: " + back.into);
+  await h.close();
+});
+
+test("a page at the foot stays at the foot when the document grows under it", { skip }, async () => {
+  const h = await open({ text: PLACE_DOC, scores: 0, height: PLACE_PANE });
+  await h.page.evaluate(() => {
+    const s = window.__mdm.view.scrollDOM;
+    s.scrollTop = s.scrollHeight;
+  });
+  await settled();
+  const before = await placeOf(h.page);
+  assert.ok(before.top > before.most - 1, "the page is not at the foot: " + before.top + " of " + before.most);
+  // Three paragraphs more at the end, as a list of works cited arrives under
+  // the last line. CodeMirror holds a page at the foot to the foot, in its
+  // measure, so the frame ends with a page at the most it scrolls and a
+  // document of another size, which is all a clamp looks like from here.
+  // What tells them apart is that the document still reaches the place that
+  // was noted: given back, it would take the page up to where the foot was.
+  await h.page.evaluate((words) => {
+    const view = window.__mdm.view;
+    const more = [31, 32, 33].map((n) => "Paragraph " + n + ". " + words).join("\n\n");
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "\n" + more + "\n" } });
+  }, PLACE_WORDS);
+  await settled();
+  const after = await placeOf(h.page);
+  assert.ok(after.most > before.most + 100, "the document did not grow: " + after.most);
+  assert.ok(after.top > after.most - 1, "the page left the foot, for " + after.top + " of " + after.most);
   await h.close();
 });

@@ -6085,6 +6085,118 @@ inside a paragraph leaves the space after it at the head of the next row in
 the editor, and on paper the bullet of an item that opens on an equation
 with no number stands under it.
 
+### The reader's place when the document gets shorter (2026-10-01)
+
+The take above found it, and it stood in Pending for a day: the `.bib`
+closed, the document took the window back, and the page came to rest at
+its foot instead of on the line it had been on, so the last hold of the
+clip lost the paragraph that names the equation. Measured then in VS Code
+1.133 on `tools/demo-clips/markdown.mdm`: a page at 600 px kept its line
+through the split and came back at 681 px, the most it scrolls at the full
+width, where a page at 300 px came back at 300.
+
+The text is narrower beside another editor, so the document is taller, and
+a reader near its foot is scrolled further than the full-width document
+goes. When the width comes back the lines rewrap in the browser's own
+layout, the browser brings the scroll down to the new maximum, and
+CodeMirror's measure, which comes after, finds an offset it did not set,
+reads it as the reader's scroll (`Math.abs(scrollOffset -
+this.viewState.scrollOffset) > 1` drops the anchor) and anchors on it,
+which at the maximum is the end of the document. It is not about the
+width: anything that shortens the document under a reader near its foot
+does it, and in the harness the outline closing and the sans taking over
+from the roman did (thirty paragraphs, the line at the top of the pane 59
+before and 61 after, and 53 against 59 for a 450 px pane going back to
+900). One case is a clamp that has to stand: a place the shorter document
+cannot reach comes out at its foot.
+
+`main.js` now keeps the place itself (*The reader's place*): CodeMirror's
+own `scrollSnapshot`, noted at every scroll, and given back as the effect
+a snapshot is restored by when the document no longer reaches where it was
+noted and the page stands at the most it scrolls. It is asked for from a
+resize observer on the document, which reports between the layout that
+clamped the scroll and the painting of it, and the measure that spends the
+effect is run there and then, so the foot is never painted.
+
+That is the second mechanism. The first asked from `remeasureText`, which
+the pane's resize event, the outline and the face go through ahead of the
+frame's measure, and from the scroll event of the clamp for anything else.
+It passed everything here, the frames included, and the first take of the
+clip on it had one frame with the page at its foot all the same: inside VS
+Code the editor is a frame in a frame, and what fits that frame is the
+width arriving in a layout with the resize event a frame behind (the order
+itself was not measured; the frame was seen, and it is gone on the second
+mechanism). The harness has no frame around it, so the test that stands
+for it is the one that gives the body its width back with no event at all.
+Two orders were measured in Chrome on the way and are worth keeping: the
+scroll event of a clamp comes after the frame's measure and not before it
+(the measure 20 ms after the clamp, the event 23), and a resize observer
+on the document left no error event behind in any of the five kinds of
+rewrap sampled.
+
+In the real window, on the recording bench
+(`tools/demo-clips/build/place-probe.js`, a scratch file): 600 px, 980.6
+with the `.bib` beside it and the same line at the top, 600 when it
+closes; 300, 572.2 and 300. And in the frames of the take, the one frame
+between the two layouts, half of the window still blank, has the line the
+frames before and after it have at the top.
+
+Eight tests at the end of `webview-narrow.test.js`, on thirty paragraphs of
+one line each in a 500 px pane, the place read back as the paragraph at the
+top and the pixels into it, since a scroll offset means little while the
+heights outside the pane are estimates: *a pane that gets its width back
+near the foot keeps the line the reader was on* (and no frame on the way
+shows another paragraph, read off the DOM after each paint), *the outline
+closing and the face changing keep the line too*, *a rewrap nothing
+announced keeps the line, and paints no frame without it*, *a caret put in
+the text on the way does not lose the place*, *a place the shorter
+document cannot reach comes out at the foot, and the foot stays the
+reader's*, *a scroll the editor asks for is not taken back for the place*,
+*text that changes above the pane moves the place with it* and *a page at
+the foot stays at the foot when the document grows under it*. Each mutation
+swapped in place and swapped back in the same command, the file checked
+back by its hash:
+
+- **RP1** `keepPlace` giving nothing back, **RP3** the document's size not
+  watched and **RP7** the scroll observer not installed, so that no place
+  is ever noted → the same five each, the pane back *at 1939 of 1939*.
+- **RP2** the measure left to the next frame → *a frame showed another
+  line*, three times: the line is kept all the same, a frame late, and
+  only the frames say so.
+- **RP4** a place out of reach taken back wherever the page stands → *the
+  caret was left out of the pane, with Paragraph 6 at the top*. **RP5** a
+  page at the most it scrolls taken back whether the document reaches the
+  place or not → *the page left the foot, for 2006 of 2217*.
+- **RP6** the place not moved with the text → the text changing above.
+- **RP8** the pane watched instead of the document → *the sans taking over
+  from the roman left the pane on another line*: a face changes the height
+  of the document and not the size of the pane.
+
+All caught, and not at the first writing of the tests. RP5 passed a caret
+sent to the end of the document, which CodeMirror leaves short of the most
+the page scrolls (1761 of 1950, the pane's padding under the last line);
+what it cannot pass is the page at the foot with text arriving under it,
+which is the list of works cited in the clip. A scroll written to the page
+in the task that clamped it was a test until the second mechanism, under
+which no mutation fails it (the scroll event notes the new place before
+the observer asks), and it is gone. And the mutation round was cut off
+once with RP6 in the file, by the session ending under it: the line was
+found by reading the fix back, which is the reason the hash is checked.
+
+Run on this state: `webview-narrow.test.js` whole (17 of 17), the tests of
+the other webview files whose names touch a scroll, the outline, the face,
+the playhead, a caret or the page (122 of 122, with another session's
+uncommitted task box in `style.css`), and `test:fast` (259 of 259).
+`render.test.js` and `html.test.js` were not run: nothing here reaches a
+render tree or the export.
+
+The Markdown clip was taken again on it (81.6 s and 4.9 MB, where the two
+takes before it ran 93.7 s; same beats, 23 frames a second captured
+against 20, so most likely a machine with less else to do, which was not
+checked further) and holds its own take to the same thing: the page has
+to stand, after the `.bib` closes, within a pixel of where it stood before
+the click that opened it.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

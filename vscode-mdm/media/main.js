@@ -12665,6 +12665,7 @@
           },
         }),
         CM.EditorView.inputHandler.of(surroundSelection),
+        CM.EditorView.domEventObservers({ scroll: notePlace }),
         CM.search({ top: true, createPanel: searchPanel }),
         CM.keymap.of(
           mdmKeymap.concat(
@@ -12711,6 +12712,7 @@
           }
           refreshRailPointer();
           placeOpenRails();
+          placeAfterUpdate(update);
           if (update.docChanged || update.selectionSet) {
             updateUndoButtons();
             // The outline follows the document and the caret while it is
@@ -12760,6 +12762,7 @@
       },
     };
     watchContent();
+    watchPlace();
     watchCarets();
     watchCardScroll();
     disarmNativeHistory();
@@ -12817,6 +12820,88 @@
   // The element that scrolls.
   function scroller() {
     return view ? view.scrollDOM : null;
+  }
+
+  // ---------- The reader's place ----------
+  //
+  // The line at the top of the pane and how far into it the pane begins.
+  // CodeMirror holds the reader to that line while the heights around it
+  // change: each measure starts from the scroll offset, finds the line there
+  // and puts it back where it was once the new heights are in. That needs the
+  // offset to be the one the reader left, and a document that comes out
+  // shorter than the place it is scrolled to takes it away first. The lines
+  // rewrap in the browser's own layout, the browser brings the scroll down to
+  // the most the shorter document allows, and the measure, coming after,
+  // finds an offset it did not set, reads it as the reader's own scroll and
+  // anchors on it, which at the maximum is the foot of the document.
+  //
+  // Found on a pane getting its width back as the editor beside it closes
+  // (VS Code 1.133, tools/demo-clips/markdown.mdm: a page at 600px came back
+  // at 681, the most it scrolls, where from 300px it came back at 300). The
+  // outline closing and the sans taking over from the roman do the same,
+  // measured in the harness on thirty paragraphs: a 450px pane with line 53
+  // at its top went back to 900 with line 59 there, and under the other two
+  // line 59 became line 61.
+  //
+  // So the place is kept here as well, as CodeMirror's own snapshot of it,
+  // noted at every scroll, and given back as the effect such a snapshot is
+  // restored by when the browser is found to have taken it. Nothing else
+  // changes hands: a place the browser left alone is CodeMirror's to hold as
+  // before, and one the shorter document cannot reach any more comes out at
+  // the foot, as it has to.
+  let place = null;
+
+  function notePlace() {
+    if (!view) return;
+    place = { at: view.scrollSnapshot(), top: view.scrollDOM.scrollTop };
+  }
+
+  // Whether the browser has moved the page off the place: the document no
+  // longer reaches where the place was noted, and the page stands at the most
+  // it scrolls now. The second half is what leaves alone a scroll made since
+  // (the caret's, the playhead's, a block's own): that offset was put there
+  // by somebody, and only the browser's clamp puts it at the maximum unasked.
+  function placeTaken() {
+    if (!view || !place) return false;
+    const s = view.scrollDOM;
+    const most = s.scrollHeight - s.clientHeight;
+    return place.top > most + 1 && s.scrollTop > most - 1;
+  }
+
+  // Asked when the document has changed size, which is the one thing every
+  // such loss has in common and which a resize observer reports between the
+  // layout that clamped the scroll and the painting of it. The effect is
+  // spent in a measure, and CodeMirror's next one is a frame away, so it is
+  // run here: the place is back in the frame that lost it and the foot is
+  // never painted. `measure` is CodeMirror's own and not in its documented
+  // API; the test that reads the frames is what says the next bump kept it.
+  //
+  // Not from the pane's resize event, which was the first attempt and is
+  // enough in a window of its own, where the event comes ahead of the layout
+  // (no frame at the foot in the harness). Inside VS Code the first take of
+  // the Markdown clip on that attempt still had one frame with the page at
+  // its foot (2026-10-01): the webview is a frame inside VS Code's, and what
+  // fits that frame is its width arriving in the layout of the frame around
+  // it with the resize event a frame behind, which was not measured. Chrome
+  // sends the scroll event of a clamp a frame late as well (the measure 20 ms
+  // after the clamp and the event 23, measured), so that is no place to
+  // answer from either.
+  function keepPlace() {
+    if (!placeTaken()) return;
+    view.dispatch({ effects: place.at });
+    view.measure();
+  }
+
+  // Text that changes moves the place with it, as it moves every position
+  // in the document.
+  function placeAfterUpdate(update) {
+    if (!place || !update.docChanged) return;
+    const at = place.at.map(update.changes);
+    place = at ? { at: at, top: place.top } : null;
+  }
+
+  function watchPlace() {
+    new ResizeObserver(keepPlace).observe(view.contentDOM);
   }
 
   // ---------- Toolbar ----------

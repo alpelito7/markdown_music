@@ -95,6 +95,10 @@
 - A display equation in a table's cell no longer stops the PDF with "Not
   allowed in LR mode": it goes down in its cell, level with the row, its
   number beside it if it has one.
+- The page stays on the line being read when the text gets its width
+  back near the end of the document: an editor closed beside it, the
+  window made wider, the outline shut, the font changed from the toolbar.
+  It jumped to the end of the document, several lines further on.
 
 ## 0.7.1
 
