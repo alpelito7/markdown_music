@@ -2367,6 +2367,162 @@ test("the page hangs a list under its text where the editor does, level by level
   );
 });
 
+// A task's box on the page is the editor's (mdm-look.css and style.css;
+// picked from design-task-box.html on 2026-10-01): 13px with its middle on
+// the middle of the face's capital, to the whole pixel, half an em before the
+// text, a line in the ink that fills with the brass when the task is done.
+// Read with one function on both surfaces, row by row, in either face: the
+// roman's capital is 13.4px and the sans's 11, so the same rule sets the box
+// on the baseline in one and a pixel under it in the other, and a page that
+// kept the -2px and the 0.28em it had would part from the editor in both.
+//
+// Every shape Pandoc writes a task in is here: in a list of tasks alone, in
+// a list that mixes them with other items, on a numbered item, and in a
+// loose list, whose box stands inside a <p> and a <label> and was reached by
+// no rule of the page until this test (it stood in the flow, behind a
+// bullet).
+const TASK_BOXES = function (lines, left) {
+  const probe = (line, css) => {
+    const s = document.createElement("span");
+    s.style.cssText = "display:inline-block;width:1px;text-indent:0;vertical-align:baseline;" + css;
+    line.appendChild(s);
+    const r = s.getBoundingClientRect();
+    s.remove();
+    return r;
+  };
+  const round = (x) => Math.round(x * 100) / 100;
+  return lines.map((line) => {
+    const input = line.querySelector('input[type="checkbox"]');
+    const baseline = probe(line, "height:0").top;
+    const cap = probe(line, "height:1cap").height;
+    const box = input.getBoundingClientRect();
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) =>
+        n.parentElement.closest(".mdm-li-marker") || !n.textContent.trim()
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    });
+    const node = walker.nextNode();
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, 1);
+    const cs = getComputedStyle(input);
+    const tick = getComputedStyle(input, "::before");
+    return {
+      text: node.textContent.trim(),
+      cap: round(cap),
+      size: box.width + "x" + box.height,
+      foot: round(box.bottom - baseline),
+      boxLeft: round(box.left - left),
+      gap: round(range.getBoundingClientRect().left - box.right),
+      textLeft: round(range.getBoundingClientRect().left - left),
+      appearance: cs.appearance,
+      ground: cs.backgroundColor,
+      edge: cs.borderTopColor,
+      tick: tick.content === "none" ? "none" : tick.backgroundColor,
+    };
+  });
+}.toString();
+
+test("a task's box on the page is the editor's: its place in the line, its gap and its drawing (TB3)", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const text =
+    "- [ ] Poder a Mariam\n- [x] Hecha\n- [ ] Tanques\n\nProse between.\n\n- an item\n- [ ] a task among items\n\n" +
+    "1. [ ] a numbered task\n\nMore prose.\n\n- [ ] a loose task\n\n- [x] a loose task done\n";
+  const TASKS = ["Poder a Mariam", "Hecha", "Tanques", "a task among items", "a numbered task", "a loose task", "a loose task done"];
+  for (const face of ["roman", "sans"]) {
+    for (const [look, extra, brass] of [["light", [], "rgb(160, 116, 15)"], ["dark", ["-M", "mdm-look:dark"], "rgb(217, 169, 79)"]]) {
+      // The dark side is read in one face: what it adds is the colours.
+      if (look === "dark" && face === "sans") continue;
+      const name = "task-box-" + face + "-" + look;
+      const where = face + ", " + look;
+      fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+      const r = spawnSync(
+        MDM,
+        ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:" + face].concat(extra),
+        { cwd: DIR, encoding: "utf8" }
+      );
+      assert.equal(r.status, 0, r.stderr);
+
+      const browser = await puppeteer.launch({
+        executablePath: CHROME,
+        args: ["--no-sandbox", "--allow-file-access-from-files"],
+        defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+      });
+      OPEN_BROWSERS.add(browser);
+      const page = await browser.newPage();
+      await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      await page.evaluate(() => document.fonts.ready);
+      const exported = await page.evaluate((f) => {
+        const main = document.querySelector("main.content");
+        return {
+          boxes: eval("(" + f + ")")(
+            Array.from(main.querySelectorAll('li input[type="checkbox"]')).map((i) => i.parentElement),
+            main.getBoundingClientRect().left
+          ),
+          // A task carries no bullet and no number beside its box.
+          markers: Array.from(main.querySelectorAll("li"))
+            .filter((li) => li.querySelector('input[type="checkbox"]'))
+            .map((li) => getComputedStyle(li, "::before").content),
+        };
+      }, TASK_BOXES);
+      await browser.close();
+      OPEN_BROWSERS.delete(browser);
+
+      const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: face, theme: look } } });
+      let editor;
+      try {
+        await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+        await h.page.evaluate(async () => {
+          await document.fonts.ready;
+          if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        });
+        await h.page.mouse.click(2, 2);
+        await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+        editor = await h.page.evaluate(
+          (f) =>
+            eval("(" + f + ")")(
+              Array.from(document.querySelectorAll("#app .cm-content .cm-line")).filter((l) => l.querySelector("input.mdm-task")),
+              window.__mdm.view.contentDOM.getBoundingClientRect().left
+            ),
+          TASK_BOXES
+        );
+      } finally {
+        await h.close();
+      }
+
+      assert.deepEqual(exported.boxes.map((b) => b.text), TASKS, where + ": the page's tasks");
+      assert.deepEqual(editor.map((b) => b.text), TASKS, where + ": the editor's tasks");
+      assert.deepEqual(
+        exported.markers,
+        TASKS.map(() => "none"),
+        where + ": a task on the page carries a marker beside its box"
+      );
+      TASKS.forEach((task, i) => {
+        const p = exported.boxes[i];
+        const e = editor[i];
+        const both = where + ", " + task + ": page " + JSON.stringify(p) + ", editor " + JSON.stringify(e);
+        assert.equal(p.size, "13x13", "the page's box, " + both);
+        assert.equal(e.size, "13x13", "the editor's box, " + both);
+        assert.ok(Math.abs(p.cap - e.cap) <= 0.05, "the two capitals, " + both);
+        assert.equal(p.foot, e.foot, "the box stands at another height in its line, " + both);
+        assert.ok(Math.abs(p.gap - e.gap) <= 0.05, "the gap before the text, " + both);
+        assert.ok(Math.abs(p.gap - 8) <= 0.05, "the gap is not half an em, " + both);
+        assert.ok(Math.abs(p.boxLeft - e.boxLeft) <= 0.5, "the box into the column, " + both);
+        assert.ok(Math.abs(p.textLeft - e.textLeft) <= 0.5, "the text into the column, " + both);
+        assert.equal(p.appearance, "none", "the page's box is the browser's, " + both);
+        for (const prop of ["ground", "edge", "tick"]) {
+          assert.equal(p[prop], e[prop], "the box's " + prop + ", " + both);
+        }
+      });
+      const done = exported.boxes[1];
+      assert.equal(done.ground, brass, where + ": a task done is not filled with the side's brass on the page");
+      assert.notEqual(done.tick, "none", where + ": a task done has no tick on the page");
+      assert.equal(exported.boxes[0].ground, "rgba(0, 0, 0, 0)", where + ": a task to do has a ground on the page");
+    }
+  }
+});
+
 // The blocks the two dialects part on, drawn as the editor draws them once
 // the copy has its blank lines (extension.js, withBreaks): a table straight
 // under a line of text, a `***` and a spaced rule under text or under an

@@ -414,22 +414,67 @@ body main.content ol > li::before {
 }
 /* A task: Pandoc writes its box as the first thing in the item, bare in a
    list of tasks alone (`ul.task-list`), inside a <label> in a list that
-   mixes tasks with other items, inside a <p> in a loose list. The box
-   stands in the gap alone, as the editor draws it, ending a space before
-   the text: pulled back by its own 13px and the space, and the bullet
-   left off. */
+   mixes tasks with other items, inside a <p> in a loose list, and inside
+   both in the loose list Quarto's Pandoc writes today (`li > p > label`,
+   which no rule here reached until 2026-10-01: the box stood in the flow
+   behind a bullet). The box stands in the gap alone, as the editor draws
+   it, ending half an em before the text: pulled back by its own 13px and
+   the space, and the bullet left off.
+
+   The box is the editor's (style.css, `.mdm-task`, where the measurements
+   behind each value are): drawn here and not the browser's, 13px with its
+   middle on the middle of the face's capital, to the whole pixel, a line in
+   the ink that fills with the brass when the task is done. The first
+   vertical-align is for a browser that has no `cap` or no `round()`.
+
+   `font: inherit` is what makes `cap` the line's and not the control's. On
+   Quarto's page Bootstrap's reboot already hands an input the family and
+   the size of its line, so taking the declaration out changes nothing there
+   and no test sees it go (mutation TB-o, tests/README.md); it stays for a
+   page set without that sheet, which nothing here has measured. */
 body main.content li:has(> input[type="checkbox"]:first-child)::before,
 body main.content li:has(> label:first-child > input[type="checkbox"]:first-child)::before,
-body main.content li:has(> p:first-child > input[type="checkbox"]:first-child)::before {
+body main.content li:has(> p:first-child > input[type="checkbox"]:first-child)::before,
+body main.content li:has(> p:first-child > label:first-child > input[type="checkbox"]:first-child)::before {
   content: none;
 }
 body main.content li > input[type="checkbox"]:first-child,
 body main.content li > label:first-child > input[type="checkbox"]:first-child,
-body main.content li > p:first-child > input[type="checkbox"]:first-child {
+body main.content li > p:first-child > input[type="checkbox"]:first-child,
+body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  position: relative;
   width: 13px;
   height: 13px;
-  margin: 0 0.28em 0 calc(-13px - 0.28em);
-  vertical-align: -2px;
+  margin: 0 0.5em 0 calc(-13px - 0.5em);
+  border: 1px solid color-mix(in srgb, var(--mdm-ink) 58%, transparent);
+  border-radius: 2px;
+  background: none;
+  font: inherit;
+  vertical-align: -1px;
+  vertical-align: round(calc((1cap - 13px) / 2), 1px);
+}
+body main.content li > input[type="checkbox"]:first-child:checked,
+body main.content li > label:first-child > input[type="checkbox"]:first-child:checked,
+body main.content li > p:first-child > input[type="checkbox"]:first-child:checked,
+body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child:checked {
+  border-color: var(--mdm-play-accent);
+  background: var(--mdm-play-accent);
+}
+body main.content li > input[type="checkbox"]:first-child:checked::before,
+body main.content li > label:first-child > input[type="checkbox"]:first-child:checked::before,
+body main.content li > p:first-child > input[type="checkbox"]:first-child:checked::before,
+body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child:checked::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--mdm-syn-page);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 11'%3E%3Cpath d='M2.3 5.7 4.6 8 8.8 3' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 11'%3E%3Cpath d='M2.3 5.7 4.6 8 8.8 3' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat;
 }
 body hr {
   height: 0;

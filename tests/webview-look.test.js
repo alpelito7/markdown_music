@@ -5180,6 +5180,155 @@ test("a task's row is as tall as a line of prose, so its words stand beside its 
   }
 });
 
+// A task's box stands where a capital does, half an em before its text, and
+// is the editor's own drawing (style.css, `.mdm-task` and `.mdm-li-gap`;
+// picked from design-task-box.html on 2026-10-01, A, 2 and Q).
+//
+// At the -2px it had, the box's middle was the lowercase's and it read as
+// dropped beside a capital, 2.4px short of the head of a P in the roman; at
+// 0.28em it stood nearer its word (4.5px) than the roman sets two words
+// (6.55). The middle of the box is now the middle of the face's capital, to
+// the whole pixel, which is read here as two things: the middles within half
+// a pixel, and the foot a whole number of pixels from the baseline in every
+// row (the rows are 27.19px, and at a fraction the box came out a pixel
+// higher than its words in two rows of eight). The roman's own number is
+// pinned as well, since its face is vendored: on the baseline.
+//
+// The baseline and the capital are read off the line itself, with spans put
+// in and taken out in one synchronous pass, before CodeMirror's observer
+// sees them. Read against the box's own font the capital is 9px, which is
+// what `font: inherit` on the box is there for.
+test("a task's box stands on the middle of the capital, half an em before its text (TB1)", { skip }, async () => {
+  const text = ["- [ ] Poder a Mariam", "- [x] Hecha", "- [ ] Tanques", "- [ ] Otra tarea", "1. [ ] Una numerada", ""].join("\n");
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { frontMatter: "hidden", textFont: face } } });
+    const rows = await h.page.evaluate(async () => {
+      await document.fonts.ready;
+      const view = window.__mdm.view;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      await new Promise((r) => setTimeout(r, 300));
+      const left = view.contentDOM.getBoundingClientRect().left;
+      const probe = (line, css) => {
+        const s = document.createElement("span");
+        s.style.cssText = "display:inline-block;width:1px;text-indent:0;vertical-align:baseline;" + css;
+        line.appendChild(s);
+        const r = s.getBoundingClientRect();
+        s.remove();
+        return r;
+      };
+      return [...document.querySelectorAll("#app .cm-content .cm-line")]
+        .filter((line) => line.querySelector("input.mdm-task"))
+        .map((line) => {
+          const baseline = probe(line, "height:0").top;
+          const cap = probe(line, "height:1cap").height;
+          const box = line.querySelector("input.mdm-task").getBoundingClientRect();
+          const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT, {
+            acceptNode: (n) =>
+              n.parentElement.closest(".mdm-li-marker") || !n.textContent.trim()
+                ? NodeFilter.FILTER_REJECT
+                : NodeFilter.FILTER_ACCEPT,
+          });
+          const range = document.createRange();
+          const node = walker.nextNode();
+          range.setStart(node, 0);
+          range.setEnd(node, 1);
+          return {
+            em: parseFloat(getComputedStyle(line).fontSize),
+            cap,
+            width: box.width,
+            height: box.height,
+            foot: box.bottom - baseline,
+            middles: baseline - cap / 2 - (box.top + box.bottom) / 2,
+            boxLeft: box.left - left,
+            gap: range.getBoundingClientRect().left - box.right,
+            textLeft: range.getBoundingClientRect().left - left,
+          };
+        });
+    });
+    assert.equal(rows.length, 5, `not five tasks drawn (${face})`);
+    for (const [i, row] of rows.entries()) {
+      const where = `task ${i + 1}, ${face}: ` + JSON.stringify(row);
+      assert.ok(row.cap > 10, "the capital is not the line's, " + where);
+      assert.equal(row.width, 13, "the box's width, " + where);
+      assert.equal(row.height, 13, "the box's height, " + where);
+      assert.ok(Math.abs(row.middles) <= 0.5, "the box is not on the middle of the capital, " + where);
+      assert.ok(Math.abs(row.foot - Math.round(row.foot)) < 0.01, "the box is not on a whole pixel from the baseline, " + where);
+      assert.ok(Math.abs(row.gap - row.em / 2) < 0.05, "the gap is not half an em, " + where);
+      assert.ok(Math.abs(row.textLeft - 1.5 * row.em) < 0.05, "the text has moved, " + where);
+      assert.ok(Math.abs(row.boxLeft - (row.em - 13)) < 0.05, "the box is not 1.5em less itself and the gap into the column, " + where);
+    }
+    if (face === "roman") {
+      assert.ok(rows.every((row) => Math.abs(row.foot) < 0.01), "the roman's box does not stand on the baseline: " + JSON.stringify(rows.map((r) => r.foot)));
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// The box is drawn in the document's own colours and follows the side: a
+// line in the ink at 58% with nothing under it, and ticked, the brass with
+// the tick in the colour of the page. The browser's own was a grey fill that
+// went Chromium's blue when ticked, on either side. The tick is a mask over
+// a fill, read as the pseudo-element's two halves.
+test("a task's box is a line in the ink, and the brass with the page's colour for a tick when done (TB2)", { skip }, async () => {
+  const text = ["- [ ] to do", "- [x] done", ""].join("\n");
+  const SIDES = {
+    light: { ink: "#24292e", brass: "rgb(160, 116, 15)" },
+    dark: { ink: "#d4d4d4", brass: "rgb(217, 169, 79)" },
+  };
+  for (const [theme, side] of Object.entries(SIDES)) {
+    const h = await open({ text, scores: 0, seed: { settings: { frontMatter: "hidden", theme } } });
+    const got = await h.page.evaluate(async (ink) => {
+      await document.fonts.ready;
+      const view = window.__mdm.view;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      await new Promise((r) => setTimeout(r, 300));
+      // What a declaration works out to here, in the form the engine reports it.
+      const resolved = (prop, value) => {
+        const el = document.createElement("i");
+        el.style.setProperty(prop, value);
+        document.querySelector("#app .cm-content").appendChild(el);
+        const out = getComputedStyle(el).getPropertyValue(prop);
+        el.remove();
+        return out;
+      };
+      const read = (box) => {
+        const cs = getComputedStyle(box);
+        const tick = getComputedStyle(box, "::before");
+        return {
+          appearance: cs.appearance,
+          ground: cs.backgroundColor,
+          edge: cs.borderTopColor,
+          edgeWidth: cs.borderTopWidth,
+          tick: tick.content,
+          tickFill: tick.backgroundColor,
+          tickMask: /^url\("data:image\/svg\+xml/.test(tick.maskImage || tick.webkitMaskImage || ""),
+        };
+      };
+      const boxes = [...document.querySelectorAll("#app input.mdm-task")];
+      return {
+        todo: read(boxes[0]),
+        done: read(boxes[1]),
+        line: resolved("color", `color-mix(in srgb, ${ink} 58%, transparent)`),
+        page: resolved("background-color", "var(--mdm-syn-page)"),
+      };
+    }, side.ink);
+    const where = theme + ": " + JSON.stringify(got);
+    assert.equal(got.todo.appearance, "none", "the box is the browser's, " + where);
+    assert.equal(got.todo.ground, "rgba(0, 0, 0, 0)", "a task to do has a ground, " + where);
+    assert.equal(got.todo.edge, got.line, "the line is not the ink at 58%, " + where);
+    assert.equal(got.todo.edgeWidth, "1px", where);
+    assert.equal(got.todo.tick, "none", "a task to do carries a tick, " + where);
+    assert.equal(got.done.ground, side.brass, "a task done is not filled with the brass, " + where);
+    assert.equal(got.done.edge, side.brass, "its line is not the brass, " + where);
+    assert.notEqual(got.done.tick, "none", "a task done has no tick, " + where);
+    assert.equal(got.done.tickFill, got.page, "the tick is not the colour of the page, " + where);
+    assert.ok(got.done.tickMask, "the tick is not a mask, " + where);
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
 test("with the header hidden the numbers are the file's lines, not the editor's", { skip }, async () => {
   const disk = ["---", "title: x", "author: y", "---", "", "First body line.", ""].join("\n");
   // Hidden is the default of mdm.frontMatter: the host keeps the header and

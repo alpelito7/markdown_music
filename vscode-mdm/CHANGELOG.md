@@ -99,6 +99,15 @@
   back near the end of the document: an editor closed beside it, the
   window made wider, the outline shut, the font changed from the toolbar.
   It jumped to the end of the document, several lines further on.
+- The box of a task stands level with the capital beside it and half an
+  em before its text, in the editor and on the exported page. It hung two
+  pixels under the line, set on the small letters, and stood closer to its
+  word than two words stand to each other. The box is drawn in the
+  document's own ink now, and a task done fills it with the brass and a
+  tick, where the browser's own box turned blue.
+- On the exported page, a task in a list with blank lines between its
+  items has its box in the margin, as the editor draws it. It stood in the
+  text, behind a bullet.
 
 ## 0.7.1
 

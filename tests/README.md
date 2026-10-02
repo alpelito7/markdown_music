@@ -6233,6 +6233,92 @@ checked further) and holds its own take to the same thing: the page has
 to stand, after the `.bib` closes, within a pixel of where it stood before
 the click that opened it.
 
+### A task's box where a capital stands, and drawn in the document's ink (2026-10-01)
+
+The owner's list, in his own words: the place of the little square and its
+distance from the letter did not please. Measured in the harness at the
+editor's 16 px: the box was 13 px at `vertical-align: -2px`, its middle
+4.5 px over the baseline, where the lowercase has its middle at 4.2 in
+either face and the capital at 6.7 in the roman (a capital of 13.4 px) and
+5.5 in the sans (11 px). It was set on the lowercase, and beside the
+capital a task opens on it read as dropped: 2.4 px short of the head of a
+P in the roman and 2 px under its foot. The gap was 4.5 px (0.28em), under
+the 6.55 px the roman sets between two words.
+
+Picked from `design/design-task-box.html`, the editor itself in Chrome
+under one sheet a variant: **A**, 13 px with its middle on the middle of
+the face's capital; **2**, half an em before the text; **Q**, the box
+drawn by hand, a line in the ink at 58% that fills with the brass when the
+task is done, the tick in the colour of the page. The browser's own was a
+grey fill that turned Chromium's blue when ticked. `style.css` (`.mdm-task`,
+`.mdm-li-gap`) and both copies of `mdm-look.css` carry it. Three things
+the rule needs that are not obvious from it:
+
+- `font: inherit` on the box. `cap` on a control is its own face's, 9 px,
+  and the first set of variants came out 2 px low for it.
+- The offset rounded to a whole pixel. The rows are 27.19 px, so each
+  starts on another fraction of one, and at the 0.19 px the roman works out
+  to the box was painted a pixel higher than its words in two rows of
+  eight; rounded, on the baseline's row in all eight (read off a capture at
+  the screen's own scale, the box's rows against the stem of an H).
+- The text stays at the 1.5em of every list (`levels`, in *a list hangs
+  under its text*), so the gap is taken from the box's side: 3 px into the
+  column where it was 6.5.
+
+The page test found a shape of task no rule of the page reached: in a
+loose list Quarto's Pandoc writes `li > p > label > input`, and the sheet
+had `li > p > input`. The box stood in the flow behind a bullet, the
+browser's own. The rule now names both.
+
+Three tests. In `webview-look.test.js`, *a task's box stands on the middle
+of the capital, half an em before its text (TB1)*, both faces, five tasks,
+and *a task's box is a line in the ink, and the brass with the page's
+colour for a tick when done (TB2)*, both sides. In `html.test.js`, *a
+task's box on the page is the editor's: its place in the line, its gap and
+its drawing (TB3)*, one function reading both surfaces, the roman on both
+sides and the sans on the light one, over every shape Pandoc writes a task
+in. Each mutation swapped in place and swapped back in the same command,
+the two files checked back by their hashes:
+
+- **TB-a** the box back at `-2px` in the editor → TB1, *the box is not on
+  the middle of the capital* (2.19 px off), and TB3, *the box stands at
+  another height in its line*. **TB-b** `font: inherit` out of the editor's
+  box → TB1, the same 2.19 px. **TB-c** the offset not rounded → TB1, *not
+  on a whole pixel from the baseline* (−0.1875).
+- **TB-d** the editor's gap back at 0.28em → TB1 (4.47 px) and TB3.
+- **TB-e** the browser's own box in the editor → TB2. **TB-f** a task done
+  without its fill → TB2 and TB3. **TB-g** the tick in the ink → TB2.
+  **TB-h** the line at 70% → TB2. **TB-i** no tick → TB2.
+- **TB-j** the page's gap back at 0.28em, **TB-k** the page's box back at
+  `-2px`, **TB-n** a task done without its fill on the page, **TB-p** the
+  browser's own box on the page, **TB-q** the page's tick in the ink → TB3
+  each.
+- **TB-l** the loose list's box out of the rule → TB3, *the page's box*
+  (12.8 px wide, 33.6 px into the column, the browser's). **TB-m** the
+  loose list's bullet left on → TB3, *a task on the page carries a marker
+  beside its box*.
+- **TB-o** `font: inherit` out of the page's box → **survived**. Bootstrap's
+  reboot already hands an input the family and the size of its line, so on
+  Quarto's page the declaration changes nothing. It stays for a page set
+  without that sheet, which nothing here has measured, and the sheet says
+  so beside it.
+
+Sixteen of seventeen caught. Seen outside the harness: in a VS Code 1.133
+window of its own (Chrome 148, `tools/demo-clips/launch.sh` on another
+profile and port), both faces and both sides, the box on the baseline in
+the roman and a pixel under it in the sans, 3 px into the column, 8 px
+before the text, the tick painted, which says the webview's policy lets
+the mask's `data:` image through; and the page in Firefox 150, where the
+box, the tick and the loose list are drawn the same and the roman's box
+stands on the baseline's row, so `cap` and `round()` are read there.
+Safari was not looked at; the `-1px` before the rule is what it gets if it
+has neither.
+
+Run on this state: the three, the tests of `webview-look`, `webview-editing`
+and `webview-markdown` whose names touch a task, a list or a marker (20 of
+20), the list tests of `html.test.js` (3 of 3) and `test:fast` (259 of
+259). `render.test.js` and the rest of `html.test.js` were not run.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -6373,3 +6459,10 @@ the click that opened it.
     Chrome's (no Chrome, or `mdm-engraver: abcm2ps`) a display formula in a
     pipe table's cell is LaTeX's, which cannot set one there, with a number
     or without.
+14. A task's box on paper is TeX's (*A task's box where a capital stands*).
+    Pandoc writes `\item[$\square$]` and `\item[$\boxtimes$]`, a glyph of
+    the maths face in the item's label, and nothing in the filter touches
+    it: its size against the capital, its distance from the text and the
+    crossed box where the screen has a brass one with a tick have not been
+    measured against the editor. The road without TeX prints the page
+    through Chrome, and the box was not looked at in print there either.

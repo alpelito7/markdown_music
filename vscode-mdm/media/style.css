@@ -1715,15 +1715,66 @@ body {
 #app .mdm-li-number {
   color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
 }
+/* A task's box, drawn here and not left to the browser, whose own is a grey
+   fill that turns Chromium's blue when ticked, a colour from outside the
+   palette: a line in the document's ink, and when the task is done the box
+   fills with the brass and carries its tick in the colour of the page
+   (picked from design-task-box.html, 2026-10-01: A, 2 and Q).
+
+   It stands where a capital does: 13px with its middle on the middle of the
+   face's capital, which sets it on the baseline in the roman (a capital of
+   13.4px) and 1px under it in the sans (11px). At the -2px it had, its
+   middle was the lowercase's, 4.5px over the baseline against 4.2, and
+   beside the capital a task opens on it read as dropped, 2.4px short of the
+   head of a P in the roman and 2px under its foot.
+
+   `font: inherit` is what makes `cap` the line's: a control has a face of
+   its own, and against it the capital measured 9px. The offset is rounded
+   to a whole pixel because the rows are 27.19px, so each starts on another
+   fraction of one: at the 0.19px the roman works out to, the box came out a
+   pixel higher than its words in two rows of eight (read off a capture at
+   the screen's own scale), and rounded it stands on the baseline's row in
+   all eight. The first vertical-align is for an engine that has no `cap`
+   or no `round()`. */
 #app .mdm-task {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  position: relative;
   width: 13px;
   height: 13px;
   margin: 0;
-  vertical-align: -2px;
+  border: 1px solid color-mix(in srgb, var(--mdm-ink) 58%, transparent);
+  border-radius: 2px;
+  background: none;
+  font: inherit;
+  vertical-align: -1px;
+  vertical-align: round(calc((1cap - 13px) / 2), 1px);
   cursor: pointer;
 }
-/* The space between a task's box and its text, the 0.28em the page gives
-   its box as a margin (mdm-look.css).
+#app .mdm-task:checked {
+  border-color: var(--mdm-play-accent);
+  background: var(--mdm-play-accent);
+}
+/* The tick is a mask over a fill, so its colour is a token like the rest:
+   an image could not read one. The webview's policy lets a data: image
+   through (img-src, extension.js). */
+#app .mdm-task:checked::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--mdm-syn-page);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 11'%3E%3Cpath d='M2.3 5.7 4.6 8 8.8 3' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 11'%3E%3Cpath d='M2.3 5.7 4.6 8 8.8 3' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat;
+}
+/* The space between a task's box and its text, the half em the page gives
+   its box as a margin (mdm-look.css). At 0.28em, 4.5px, the box stood
+   nearer its word than the roman sets one word from the next (6.55px), and
+   a box has no white of its own at its sides as a letter has. The text
+   stays at the 1.5em of every list, so the box is what moves: 3px into the
+   column where it was 6.5.
 
    Hung from the top of the row: an inline-block that clips has its
    baseline at its bottom edge, so on the baseline its whole box of a line
@@ -1733,7 +1784,7 @@ body {
    over them (measured in the test harness). */
 #app .mdm-li-gap {
   display: inline-block;
-  width: 0.28em;
+  width: 0.5em;
   overflow: hidden;
   vertical-align: top;
 }
