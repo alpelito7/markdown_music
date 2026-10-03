@@ -4759,3 +4759,228 @@ test("a path in the kept list that is not one the paste writes is never swept", 
   h.dispose();
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+// ---------- TEMPORARY: a document the start of VS Code left in the text editor ----------
+//
+// These go when the section of the same name in extension.js goes, which is
+// when VS Code opens a file it is started on in the editor of its kind
+// (https://github.com/microsoft/vscode/issues/325506; Pending 15 in
+// README.md says how to tell). Until then they hold what was seen in VS Code
+// 1.133.0 on 2026-10-02 and what the owner asked for that day: a document
+// opened by a double click while VS Code is shut ends in the MDM editor, and
+// one the reader reopened in the text editor stays there.
+
+// VS Code started, with these tabs and with what this window kept: the
+// extension activated on a workspaceState, and the look at the start run to
+// its end. `memory` handed again is the same window started again, and
+// `openWithFails` is what the mock's vscode.openWith does instead of opening.
+async function startWindow(groups, memory, openWithFails) {
+  vscode._reset();
+  vscode._state.tabGroups = groups;
+  vscode._state.openWithFails = openWithFails || null;
+  const workspaceState = memory || vscode._memento();
+  const written = [];
+  const update = workspaceState.update.bind(workspaceState);
+  workspaceState.update = (key, value) => {
+    written.push({ key, value });
+    return update(key, value);
+  };
+  const context = {
+    subscriptions: [],
+    extensionUri: vscode.Uri.file("/ext"),
+    globalState: vscode._memento(),
+    workspaceState,
+  };
+  ext.activate(context);
+  for (let i = 0; i < 20; i++) await settle();
+  return { workspaceState, written, context };
+}
+
+const textTab = (file, more) => Object.assign({ input: { uri: vscode.Uri.file(file) } }, more);
+const mdmTab = (file) => ({ input: { uri: vscode.Uri.file(file), viewType: "mdm.editor" } });
+const reopened = () => vscode._state.executed.filter((e) => e.command === "vscode.openWith");
+const keptAsText = (w) => w.workspaceState.get(ext.KEPT_AS_TEXT) || [];
+// What a group shows, tab by tab: the file and the editor it is in.
+const tabsOf = (group) => group.tabs.map((t) => t.input.uri.path + (t.input.viewType ? " in " + t.input.viewType : " as text"));
+
+test("started as text: a document VS Code was started on is reopened in the MDM editor", async () => {
+  const stray = textTab("/w/doc.mdm", { isActive: true });
+  const group = { viewColumn: 1, isActive: true, tabs: [stray] };
+  const w = await startWindow([group]);
+  assert.equal(reopened().length, 1);
+  const [uri, viewType, options] = reopened()[0].args;
+  assert.equal(uri.toString(), "file:///w/doc.mdm");
+  assert.equal(viewType, "mdm.editor");
+  // In its own group, a tab to stay as the text tab was, and with the focus
+  // the text tab had.
+  assert.deepEqual(options, { viewColumn: 1, preview: false, preserveFocus: false });
+  assert.deepEqual(vscode._state.closedTabs, [stray]);
+  assert.deepEqual(tabsOf(group), ["/w/doc.mdm in mdm.editor"]);
+  // The tab that was moved is never written down as one the reader chose,
+  // not even for the moment both tabs are open.
+  assert.deepEqual(w.written, []);
+  assert.deepEqual(keptAsText(w), []);
+});
+
+test("started as text: only a text tab on an .mdm is moved", async () => {
+  const doc = vscode.Uri.file("/w/doc.mdm");
+  const tabs = [
+    textTab("/w/notes.md"),
+    textTab("/w/readme.mdm.txt"),
+    mdmTab("/w/open.mdm"),
+    { input: { uri: vscode.Uri.file("/w/book.mdm"), notebookType: "some-notebook" } },
+    // A diff has two addresses and no `uri`; a terminal or the settings have
+    // no input the extension can read at all.
+    { input: { original: doc, modified: doc } },
+    { input: undefined },
+    // The ending is matched as VS Code matches `*.mdm`, whatever its capitals.
+    textTab("/w/TUNE.MDM", { isActive: true }),
+  ];
+  const group = { viewColumn: 2, isActive: true, tabs };
+  await startWindow([group]);
+  assert.deepEqual(
+    reopened().map((e) => e.args[0].toString()),
+    ["file:///w/TUNE.MDM"]
+  );
+  assert.equal(reopened()[0].args[2].viewColumn, 2);
+  assert.equal(vscode._state.closedTabs.length, 1);
+  assert.equal(group.tabs.length, 7);
+});
+
+test("started as text: the tab shown is moved last, and only the tab with the focus takes it", async () => {
+  // Three documents selected and opened at once: VS Code shows one of them
+  // and the other two are tabs behind it. A second group shows a fourth, and
+  // has not got the focus.
+  const first = { viewColumn: 1, isActive: true, tabs: [textTab("/w/a.mdm", { isActive: true }), textTab("/w/b.mdm"), textTab("/w/c.mdm", { isPreview: true })] };
+  const second = { viewColumn: 2, isActive: false, tabs: [textTab("/w/d.mdm", { isActive: true })] };
+  await startWindow([first, second]);
+  const calls = reopened().map((e) => [e.args[0].path, e.args[2]]);
+  assert.deepEqual(calls.slice(0, 2), [
+    ["/w/b.mdm", { viewColumn: 1, preview: false, preserveFocus: true }],
+    ["/w/c.mdm", { viewColumn: 1, preview: true, preserveFocus: true }],
+  ]);
+  assert.deepEqual(calls.slice(2), [
+    ["/w/a.mdm", { viewColumn: 1, preview: false, preserveFocus: false }],
+    ["/w/d.mdm", { viewColumn: 2, preview: false, preserveFocus: true }],
+  ]);
+  assert.deepEqual(tabsOf(first), ["/w/b.mdm in mdm.editor", "/w/c.mdm in mdm.editor", "/w/a.mdm in mdm.editor"]);
+  assert.deepEqual(tabsOf(second), ["/w/d.mdm in mdm.editor"]);
+});
+
+test("started as text: a document the reader reopened in the text editor stays there, across a restart", async () => {
+  // A window running, the document in the MDM editor.
+  const group = { viewColumn: 1, isActive: true, tabs: [mdmTab("/w/doc.mdm")] };
+  const w = await startWindow([group]);
+  assert.deepEqual(reopened(), []);
+  // "Reopen Editor With... Text Editor": the same tab, now a text one.
+  group.tabs = [textTab("/w/doc.mdm", { isActive: true })];
+  vscode._changeTabs();
+  await settle();
+  assert.deepEqual(reopened(), [], "the reader's own text tab was taken back to the MDM editor");
+  assert.deepEqual(keptAsText(w), ["file:///w/doc.mdm"]);
+  // VS Code closed and opened again, the window restored with that tab.
+  const restored = { viewColumn: 1, isActive: true, tabs: [textTab("/w/doc.mdm", { isActive: true })] };
+  const again = await startWindow([restored], w.workspaceState);
+  assert.deepEqual(reopened(), [], "a restart took the reader's text tab back to the MDM editor");
+  assert.deepEqual(tabsOf(restored), ["/w/doc.mdm as text"]);
+  assert.deepEqual(keptAsText(again), ["file:///w/doc.mdm"]);
+  // Beside it, at that same start, a document VS Code was started on: that
+  // one is moved and the reader's is not.
+  const both = { viewColumn: 1, isActive: true, tabs: [textTab("/w/doc.mdm"), textTab("/w/other.mdm", { isActive: true })] };
+  const third = await startWindow([both], w.workspaceState);
+  assert.deepEqual(
+    reopened().map((e) => e.args[0].path),
+    ["/w/other.mdm"]
+  );
+  assert.deepEqual(tabsOf(both), ["/w/doc.mdm as text", "/w/other.mdm in mdm.editor"]);
+  assert.deepEqual(keptAsText(third), ["file:///w/doc.mdm"]);
+});
+
+test("started as text: a text tab closed, or reopened in the MDM editor, is no longer the reader's", async () => {
+  const group = { viewColumn: 1, isActive: true, tabs: [mdmTab("/w/a.mdm"), mdmTab("/w/b.mdm")] };
+  const w = await startWindow([group]);
+  group.tabs = [textTab("/w/a.mdm"), textTab("/w/b.mdm")];
+  vscode._changeTabs();
+  await settle();
+  assert.deepEqual(keptAsText(w), ["file:///w/a.mdm", "file:///w/b.mdm"]);
+  // One closed, the other sent back to the MDM editor by the reader.
+  group.tabs = [mdmTab("/w/b.mdm")];
+  vscode._changeTabs();
+  await settle();
+  assert.deepEqual(keptAsText(w), []);
+  // So a later start that finds either of them as text was VS Code's doing.
+  const cold = { viewColumn: 1, isActive: true, tabs: [textTab("/w/a.mdm", { isActive: true })] };
+  await startWindow([cold], w.workspaceState);
+  assert.deepEqual(tabsOf(cold), ["/w/a.mdm in mdm.editor"]);
+  // A change of the tabs that leaves the text ones as they were writes nothing.
+  const quiet = { viewColumn: 1, isActive: true, tabs: [mdmTab("/w/a.mdm")] };
+  const q = await startWindow([quiet]);
+  quiet.tabs.push(textTab("/w/notes.md"));
+  vscode._changeTabs();
+  await settle();
+  assert.deepEqual(q.written, []);
+});
+
+test("started as text: a tab with unsaved changes is left where it is", async () => {
+  // Closing it would ask the reader about the changes, at a start they did
+  // nothing to cause.
+  const dirty = textTab("/w/doc.mdm", { isActive: true, isDirty: true });
+  const group = { viewColumn: 1, isActive: true, tabs: [dirty] };
+  await startWindow([group]);
+  assert.deepEqual(reopened(), []);
+  assert.deepEqual(vscode._state.closedTabs, []);
+  assert.deepEqual(tabsOf(group), ["/w/doc.mdm as text"]);
+});
+
+test("started as text: the text tab is closed only once the MDM editor has the document", async () => {
+  // The command fails: the document stays where VS Code had put it, and the
+  // log says so.
+  const group = { viewColumn: 1, isActive: true, tabs: [textTab("/w/doc.mdm", { isActive: true })] };
+  await startWindow([group], null, "throw");
+  assert.equal(reopened().length, 1);
+  assert.deepEqual(vscode._state.closedTabs, []);
+  assert.deepEqual(tabsOf(group), ["/w/doc.mdm as text"]);
+  assert.match(exportLog().lines.join("\n"), /Could not reopen file:\/\/\/w\/doc\.mdm in the MDM editor: no such editor/);
+  assert.deepEqual(vscode._state.errorMessages, []);
+  // The command comes back and no tab of the MDM editor is there.
+  const silent = { viewColumn: 1, isActive: true, tabs: [textTab("/w/doc.mdm", { isActive: true })] };
+  await startWindow([silent], null, "nothing");
+  assert.equal(reopened().length, 1);
+  assert.deepEqual(vscode._state.closedTabs, []);
+  assert.deepEqual(tabsOf(silent), ["/w/doc.mdm as text"]);
+});
+
+test("started as text: what the window kept is read as a list or as nothing", async () => {
+  // A workspaceState written by hand, or by anything else that can write it.
+  for (const bad of ["file:///w/doc.mdm", { "file:///w/doc.mdm": true }, 7, null]) {
+    const memory = vscode._memento();
+    await memory.update(ext.KEPT_AS_TEXT, bad);
+    const group = { viewColumn: 1, isActive: true, tabs: [textTab("/w/doc.mdm", { isActive: true })] };
+    await startWindow([group], memory);
+    assert.deepEqual(tabsOf(group), ["/w/doc.mdm in mdm.editor"], "kept as " + JSON.stringify(bad));
+  }
+});
+
+test("started as text: an extension handed no workspaceState starts all the same", async () => {
+  vscode._reset();
+  vscode._state.tabGroups = [{ viewColumn: 1, isActive: true, tabs: [textTab("/w/doc.mdm", { isActive: true })] }];
+  ext.activate({ subscriptions: [], extensionUri: vscode.Uri.file("/ext"), globalState: vscode._memento() });
+  for (let i = 0; i < 20; i++) await settle();
+  assert.deepEqual(reopened(), []);
+  assert.equal(vscode._state.registeredProviders.length, 1);
+});
+
+test("started as text: the extension is woken at the start of the window, early and always", () => {
+  // With no activation event of its own the extension is loaded only when
+  // an MDM editor opens, and at a start that opened the document as text
+  // none does. Both events are needed (seen in the logs of VS Code 1.133.0):
+  // 'onLanguage:markdown' comes as soon as the extension host is up, since
+  // an .mdm in the text editor is a Markdown document, and is what makes the
+  // text editor give way quickly (on the owner's machine 'onStartupFinished'
+  // came 2.0 and 2.4 s after it); 'onStartupFinished' has the extension
+  // running in a window that started with no Markdown open, before the
+  // reader can open an .mdm in the text editor there and have that tab
+  // taken for a stray.
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "vscode-mdm", "package.json"), "utf8"));
+  assert.deepEqual(manifest.activationEvents, ["onLanguage:markdown", "onStartupFinished"]);
+});

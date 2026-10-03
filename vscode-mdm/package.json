@@ -41,7 +41,10 @@
     "live preview"
   ],
   "main": "./extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:markdown",
+    "onStartupFinished"
+  ],
   "contributes": {
     "configuration": {
       "title": "MDM",

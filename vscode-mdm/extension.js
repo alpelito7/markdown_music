@@ -80,6 +80,9 @@ function activate(context) {
       }
     )
   );
+  // TEMPORARY, with the section it names: a document VS Code opened in the
+  // text editor because it was started on it goes to the MDM editor.
+  watchTextTabs(context);
 }
 
 // Every setting the webview reads or writes, with its allowed values; the
@@ -4313,6 +4316,155 @@ window.MDM_PALETTE = ${inlineJson(readPalette())};
   }
 }
 
+// ---------- A document the start of VS Code left in the text editor ----------
+//
+// TEMPORARY: a way round a fault of VS Code's, to be taken out when it is
+// mended (https://github.com/microsoft/vscode/issues/325506, reported on
+// 1.128.0 and open on 2026-10-02). What goes with it: this section, its
+// call in activate(), the two activationEvents in package.json, the tests named
+// "started as text" and their fixtures in the mock, and Pending 15 in
+// tests/README.md, which says how to tell that the fault is gone.
+//
+// VS Code started on a file, which is what a double click on a document does
+// while VS Code is shut, opens it in the text editor whatever editor its kind
+// has: 13 starts of 14 in VS Code 1.133.0 on 2026-10-02, with the reader's
+// `"*.mdm": "mdm.editor"` association and with no settings at all, and a
+// .png the same (the text editor's notice of a binary file where the image
+// preview belongs). A file opened into a window already running gets the
+// editor of its kind, so nothing in the manifest or the settings is wrong
+// and nothing in them mends it.
+//
+// So the extension is woken at the start of the window and looks at the
+// tabs: a text tab on an .mdm that the reader did not ask for is opened in
+// the MDM editor and closed. Two events wake it. "onLanguage:markdown" is the
+// quick one: an .mdm in the text editor is a Markdown document to VS Code, so
+// it comes as soon as the extension host is up, where "onStartupFinished"
+// waits for every extension that starts with the window (2.0 and 2.4 s
+// later in two starts on the owner's machine, read off its log on
+// 2026-10-02, and the text editor was on screen all that while). "onStartupFinished" is the one that keeps the
+// reader's choice: without it, in a window that started with no Markdown
+// open, the extension would be woken by the very tab the reader opens in the
+// text editor, and its look at the start would take that tab back.
+//
+// What the reader did ask for is kept apart, since "Reopen Editor With...
+// Text Editor" is theirs to choose and has to hold (the owner, 2026-10-02):
+// once the start has been looked at, every text tab on an .mdm in this
+// window is one the reader put there, a running window opening none by
+// itself, and their addresses are kept in workspaceState under KEPT_AS_TEXT,
+// which is this window's own and outlives a restart. A tab restored as text
+// at the next start is found in that list and left.
+//
+// Not covered, and known: the first start after this is installed has no
+// list, so a text tab left open on an .mdm before it is reopened once; and a
+// tab that shows up after the look at the start (none was seen to) would be
+// taken for the reader's and stay, which is what VS Code does today.
+const KEPT_AS_TEXT = "keptAsText";
+
+// context.workspaceState, handed over on activation.
+let workspaceState = null;
+
+// The text tabs on an .mdm, each with the group it is in. A text tab's input
+// has an address and neither a viewType (a custom editor's) nor a
+// notebookType; a diff has two addresses under other names and is not one.
+// The ending is matched as VS Code matches the manifest's `*.mdm`, whatever
+// its capitals.
+function textTabs() {
+  const out = [];
+  const groups = (vscode.window.tabGroups && vscode.window.tabGroups.all) || [];
+  groups.forEach(function (group) {
+    group.tabs.forEach(function (tab) {
+      const input = tab.input;
+      if (!input || !input.uri || input.viewType || input.notebookType) return;
+      if (/\.mdm$/i.test(input.uri.path || "")) out.push({ group, tab });
+    });
+  });
+  return out;
+}
+
+// The addresses kept. Anything but a list is read as nothing kept.
+function keptAsText() {
+  const kept = workspaceState ? workspaceState.get(KEPT_AS_TEXT) : undefined;
+  return Array.isArray(kept) ? kept : [];
+}
+
+// The text tabs open now, written down as the reader's. Called on every
+// change of the tabs, so a tab closed, or reopened in the MDM editor, leaves
+// the list as it goes.
+function keepTextTabs() {
+  if (!workspaceState) return Promise.resolve();
+  const now = [];
+  textTabs().forEach(function (t) {
+    const uri = t.tab.input.uri.toString();
+    if (now.indexOf(uri) === -1) now.push(uri);
+  });
+  const before = keptAsText();
+  if (now.length === before.length && now.every((uri, i) => uri === before[i])) return Promise.resolve();
+  return Promise.resolve(workspaceState.update(KEPT_AS_TEXT, now));
+}
+
+// One tab moved to the MDM editor: opened there first, in its own group and
+// as it stood (a preview stays a preview, and only the tab that had the
+// focus takes it), and the text tab closed only once the MDM editor's is
+// there, so a failure leaves the document where VS Code had put it.
+function reopenInEditor(stray) {
+  const uri = stray.tab.input.uri;
+  const column = stray.group.viewColumn;
+  const here = function (input) {
+    return !!input && !!input.uri && input.uri.toString() === uri.toString();
+  };
+  return Promise.resolve(
+    vscode.commands.executeCommand("vscode.openWith", uri, "mdm.editor", {
+      viewColumn: column,
+      preview: !!stray.tab.isPreview,
+      preserveFocus: !stray.focused,
+    })
+  ).then(
+    function () {
+      const group = vscode.window.tabGroups.all.find((g) => g.viewColumn === column);
+      const tabs = group ? group.tabs : [];
+      if (!tabs.some((t) => here(t.input) && t.input.viewType === "mdm.editor")) return;
+      const left = tabs.filter((t) => here(t.input) && !t.input.viewType && !t.input.notebookType);
+      if (left.length) return vscode.window.tabGroups.close(left, true);
+    },
+    function (e) {
+      channel().appendLine("Could not reopen " + uri.toString() + " in the MDM editor: " + (e && e.message ? e.message : e));
+    }
+  );
+}
+
+// The look at the start. A tab with unsaved changes is left: closing it would
+// ask about them. One at a time, and the tab shown in its group last, so the
+// group ends on the document it started on; which tab is shown and which has
+// the focus is read before the first is moved, since moving one changes it
+// for the rest.
+function reopenStartedAsText() {
+  const kept = keptAsText();
+  const strays = textTabs()
+    .filter(function (t) {
+      return !t.tab.isDirty && kept.indexOf(t.tab.input.uri.toString()) === -1;
+    })
+    .map(function (t) {
+      return { group: t.group, tab: t.tab, shown: !!t.tab.isActive, focused: !!(t.tab.isActive && t.group.isActive) };
+    });
+  strays.sort((a, b) => (a.shown ? 1 : 0) - (b.shown ? 1 : 0));
+  return strays.reduce(function (turn, stray) {
+    return turn.then(() => reopenInEditor(stray));
+  }, Promise.resolve());
+}
+
+// What activate() runs: the look at the start, and from then on the list.
+// The tabs are listened to only after the look, so the text tab that is
+// about to be closed is never written down as the reader's.
+function watchTextTabs(context) {
+  workspaceState = context.workspaceState || null;
+  if (!vscode.window.tabGroups || !workspaceState) return Promise.resolve();
+  return reopenStartedAsText()
+    .then(keepTextTabs)
+    .then(function () {
+      context.subscriptions.push(vscode.window.tabGroups.onDidChangeTabs(keepTextTabs));
+    });
+}
+
 function deactivate() {}
 
 // withFilter, withReader, withBreaks, hasScores and renderArgs are pure and
@@ -4327,7 +4479,8 @@ function deactivate() {}
 // is told to the webview as, both pure. audioFileName
 // is pure in the same way and is the half of the audio export that decides
 // what lands on the disk: what a score's title may put in a file name, and
-// what a document whose own name is too long gets instead.
+// what a document whose own name is too long gets instead. KEPT_AS_TEXT is
+// the key of the text tabs kept, TEMPORARY with the section that names it.
 module.exports = {
   audioFileName,
   activate,
@@ -4358,4 +4511,5 @@ module.exports = {
   LANGUAGES,
   DOCUMENT_HYPHENATION,
   DOCUMENTS_KEPT,
+  KEPT_AS_TEXT,
 };

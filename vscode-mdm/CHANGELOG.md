@@ -126,6 +126,14 @@
 - On the exported page, a task in a list with blank lines between its
   items has its box in the margin, as the editor draws it. It stood in the
   text, behind a bullet.
+- A document opened with a double click while VS Code is shut opens in the
+  MDM editor. VS Code opened it as plain text, which is a fault of VS
+  Code's own ([microsoft/vscode#325506](https://github.com/microsoft/vscode/issues/325506))
+  and not a setting: until it is mended there, the extension moves the
+  document to the MDM editor once the window has started, so the text
+  shows for a moment first. A document you reopen yourself with
+  `Reopen Editor With...` > `Text Editor` stays in the text editor, and is
+  still there when VS Code is opened again.
 
 ## 0.7.1
 

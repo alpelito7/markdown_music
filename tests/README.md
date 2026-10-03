@@ -6319,6 +6319,100 @@ and `webview-markdown` whose names touch a task, a list or a marker (20 of
 20), the list tests of `html.test.js` (3 of 3) and `test:fast` (259 of
 259). `render.test.js` and the rest of `html.test.js` were not run.
 
+### A document VS Code was started on, out of the text editor (2026-10-02, temporary)
+
+A way round a fault of VS Code's and not a feature: it goes when the fault
+does (Pending 15). VS Code started on a file, which is what a double click
+on a document does while VS Code is shut, opens it in the text editor
+whatever editor its kind has
+(https://github.com/microsoft/vscode/issues/325506, reported on 1.128.0 and
+open on 2026-10-02). Measured that day in VS Code 1.133.0 on Linux, in an
+instance of its own driven through its DevTools port: 13 starts of 14 on an
+`.mdm` ended in the text editor, with the owner's settings
+(`"*.mdm": "mdm.editor"` among them) and with none, with and without what
+VS Code keeps about editors (`editorOverrideService.cache`,
+`memento/customEditors`), and never in Restricted Mode; a `.png` got the
+text editor's notice of a binary file where the image preview belongs; and
+a file opened into a window already running got the editor of its kind
+every time.
+
+What the extension does about it is in `extension.js` under *A document the
+start of VS Code left in the text editor*: woken at the start of the window,
+it opens in the MDM editor every text tab on an `.mdm` that the reader did
+not ask for and closes the text one. Two events wake it, and the section
+says why each: `onLanguage:markdown` as soon as the extension host is up,
+and `onStartupFinished` for a window that started with no Markdown open.
+The second alone was the first cut and the owner found it slow (2026-10-02):
+his log of two starts has `onLanguage:markdown` 1.6 and 1.7 s after VS Code
+is launched and `onStartupFinished` 3.5 and 4.1 s after, the text editor on
+screen all the while. What the reader asked for holds, which is
+what the owner set as the condition (2026-10-02): every text tab on an
+`.mdm` in a window that has started is the reader's, and their addresses
+are kept in the window's `workspaceState` and left alone at the next start.
+
+Ten tests in `extension-host.test.js`, all named *started as text: …*, on
+tab fixtures the mock grew for them (`onDidChangeTabs`, `close`, and a
+`vscode.openWith` that adds the editor's tab beside the text one, as VS
+Code does). Each mutation swapped in place and swapped back in the same
+command, `extension.js` and `package.json` checked back by their hashes:
+
+- **ST-1** every text tab moved, kept or not → *a document the reader
+  reopened in the text editor stays there, across a restart*. **ST-17** the
+  tabs never listened to → the same, and *a text tab closed, or reopened in
+  the MDM editor, is no longer the reader's*.
+- **ST-2** the text tab never closed → six of the ten. **ST-3** closed
+  without looking for the MDM editor's tab, **ST-18** a failure not logged
+  → *the text tab is closed only once the MDM editor has the document*.
+- **ST-4** a tab with unsaved changes moved too → *a tab with unsaved
+  changes is left where it is*.
+- **ST-5** the tabs listened to before the look at the start, **ST-13**
+  the list written on every change → *a document VS Code was started on is
+  reopened in the MDM editor*, which holds that nothing is written.
+- **ST-6** the ending matched with its capitals, **ST-7** `.mdm` anywhere
+  in the name, **ST-8** an MDM tab taken for a text one, **ST-9** a
+  notebook taken for one → *only a text tab on an .mdm is moved*.
+- **ST-10** the tab shown not moved last, **ST-11** every moved tab taking
+  the focus, **ST-12** a preview made a kept tab, **ST-21** a tab shown in
+  a group without the focus taking it → *the tab shown is moved last, and
+  only the tab with the focus takes it*.
+- **ST-14** what was kept not checked to be a list → *what the window kept
+  is read as a list or as nothing*. **ST-19** a missing `workspaceState`
+  not minded → *an extension handed no workspaceState starts all the same*.
+- **ST-15** `activationEvents` empty, **ST-22** `onStartupFinished` alone,
+  **ST-23** `onLanguage:markdown` alone → *the extension is woken at the
+  start of the window, early and always*. **ST-16** `activate` not looking
+  at the start → nine of the ten. **ST-20** opened in the active group and not the tab's own →
+  seven of the ten.
+
+Twenty-three of twenty-three caught. Seen outside the harness, in that same
+VS Code 1.133.0 of its own with the extension linked from this tree: a
+start on one `.mdm` and on three at once ends with every one in the MDM
+editor and one tab each, the extension activated by `onLanguage:markdown`;
+a `.png` is not touched; a tab reopened with the text editor stays text for as long
+as it is open, through two restarts of an empty window and of a folder
+window, and a double click on that same file while VS Code runs opens a
+second tab in the MDM editor beside it, which is VS Code's own doing. Not
+seen in a window: a tab with unsaved changes at the start, and Windows,
+where the report upstream comes from.
+
+Timed in that instance, which has no other extension to wait for, from the
+launch to the first line of the MDM editor drawn, over four starts each:
+with `onStartupFinished` alone the extension woke at 2.3 to 2.7 s
+and the text editor gave way at 2.5 to 2.8 s; with `onLanguage:markdown`
+it woke at 1.8 to 2.1 s and the text gave way at 2.1 to 2.2 s. The text is
+drawn at 1.4 to 1.6 s either way, and the MDM editor has its first line
+0.4 to 1.4 s after its tab opens, which is the editor's own loading. What
+is left of the wait is that and the extension host's own start. The checks after
+this change were run on a KWin of its own drawing to a framebuffer
+(`kwin_wayland --virtual` on a private session bus, VS Code with
+`--ozone-platform=wayland`), so that no window lands on the owner's
+screen; the timings above are from the X11 runs before it.
+
+Run on this state: the ten, `test:fast` (269 of 269), `webview-memory`
+(2 of 2) and the one test each of `webview-audio-export` and `html.test.js`
+that activates the extension. The rest of the Chrome suites and
+`render.test.js` were not run.
+
 ### A list in a table's cell (2026-10-02)
 
 The owner asked to see tasks and bullets in a cell
@@ -6673,3 +6767,21 @@ that names an engraving by its key, since the two helpers changed (9 of
     crossed box where the screen has a brass one with a tick have not been
     measured against the editor. The road without TeX prints the page
     through Chrome, and the box was not looked at in print there either.
+15. TEMPORARY, to be taken out: the way round VS Code opening a document
+    it is started on in the text editor (*A document VS Code was started
+    on, out of the text editor*). It is there for
+    https://github.com/microsoft/vscode/issues/325506 and for nothing
+    else. To tell that the fault is gone: with VS Code shut, take the two
+    `activationEvents` out of `package.json`, start VS Code on an `.mdm`
+    (`code example.mdm`) a few times and see the MDM editor every time. Then out go the section of `extension.js` named *A document the
+    start of VS Code left in the text editor* with its call in
+    `activate()` and `KEPT_AS_TEXT` in the exports, the activation events,
+    the ten tests *started as text* with their helpers, what the mock grew
+    for them (`tabListeners`, `closedTabs`, `openWithFails`, `_changeTabs`),
+    this item and the changelog's line. Known while it stays: the text
+    editor is seen for a moment before the MDM editor takes its place; the
+    first start after the extension is updated reopens once a text tab left
+    open on an `.mdm`, there being no list yet; and with VS Code shut, a
+    double click on a document that was left as text opens it in the MDM
+    editor, in a new window (VS Code does not bring the old one back when
+    it is started on a file).

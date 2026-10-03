@@ -35,6 +35,9 @@ const state = {
   executed: [], // {command, args} of every commands.executeCommand
   shownDocuments: [], // {uri, options} of every window.showTextDocument
   tabGroups: [], // {viewColumn, tabs: [{input}]}, served as window.tabGroups.all
+  tabListeners: [], // what window.tabGroups.onDidChangeTabs was handed
+  closedTabs: [], // every tab window.tabGroups.close took off
+  openWithFails: null, // "throw": vscode.openWith rejects; "nothing": it opens no tab
   dirtyDocuments: new Set(), // uris whose mock document reports isDirty
   workspaceFolder: null, // fsPath served by getWorkspaceFolder
   registeredProviders: [],
@@ -73,6 +76,9 @@ function reset() {
   state.executed = [];
   state.shownDocuments = [];
   state.tabGroups = [];
+  state.tabListeners = [];
+  state.closedTabs = [];
+  state.openWithFails = null;
   state.dirtyDocuments = new Set();
   state.workspaceFolder = null;
   state.registeredProviders = [];
@@ -362,7 +368,28 @@ const window = {
   // uri, the MDM editor's a uri and a viewType), seeded through
   // _state.tabGroups.
   get tabGroups() {
-    return { all: state.tabGroups };
+    return {
+      all: state.tabGroups,
+      onDidChangeTabs(listener) {
+        state.tabListeners.push(listener);
+        return {
+          dispose() {
+            state.tabListeners = state.tabListeners.filter((l) => l !== listener);
+          },
+        };
+      },
+      // One tab or several taken off their groups, as VS Code closes them,
+      // and the listeners told.
+      close(tabs) {
+        const gone = Array.isArray(tabs) ? tabs : [tabs];
+        state.tabGroups.forEach((group) => {
+          group.tabs = group.tabs.filter((t) => gone.indexOf(t) === -1);
+        });
+        state.closedTabs.push(...gone);
+        changeTabs();
+        return Promise.resolve(true);
+      },
+    };
   },
   registerCustomEditorProvider(viewType, provider, options) {
     state.registeredProviders.push({ viewType, provider, options });
@@ -515,9 +542,29 @@ const env = {
 const commands = {
   executeCommand(command, ...args) {
     state.executed.push({ command, args });
+    // vscode.openWith puts a tab of that editor in the group it is sent to,
+    // beside whatever tab the file has there already, which is what VS Code
+    // does with a custom editor over a text tab (seen in 1.133.0); seeded
+    // through _state.openWithFails to reject, or to open nothing.
+    if (command === "vscode.openWith") {
+      if (state.openWithFails === "throw") return Promise.reject(new Error("no such editor"));
+      const [uri, viewType, options] = args;
+      const group = state.tabGroups.find((g) => g.viewColumn === (options && options.viewColumn));
+      if (group && state.openWithFails !== "nothing") {
+        group.tabs.forEach((t) => (t.isActive = false));
+        group.tabs.push({ input: { uri, viewType }, isActive: true });
+        changeTabs();
+      }
+    }
     return Promise.resolve(undefined);
   },
 };
+
+// The tabs changed: a test calls this after rewriting _state.tabGroups, as
+// the reader's own opening, closing or reopening of a tab.
+function changeTabs() {
+  state.tabListeners.slice().forEach((listener) => listener({ opened: [], closed: [], changed: [] }));
+}
 
 // The Memento VS Code hands an extension as context.globalState. Values go in
 // and come out as JSON, the way VS Code stores them, so what is kept is only
@@ -559,6 +606,7 @@ module.exports = {
   _reset: reset,
   _makeDocument: makeDocument,
   _memento: memento,
+  _changeTabs: changeTabs,
   _setText: setText,
   _willSave: willSave,
   _didSave: didSave,
