@@ -463,10 +463,26 @@
   // ever missed, so it is the light one.
   var PLAY_HIGHLIGHT = "#a0740f";
 
+  // The ledger lines of a note, lit and put out with it. They stand at the
+  // head of their system since sinkLedgers moved them out of the note's
+  // group, which is the element abcjs marks, so they are marked here with a
+  // class of their own (.mdm-ledger--lit in mdm-look.css), as the editor
+  // marks them.
+  function lightLedgers(child, on) {
+    (child.elemset || []).forEach(function (el) {
+      (el.mdmLedgers || []).forEach(function (line) {
+        line.classList.toggle("mdm-ledger--lit", on);
+      });
+    });
+  }
+
   // The engraver keeps the elements it has lit in `selected`; this puts their
   // ink back. abcjs 6 has no clearSelection on the controller, only the
   // per-element unhighlight its own rangeHighlight uses.
   function clearEngraverSelection(engraver) {
+    (engraver.selected || []).forEach(function (el) {
+      lightLedgers(el, false);
+    });
     if (typeof engraver.clearSelection === "function") {
       engraver.clearSelection();
       return;
@@ -534,6 +550,7 @@
           ) {
             engraver.selected.push(child);
             child.highlight(undefined, PLAY_HIGHLIGHT);
+            lightLedgers(child, true);
             if (!root && child.elemset && child.elemset[0]) {
               root = child.elemset[0].ownerSVGElement;
             }
@@ -812,6 +829,24 @@
     }, draw);
   }
 
+  // The ledger lines go under the notes, as in the editor (sinkLedgers in
+  // vscode-mdm/media/main.js, where the reasons are): abcjs draws them after
+  // the head and the stem of their note, and one voice after another, so a
+  // grey line crossed the note it carries. They are moved to the head of
+  // their system's group, where abcjs draws the staff lines, and the note
+  // keeps the list of its lines for the player (lightLedgers). Before the
+  // slices for print are cut, which are clones of the drawing.
+  function sinkLedgers(root) {
+    root.querySelectorAll("svg .abcjs-ledger").forEach(function (line) {
+      var note = line.parentNode;
+      var system = note.parentNode;
+      if (!note.matches("g.abcjs-note") || note.hasAttribute("transform")) return;
+      if (!system || !system.matches("svg > g.abcjs-staff-wrapper")) return;
+      (note.mdmLedgers || (note.mdmLedgers = [])).push(line);
+      system.insertBefore(line, system.firstChild);
+    });
+  }
+
   function renderBlock(block) {
     var srcEl = block.querySelector(".mdm-src");
     var paper = block.querySelector(".mdm-paper");
@@ -850,6 +885,7 @@
     var format = scoreFormat();
     if (format) params.format = format;
     var visual = ABCJS.renderAbc(paper, source, params)[0];
+    sinkLedgers(paper);
     // The box the score sits in, which carries the alignment (mdm-look.css)
     // and, for a score narrower than the column, the width as well: held to
     // the drawing, its auto margins centre it.

@@ -697,6 +697,66 @@ function dblClickAt(page, pos, opts) {
   return clickAt(page, pos, Object.assign({}, opts || {}, { count: 2 }));
 }
 
+// A tune for the ledger lines, which are drawn under the notes: two voices
+// on one staff. On the first beat the second voice's low A has a ledger line
+// through the middle C of the first; then a low A whose stem goes up through
+// its ledger line, a high C whose stem comes down through one, and a high E
+// on its third. Ten ledger lines, five heads, all of them filled.
+const LEDGER_FIXTURE =
+  "X:1\n%%score (1 2)\nM:4/4\nL:1/4\nK:C\nV:1\nC A, x e'|\nV:2\nA, x c' x|\n";
+
+// The colour painted at each point, off one capture of the box holding
+// them. The points and the box are in CSS pixels; the capture is at the
+// device scale of the page, which a test that reads a hairline sets to 3.
+async function paintedAt(page, clip, points) {
+  const png = await page.screenshot({ clip, encoding: "base64" });
+  return page.evaluate(
+    async (b64, clip, points) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+      const cv = new OffscreenCanvas(bmp.width, bmp.height);
+      const g = cv.getContext("2d");
+      g.drawImage(bmp, 0, 0);
+      const k = bmp.width / clip.width;
+      return points.map((p) => {
+        const d = g.getImageData(Math.round((p.x - clip.x) * k), Math.round((p.y - clip.y) * k), 1, 1).data;
+        return [d[0], d[1], d[2]];
+      });
+    },
+    png,
+    clip,
+    points
+  );
+}
+
+// Where the ink of a score must show through its ledger lines: the middle of
+// every note head, and every place a stem crosses a ledger line. `root` is
+// the box the score is drawn in (the editor's code.language-abc, the page's
+// .mdm-paper); its first svg is the drawing. Answers with the points and the
+// box to capture them in.
+function inkPoints(page, root) {
+  return page.evaluate((root) => {
+    const svg = document.querySelector(root + " svg");
+    const box = (el) => el.getBoundingClientRect();
+    const points = [];
+    svg.querySelectorAll(".abcjs-notehead").forEach((head) => {
+      const b = box(head);
+      points.push({ what: "head", x: b.left + b.width / 2, y: b.top + b.height / 2 });
+    });
+    const ledgers = Array.from(svg.querySelectorAll(".abcjs-ledger")).map(box);
+    svg.querySelectorAll(".abcjs-stem").forEach((stem) => {
+      const s = box(stem);
+      ledgers.forEach((l) => {
+        const y = l.top + l.height / 2;
+        const x = s.left + s.width / 2;
+        if (y > s.top + 1 && y < s.bottom - 1 && x > l.left && x < l.right) points.push({ what: "stem", x, y });
+      });
+    });
+    const b = box(svg);
+    return { clip: { x: b.left, y: b.top, width: b.width, height: b.height }, points };
+  }, root);
+}
+
 module.exports = {
   CHROME,
   HARNESS,
@@ -705,6 +765,7 @@ module.exports = {
   DUET_FIXTURE,
   REST_FIXTURE,
   TOP_SCORE_FIXTURE,
+  LEDGER_FIXTURE,
   typedIntoFirstParagraph,
   open,
   update,
@@ -724,4 +785,6 @@ module.exports = {
   rows,
   clickAt,
   dblClickAt,
+  paintedAt,
+  inkPoints,
 };

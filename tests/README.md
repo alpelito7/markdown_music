@@ -6398,6 +6398,134 @@ TB15 among them (18 of 18), TB3, TB16 and the list's hanging indent in
 TB17 with the display formula in a cell in `render.test.js` (2 of 2). The
 rest of the suites were not run.
 
+### Ledger lines in the staff's grey, and under the notes (2026-10-02 and 03)
+
+The owner, with a picture of a low note: if the staff lines are grey, the
+little lines should be grey too. They were black on every surface: the
+grey rules named `.abcjs-staff` and nothing else, and abcm2ps's ledger
+lines are drawn by procedures of their own (`hl`, `hl1`, `hl2`, and the
+grace note's `ghl`) outside the run of horizontals `paint_eps` wraps in the
+grey. A comment in mdm.lua said they stayed in the ink "exactly as in the
+browser", which described the editor and was not a decision of the look.
+
+The first version painted them grey where they were drawn, and the owner
+came back the next morning with another picture: the line showed over the
+head of its note, "something basic" that should not have needed pointing
+out. abcjs writes a note's ledger lines after its head and its stem,
+inside the note's group, and one voice after another; abcm2ps draws them
+before the head of their own note, but also one voice after another. In
+one ink the order never showed. In the grey the line crossed the head it
+carries, the stem of a note high over the staff, the slur under a grace
+note, and the head another voice has on the same line, which is any bar of
+a guitar piece in two voices. The first version was handed over on the
+computed colours alone, and its paper test had put its notes in the spaces
+between ledger lines so that no head would cut a line in two: the same
+fault, stepped round instead of looked at.
+
+Now in the staff's colour, in ink with it when the staff is in ink, and
+under the notes, as the staff is:
+
+- The editor and the page move every ledger line to the head of its
+  system's group, where abcjs draws the staff lines: `sinkLedgers` in
+  `main.js` and in both copies of `mdm.js`, and the same lines in
+  `chrome_page` for the engraving of a typeset PDF. A system is a
+  `g.abcjs-staff-wrapper` under the svg and a note a `g.abcjs-note` in it,
+  with no transform (abcjs 6.7.0, read in the harness over chords, grace
+  notes, two voices on a staff and two staves); a line in any other shape
+  stays where abcjs drew it. The slices the page prints a score of several
+  systems from are reached too.
+- Out of its note's group a line is no longer reached by the mark abcjs
+  puts on a sounding note, so the player marks the lines itself
+  (`lightLedgers`, `.mdm-ledger--lit`) and puts them out with the note: they
+  take the accent with it, as they did. abcjs's own class stays on what
+  abcjs lit, which the player's tests count and measure.
+- abcm2ps's page is drawn twice (`paint_eps`): once under an empty clip
+  that only the four ledger procedures lift, each for its stroke in the
+  grey, and once more with each of them under an empty clip of its own,
+  handing on the line width it leaves. PostScript paints over what is
+  there, so a line cannot go under a note drawn before it any other way,
+  and drawn in place the passes need nothing of where abcm2ps scales or
+  moves a voice.
+- Both engravings' cache keys carry a recipe, `abcjs 8` and `abcm2ps 3`
+  (7 and 2 were the first version, a day old and never released), or a
+  warm cache would keep the old drawings; the two key helpers of
+  `render.test.js` follow.
+
+Five tests, on a tune of two voices on one staff (`LEDGER_FIXTURE` in
+`webview/helpers.js`: the second voice's low A has a ledger line through
+the first voice's middle C, a stem goes up through a line and another
+comes down through one). **LL1** in `webview-look.test.js`: the lines in
+the staff's grey on both sides and in ink with ink staff lines, and what
+is painted, in a capture at three device pixels a pixel: ink at the middle
+of every head and wherever a stem crosses a ledger line (`inkPoints` and
+`paintedAt` in the helpers). **LL2** in `html.test.js`: the same on the
+page, light, dark and ink, and no ledger line left in a note's group in
+the slices for print. **LL3** in `render.test.js`: each engraver's PDF
+from the cache at 300 dpi, grey ledger lines outside the staff and none
+with the staff in ink, the high heads still in ink (counted in the right
+half of the drawing: the clef stands out of the staff on the left), and
+for two voices the middle of each ledger line of the column in ink, the
+grey on either side of the head. **LL4** in `webview-player.test.js` and
+**LL5** in `html.test.js`, under the real players: a sounding note's lines
+lit and no other, none lit on a note without them, none left when the
+player shuts or the tune ends. LL5 is the first test to start the page's
+player: abcjs fetches its piano from the network, so the requests are
+answered with the piano the editor ships and nothing else is let out. The
+abcm2ps colour test reads the two passes in the dark EPS and one in the
+ink one. Each mutation swapped in place, its tests run and swapped back in
+one command, the files checked back by their hashes:
+
+- **LG-a**, **LG-b** the editor's ledger lines out of the grey rule, light
+  and dark → LL1. **LG-c** the lines left where abcjs draws them → LL1,
+  *the head at 141,182 is painted 163,163,163 and not the ink*, and LL4.
+  **LG-d** the lines sunk in their own note's group and no further → LL1,
+  the same head: the second voice's line over the first voice's C.
+- **LG-e** a sounding note's lines not lit, **LG-f** not put out → LL4.
+  **LG-g**, **LG-h** the grey rule taking the lit line too, light and
+  dark, **LG-i** no accent for the lit line → LL4 each.
+- **LG-j** the page's ledger lines out of the grey rule → LL2. **LG-k**
+  the page's lines left where abcjs draws them → LL2 (the head painted
+  grey) and LL5. **LG-l** sunk in the note's group only → LL2, the same
+  head.
+- **LG-m** only the drawing on screen sunk, after the slices are cut →
+  LL2, *the slices for print keep their ledger lines over the notes*. Its
+  first form, the two calls merely changed places, passed and was no
+  defect: `sinkLedgers` reaches the slices as well, which hang in the same
+  paper.
+- **LG-n**, **LG-o** the page's lines not lit, not put out, **LG-p** no
+  accent for the lit line on the page, **LG-q** the page's grey rule made
+  heavier than the lit one → LL5 each.
+- **LG-r** the Chrome page without the ledger lines in its grey rule →
+  LL3. **LG-s** the Chrome page leaving the lines where abcjs draws them →
+  LL3, *abcjs, two voices ... the line is drawn over it*, both heads.
+  **LG-t** sunk in the note's group only → LL3, the first head grey and
+  the second in ink.
+- **LG-u** no procedure of abcm2ps wrapped → LL3 and the colour test.
+  **LG-v** the grace note's `ghl` left out → the colour test; LL3 has no
+  grace note and passes. **LG-w** the first pass letting no line through
+  → LL3 (no grey ledger line at all) and the colour test. **LG-x** the
+  second pass drawing the lines again in ink → both. **LG-y** the lines
+  greyed in place in one pass, as first committed → LL3, *abcm2ps, two
+  voices ... the head on ledger line 1 is painted 163,163,163*, and the
+  colour test.
+- **LG-z**, **LG-zz** a recipe not bumped → LL3 (the engraving is not
+  where the new key says).
+
+Twenty-seven of twenty-seven caught, LG-m once it was written again. Seen
+in a real VS Code window too, off screen (VS Code on Chromium 148 under a
+KWin of its own, the extension linked from this tree): both sides, the
+sixteen ledger lines of two scores under their notes and in the grey, and
+under the player the lines of the sounding notes lit, both voices of the
+first beat together, and put out when it was shut.
+
+Run on this state: `test:fast` (277 of 277), the staff-line tests of
+`webview-look.test.js` with LL1 (3 of 3), LL4 and the tests of
+`webview-player.test.js` that light a note (6 of 6), LL2, LL5 and the
+tests of `html.test.js` on the page's look, its scripts, its player and
+its slices for print (7 of 7), and in `render.test.js` LL3 and every test
+that names an engraving by its key, since the two helpers changed (9 of
+9). The rest of the suites were not run.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

@@ -110,6 +110,13 @@
   back near the end of the document: an editor closed beside it, the
   window made wider, the outline shut, the font changed from the toolbar.
   It jumped to the end of the document, several lines further on.
+- With grey staff lines, the short lines over and under the staff for a
+  high or a low note (ledger lines) are grey too, in the editor, on the
+  page and on paper, and they are drawn under the notes, as the staff is:
+  a head or a stem covers the line it stands on, in two voices on one
+  staff as well. They stood in black beside a grey staff. While their
+  note sounds they light up with it, as before, and with the staff lines
+  in ink they are in ink.
 - The box of a task stands level with the capital beside it and half an
   em before its text, in the editor and on the exported page. It hung two
   pixels under the line, set on the small letters, and stood closer to its

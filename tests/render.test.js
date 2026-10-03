@@ -43,21 +43,23 @@ function sha1(s) {
 // light side, and the grey the staff lines take unless the editor asks for ink.
 const LIGHT_INK = "#000000";
 const GRAY_STAFF = "#a3a3a3";
-// The 0.9 is the width the staff lines are rewritten to (STAFF_LINE_WIDTH in
-// mdm.lua), which is part of the cache key: a width change re-engraves.
+// The leading `abcm2ps 3` is the recipe of the paint (paint_eps in mdm.lua),
+// and the 0.9 is the width the staff lines are rewritten to
+// (STAFF_LINE_WIDTH), both part of the cache key: a change to either
+// re-engraves.
 function cacheName(abc, ink, staff) {
-  return sha1(abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF) + " 0.9");
+  return sha1("abcm2ps 3\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF) + " 0.9");
 }
 
 // What an abcjs engraving is named after: the engraver with its recipe
-// version (`abcjs 5` in mdm.lua), then the block, the colours as above, and
+// version (`abcjs 8` in mdm.lua), then the block, the colours as above, and
 // the face its words are set in, since the same score in the roman and in the
 // sans are two drawings and cannot share one file. The default engraver on a
 // machine with a Chrome, which this one is: the webview suites already need
 // it.
 function abcjsCacheName(abc, ink, staff, face) {
   return sha1(
-    "abcjs 6\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF) +
+    "abcjs 8\n" + abc + "\n" + (ink || LIGHT_INK) + " " + (staff || GRAY_STAFF) +
       " " + (face || "sans"));
 }
 
@@ -3108,6 +3110,33 @@ test("a score is engraved in the colours of the look", () => {
   const darkEps = fs.readFileSync(path.join(cache, dark + "_001.eps"), "utf8");
   assert.match(darkEps, /%%EndSetup\n0\.831 0\.831 0\.831 setrgbcolor\n/);
   assert.match(darkEps, staffRun, "the staff lines are not in the grey of the side");
+  // The ledger lines in the same grey, and under the notes: the page is
+  // drawn twice, once under an empty clip that only abcm2ps's four ledger
+  // procedures lift, each for a stroke in the grey, and once more with each
+  // of them under an empty clip of its own, handing on the width it leaves.
+  for (const proc of ["hl", "hl1", "hl2", "ghl"]) {
+    for (const [line, what] of [
+      ["/" + proc + " where {pop /mdm_" + proc + " /" + proc + " load def} if\n", "is not kept"],
+      [
+        "/mdm_" + proc + " where {pop /" + proc + " {gsave initclip 0.435 0.435 0.435 setrgbcolor mdm_" + proc +
+          " grestore} def} if\n",
+        "does not draw first, in the grey of the side",
+      ],
+      [
+        "/mdm_" + proc + " where {pop /" + proc + " {gsave 0 0 0 0 rectclip mdm_" + proc +
+          " currentlinewidth grestore setlinewidth} def} if\n",
+        "is drawn again with the notes",
+      ],
+    ]) {
+      assert.ok(darkEps.includes(line), "the ledger procedure `" + proc + "` " + what);
+    }
+  }
+  assert.equal(darkEps.split("\ngsave 0 0 0 0 rectclip\n").length, 2, "the pass of the ledger lines is not there once");
+  assert.equal(
+    (darkEps.match(/\n0\.435 0\.435 0\.435 setrgbcolor 0\.9 SLW /g) || []).length,
+    2,
+    "the page of one staff is not drawn twice"
+  );
 
   // Ink staff lines: the whole engraving in one colour, and no wrapping left.
   r = runMdm(
@@ -3121,6 +3150,8 @@ test("a score is engraved in the colours of the look", () => {
   const inkedEps = fs.readFileSync(path.join(cache, inked + "_001.eps"), "utf8");
   assert.match(inkedEps, /%%EndSetup\n0\.831 0\.831 0\.831 setrgbcolor\n/);
   assert.doesNotMatch(inkedEps, /setrgbcolor 0\.9 SLW/, "the staff lines were greyed");
+  assert.doesNotMatch(inkedEps, /mdm_hl/, "the ledger lines were greyed");
+  assert.equal((inkedEps.match(/\n0\.9 SLW /g) || []).length, 1, "a page in one ink is drawn once");
   // In ink the lines keep the colour of the score but still take the width.
   assert.match(inkedEps, /\n0\.9 SLW [^\n]*stroke/, "the staff lines kept the hairline width");
 
@@ -3131,6 +3162,171 @@ test("a score is engraved in the colours of the look", () => {
     path.join(cache, cacheName(NARROW_ABC) + "_001.eps"), "utf8");
   assert.match(light, /%%EndSetup\n0\.000 0\.000 0\.000 setrgbcolor\n/);
   assert.match(light, /\n0\.639 0\.639 0\.639 setrgbcolor 0\.9 SLW [^\n]*stroke 0\.000/);
+});
+
+// The ledger lines on paper in the staff's grey, from either engraver: the
+// page abcjs is drawn on in Chrome (chrome_page in mdm.lua) and the EPS of
+// abcm2ps (paint_eps), whose painted procedures the test above reads. They
+// stood in the ink beside a grey staff (2026-10-02). Read in the engraving
+// the cache keeps, as pixels at 300 dpi: the staff is the five rows the grey
+// crosses most of the width of, and outside it the tune puts seven ledger
+// lines (two under G, and B,, five over b' and d''), of which a run of the
+// grey crosses some; the pixels the edges of a note head share with the
+// grey lose or split one or two, so they are counted as some and not as
+// seven. In ink there are none. And the heads of b' and d'' are still in
+// the ink: a ledger procedure that left its grey behind drew every note after
+// it grey (mutation LG-h, which the clef, out of the staff on the left and
+// drawn before any ledger line, hid until the count kept to the right half).
+//
+// And under the notes, which the owner had to point out (2026-10-03): the
+// grey line was drawn over the head it carries by abcjs, and by both
+// engravers over the head another voice has on the same line. A second tune
+// puts a middle C in one voice over a low A in the other, one column and two
+// ledger lines, each with a filled head on it: on the rows of each line the
+// grey shows on both sides of the head and the middle of it is ink
+// (`covered`, the colour at the middle of each line, top to bottom).
+function ledgerPixels(pdf, grey) {
+  const r = spawnSync("pdftoppm", ["-r", "300", pdf], { maxBuffer: 1 << 30 });
+  assert.equal(r.status, 0, String(r.stderr));
+  const buf = r.stdout;
+  const head = buf.toString("latin1", 0, 40).split(/\s+/);
+  const w = Number(head[1]);
+  const h = Number(head[2]);
+  const start = buf.length - w * h * 3;
+  const near = (i, rgb) =>
+    Math.abs(buf[i] - rgb[0]) <= 8 && Math.abs(buf[i + 1] - rgb[1]) <= 8 && Math.abs(buf[i + 2] - rgb[2]) <= 8;
+  const rows = [];
+  for (let y = 0; y < h; y++) {
+    let run = 0;
+    let greyRun = 0;
+    let greyAll = 0;
+    let greyRuns = 0;
+    let greyFrom = -1;
+    let greyTo = -1;
+    let inkRun = 0;
+    let ink = 0;
+    let inkAll = 0;
+    for (let x = 0; x < w; x++) {
+      const i = start + (y * w + x) * 3;
+      run = near(i, grey) ? run + 1 : 0;
+      if (run) greyAll++;
+      // The runs of five pixels or more, each counted as it gets there, and
+      // where the first of them starts and the last ends: a pixel of the
+      // clef's edge or of a head's can pass for the grey on its own.
+      if (run === 5) {
+        greyRuns++;
+        if (greyFrom < 0) greyFrom = x - 4;
+      }
+      if (run >= 5) greyTo = x;
+      greyRun = Math.max(greyRun, run);
+      ink = near(i, [0, 0, 0]) ? ink + 1 : 0;
+      if (ink) inkAll++;
+      // The heads in the right half alone: the clef on the left stands out
+      // of the staff too, and is drawn before any ledger line.
+      if (x >= w / 2) inkRun = Math.max(inkRun, ink);
+    }
+    // A line of the staff, grey or in ink: what crosses most of the width.
+    rows.push({
+      staff: greyAll >= 0.6 * w,
+      line: greyAll >= 0.6 * w || inkAll >= 0.6 * w,
+      greyRun,
+      greyRuns,
+      greyFrom,
+      greyTo,
+      inkRun,
+    });
+  }
+  // The colour at the middle of the grey of a row, from the start of its
+  // first run to the end of its last.
+  const middle = (y) => {
+    const i = start + (y * w + Math.round((rows[y].greyFrom + rows[y].greyTo) / 2)) * 3;
+    return [buf[i], buf[i + 1], buf[i + 2]];
+  };
+  const staff = rows.map((row, y) => (row.line ? y : -1)).filter((y) => y >= 0);
+  assert.ok(staff.length, pdf + ": no staff found");
+  const outside = (y) => y < staff[0] || y > staff[staff.length - 1];
+  const runs = (pick) => {
+    let n = 0;
+    rows.forEach((row, y) => {
+      if (pick(row, y) && !(y > 0 && pick(rows[y - 1], y - 1))) n++;
+    });
+    return n;
+  };
+  // The ledger lines by their rows, whole or cut in two by a head: one long
+  // run of the grey, or a run of it on either side of the head. The edges of
+  // a head and of the clef share a few pixels with the grey, never two runs
+  // of five in a row (read off the rows of both engravings).
+  const bands = [];
+  rows.forEach((row, y) => {
+    if (!outside(y) || !(row.greyRun >= 20 || row.greyRuns >= 2)) return;
+    const band = bands[bands.length - 1];
+    if (band && band[band.length - 1] === y - 1) band.push(y);
+    else bands.push([y]);
+  });
+  return {
+    staffLines: runs((row) => row.staff),
+    ledgerLines: runs((row, y) => outside(y) && row.greyRun >= 20),
+    inkRows: rows.filter((row, y) => outside(y) && row.inkRun >= 10).length,
+    covered: bands.map((band) => middle(band[Math.floor(band.length / 2)])),
+  };
+}
+
+test("on paper the ledger lines are in the staff's grey and under the notes, from either engraver (LL3)", {
+  skip: spawnSync("pdftoppm", ["-v"]).status !== 0 && "needs pdftoppm",
+}, () => {
+  const tune = "X:1\nL:1/4\nK:C clef=treble\nG, B, b' d''|\n";
+  for (const engraver of ["abcjs", "abcm2ps"]) {
+    for (const staffLines of ["gray", "ink"]) {
+      const dir = freshDir("pdf-ledger-" + engraver + "-" + staffLines);
+      fs.writeFileSync(
+        path.join(dir, "doc.mdm"),
+        "---\nformat:\n  pdf:\n    documentclass: article\n" +
+          (engraver === "abcm2ps" ? "mdm-engraver: abcm2ps\n" : "") +
+          "mdm-staff-lines: " + staffLines + "\nfilters:\n  - mdm\n---\n\n```abc\n" + tune + "```\n"
+      );
+      const r = runMdm(["render", "doc.mdm", "--to", "pdf"], dir);
+      assert.equal(r.status, 0, r.stderr);
+      // Named after the recipe too: `abcjs 8` and `abcm2ps 3` are the ones
+      // that draw the ledger lines in the grey and under the notes, so an
+      // engraving from before is not served.
+      const staff = staffLines === "gray" ? GRAY_STAFF : LIGHT_INK;
+      const name =
+        engraver === "abcjs" ? abcjsCacheName(tune, LIGHT_INK, staff) : cacheName(tune, LIGHT_INK, staff);
+      const pdf = path.join(dir, "mdm_cache", name + ".pdf");
+      assert.ok(fs.existsSync(pdf), engraver + ", " + staffLines + ": no engraving at " + name);
+      const seen = ledgerPixels(pdf, [163, 163, 163]);
+      const where = engraver + ", " + staffLines + " staff lines: " + JSON.stringify(seen);
+      assert.ok(seen.inkRows > 0, where + ": no ink outside the staff, the note heads went grey");
+      if (staffLines === "gray") {
+        assert.equal(seen.staffLines, 5, where + ": the staff");
+        assert.ok(seen.ledgerLines >= 4, where + ": the ledger lines are not in the staff's grey");
+      } else {
+        assert.equal(seen.staffLines, 0, where + ": the staff is not in ink");
+        assert.equal(seen.ledgerLines, 0, where + ": the ledger lines are grey with the staff in ink");
+      }
+    }
+    // Two voices on a staff: the head of each on its ledger line, over it.
+    const voices = "X:1\n%%score (1 2)\nM:4/4\nL:1/4\nK:C clef=treble\nV:1\nC x x x|\nV:2\nA, x x x|\n";
+    const dir = freshDir("pdf-ledger-" + engraver + "-voices");
+    fs.writeFileSync(
+      path.join(dir, "doc.mdm"),
+      "---\nformat:\n  pdf:\n    documentclass: article\n" +
+        (engraver === "abcm2ps" ? "mdm-engraver: abcm2ps\n" : "") +
+        "filters:\n  - mdm\n---\n\n```abc\n" + voices + "```\n"
+    );
+    const r = runMdm(["render", "doc.mdm", "--to", "pdf"], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const name = engraver === "abcjs" ? abcjsCacheName(voices) : cacheName(voices);
+    const seen = ledgerPixels(path.join(dir, "mdm_cache", name + ".pdf"), [163, 163, 163]);
+    const where = engraver + ", two voices: " + JSON.stringify(seen);
+    assert.equal(seen.covered.length, 2, where + ": the two ledger lines of the column");
+    seen.covered.forEach((rgb, i) => {
+      assert.ok(
+        Math.max(...rgb) <= 60,
+        where + ": the head on ledger line " + (i + 1) + " is painted " + rgb + " at its middle, the line is drawn over it"
+      );
+    });
+  }
 });
 
 test("PDF render reuses the cache (abcm2ps not rerun on a warm cache)", () => {

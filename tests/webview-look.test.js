@@ -31,6 +31,9 @@ const {
   settingsMessage,
   postSettings,
   setSettingPosts,
+  paintedAt,
+  inkPoints,
+  LEDGER_FIXTURE,
 } = require("./webview/helpers.js");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -3084,6 +3087,76 @@ test("gray staff lines are a darker gray on the dark side", { skip }, async () =
   // staff lines alone.
   assert.equal(out.note, "rgb(212, 212, 212)");
   await h.close();
+});
+
+// The ledger lines over and under the staff are its lines carried on, and
+// are drawn in its colour: they stood in ink beside a grey staff, which the
+// owner pointed out (2026-10-02). In ink they follow the staff into ink.
+//
+// And they are drawn under the notes, as the staff is. abcjs writes a note's
+// ledger lines after its head and its stem, and one voice after another, so
+// in the grey the line crossed the head it carries, the stem of a note high
+// over the staff, and the head another voice has on the same line, which
+// the owner had to point out too (2026-10-03). sinkLedgers in main.js moves
+// them to the head of their system. Read here in what is painted: a capture
+// at three device pixels a pixel, and in it the middle of every head and
+// every place a stem crosses a ledger line (inkPoints and paintedAt in
+// webview/helpers.js, which the page's test reads with too), which is ink
+// if nothing grey was drawn over it. The tune is LEDGER_FIXTURE, two voices
+// on one staff. The accent a sounding note's lines take is in
+// webview-player.test.js (LL4), under the real player.
+test("the ledger lines are drawn in the staff's colour and under the notes (LL1)", { skip }, async () => {
+  const text = "```abc\n" + LEDGER_FIXTURE + "```\n";
+  const read = (page) =>
+    page.evaluate(() => {
+      const svg = document.querySelector("#app code.language-abc svg");
+      const fills = (sel) => [...new Set(Array.from(svg.querySelectorAll(sel)).map((p) => getComputedStyle(p).fill))];
+      return {
+        count: svg.querySelectorAll(".abcjs-ledger").length,
+        ledger: fills(".abcjs-ledger"),
+        staff: fills(".abcjs-staff path"),
+        head: fills(".abcjs-notehead"),
+      };
+    });
+  for (const [theme, grey, ink] of [
+    ["light", "rgb(163, 163, 163)", "rgb(36, 41, 46)"],
+    ["dark", "rgb(111, 111, 111)", "rgb(212, 212, 212)"],
+  ]) {
+    const h = await open({ text, scores: 1, height: 700, seed: { settings: { theme } } });
+    try {
+      const gray = await read(h.page);
+      assert.equal(gray.count, 10, theme + ": the tune's ledger lines");
+      assert.deepEqual(gray.staff, [grey], theme + ": the staff");
+      assert.deepEqual(gray.ledger, [grey], theme + ": the ledger lines are not in the staff's grey");
+      assert.deepEqual(gray.head, [ink], theme + ": the note heads left the ink");
+      // What is painted: ink at the middle of every head and where a stem
+      // crosses a ledger line, the grey nowhere over them.
+      await h.page.setViewport({ width: 900, height: 700, deviceScaleFactor: 3 });
+      await sleep(200);
+      const { clip, points } = await inkPoints(h.page, "#app code.language-abc");
+      assert.equal(points.filter((p) => p.what === "head").length, 5, theme + ": the heads");
+      assert.ok(points.filter((p) => p.what === "stem").length >= 2, theme + ": no stem crosses a ledger line: " + JSON.stringify(points));
+      const want = ink.match(/\d+/g).map(Number);
+      const seen = await paintedAt(h.page, clip, points);
+      seen.forEach((rgb, i) => {
+        const off = Math.max(...rgb.map((v, c) => Math.abs(v - want[c])));
+        assert.ok(
+          off <= 24,
+          theme + ": the " + points[i].what + " at " + Math.round(points[i].x) + "," + Math.round(points[i].y) +
+            " is painted " + rgb + " and not the ink " + want + ": a ledger line is drawn over it"
+        );
+      });
+      // Ink staff lines: the ledger lines in ink with them.
+      await postSettings(h.page, { staffLines: "ink", theme });
+      await sleep(300);
+      const inked = await read(h.page);
+      assert.deepEqual(inked.staff, [ink], theme + ": the staff in ink");
+      assert.deepEqual(inked.ledger, [ink], theme + ": the ledger lines did not follow the staff into ink");
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+  }
 });
 
 // ---------- Score fill ----------

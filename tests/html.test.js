@@ -645,6 +645,193 @@ test("the page draws a score in the face the document is set in", { skip }, asyn
   await sans.close();
 });
 
+// The ledger lines on the page as the editor draws them (LL1 in
+// webview-look.test.js, with the same tune and the same reading of what is
+// painted): in the staff's colour, the side's grey on either side and the
+// ink when the staff lines are in ink, and under the notes, the middle of
+// every head and every stem that crosses one of them in ink. mdm.js moves
+// them there (sinkLedgers), as the editor does: left where abcjs draws them
+// the grey line crossed the head it carries (2026-10-03). And in the slices
+// a score of several systems is printed from as well, which are clones of
+// the drawing and stand in for it on paper, in the PDF the extension prints
+// too: a second tune, of two systems, is read in its slices.
+test("the page draws the ledger lines in the staff's colour and under the notes (LL2)", { skip }, async () => {
+  const { paintedAt, inkPoints, LEDGER_FIXTURE } = require("./webview/helpers.js");
+  const text =
+    "Low and high.\n\n```abc\n" + LEDGER_FIXTURE + "```\n\nTwo systems.\n\n" +
+    "```abc\nX:2\nL:1/4\nK:C\nC A, a c'|\nA, C c' a|\n```\n";
+  for (const [name, extra, grey] of [
+    ["ledger-light", [], "rgb(163, 163, 163)"],
+    ["ledger-dark", ["-M", "mdm-look:dark"], "rgb(111, 111, 111)"],
+    ["ledger-ink", ["-M", "mdm-staff-lines:ink"], null],
+  ]) {
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"].concat(extra), { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: 900, height: 700, deviceScaleFactor: 3 },
+    });
+    OPEN_BROWSERS.add(browser);
+    try {
+      const page = await browser.newPage();
+      await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.querySelector(".mdm-paper svg .abcjs-ledger"), { timeout: 20000 });
+      const seen = await page.evaluate(() => {
+        const svg = document.querySelector(".mdm-paper svg");
+        const fills = (sel) => [...new Set(Array.from(svg.querySelectorAll(sel)).map((p) => getComputedStyle(p).fill))];
+        return {
+          count: svg.querySelectorAll(".abcjs-ledger").length,
+          ledger: fills(".abcjs-ledger"),
+          staff: fills(".abcjs-staff path"),
+          head: fills(".abcjs-notehead"),
+        };
+      });
+      assert.equal(seen.count, 10, name + ": the tune's ledger lines");
+      assert.equal(seen.head.length, 1, name + ": the note heads");
+      if (!grey) {
+        assert.deepEqual(seen.ledger, seen.head, name + ": the ledger lines are not in the ink of the notes");
+        assert.deepEqual(seen.staff, seen.head, name + ": the staff is not in ink");
+        continue;
+      }
+      assert.deepEqual(seen.staff, [grey], name + ": the staff");
+      assert.deepEqual(seen.ledger, [grey], name + ": the ledger lines are not in the staff's grey");
+      assert.notEqual(seen.head[0], grey, name + ": the note heads went grey");
+      // What is painted: the ink of the heads at the middle of each of them
+      // and where a stem crosses a ledger line.
+      const { clip, points } = await inkPoints(page, ".mdm-paper");
+      assert.equal(points.filter((p) => p.what === "head").length, 5, name + ": the heads");
+      assert.ok(points.filter((p) => p.what === "stem").length >= 2, name + ": no stem crosses a ledger line");
+      const want = seen.head[0].match(/\d+/g).map(Number);
+      const painted = await paintedAt(page, clip, points);
+      painted.forEach((rgb, i) => {
+        const off = Math.max(...rgb.map((v, c) => Math.abs(v - want[c])));
+        assert.ok(
+          off <= 24,
+          name + ": the " + points[i].what + " at " + Math.round(points[i].x) + "," + Math.round(points[i].y) +
+            " is painted " + rgb + " and not the ink " + want + ": a ledger line is drawn over it"
+        );
+      });
+      // The slices a score of several systems is printed from, which are
+      // not on screen to be read as pixels: no ledger line of theirs is left
+      // in the group of its note.
+      const slices = await page.evaluate(() => ({
+        drawings: document.querySelectorAll(".mdm-slices svg").length,
+        lines: document.querySelectorAll(".mdm-slices svg .abcjs-ledger").length,
+        inNotes: document.querySelectorAll(".mdm-slices svg .abcjs-note .abcjs-ledger").length,
+      }));
+      assert.equal(slices.drawings, 2, name + ": the slices of the tune of two systems");
+      assert.ok(slices.lines > 0, name + ": no ledger line in the slices");
+      assert.equal(slices.inNotes, 0, name + ": the slices for print keep their ledger lines over the notes");
+    } finally {
+      await browser.close();
+      OPEN_BROWSERS.delete(browser);
+    }
+  }
+});
+
+// The ledger lines of a sounding note take the accent with it on the page as
+// in the editor (LL4 in webview-player.test.js): out of the note's group
+// since mdm.js moves them under the notes, they are marked by the player
+// itself (lightLedgers). Under the page's own player, which this suite had
+// never started: abcjs fetches its piano from the network, so the requests
+// are answered here with the piano the editor ships, and nothing else is let
+// out. A middle C whose one line is lit and no other, an E with no ledger
+// line, the low A with its two, and nothing lit once the tune is over.
+test("on the page a sounding note's ledger lines are lit with it and put out with it (LL5)", { skip }, async () => {
+  const text = "A tune to play.\n\n```{.abc .play}\nX:1\nL:1/4\nQ:1/4=120\nK:C\nC2 e2|A,4|\n```\n";
+  const PIANO = path.join(ROOT, "vscode-mdm", "media", "vendor", "soundfont");
+  for (const [name, extra, grey, accent] of [
+    ["ledger-play-light", [], "rgb(163, 163, 163)", "rgb(160, 116, 15)"],
+    ["ledger-play-dark", ["-M", "mdm-look:dark"], "rgb(111, 111, 111)", "rgb(217, 169, 79)"],
+  ]) {
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"].concat(extra), { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files", "--autoplay-policy=no-user-gesture-required"],
+    });
+    OPEN_BROWSERS.add(browser);
+    try {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        const note = /midi-js-soundfonts\/[^/]+\/(acoustic_grand_piano-mp3\/[A-Za-z0-9]+\.mp3)$/.exec(req.url());
+        if (note && fs.existsSync(path.join(PIANO, note[1]))) {
+          return req.respond({
+            status: 200,
+            contentType: "audio/mpeg",
+            headers: { "access-control-allow-origin": "*" },
+            body: fs.readFileSync(path.join(PIANO, note[1])),
+          });
+        }
+        return /^https?:/.test(req.url()) ? req.abort() : req.continue();
+      });
+      await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      await page.waitForFunction(
+        () => document.querySelector(".mdm-paper svg .abcjs-ledger") && document.querySelector(".mdm-audio .abcjs-midi-start"),
+        { timeout: 20000 }
+      );
+      // Every ledger line by its note: whether it is lit, and its paint; and
+      // the notes abcjs has marked.
+      const read = () =>
+        page.evaluate(() => {
+          const svg = document.querySelector(".mdm-paper svg");
+          const notes = Array.from(svg.querySelectorAll(".abcjs-note"));
+          return {
+            lines: Array.from(svg.querySelectorAll(".abcjs-ledger"))
+              .map((line) => ({
+                note: notes.findIndex((n) => (n.mdmLedgers || []).indexOf(line) >= 0),
+                lit: line.classList.contains("mdm-ledger--lit"),
+                fill: getComputedStyle(line).fill,
+              }))
+              .sort((a, b) => a.note - b.note)
+              .map((l) => [l.note, l.lit, l.fill]),
+            marked: Array.from(svg.querySelectorAll(".abcjs-note_selected")).map((el) => notes.indexOf(el)),
+          };
+        });
+      // The note the player has lit, -1 for none.
+      const sounding = (index) =>
+        page.waitForFunction(
+          (index) => {
+            const svg = document.querySelector(".mdm-paper svg");
+            const notes = Array.from(svg.querySelectorAll(".abcjs-note"));
+            return notes.indexOf(svg.querySelector(".abcjs-note.abcjs-note_selected")) === index;
+          },
+          { timeout: 20000 },
+          index
+        );
+      const still = [[0, false, grey], [2, false, grey], [2, false, grey]];
+      assert.deepEqual((await read()).lines, still, name + ": the lines of the C and of the low A, at rest");
+      await page.click(".mdm-audio .abcjs-midi-start");
+      await sounding(0);
+      assert.deepEqual(
+        await read(),
+        { lines: [[0, true, accent], [2, false, grey], [2, false, grey]], marked: [0] },
+        name + ": the sounding C's line is not the one lit"
+      );
+      await sounding(1);
+      assert.deepEqual((await read()).lines, still, name + ": a line stayed lit after its note");
+      await sounding(2);
+      assert.deepEqual(
+        (await read()).lines,
+        [[0, false, grey], [2, true, accent], [2, true, accent]],
+        name + ": the low A's two lines are not lit with it"
+      );
+      await sounding(-1);
+      assert.deepEqual(await read(), { lines: still, marked: [] }, name + ": a line left lit when the tune was over");
+      assert.deepEqual(errors, []);
+    } finally {
+      await browser.close();
+      OPEN_BROWSERS.delete(browser);
+    }
+  }
+});
+
 test("code is on the editor's card, in the palette's colours", { skip }, async () => {
   const h = await open();
   const l = await looks(h.page);

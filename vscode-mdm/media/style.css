@@ -2644,7 +2644,8 @@ body {
 #app.mdm--dark code.language-abc svg .abcjs-note_selected,
 #app.mdm--dark code.language-abc svg .abcjs-note_selected *,
 #app.mdm-staff--gray code.language-abc svg .abcjs-note_selected,
-#app.mdm-staff--gray code.language-abc svg .abcjs-note_selected * {
+#app.mdm-staff--gray code.language-abc svg .abcjs-note_selected *,
+#app code.language-abc svg .mdm-ledger--lit {
   fill: var(--mdm-play-accent);
 }
 /* The playing cursor: a brass line that walks the score while its tune
@@ -2683,13 +2684,25 @@ body {
    past an attribute on the child: the rule has to reach the paths. (abcjs
    5.10.3, which the Vditor editor engraved with, put the class on the path
    itself; with the group alone the lines stayed in ink and the staff-lines
-   button did nothing visible.) */
+   button did nothing visible.)
+
+   The ledger lines above and below the staff are its lines carried on, and
+   take its grey: they stood in ink beside a grey staff, which the owner
+   pointed out (2026-10-02). abcjs draws them as paths of their own,
+   `.abcjs-ledger`, which main.js moves under the notes of their system
+   (sinkLedgers): drawn where abcjs leaves them, after the head, the grey
+   line crossed the note it carries. While their note sounds they take the
+   accent with it, as they did: out of the note's group they are no longer
+   reached by the mark abcjs puts on it, so main.js marks them itself
+   (lightLedgers, .mdm-ledger--lit beside the sounding note's rule). */
 #app.mdm-staff--gray code.language-abc svg .abcjs-staff,
-#app.mdm-staff--gray code.language-abc svg .abcjs-staff path {
+#app.mdm-staff--gray code.language-abc svg .abcjs-staff path,
+#app.mdm-staff--gray code.language-abc svg .abcjs-ledger:not(.mdm-ledger--lit) {
   fill: #a3a3a3;
 }
 #app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-staff,
-#app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-staff path {
+#app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-staff path,
+#app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-ledger:not(.mdm-ledger--lit) {
   fill: #6f6f6f;
 }
 /* A score sits in the text the way an equation does. These are the

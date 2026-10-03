@@ -963,14 +963,22 @@ body .code-copy-button:hover {
 /* Guitar-Pro-style gray staff lines. abcjs 6 draws the five lines as paths
    inside a <g class="abcjs-staff">, each carrying a fill attribute of its
    own, and a fill set on the group is not inherited past an attribute on the
-   child: the rule has to reach the paths. */
+   child: the rule has to reach the paths. The ledger lines take the staff's
+   colour too, and the accent with their note while it sounds, as in the
+   editor (style.css): the rule for the sounding note comes after this one,
+   with the same weight, so it outranks it where the editor needs a :not().
+   mdm.js moves them under the notes of their system (sinkLedgers), where a
+   grey line does not cross the head it carries, and marks them while their
+   note sounds (lightLedgers, .mdm-ledger--lit). */
 .mdm-paper svg .abcjs-staff,
-.mdm-paper svg .abcjs-staff path {
+.mdm-paper svg .abcjs-staff path,
+.mdm-paper svg .abcjs-ledger {
   fill: var(--mdm-staff-fill);
 }
 /* The note sounding under the player (mdm.js marks it as the editor does). */
 .mdm-paper svg .abcjs-note_selected,
-.mdm-paper svg .abcjs-note_selected * {
+.mdm-paper svg .abcjs-note_selected *,
+.mdm-paper svg .mdm-ledger--lit {
   fill: var(--mdm-play-accent);
 }
 /* The card a score sits on, the width of the column as in the editor. The

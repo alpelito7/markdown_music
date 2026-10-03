@@ -1425,9 +1425,30 @@ end
 --
 -- The ink goes in once, at the head of the page. The staff lines are the only
 -- thing the engraver draws as a run of horizontals opened by `dlw` and closed
--- by `stroke`, and that run is what the grey wraps; the ledger lines under a
--- low note are `hl` and stay in the ink, exactly as in the browser, where the
--- stylesheet paints `.abcjs-staff` and nothing else.
+-- by `stroke`, and that run is what the grey wraps. The ledger lines over and
+-- under the staff take the grey too, as the editor draws them (style.css,
+-- `.abcjs-ledger`): they stood in the ink beside a grey staff, which the owner
+-- pointed out (2026-10-02). abcm2ps draws them with four procedures of its
+-- prolog, `hl`, `hl1`, `hl2` and the grace note's `ghl` (8.14.15), each
+-- taking the point it starts from.
+--
+-- And they go under the notes, as the staff does and as the editor moves
+-- them (sinkLedgers in main.js). abcm2ps draws a note's ledger lines before
+-- its head, but one voice after another, so in two voices on a staff the
+-- grey line of the second crossed the head the first has on that line, and
+-- the slur under a grace note (seen in the raster, 2026-10-03). PostScript
+-- paints over what is there, so the lines have to be drawn first, and the
+-- page is drawn twice for it: once with nothing let through but the ledger
+-- lines, in the grey, and once more with everything but them. The first
+-- pass runs under an empty clip, which every gsave inside it inherits, and
+-- a ledger procedure lifts it for its own stroke (initclip: the EPS is a
+-- page of its own here, turned into a PDF before anything embeds it). In
+-- the second each one runs under an empty clip of its own and hands on the
+-- line width it leaves, so what follows it strokes as it always did. Drawn
+-- in place, the two passes need nothing of where abcm2ps scales or moves a
+-- voice. A prolog without one of the four is left as it is, and an EPS
+-- that does not end on a `showpage` of its own keeps its ledger lines in
+-- the ink.
 --
 -- The same run also has its width rewritten. abcm2ps strokes the staff at
 -- `dlw`, 0.7 pt, which on a 96 dpi screen is 0.93 of a pixel: a viewer that
@@ -1451,6 +1472,18 @@ local function ps_color(hex)
     tonumber(r, 16) / 255, tonumber(g, 16) / 255, tonumber(b, 16) / 255)
 end
 
+local LEDGER_PROCS = { "hl", "hl1", "hl2", "ghl" }
+
+-- A line of PostScript for each ledger procedure, its name wherever the
+-- line says NAME.
+local function ledger_lines(line)
+  local out = {}
+  for _, name in ipairs(LEDGER_PROCS) do
+    out[#out + 1] = (line:gsub("NAME", name))
+  end
+  return table.concat(out, "\n") .. "\n"
+end
+
 local function paint_eps(text, ink, staff)
   local painted = text:gsub("(%%%%EndSetup\n)", "%1" .. ps_color(ink) .. "\n", 1)
   local open, close = "", ""
@@ -1464,7 +1497,22 @@ local function paint_eps(text, ink, staff)
   painted = painted:gsub(
     "\ndlw ([^\n]-stroke)",
     "\n" .. open .. STAFF_LINE_WIDTH .. " SLW %1" .. close)
-  return painted
+  if staff == ink then return painted end
+  -- The page between the prolog (and the ink after it) and its showpage,
+  -- drawn twice: the ledger lines, then everything but them.
+  local prolog, page, tail = painted:match("^(.-%%%%EndSetup\n[^\n]*\n)(.*\n)(showpage\n.*)$")
+  if not prolog then return painted end
+  return prolog
+    .. ledger_lines("/NAME where {pop /mdm_NAME /NAME load def} if")
+    .. "gsave 0 0 0 0 rectclip\n"
+    .. ledger_lines("/mdm_NAME where {pop /NAME {gsave initclip " .. ps_color(staff)
+      .. " mdm_NAME grestore} def} if")
+    .. page
+    .. "grestore\n"
+    .. ledger_lines("/mdm_NAME where {pop /NAME {gsave 0 0 0 0 rectclip mdm_NAME"
+      .. " currentlinewidth grestore setlinewidth} def} if")
+    .. page
+    .. tail
 end
 
 -- The four corners of the ink of a graphic, EPS or PDF alike, measured by
@@ -1821,7 +1869,8 @@ local function chrome_page(source, ink, staff, roman)
     '  .mdm-paper svg [fill="transparent"],',
     '  .mdm-paper svg [fill="rgba(0,0,0,0)"] { fill: none; }',
     "  .mdm-paper svg .abcjs-staff,",
-    "  .mdm-paper svg .abcjs-staff path { fill: " .. staff .. "; }",
+    "  .mdm-paper svg .abcjs-staff path,",
+    "  .mdm-paper svg .abcjs-ledger { fill: " .. staff .. "; }",
     "</style>",
     '<div class="mdm-paper" id="paper"></div>',
     "<script>",
@@ -1845,6 +1894,17 @@ local function chrome_page(source, ink, staff, roman)
     "  if (withFace && MDM_FORMAT) params.format = MDM_FORMAT;",
     '  ABCJS.renderAbc(document.getElementById("paper"), ' ..
       js_string(source) .. ", params);",
+    -- The ledger lines under the notes of their system, as the editor and
+    -- the page move them (sinkLedgers in main.js, where the reasons are):
+    -- abcjs draws them after the head and the stem of their note, and one
+    -- voice after another, so a grey line crossed the note it carries.
+    '  document.querySelectorAll("#paper svg .abcjs-ledger").forEach(function (line) {',
+    "    var note = line.parentNode;",
+    "    var system = note.parentNode;",
+    '    if (!note.matches("g.abcjs-note") || note.hasAttribute("transform")) return;',
+    '    if (!system || !system.matches("svg > g.abcjs-staff-wrapper")) return;',
+    "    system.insertBefore(line, system.firstChild);",
+    "  });",
     -- Where one staff system ends and the next begins: the gaps the
     -- engraving itself leaves, which is where the page may break the
     -- drawing (insert_score cuts it there). abcjs wraps each system in a
@@ -2594,16 +2654,18 @@ local function render_latex(el)
   local wants_abcjs = not (look and look.engraver == "abcm2ps")
 
   if wants_abcjs and chrome_path and has_pdfcrop then
-    -- The leading `abcjs 6` is the engraver and the recipe: a change to the
+    -- The leading `abcjs 8` is the engraver and the recipe: a change to the
     -- page it prints from (chrome_page) has to bump it, or a warm cache would
     -- keep serving the old drawing, and SCORE_TEXT_ROLES is part of that page
     -- though it is not in the string. 3 was the page with no staffwidth and
     -- no stroke on the staff lines; 4 set the words in the face the document
     -- is set in; 5 is 4 with headerfont and footerfont named as well; 6 takes
     -- the chord symbols into the face too, draws the annotation in the wide
-    -- family and unrounds the two metric overrides.
+    -- family and unrounds the two metric overrides; 7 drew the ledger lines
+    -- in the colour of the staff, over their notes (a day, never released),
+    -- and 8 draws them under the notes.
     local digest = sha1(
-      "abcjs 6\n" .. source .. "\n" .. ink .. " " .. staff ..
+      "abcjs 8\n" .. source .. "\n" .. ink .. " " .. staff ..
       (roman and " roman" or " sans"))
     if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
       return insert_score(digest, true)
@@ -2631,8 +2693,12 @@ local function render_latex(el)
     end
   end
 
+  -- The leading `abcm2ps 3` is what paint_eps paints: 2 greyed the ledger
+  -- lines with the staff, in place (a day, never released), and 3 draws them
+  -- under the notes. A change to it has to bump the number, or a warm cache
+  -- keeps serving the drawing painted the old way.
   local digest = sha1(
-    source .. "\n" .. ink .. " " .. staff .. " " .. STAFF_LINE_WIDTH)
+    "abcm2ps 3\n" .. source .. "\n" .. ink .. " " .. staff .. " " .. STAFF_LINE_WIDTH)
   if file_exists(CACHE_DIR .. "/" .. digest .. ".pdf") then
     return insert_score(digest)
   end

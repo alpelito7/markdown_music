@@ -2013,10 +2013,27 @@
     return engraver && engraver.staffgroups ? engraver : null;
   }
 
+  // The ledger lines of a note, lit and put out with it. They stand at the
+  // head of their system since sinkLedgers moved them out of the note's
+  // group, which is the element abcjs marks, so they are marked here, with
+  // a class of their own that the stylesheet paints in the accent
+  // (.mdm-ledger--lit): abcjs's class stays on what abcjs lit, which is
+  // what the player and its tests count.
+  function lightLedgers(child, on) {
+    (child.elemset || []).forEach(function (el) {
+      (el.mdmLedgers || []).forEach(function (line) {
+        line.classList.toggle("mdm-ledger--lit", on);
+      });
+    });
+  }
+
   // The engraver keeps the elements it has lit in `selected`; this puts
   // their ink back. abcjs 6 has no clearSelection on the controller (5.x
   // had), only the per-element unhighlight its own rangeHighlight uses.
   function clearEngraverSelection(engraver) {
+    (engraver.selected || []).forEach(function (el) {
+      lightLedgers(el, false);
+    });
     if (typeof engraver.clearSelection === "function") {
       engraver.clearSelection();
       return;
@@ -2079,6 +2096,7 @@
           ) {
             engraver.selected.push(child);
             child.highlight(undefined, PLAY_HIGHLIGHT);
+            lightLedgers(child, true);
             if (!root && child.elemset && child.elemset[0]) {
               root = child.elemset[0].ownerSVGElement;
             }
@@ -11196,6 +11214,33 @@
     return out;
   }
 
+  // The ledger lines go under the notes. abcjs draws a note's ledger lines
+  // after its head and its stem, inside the note's group, and one voice
+  // after another, so with the staff in grey a line was drawn across the
+  // head it carries, across the stem, and across the head another voice
+  // stands on the same line with (the owner's picture of a middle C,
+  // 2026-10-03). In one ink the order never showed. They are moved to the
+  // head of their system's group, where abcjs draws the staff lines: under
+  // every note of the system, as the staff is, whatever the two colours.
+  //
+  // A system is a `g.abcjs-staff-wrapper` under the svg and a note a
+  // `g.abcjs-note` in it, with no transform on the note (abcjs 6.7.0, read
+  // in the harness over chords, grace notes, two voices on a staff and two
+  // staves); a line found in any other shape stays where abcjs drew it. The
+  // note keeps the list of its lines, which no longer stand in the group
+  // abcjs marks while the note sounds (lightLedgers). The page and the
+  // engraving of a typeset PDF do the same (mdm.js, chrome_page in mdm.lua).
+  function sinkLedgers(root) {
+    root.querySelectorAll("svg .abcjs-ledger").forEach(function (line) {
+      const note = line.parentNode;
+      const system = note.parentNode;
+      if (!note.matches("g.abcjs-note") || note.hasAttribute("transform")) return;
+      if (!system || !system.matches("svg > g.abcjs-staff-wrapper")) return;
+      (note.mdmLedgers || (note.mdmLedgers = [])).push(line);
+      system.insertBefore(line, system.firstChild);
+    });
+  }
+
   // Engraves one score into its <code>. abcjs is loaded by the page before
   // this script (vendor/abcjs), so the engraving is synchronous; what needs
   // the block to be on screen (fitScores measures it) runs afterwards, from
@@ -11220,6 +11265,7 @@
       if (format) params.format = format;
       const visual = ABCJS.renderAbc(code, source, params)[0];
       if (visual) SCORE_VISUALS.set(code, visual);
+      sinkLedgers(code);
     } catch (e) {
       // Score rendering must never break editing.
     }

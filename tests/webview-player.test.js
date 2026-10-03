@@ -2412,6 +2412,85 @@ test("every voice of a duet lights up, on its own staff", { skip }, async () => 
   await h.close();
 });
 
+// The ledger lines of a sounding note take the accent with it, as they did
+// while abcjs kept them in the note's group, which is the element it marks.
+// They stand under the notes of their system now (sinkLedgers in main.js,
+// 2026-10-03), out of that group, so the player marks them itself
+// (lightLedgers), with a class of its own: abcjs's class stays on what abcjs
+// lit, which the tests around this one count and measure. Under the real
+// player, on both sides: a middle C, whose one line is lit and no other,
+// then an E with no ledger line, where none is lit, and nothing left lit
+// when the player is shut.
+test("a sounding note's ledger lines are lit with it and put out with it (LL4)", { skip }, async () => {
+  const text = "```abc\nX:1\nL:1/4\nQ:1/4=80\nK:C\nC2 e2|A,4|\n```\n";
+  for (const [theme, grey, accent] of [
+    ["light", "rgb(163, 163, 163)", "rgb(160, 116, 15)"],
+    ["dark", "rgb(111, 111, 111)", "rgb(217, 169, 79)"],
+  ]) {
+    const h = await open({ text, scores: 1, height: 900, seed: { settings: { theme } } });
+    try {
+      // Every ledger line: the note it belongs to, whether it is lit, its
+      // paint; and what carries abcjs's own mark.
+      const read = () =>
+        h.page.evaluate(() => {
+          const svg = document.querySelector("#app code.language-abc svg");
+          const notes = Array.from(svg.querySelectorAll(".abcjs-note"));
+          return {
+            // By note, whatever order the drawing holds them in.
+            lines: Array.from(svg.querySelectorAll(".abcjs-ledger"))
+              .map((line) => ({
+                note: notes.findIndex((n) => (n.mdmLedgers || []).indexOf(line) >= 0),
+                lit: line.classList.contains("mdm-ledger--lit"),
+                fill: getComputedStyle(line).fill,
+              }))
+              .sort((a, b) => a.note - b.note),
+            marked: Array.from(svg.querySelectorAll(".abcjs-note_selected")).map((el) =>
+              notes.indexOf(el) >= 0 ? "note " + notes.indexOf(el) : el.getAttribute("class")
+            ),
+          };
+        });
+      const sounding = (index) =>
+        h.page.waitForFunction(
+          (index) => {
+            const svg = document.querySelector("#app [data-mdm-audio] code.language-abc svg");
+            const notes = svg ? Array.from(svg.querySelectorAll(".abcjs-note")) : [];
+            return notes.indexOf(svg && svg.querySelector(".abcjs-note.abcjs-note_selected")) === index;
+          },
+          { timeout: 15000 },
+          index
+        );
+      const rest = await read();
+      assert.deepEqual(rest.lines.map((l) => l.note), [0, 2, 2], theme + ": the lines of the C and of the low A");
+      await clickToggle(h.page, 0);
+      await h.page.waitForFunction(() => document.querySelector(".mdm-audio .abcjs-midi-start"), { timeout: 15000 });
+      await pressPlay(h.page);
+      await sounding(0);
+      const onC = await read();
+      assert.deepEqual(onC.marked, ["note 0"], theme + ": what abcjs marked");
+      assert.deepEqual(
+        onC.lines.map((l) => [l.lit, l.fill]),
+        [[true, accent], [false, grey], [false, grey]],
+        theme + ": the sounding C's line is not the one lit"
+      );
+      await sounding(1);
+      const onE = await read();
+      assert.deepEqual(
+        onE.lines.map((l) => [l.lit, l.fill]),
+        [[false, grey], [false, grey], [false, grey]],
+        theme + ": a line stayed lit after its note"
+      );
+      await clickToggle(h.page, 0); // close: playback stops, highlight cleared
+      await new Promise((r) => setTimeout(r, 300));
+      const shut = await read();
+      assert.deepEqual(shut.marked, [], theme + ": a note left marked");
+      assert.equal(shut.lines.filter((l) => l.lit).length, 0, theme + ": a line left lit");
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+  }
+});
+
 // A written silence takes the ink like a note while the cursor is on it. It
 // always did when the tune was played from the top, where the synth reports
 // the rest as an event of its own and the highlight lights it. What it did
