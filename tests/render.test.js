@@ -3812,3 +3812,41 @@ test("on paper a display formula in a table's cell goes down in the cell, and a 
   const text = spawnSync("pdftotext", ["-layout", path.join(dir, "cell.pdf"), "-"], { encoding: "utf8" }).stdout;
   assert.match(text, /See Equation 1\./);
 });
+
+// A cell of a table written as a list, set on paper as the editor draws it
+// (cell_lines in mdm.lua; MDM's reading, taken on the owner's word of
+// 2026-10-02): the box a task of a list has on paper, Pandoc's $\square$ and
+// $\boxtimes$, half an em before the words, the bullet a list has, and a
+// `<br>` the line break it is in the editor and on the page. LaTeX left the
+// `<br>` out, raw HTML that it is, and `first<br>second` came out as
+// "firstsecond", two tasks of a cell on one line (2026-10-02).
+test("on paper a cell written as a list sets its boxes and bullets, and breaks its lines at a <br> (TB17)", {
+  skip: spawnSync("pdftotext", ["-v"]).status !== 0 && "needs pdftotext",
+}, () => {
+  const dir = freshDir("pdf-cell-lists");
+  fs.writeFileSync(
+    path.join(dir, "cell.mdm"),
+    "---\nformat:\n  pdf:\n    documentclass: article\nfilters:\n  - mdm\n---\n\n" +
+      "| Tasks | Bullets |\n|---|---|\n| - [ ] Tune | - Rosin |\n| - [x] Scales<br>1. [ ] Arpeggios | * Bow<br> + Mute |\n" +
+      "| first<br>second | 1. as written |\n"
+  );
+  const r = runMdm(["render", "cell.mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const tex = fs.readFileSync(path.join(dir, "cell.tex"), "utf8");
+  // Pandoc wraps a long line of the .tex, so any run of blanks between
+  // the pieces.
+  assert.match(tex, /^\$\\square\$\\hspace\{0\.5em\}Tune\s+&\s+\\textbullet\{\}\s+Rosin\s+\\\\$/m);
+  assert.match(
+    tex,
+    /\\vtop\{\\hbox\{\\strut\s+\$\\boxtimes\$\\hspace\{0\.5em\}Scales\}\\hbox\{\\strut\s+\$\\square\$\\hspace\{0\.5em\}Arpeggios\}\}/
+  );
+  assert.match(tex, /\\vtop\{\\hbox\{\\strut\s+\\textbullet\{\}\s+Bow\}\\hbox\{\\strut\s+\\textbullet\{\}\s+Mute\}\}/);
+  assert.match(tex, /\\vtop\{\\hbox\{\\strut\s+first\}\\hbox\{\\strut\s+second\}\}\s+&\s+1\.\s+as\s+written/);
+  // On the sheet, each line of a cell under the one before it.
+  const words = pdfWordBoxes(path.join(dir, "cell.pdf"));
+  const at = (w) => words.find((x) => x.text === w);
+  for (const [over, under] of [["Scales", "Arpeggios"], ["Bow", "Mute"], ["first", "second"]]) {
+    assert.ok(at(over) && at(under), over + " or " + under + " is not on the sheet");
+    assert.ok(at(under).y0 > at(over).y1, under + " is not on a line under " + over);
+  }
+});

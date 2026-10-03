@@ -95,6 +95,17 @@
 - A display equation in a table's cell no longer stops the PDF with "Not
   allowed in LR mode": it goes down in its cell, level with the row, its
   number beside it if it has one.
+- A cell of a table can hold a short list. Written `- [ ] Tune the A`, it
+  shows the box of a task, which a click ticks; written `- Rosin`, a
+  bullet; and a `<br>` (`Shift+Enter` in a row) starts the next item in
+  the same cell. So it is in the editor, on the page and on paper.
+  Markdown itself has no list in a table's cell, so on GitHub and in other
+  editors these cells still read as they are written. A click anywhere
+  else on the table opens its source, as before. With the caret in a cell,
+  the list buttons and `Ctrl+Shift+T` put their marker in that cell: they
+  wrote it in front of the row, and the row fell out of the table. On
+  paper a `<br>` in any cell is a line break, as in the editor and on the
+  page; it was left out, and the two lines ran together.
 - The page stays on the line being read when the text gets its width
   back near the end of the document: an editor closed beside it, the
   window made wider, the outline shut, the font changed from the toolbar.

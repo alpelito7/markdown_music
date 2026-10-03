@@ -6319,6 +6319,85 @@ and `webview-markdown` whose names touch a task, a list or a marker (20 of
 20), the list tests of `html.test.js` (3 of 3) and `test:fast` (259 of
 259). `render.test.js` and the rest of `html.test.js` were not run.
 
+### A list in a table's cell (2026-10-02)
+
+The owner asked to see tasks and bullets in a cell
+(`| - [ ] task1 | - bullet1 |`). Markdown has no such thing: a cell of a
+pipe table holds one line of inline text, and Pandoc 3.8.3 prints
+`<td>- [ ] task1</td>` with the export's reader and with `-f gfm` alike, so
+the editor, the page and the paper all showed the characters. Asked first,
+with what it breaks elsewhere (GitHub, other editors and Pandoc without the
+filter keep showing the characters), the owner chose to have them drawn,
+and that a click on a box ticks it while a click anywhere else on the table
+still opens its source. MDM's reading, on all three surfaces: a line of a
+cell starts at its head and past every `<br>`; a bullet (`-`, `+`, `*`) and
+a space make an item with the prose's bullet, and a box after a bullet or a
+number (`[ ]`, `[x]`) and a space make a task with the prose's box in place
+of the marker; a number with no box stays the text it is. `cellItems` in
+`main.js` and `cell_lines` in `mdm.lua` (both trees); the page's box is the
+list's rule in both copies of `mdm-look.css` with its own margin, and the
+editor needed no rule of its own (`.mdm-task`, `.mdm-li-gap` and
+`.mdm-bullet` were already general).
+
+Two defects came up on the way. The list buttons and `Ctrl+Shift+T` with
+the caret in a row wrote their marker in front of the row,
+`- [ ] | task1 | bullet1 |`, and the row became a list item and left the
+table; they now work on the lines of the cells (`cellLines`). And on paper
+a `<br>` in a cell was raw HTML, which the LaTeX writer leaves out:
+`first<br>second` came out as "firstsecond". It is a LineBreak in a cell
+now, which Pandoc sets as a `\vtop` of one `\hbox` a line.
+
+Two readings the page cannot follow, since Pandoc's tokens keep neither a
+backslash nor the width of a space: `\- word` is text in the editor and a
+bullet on the page and paper, and `[  ]` with two spaces is text in the
+editor and a box there. Both are said beside `cellItems` and `cell_lines`.
+
+Five tests. In `webview-markdown.test.js`, **TB13**, every cell read as
+its pieces. In `webview-editing.test.js`, **TB14**, the buttons in a row
+(a caret, the head of the row, the header, an empty cell, a line past a
+`<br>`, a selection over two rows, the alignment row), and **TB15**, a
+click on a box ticks it with the table shut, the caret where it was and
+the focus in the text, and a click on a cell's words opens the source at
+the cell. In `html.test.js`, **TB16**, the page against the editor in both
+faces: the pieces of every cell, and with `TASK_BOXES` the box of a
+one-line cell (13 px, the same height in its line, at the head of the
+cell, 8 px before the words, the same drawing), the bullet's shade and its
+words. In `render.test.js`, **TB17**, the `.tex` of the cells and each line
+of a cell under the one before it on the sheet. Each mutation swapped in
+place, its tests run and swapped back in one command, the three files
+checked back by their hashes:
+
+- **CI-a** no item read in the editor → TB13, TB15, TB16. **CI-b** no line
+  read past a `<br>` → TB13, TB16. **CI-c** the box without its gap →
+  TB13, TB16 (*the gap before the words*). **CI-d** the box's offset one
+  off → TB15. **CI-e** a click on a box opens the table → TB15.
+- **CI-f** the press on a box not held → **survived** at first: the box
+  took the focus from the text, and a space typed then would have ticked
+  it in the page and not in the file. TB15 now asks that the focus stays
+  in the text, and fails (*the box took the focus*).
+- **CI-g** the buttons in front of the row, **CI-h** the caret left in
+  front of the marker, **CI-i** a cell's `<br>` not a line → TB14 each.
+- **CL-a** the filter leaving the cells → TB16, TB17. **CL-b** no line past
+  a `<br>` on the page and paper → TB16, TB17. **CL-c** the `<br>` left raw
+  on paper, **CL-e** the box on paper without its half em → TB17.
+  **CL-d** the page's box without its class → TB16 (the browser's box,
+  4.89 px before the words).
+- **CS-a** the page's box pulled into a list's gap (−21 px), **CS-b** the
+  browser's box on the page, **CS-c** the page's bullet in full ink,
+  **CS-d** a task done not filled on the page → TB16 each.
+
+Nineteen of nineteen caught, CI-f after the test was given its focus
+check. Not seen in a real VS Code window: the harness is the webview's
+own page in Chrome, which is the evidence here.
+
+Run on this state: `test:fast` (277 of 277), the table cases of
+`webview-markdown.test.js` (12 of 12), the tests of
+`webview-editing.test.js` whose names touch a task or a list, TB14 and
+TB15 among them (18 of 18), TB3, TB16 and the list's hanging indent in
+`html.test.js` (3 of 3), since the page's box rule gained a selector, and
+TB17 with the display formula in a cell in `render.test.js` (2 of 2). The
+rest of the suites were not run.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

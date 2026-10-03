@@ -1505,6 +1505,109 @@ test("the task button puts a box behind the marker a line has, makes a bulleted 
   assert.equal(out.text, "> - [ ] Cello\n");
 });
 
+// In a table's row the list buttons work on the cells, where the editor and
+// the export read a list (cellItems in main.js, cell_lines in mdm.lua; MDM's
+// reading, taken on 2026-10-02). They wrote their marker in front of the
+// row, `- [ ] | task1 | bullet1 |`, and the row became a list item and left
+// the table. A line of a cell is a line here, from its head or a `<br>` to
+// the next, and the buttons do with it what they do with a line of prose.
+test("in a table's row the list and task buttons write their marker into the cell and not in front of the row (TB14)", { skip }, async () => {
+  const text = "| a | b |\n|---|---|\n| task1 | bullet1 |\n";
+  let out = await buttonOn(text, text.indexOf("sk1"), "task-list");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| - [ ] task1 | bullet1 |\n");
+  assert.deepEqual(out.ranges, [[text.indexOf("sk1") + 6, text.indexOf("sk1") + 6]]);
+  out = await buttonOn(text, text.indexOf("llet1"), "unordered-list");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| task1 | - bullet1 |\n");
+  out = await buttonOn(text, text.indexOf("llet1"), "ordered-list");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| task1 | 1. bullet1 |\n");
+  // Twice, the box goes and the item stays, as on a line of prose.
+  out = await buttonOn(text, text.indexOf("sk1"), "task-list", 2);
+  assert.equal(out.text, "| a | b |\n|---|---|\n| - task1 | bullet1 |\n");
+  // A caret before the first pipe takes the first cell, and one in the
+  // header its cell.
+  out = await buttonOn(text, text.indexOf("| task1"), "task-list");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| - [ ] task1 | bullet1 |\n");
+  out = await buttonOn(text, 3, "unordered-list");
+  assert.equal(out.text, "| - a | b |\n|---|---|\n| task1 | bullet1 |\n");
+  // In an empty cell the marker goes in at the caret and the caret after
+  // it, where the words of the item will be typed.
+  const empty = "| a | b |\n|---|---|\n|   | x |\n";
+  out = await buttonOn(empty, empty.indexOf("|   |") + 2, "task-list");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| - [ ]   | x |\n");
+  assert.deepEqual(out.ranges, [[empty.indexOf("|   |") + 8, empty.indexOf("|   |") + 8]]);
+  // A line past a <br> is a line of its own.
+  const broken = "| a | b |\n|---|---|\n| - [ ] one<br>two | x |\n";
+  out = await buttonOn(broken, broken.indexOf("two") + 1, "task-list");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| - [ ] one<br>- [ ] two | x |\n");
+  // A selection takes every line of a cell it touches, row after row.
+  const rows = "| a | b |\n|---|---|\n| one | x |\n| two | y |\n";
+  out = await buttonOn(rows, [{ anchor: rows.indexOf("one"), head: rows.indexOf("two") + 2 }], "unordered-list");
+  assert.equal(out.text, "| a | b |\n|---|---|\n| - one | - x |\n| - two | y |\n");
+  // The alignment row takes no marker.
+  out = await buttonOn(text, text.indexOf("---") + 1, "task-list");
+  assert.equal(out.text, text);
+});
+
+// A box in a table's cell is the prose's box, and a click ticks it in the
+// source while the table stays drawn; a click anywhere else on the table
+// opens its source, as it always has. The owner asked for both, in those
+// words (2026-10-02).
+test("a click on a box in a table's cell ticks it and leaves the table shut, and a click on the rest of the table opens its source (TB15)", { skip }, async () => {
+  const text = "Before.\n\n| tasks | bullets |\n|---|---|\n| - [ ] task1 | - bullet1 |\n| - [x] task2<br>- [ ] three | x |\n";
+  const h = await open({ text, scores: 0, height: 900 });
+  try {
+    const box = (i) =>
+      h.page.evaluate((i) => {
+        const r = document.querySelectorAll("#app .mdm-table input.mdm-task")[i].getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }, i);
+    const state = () =>
+      h.page.evaluate(() => ({
+        boxes: Array.from(document.querySelectorAll("#app .mdm-table input.mdm-task")).map((b) => b.checked),
+        open: document.querySelectorAll("#app .cm-line.mdm-table-line").length,
+      }));
+    await setSelection(h.page, 0);
+    let at = await box(0);
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(150);
+    assert.equal(await docText(h.page), text.replace("- [ ] task1", "- [x] task1"));
+    assert.deepEqual(await state(), { boxes: [true, true, false], open: 0 }, "the click opened the table");
+    assert.deepEqual(await selectionRanges(h.page), [[0, 0]], "the click moved the caret");
+    // The press is held, as on the prose's box: the focus stays in the
+    // text, where the browser would have given it to the box.
+    assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, "the box took the focus");
+    // The second line of a cell, done and undone.
+    at = await box(1);
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(150);
+    at = await box(2);
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(150);
+    assert.equal(await docText(h.page), text.replace("- [ ] task1", "- [x] task1").replace("- [x] task2", "- [ ] task2").replace("- [ ] three", "- [x] three"));
+    // The words of a cell open the source at the cell, as before.
+    const words = await h.page.evaluate(() => {
+      const td = document.querySelectorAll("#app .mdm-table tbody td")[1];
+      const r = td.getBoundingClientRect();
+      return { x: r.right - 4, y: r.top + r.height / 2 };
+    });
+    await h.page.mouse.click(words.x, words.y);
+    await sleep(200);
+    assert.equal((await state()).open, 4, "a click on a cell's words did not open the table");
+    const [[caret]] = await selectionRanges(h.page);
+    assert.equal(caret, text.indexOf("- bullet1"), "the caret is not at the cell's words");
+    // Open, the drawing under the source still ticks its boxes, and the
+    // caret stays in the source.
+    at = await box(0);
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(150);
+    assert.match(await docText(h.page), /\| - \[ \] task1 \|/);
+    assert.deepEqual(await selectionRanges(h.page), [[caret, caret]]);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
 test("the quote button quotes the whole of the blocks it touches and takes a quote off again", { skip }, async () => {
   // A caret quotes its whole paragraph: a line left out would stay in the
   // quote as lazy continuation.

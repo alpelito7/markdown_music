@@ -431,7 +431,11 @@ body main.content ol > li::before {
    Quarto's page Bootstrap's reboot already hands an input the family and
    the size of its line, so taking the declaration out changes nothing there
    and no test sees it go (mutation TB-o, tests/README.md); it stays for a
-   page set without that sheet, which nothing here has measured. */
+   page set without that sheet, which nothing here has measured.
+
+   The same box stands in a table's cell written as a list (cell_lines in
+   mdm.lua, `input.mdm-task`), at the head of its line and not out in a
+   gap, with the half em after it that the editor's .mdm-li-gap leaves. */
 body main.content li:has(> input[type="checkbox"]:first-child)::before,
 body main.content li:has(> label:first-child > input[type="checkbox"]:first-child)::before,
 body main.content li:has(> p:first-child > input[type="checkbox"]:first-child)::before,
@@ -441,7 +445,8 @@ body main.content li:has(> p:first-child > label:first-child > input[type="check
 body main.content li > input[type="checkbox"]:first-child,
 body main.content li > label:first-child > input[type="checkbox"]:first-child,
 body main.content li > p:first-child > input[type="checkbox"]:first-child,
-body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child {
+body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child,
+body main.content input.mdm-task {
   -webkit-appearance: none;
   appearance: none;
   box-sizing: border-box;
@@ -459,14 +464,16 @@ body main.content li > p:first-child > label:first-child > input[type="checkbox"
 body main.content li > input[type="checkbox"]:first-child:checked,
 body main.content li > label:first-child > input[type="checkbox"]:first-child:checked,
 body main.content li > p:first-child > input[type="checkbox"]:first-child:checked,
-body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child:checked {
+body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child:checked,
+body main.content input.mdm-task:checked {
   border-color: var(--mdm-play-accent);
   background: var(--mdm-play-accent);
 }
 body main.content li > input[type="checkbox"]:first-child:checked::before,
 body main.content li > label:first-child > input[type="checkbox"]:first-child:checked::before,
 body main.content li > p:first-child > input[type="checkbox"]:first-child:checked::before,
-body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child:checked::before {
+body main.content li > p:first-child > label:first-child > input[type="checkbox"]:first-child:checked::before,
+body main.content input.mdm-task:checked::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -475,6 +482,16 @@ body main.content li > p:first-child > label:first-child > input[type="checkbox"
     center / 100% 100% no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 11'%3E%3Cpath d='M2.3 5.7 4.6 8 8.8 3' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     center / 100% 100% no-repeat;
+}
+/* The box of a cell and the bullet of a cell (cell_lines in mdm.lua): the
+   box at the head of its line with the half em after it, and the bullet in
+   the shade of a list's (the editor's .mdm-bullet), with a space after it
+   in the face. */
+body main.content input.mdm-task {
+  margin: 0 0.5em 0 0;
+}
+body main.content .mdm-bullet {
+  color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
 }
 body hr {
   height: 0;

@@ -1360,6 +1360,47 @@ const CASES = [
     domExpected: [["a | b", "escaped pipe"], ["a \\| b", "pipe in code, escaped"], ["x || y", "unescaped pipes in code"]],
   },
   {
+    id: "TB13",
+    name: "a cell written as a list draws the prose's box and bullet, a line at a time past a <br>, and a number with no box as written",
+    // MDM's reading and not Markdown's (cellItems in main.js), taken on the
+    // owner's word of 2026-10-02: Pandoc 3.8.3 prints every one of these
+    // cells as the characters it is, with the export's reader and with
+    // `-f gfm`, and mdm.lua sets them as drawn here (html.test.js and
+    // render.test.js hold the page and the paper to it). The escaped bullet
+    // is text here and a bullet on the page, which cannot tell `\-` from
+    // `-` (noted beside cellItems).
+    text:
+      "| tasks | bullets |\n|---|---|\n| - [ ] task1 | - bullet1 |\n" +
+      "| - [x] task2<br>1. [ ] three | * b2<br> + b3 |\n| \\- escaped | 1. plain |\n",
+    rows: [
+      [1, "mdm-table", "tasksbullets☐ task1• bullet1☑ task2☐ three• b2• b3- escaped1. plain"],
+      [6, "mdm-blank", ""],
+    ],
+    // Each cell as its pieces: a box as [ ] or [x], the half em after it as
+    // _, a bullet, a line break as ⏎, and the text.
+    dom: async (page) =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll("#app .mdm-table tbody td")).map((td) =>
+          Array.from(td.childNodes)
+            .map((n) =>
+              n.nodeType === 3
+                ? n.textContent
+                : n.matches("input.mdm-task")
+                  ? n.checked ? "[x]" : "[ ]"
+                  : n.matches(".mdm-li-gap")
+                    ? "_"
+                    : n.matches(".mdm-bullet")
+                      ? "•"
+                      : n.tagName === "BR"
+                        ? "⏎"
+                        : n.outerHTML
+            )
+            .join("")
+        )
+      ),
+    domExpected: ["[ ]_task1", "• bullet1", "[x]_task2⏎[ ]_three", "• b2⏎• b3", "- escaped", "1. plain"],
+  },
+  {
     id: "M01",
     name: "inline maths is typeset, dollars hidden",
     text: "Euler: $e^{i\\pi} + 1 = 0$, a fraction $\\frac{a}{b}$.\n",

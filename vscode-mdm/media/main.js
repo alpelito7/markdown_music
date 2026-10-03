@@ -5195,6 +5195,63 @@
     return parts;
   }
 
+  // A cell of a table written as a list (`| - [ ] Tune the A string |`),
+  // drawn as one. This is MDM's reading and not Markdown's, taken on the
+  // owner's word of 2026-10-02: a cell of a pipe table holds one line of
+  // inline text, and GFM and Pandoc both print `- [ ] task` in it as the
+  // characters it is (Pandoc 3.8.3 with `-f gfm` and with the export's
+  // reader), so that is what the file reads as anywhere else. A line of the
+  // cell starts at its head and past every `<br>` in it (Shift+Enter in a
+  // row writes one). One that opens on a bullet (`-`, `+`, `*`) and a space
+  // is an item and gets the prose's bullet, and a box after the bullet or
+  // after a number (`[ ]`, `[x]`) and a space is a task and gets the
+  // prose's box in place of the marker, as an item of a list does; a click
+  // ticks it (tickCell). A number with no box stays the text it is. mdm.lua
+  // reads the cells of the page and of the paper the same way (cell_lines).
+  //
+  // Two readings the page cannot follow, since Pandoc's tokens keep neither
+  // a backslash nor the width of a space: `\- word` is text here and a
+  // bullet on the page, and `[  ]` with two spaces is text here and a box
+  // there.
+  //
+  // The marker is read off the parts, where cellParts left it as text, and
+  // the box is placed in the source by where its line starts there: the
+  // text of a line's first part starts where the line does, at the head of
+  // the cell or at the end of its `<br>`, and the smart punctuation drawn
+  // into it changes nothing before the box. `origin` is the head of the
+  // table, which the offset is counted from (tableModel).
+  const CELL_ITEM = /^[ \t]*(?:([-+*])|\d{1,9}[.)])[ \t]+(?:\[([ xX])\][ \t]+)?/;
+  function cellItems(content, text, parts, origin) {
+    const starts = [content.from];
+    for (let c = content.firstChild; c; c = c.nextSibling) {
+      if (c.name === "HTMLTag" && /^<br\s*\/?>$/i.test(text(c.from, c.to))) starts.push(c.to);
+    }
+    const out = [];
+    let line = 0;
+    let head = true;
+    parts.forEach(function (p) {
+      if (p.kind === "br") {
+        out.push(p);
+        line++;
+        head = true;
+        return;
+      }
+      const m = head && p.kind === "text" ? CELL_ITEM.exec(p.text) : null;
+      head = false;
+      if (!m || !(m[1] || m[2])) {
+        out.push(p);
+        return;
+      }
+      out.push({
+        kind: "item",
+        checked: m[2] ? m[2] !== " " : null,
+        box: m[2] ? starts[line] - origin + m[0].indexOf("[") : null,
+      });
+      if (m[0].length < p.text.length) out.push({ kind: "text", text: p.text.slice(m[0].length) });
+    });
+    return out;
+  }
+
   // What a run of parts says, for the title of a link that carries its own
   // address as its label.
   function partsText(parts) {
@@ -5244,6 +5301,32 @@
       }
       if (p.kind === "br") {
         el.appendChild(document.createElement("br"));
+        return;
+      }
+      if (p.kind === "item") {
+        // An item of a cell (cellItems), with the prose's own pieces: the
+        // bullet and a space after it, or the box and the half em after it
+        // (markerDOM). The box says where it stands in the source, as an
+        // offset from the head of the table, for the click (tickCell).
+        if (p.checked === null) {
+          const bullet = document.createElement("span");
+          bullet.className = "mdm-bullet";
+          bullet.textContent = "•";
+          el.appendChild(bullet);
+          el.appendChild(document.createTextNode(" "));
+          return;
+        }
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.className = "mdm-task";
+        box.checked = p.checked;
+        box.setAttribute("aria-label", p.checked ? "Done" : "To do");
+        box.setAttribute("data-mdm-box", String(p.box));
+        el.appendChild(box);
+        const gap = document.createElement("span");
+        gap.className = "mdm-li-gap";
+        gap.textContent = " ";
+        el.appendChild(gap);
         return;
       }
       if (p.kind === "eqref") {
@@ -5342,7 +5425,9 @@
         const lead = inner.length - inner.replace(/^[ \t]+/, "").length;
         out.push({
           at: (content ? content.from : from + lead) - node.from,
-          parts: content ? cellParts(content, text, null, smartMarks(content, content.to, text), refs) : [],
+          parts: content
+            ? cellItems(content, text, cellParts(content, text, null, smartMarks(content, content.to, text), refs), node.from)
+            : [],
         });
       };
       let at = row.from;
@@ -8249,9 +8334,78 @@
   // marker or a heading's hashes, and a task box.
   const LIST_LINE = /^((?:[ \t]*>)*[ \t]*)(?:([-+*])[ \t]+|(\d+)[.)][ \t]+|(#{1,6})[ \t]+)?(\[[ xX]\][ \t]+)?/;
 
+  // The head of a line of a table's cell as the list buttons read it: a
+  // list marker and a task box, the marks cellItems reads there.
+  const CELL_LINE = /^(?:([-+*])[ \t]+|(\d+)[.)][ \t]+)?(\[[ xX]\][ \t]+)?/;
+
+  // The row of a table a line of the document is, its head or one of its
+  // body rows; null for the alignment row and anywhere else.
+  function rowOfLine(tree, line) {
+    let row = null;
+    tree.iterate({
+      from: line.from,
+      to: line.to,
+      enter: function (n) {
+        if (row) return false;
+        if (n.name === "TableHeader" || n.name === "TableRow") {
+          row = n.node;
+          return false;
+        }
+      },
+    });
+    return row;
+  }
+
+  // The lines of a row's cells a range takes, for the list buttons. A row is
+  // not a line a marker can go in front of: written there, the marker took
+  // the row out of the table and made it an item holding the text
+  // (`- [ ] | a | b |`, found 2026-10-02). In a row the buttons work on the
+  // cells instead, where cellItems reads a list, and each line of a cell,
+  // from its head or a `<br>` to the next, is a line of its own. A caret
+  // takes the line it is in (a `<br>` belongs to the line after it), and
+  // one before the first pipe or after the last the line nearest it; a
+  // selection takes every line it touches. On a line with nothing on it the
+  // marker goes in at the caret, where the words will be typed.
+  function cellLines(doc, row, range) {
+    const lines = [];
+    const nodes = row.getChildren("TableCell");
+    rowCells(row, doc).forEach(function (cell) {
+      const content = nodes.filter(function (c) {
+        return c.from >= cell.from && c.to <= cell.to;
+      })[0];
+      let lo = cell.from;
+      let from = cell.textFrom;
+      (content ? content.getChildren("HTMLTag") : []).forEach(function (tag) {
+        if (!/^<br\s*\/?>$/i.test(doc.sliceString(tag.from, tag.to))) return;
+        lines.push({ lo: lo, hi: tag.from, from: from, to: tag.from });
+        lo = tag.from;
+        from = tag.to;
+      });
+      lines.push({ lo: lo, hi: cell.to, from: from, to: cell.textTo });
+    });
+    let taken;
+    if (range.empty) {
+      let pick = lines.filter(function (l) {
+        return l.lo <= range.head && range.head <= l.hi;
+      })[0];
+      if (!pick && lines.length) pick = range.head < lines[0].lo ? lines[0] : lines[lines.length - 1];
+      taken = pick ? [pick] : [];
+    } else {
+      taken = lines.filter(function (l) {
+        return l.lo < range.to && l.hi > range.from;
+      });
+    }
+    return taken.map(function (l) {
+      const own = l.from < l.to ? doc.sliceString(l.from, l.to) : "";
+      let at = l.from + (own.length - own.replace(/^[ \t]+/, "").length);
+      if (!own.trim() && range.empty && l.lo <= range.head && range.head <= l.hi) at = range.head;
+      return { at: at, text: at < l.to ? doc.sliceString(at, l.to) : "" };
+    });
+  }
+
   // The lines the selection covers that a marker belongs on, once each and
   // read into their marks: not the blank ones, nor code, an equation or the
-  // header.
+  // header. In a table's row, the lines of its cells (cellLines).
   function markableLines(state, tree) {
     const doc = state.doc;
     const seen = new Set();
@@ -8260,6 +8414,16 @@
       const first = doc.lineAt(range.from).number;
       const last = doc.lineAt(range.to).number;
       for (let n = first; n <= last; n++) {
+        const row = rowOfLine(tree, doc.line(n));
+        if (row) {
+          cellLines(doc, row, range).forEach(function (c) {
+            if (seen.has("cell " + c.at)) return;
+            seen.add("cell " + c.at);
+            const m = CELL_LINE.exec(c.text);
+            parsed.push({ at: c.at, bullet: m[1], number: m[2], box: m[3] || "", markLen: m[0].length, cell: true });
+          });
+          continue;
+        }
         if (seen.has(n)) continue;
         seen.add(n);
         const line = doc.line(n);
@@ -8348,9 +8512,23 @@
         }
         changes.push({ from: p.at, to: p.at + p.markLen - p.box.length, insert: ordered ? k + ". " : "- " });
       });
-      if (changes.length) v.dispatch({ changes: changes });
+      if (changes.length) v.dispatch(listChanges(state, changes, parsed));
       return true;
     };
+  }
+
+  // What a list button dispatches. A caret where a marker goes into a
+  // cell's line ends after it, ready for the item's words, which on a line
+  // of a cell with nothing on it is where it stood (cellLines); CodeMirror
+  // would leave it in front of what went in. In the prose the carets are
+  // mapped as they always were.
+  function listChanges(state, changes, parsed) {
+    const cell = parsed.some(function (p) {
+      return p.cell;
+    });
+    if (!cell) return { changes: changes };
+    const set = state.changes(changes);
+    return { changes: set, selection: state.selection.map(set, 1) };
   }
 
   // The task button: a box on each selected line, or off again when every
@@ -8381,7 +8559,7 @@
       else if (p.bullet || p.number) changes.push({ from: head, insert: "[ ] " });
       else changes.push({ from: p.at, to: head, insert: "- [ ] " });
     });
-    if (changes.length) v.dispatch({ changes: changes });
+    if (changes.length) v.dispatch(listChanges(state, changes, parsed));
     return true;
   }
 
@@ -10840,7 +11018,9 @@
   // (G083). A plain click on a link edits it, as in VS Code's own editor.
   function handleMouseDown(e) {
     if (!e.target.closest) return;
-    if (e.target.closest(".mdm-chrome")) {
+    // A box in a table's cell as well: its click ticks it (tickCell), and
+    // the press would give the focus to the box.
+    if (e.target.closest(".mdm-chrome, .mdm-table input.mdm-task")) {
       e.preventDefault();
       return;
     }
@@ -11861,6 +12041,16 @@
       e.preventDefault();
       return;
     }
+    // A box in a table's cell is ticked and the table stays as it is drawn;
+    // a click anywhere else on the table opens its source below, as the
+    // owner asked to keep it (2026-10-02). The default would tick the box
+    // in the page before the source does.
+    const box = e.target.closest(".mdm-table input.mdm-task");
+    if (box) {
+      e.preventDefault();
+      tickCell(box);
+      return;
+    }
     const drawing = e.target.closest(".mdm-score, .mdm-math, .mdm-table, .mdm-figure");
     if (drawing) {
       e.preventDefault();
@@ -11869,6 +12059,23 @@
       const cell = e.target.closest("[data-mdm-at]");
       revealBlock(drawing, addsCaret(e), cell ? Number(cell.dataset.mdmAt) : null, e.clientY);
     }
+  }
+
+  // The box of a task in a table's cell (cellItems), ticked or cleared in
+  // the source, the `x` or the space between its brackets, as the prose's
+  // box is (handleMouseDown). Where it stands is an offset from the head of
+  // the table, which is found from the drawing as revealBlock finds it; a
+  // source that no longer has the box there is left alone.
+  function tickCell(box) {
+    if (!view) return;
+    const tree = CM.syntaxTree(view.state);
+    let node = tree.resolveInner(Math.max(0, view.posAtDOM(box.closest(".mdm-table")) - 1), -1);
+    while (node && node.name !== "Table") node = node.parent;
+    if (!node) return;
+    const at = node.from + Number(box.getAttribute("data-mdm-box"));
+    const mark = view.state.sliceDoc(at, at + 3);
+    if (!/^\[[ xX]\]$/.test(mark)) return;
+    view.dispatch({ changes: { from: at + 1, to: at + 2, insert: mark === "[ ]" ? "x" : " " } });
   }
 
   // A click on a rendered equation or score puts the caret at the start of

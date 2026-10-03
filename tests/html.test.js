@@ -2523,6 +2523,156 @@ test("a task's box on the page is the editor's: its place in the line, its gap a
   }
 });
 
+// A cell of a table written as a list, set on the page as the editor draws
+// it: MDM's reading and not Markdown's (cell_lines in mdm.lua, cellItems in
+// main.js), taken on the owner's word of 2026-10-02. Every cell read as its
+// pieces on both surfaces (a box, a bullet, a line break, the words), and
+// the box of a one-line cell measured with TASK_BOXES against the head of
+// the cell's text: the size, the height in the line, the gap and the
+// drawing of the prose's box. The bullet in the shade a list's has, and its
+// words a space after it. In either face, on the light side.
+const CELL_PIECES = function (cells) {
+  return cells.map((td) =>
+    Array.from(td.childNodes)
+      .map((n) =>
+        n.nodeType === 3
+          ? n.textContent
+          : n.matches('input[type="checkbox"]')
+            ? n.checked ? "[x]" : "[ ]"
+            : n.matches(".mdm-li-gap")
+              ? ""
+              : n.matches(".mdm-bullet")
+                ? "•"
+                : n.tagName === "BR"
+                  ? "⏎"
+                  : n.textContent
+      )
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}.toString();
+const CELL_BULLETS = function (cells) {
+  return cells
+    .filter((td) => td.querySelector(".mdm-bullet") && !td.querySelector("br"))
+    .map((td) => {
+      const bullet = td.querySelector(".mdm-bullet");
+      // The first letter after the bullet: the space after it is a text
+      // node of its own in the editor and part of the words on the page.
+      const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) =>
+          bullet.contains(n) || !(bullet.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) || !/\S/.test(n.textContent)
+            ? NodeFilter.FILTER_REJECT
+            : NodeFilter.FILTER_ACCEPT,
+      });
+      const words = walker.nextNode();
+      const at = words.textContent.search(/\S/);
+      const range = document.createRange();
+      range.setStart(words, at);
+      range.setEnd(words, at + 1);
+      const left = td.getBoundingClientRect().left + parseFloat(getComputedStyle(td).paddingLeft);
+      return {
+        colour: getComputedStyle(bullet).color,
+        bulletLeft: Math.round((bullet.getBoundingClientRect().left - left) * 100) / 100,
+        textLeft: Math.round((range.getBoundingClientRect().left - left) * 100) / 100,
+      };
+    });
+}.toString();
+
+test("a cell written as a list is set on the page as the editor draws it: its boxes, its bullets and its lines (TB16)", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const text =
+    "| tasks | bullets |\n|---|---|\n| - [ ] Tune the A | - Rosin |\n| - [x] Done | * Bow<br> + Mute |\n" +
+    "| - [x] Scales<br>1. [ ] Arpeggios | plain |\n| 1. as written | x |\n";
+  const PIECES = ["[ ]Tune the A", "• Rosin", "[x]Done", "• Bow⏎• Mute", "[x]Scales⏎[ ]Arpeggios", "plain", "1. as written", "x"];
+  for (const face of ["roman", "sans"]) {
+    const name = "cell-lists-" + face;
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:" + face], { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    // One reading for both surfaces, the cells found by the selector given.
+    const read = function (selector, pieces, boxes, bullets) {
+      const cells = Array.from(document.querySelectorAll(selector));
+      const ones = cells.filter((td) => td.querySelector('input[type="checkbox"]') && !td.querySelector("br"));
+      return {
+        pieces: eval("(" + pieces + ")")(cells),
+        boxes: ones.map((td) => eval("(" + boxes + ")")([td], td.getBoundingClientRect().left + parseFloat(getComputedStyle(td).paddingLeft))[0]),
+        bullets: eval("(" + bullets + ")")(cells),
+      };
+    }.toString();
+
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+    });
+    OPEN_BROWSERS.add(browser);
+    const page = await browser.newPage();
+    await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    const exported = await page.evaluate(
+      (read, ...args) => eval("(" + read + ")")(...args),
+      read,
+      "main.content tbody td",
+      CELL_PIECES,
+      TASK_BOXES,
+      CELL_BULLETS
+    );
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+
+    const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: face, theme: "light" } } });
+    let editor;
+    try {
+      await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+      await h.page.evaluate(async () => {
+        await document.fonts.ready;
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      });
+      await h.page.mouse.click(2, 2);
+      await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+      editor = await h.page.evaluate(
+        (read, ...args) => eval("(" + read + ")")(...args),
+        read,
+        "#app .mdm-table tbody td",
+        CELL_PIECES,
+        TASK_BOXES,
+        CELL_BULLETS
+      );
+    } finally {
+      await h.close();
+    }
+
+    assert.deepEqual(exported.pieces, PIECES, face + ": the page's cells");
+    assert.deepEqual(editor.pieces, PIECES, face + ": the editor's cells");
+    assert.equal(exported.boxes.length, 2, face + ": the page's one-line tasks");
+    assert.equal(editor.boxes.length, 2, face + ": the editor's one-line tasks");
+    exported.boxes.forEach((p, i) => {
+      const e = editor.boxes[i];
+      const both = face + ", " + p.text + ": page " + JSON.stringify(p) + ", editor " + JSON.stringify(e);
+      assert.equal(p.text, e.text, both);
+      assert.equal(p.size, "13x13", "the page's box, " + both);
+      assert.equal(e.size, "13x13", "the editor's box, " + both);
+      assert.equal(p.foot, e.foot, "the box stands at another height in its line, " + both);
+      assert.ok(Math.abs(p.boxLeft) <= 0.5 && Math.abs(e.boxLeft) <= 0.5, "the box is not at the head of its cell, " + both);
+      assert.ok(Math.abs(p.gap - e.gap) <= 0.05, "the gap before the words, " + both);
+      assert.ok(Math.abs(p.gap - 8) <= 0.05, "the gap is not half an em, " + both);
+      for (const prop of ["appearance", "ground", "edge", "tick"]) {
+        assert.equal(p[prop], e[prop], "the box's " + prop + ", " + both);
+      }
+    });
+    assert.equal(exported.boxes[1].ground, "rgb(160, 116, 15)", face + ": a task done in a cell is not filled with the brass on the page");
+    assert.equal(exported.bullets.length, 1, face + ": the page's one-line bullets");
+    assert.equal(editor.bullets.length, 1, face + ": the editor's one-line bullets");
+    const p = exported.bullets[0];
+    const e = editor.bullets[0];
+    const both = face + ": page " + JSON.stringify(p) + ", editor " + JSON.stringify(e);
+    assert.equal(p.colour, e.colour, "the bullet's shade, " + both);
+    assert.ok(Math.abs(p.bulletLeft) <= 0.5 && Math.abs(e.bulletLeft) <= 0.5, "the bullet is not at the head of its cell, " + both);
+    assert.ok(Math.abs(p.textLeft - e.textLeft) <= 0.5, "the bullet's words, " + both);
+  }
+});
+
 // The blocks the two dialects part on, drawn as the editor draws them once
 // the copy has its blank lines (extension.js, withBreaks): a table straight
 // under a line of text, a `***` and a spaced rule under text or under an

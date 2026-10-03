@@ -3285,6 +3285,111 @@ local function sixth_heading(el)
   return pandoc.Plain(inlines)
 end
 
+-- A cell of a table written as a list (`| - [ ] Tune the A string |`), set
+-- as the editor draws it (cellItems in vscode-mdm/media/main.js). This is
+-- MDM's reading and not Markdown's, taken on the owner's word of 2026-10-02:
+-- a cell of a pipe table holds one line of inline text, and Pandoc prints
+-- `- [ ] task` in it as the characters it is. A line of the cell starts at
+-- its head and past every `<br>` in it. One that opens on a bullet (`-`,
+-- `+`, `*`) and a space is an item and gets the bullet a list has, and a
+-- box after the bullet or after a number (`[ ]`, `[x]`) and a space is a
+-- task and gets the box a task has in place of the marker: on the page the
+-- input Pandoc writes for one, which mdm-look.css draws as the editor's
+-- box, and on paper Pandoc's $\square$ and $\boxtimes$. A number with no box
+-- stays the text it is.
+--
+-- Pandoc's tokens keep neither a backslash nor the width of a space, so
+-- `\- word` comes here as a bullet where the editor draws the text, and
+-- `[  ]` with two spaces as a box where the editor draws the text.
+--
+-- On paper a `<br>` in a cell is the line break the editor and the page
+-- draw. Pandoc's LaTeX writer leaves raw HTML out, so `first<br>second`
+-- came out as "firstsecond", and two tasks in a cell would have stood on
+-- one line (measured 2026-10-02); a LineBreak in a cell of a table with no
+-- widths it sets as a \vtop of one \hbox a line.
+local function cell_break(el)
+  return el.t == "LineBreak"
+    or (el.t == "RawInline" and el.format == "html" and el.text:lower():match("^<br%s*/?>$") ~= nil)
+end
+
+-- The item a line of a cell opens with, read from inlines[i]: the index past
+-- its marker, its box and the spaces before them, and whether the box is
+-- ticked (nil for a bullet); nil when the line is no item.
+local function cell_item(inlines, i)
+  local function is(el, t, text)
+    return el ~= nil and el.t == t and (text == nil or el.text == text)
+  end
+  while is(inlines[i], "Space") do i = i + 1 end
+  local mark = inlines[i]
+  if not (is(mark, "Str") and is(inlines[i + 1], "Space")) then return nil end
+  local bullet = mark.text == "-" or mark.text == "+" or mark.text == "*"
+  if not bullet and not (mark.text:match("^%d+[.)]$") and #mark.text <= 10) then return nil end
+  local k = i + 2
+  local a, b, c, d = inlines[k], inlines[k + 1], inlines[k + 2], inlines[k + 3]
+  if is(a, "Str") and (a.text == "[x]" or a.text == "[X]") and is(b, "Space") then
+    return k + 2, true
+  end
+  if is(a, "Str", "[") and is(b, "Space") and is(c, "Str", "]") and is(d, "Space") then
+    return k + 4, false
+  end
+  if bullet then return k, nil end
+  return nil
+end
+
+local function cell_lines(inlines)
+  local latex = quarto.doc.is_format("latex")
+  local out = pandoc.Inlines({})
+  local head = true
+  local i = 1
+  while i <= #inlines do
+    local past, ticked
+    if head then past, ticked = cell_item(inlines, i) end
+    head = false
+    if past and ticked == nil then
+      out:insert(latex and pandoc.RawInline("latex", "\\textbullet{}")
+        or pandoc.Span({ pandoc.Str("•") }, { class = "mdm-bullet" }))
+      out:insert(pandoc.Space())
+      i = past
+    elseif past then
+      out:insert(latex
+        and pandoc.RawInline("latex", (ticked and "$\\boxtimes$" or "$\\square$") .. "\\hspace{0.5em}")
+        or pandoc.RawInline("html", '<input type="checkbox" class="mdm-task"' .. (ticked and ' checked=""' or "") .. " />"))
+      i = past
+    else
+      local el = inlines[i]
+      if cell_break(el) then
+        head = true
+        if latex then el = pandoc.LineBreak() end
+      end
+      out:insert(el)
+      i = i + 1
+    end
+  end
+  return out
+end
+
+local function table_lists(el)
+  if not quarto.doc.is_format("html") and not quarto.doc.is_format("latex") then
+    return nil
+  end
+  local function rows(list)
+    for _, row in ipairs(list) do
+      for _, cell in ipairs(row.cells) do
+        for _, block in ipairs(cell.contents) do
+          if block.t == "Plain" or block.t == "Para" then block.content = cell_lines(block.content) end
+        end
+      end
+    end
+  end
+  rows(el.head.rows)
+  for _, body in ipairs(el.bodies) do
+    rows(body.head)
+    rows(body.body)
+  end
+  rows(el.foot.rows)
+  return el
+end
+
 -- Meta has to run before the CodeBlocks, since it settles the abcm2ps path,
 -- and before the headings, since it settles which command each level of them
 -- is written as (look.heads). The equations are numbered next, before Math
@@ -3294,5 +3399,5 @@ return {
   { Meta = Meta },
   { Pandoc = equations },
   { CodeBlock = CodeBlock, Header = sixth_heading, HorizontalRule = horizontal_rule,
-    Figure = figure_on_paper, Image = Image, Math = Math, Pandoc = document },
+    Figure = figure_on_paper, Image = Image, Math = Math, Table = table_lists, Pandoc = document },
 }
