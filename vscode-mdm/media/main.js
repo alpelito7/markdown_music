@@ -4494,9 +4494,10 @@
       return false;
     }
     // A click on the drawing puts the caret at its source, which is what
-    // opens it; the editor's own click handler does that (revealBlock), so
-    // CodeMirror leaves the event alone. The preview sits after the source
-    // the caret is already in, so its clicks are its own too.
+    // opens it, and the next one puts the source away; the editor's own
+    // click handler does both (revealBlock, putAwayDrawing), so CodeMirror
+    // leaves the event alone. The preview sits after the source the caret
+    // is already in, so its click is the one that puts it away.
     ignoreEvent() {
       return true;
     }
@@ -4571,8 +4572,9 @@
       return framed(block, this.frame);
     }
     // The chrome and the player are theirs, and a click on the score itself
-    // is answered by the editor's click handler (revealBlock), so CodeMirror
-    // leaves every event alone.
+    // is answered by the editor's click handler (revealBlock, and
+    // putAwayDrawing for the next one), so CodeMirror leaves every event
+    // alone.
     ignoreEvent() {
       return true;
     }
@@ -5566,8 +5568,9 @@
       wrap.appendChild(chrome);
       return framed(wrap, this.frame);
     }
-    // The click puts the caret at the source, which the editor's own handler
-    // does (revealBlock), and the rail's are answered by handleChromeClick;
+    // The click puts the caret at the source and the next one puts the
+    // source away, which the editor's own handler does (revealBlock,
+    // putAwayDrawing), and the rail's are answered by handleChromeClick;
     // CodeMirror leaves every event alone.
     ignoreEvent() {
       return true;
@@ -11024,6 +11027,31 @@
     requestAnimationFrame(look);
   }
 
+  // The drawing a press or a click belongs to. The block before the maths:
+  // a formula in a table's cell, in a figure's caption or after an
+  // equation's `$$` is part of that block's drawing and not one of its own.
+  // Taken for one, a click on `$k^2$` in a cell opened the table with the
+  // caret at the table's end, and not at the cell as the rest of the cell
+  // does (measured, 2026-10-03).
+  function drawingAt(target) {
+    return target.closest(".mdm-score, .mdm-math--block, .mdm-table, .mdm-figure") || target.closest(".mdm-math");
+  }
+
+  // That drawing when it stands for a block whose source is open: the
+  // preview beside an inline equation being edited, or a score, a display
+  // equation or a table whose rail says so (.mdm-chrome--open, which the
+  // widget takes from the same reading of the carets that opens the source).
+  function openDrawing(target) {
+    const drawing = drawingAt(target);
+    if (!drawing) return null;
+    if (drawing.classList.contains("mdm-math--preview")) return drawing;
+    const rail = drawing.querySelector(":scope > .mdm-chrome");
+    return rail && rail.classList.contains("mdm-chrome--open") ? drawing : null;
+  }
+
+  // The drawing the last press found open (handleMouseDown), for its click.
+  let closingDrawing = null;
+
   // Mousedown on the chrome of a block (copy, player toggle), on a list
   // marker, and on a link with the follow modifier. Caught on the content
   // DOM in the capture phase: CodeMirror ignores events inside the widgets
@@ -11034,8 +11062,28 @@
   // caret at the item's text (G066), and Ctrl+click on a link follows it: a
   // heading of this document by the caret, anything else through the host
   // (G083). A plain click on a link edits it, as in VS Code's own editor.
+  //
+  // A plain press on the drawing of a block whose source is open is noted:
+  // its click puts the source away (handleChromeClick). Whether the block
+  // was open is read on the press, because that is what the reader was
+  // looking at; by the click the press may have handed an unfocused
+  // document the focus, and a caret left inside a drawn block then reads as
+  // open, so the first click on it would have shut it. And held: left to
+  // the browser, the press takes the native selection out of the text until
+  // the click puts a caret back, and in VS Code a button kept down for most
+  // of a second came back with the caret at the head of the document (the
+  // first slow click of a window, two cold starts of two in 1.133; never in
+  // the harness, where the selection is taken away all the same), so the
+  // click found no caret in the block to bring out under it.
+  // Not the second press of a double click, which says "edit this" and must
+  // not shut what the first one opened, and not one with a modifier, which
+  // adds a caret or follows a link: either forgets what the press before it
+  // noted, so a press dragged off the drawing leaves nothing for them.
   function handleMouseDown(e) {
     if (!e.target.closest) return;
+    const plain = e.detail === 1 && !(e.shiftKey || e.altKey || e.ctrlKey || e.metaKey);
+    closingDrawing = plain ? openDrawing(e.target) : null;
+    if (closingDrawing) e.preventDefault();
     // A box in a table's cell as well: its click ticks it (tickCell), and
     // the press would give the focus to the box.
     if (e.target.closest(".mdm-chrome, .mdm-table input.mdm-task")) {
@@ -12097,9 +12145,17 @@
       tickCell(box);
       return;
     }
-    const drawing = e.target.closest(".mdm-score, .mdm-math, .mdm-table, .mdm-figure");
+    const drawing = drawingAt(e.target);
     if (drawing) {
       e.preventDefault();
+      // Pressed while its source was open: the click puts it away, the
+      // second click on the hand undoing the first (the owner, 2026-10-02).
+      const open = closingDrawing;
+      closingDrawing = null;
+      if (open === drawing) {
+        putAwayDrawing(drawing);
+        return;
+      }
       // A table says where in its source the click was: the cell it landed
       // on, as an offset from the head of the table (TableWidget).
       const cell = e.target.closest("[data-mdm-at]");
@@ -12200,6 +12256,37 @@
       });
     }
     view.focus();
+  }
+
+  // The second click on a drawing, which puts its source away the way a click
+  // outside the text does, as the owner asked (2026-10-02): the carets come
+  // out of the open blocks (dismissOpenBlock) and the document is left to
+  // nobody (leaveDocument), which draws it as it reads.
+  //
+  // The source stands above the drawing, so its lines going lift the drawing
+  // out from under the pointer by their height; it is held where it was, as
+  // the opening holds the line that was clicked (revealBlock). The widget
+  // keeps its element while the caret leaves (updateDOM), which is what is
+  // measured; the preview of an inline equation goes with its source, and
+  // the row it stood on stays where it was.
+  function putAwayDrawing(el) {
+    if (!view) return;
+    const top = el.getBoundingClientRect().top;
+    dismissOpenBlock();
+    leaveDocument();
+    // What syncFocus would do once the focus has gone, said outright: it
+    // only takes the focus going nowhere for the reader's doing within half
+    // a second of a press (leftByHand), and the press of a slow click is
+    // further back than that by its release.
+    if (view.state.field(focusField, false)) view.dispatch({ effects: setFocused.of(false) });
+    view.requestMeasure({
+      read: function () {
+        return el.isConnected ? Math.round(el.getBoundingClientRect().top - top) : 0;
+      },
+      write: function (moved, v) {
+        if (moved) v.scrollDOM.scrollTop += moved;
+      },
+    });
   }
 
   // The source of the block a piece of chrome belongs to: a score, a display

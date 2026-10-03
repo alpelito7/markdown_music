@@ -6620,6 +6620,115 @@ its slices for print (7 of 7), and in `render.test.js` LL3 and every test
 that names an engraving by its key, since the two helpers changed (9 of
 9). The rest of the suites were not run.
 
+### The second click on a drawing puts its source away (2026-10-03)
+
+The owner (2026-10-02): a click on a drawn table, with the hand, shows its
+code, and a click on it again should hide the code, "the same as what
+happens with a click outside the text", and the same for the equations and
+the scores. The second click had sent the caret back to the head of the
+source (to the cell that was clicked, in a table), and the source stayed.
+
+A plain click on the drawing of a block whose source is open now does what
+the dead margin does, by the same two calls (`dismissOpenBlock` and
+`leaveDocument`): the carets come out of the open blocks and the document
+is left to nobody. A table, a display equation, a score, and the preview
+that stands beside an inline equation while it is edited. A figure is not
+drawn while its source is open and has no second click. What is decided in
+it, each with its test:
+
+- **Open is read on the press** (`openDrawing` in `handleMouseDown`, off
+  the rail's `.mdm-chrome--open` or the preview's class) and used by the
+  click. Read at the click, a table drawn shut in a document that was
+  nobody's, with the caret still in it, was shut by its first click: the
+  press hands the focus back and by the release the block reads as open.
+  The case in the test is a table that is the whole document, which the
+  margin has no line to send the caret to.
+- **The press is held** (`preventDefault`). The first version held it, the
+  first round of mutations showed nothing in the harness that needed it
+  and it was taken out, and a real VS Code window brought it back: left to
+  the browser the press takes the native selection out of the text, and
+  the first slow click of a window (the button down for 800 ms) ended with
+  the caret at the head of the document instead of under the block, two
+  cold starts of two in 1.133.0, and none of two with the press held. Why
+  the caret goes there was not established. The harness never shows the
+  caret move; the test holds the nearest thing it does show, the native
+  selection still in the text while the button is down.
+- **The drawing stays under the pointer.** The source stands above it, and
+  its lines going lifted the drawing by their height (100 px for the
+  table of the fixture). `putAwayDrawing` moves the scroller back by what
+  the drawing travelled, the twin of what `revealBlock` does for the line
+  that was clicked.
+- **One plain click.** The second press of a double click does not shut
+  what the first opened, a click with the multicursor modifier still adds
+  its caret, and a press dragged off the drawing leaves nothing behind for
+  the next click.
+- **The state is told outright.** `syncFocus` takes a focus that went
+  nowhere for the reader's doing only within half a second of a press, and
+  a slow click releases later than that: the document kept its marks up
+  (the `##` of the heading under the score, where the caret had gone).
+
+On the way, **a formula in a cell is the table's drawing** (`drawingAt`).
+It was found before the table, as an equation of the prose is, and a click
+on `$k^2$` in a cell opened the table with the caret at the table's end,
+not at the cell (measured on 86ad194). The same reading now serves a
+formula in a figure's caption and in the words after an equation's `$$`,
+which no test clicks.
+
+Three tests in `webview-editing.test.js`: *a second click on a drawing puts
+its source away, as a click outside the text does* (the three blocks and
+the preview, each put away, held in place, and left with the caret where
+the margin leaves it), *the click that puts a source away is one plain
+click, on a drawing that was open when it was pressed*, and *a formula in a
+table's cell is the table's drawing*. One test changed: *a click that
+closes a block, or lands on a drawing, keeps the other carets* made its
+plain click on a score left open by the click before it, which now puts
+the score away; it takes the carets out of the score first.
+
+The mutations were run on a copy of the tree in a scratch folder and not
+in the checkout, which other sessions were running suites against: each
+swapped in the copy, the three tests run and the copy put back, and the
+copy's `main.js` checked against the checkout's by hash before and after.
+
+- **SC1** the click on an open drawing opens it again, as before → all
+  three. **SC2** open read at the click → *the first click on a table
+  drawn shut did not open it*. **SC3** the second press of a double click
+  counted → *put the table away*. **SC4** a press with a modifier counted
+  → *Alt+click on an open table added no caret*.
+- **SC5** the focus kept → *was not put away by the second click*. **SC6**
+  the state left to `syncFocus` → *a slow click did not leave the
+  document*. **SC7** the drawing not held → *a table moved -100px*. **SC8**
+  the caret left in the block → *the second click and the margin leave the
+  caret in different places*, and *the caret is not on the line under the
+  score*.
+- **SC9** the preview not taken for an open drawing → *the inline equation
+  was not put away*. **SC10** a press that is not plain keeps what the one
+  before it noted → *Alt+click after a press that was dragged off added no
+  caret*. **SC11** a maths inside a block found before the block → *the
+  caret is not at the cell of the formula*. **SC12** the press left to the
+  browser → *took the native selection out of the text*.
+
+Twelve of twelve caught. Two lines went on the way: a reset of the noted
+drawing at the head of the handler, which survived once the press assigned
+it on every path and is now the one assignment, and a test for the left
+button, which no click of another button follows.
+
+Seen in a real VS Code, 1.133.0, an instance of its own on a KWin with no
+screen and the extension linked from this tree: the three blocks and the
+preview open on the first click and are put away by the second, the
+document without the focus and the drawing where it was (0 px), and the
+formula in the cell opens the table at its cell.
+
+Run on this state: `test:fast` (277 of 277), the whole of
+`webview-editing.test.js` (150 of 150), and the tests that click a drawing or
+open a source in `webview-look.test.js` (14 of 14), `webview-markdown.test.js`
+(4 of 4) and `webview-player.test.js` (8 of 8). The rest of the suites
+were not run.
+
+Left standing. The source opens with the line that was clicked held under
+the pointer, so a second click made without moving the pointer lands on
+the source and not on the drawing, which by then stands lower: the hand
+has to go down to it. And item 18 of the list below, found on the way.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -6785,3 +6894,21 @@ that names an engraving by its key, since the two helpers changed (9 of
     double click on a document that was left as text opens it in the MDM
     editor, in a new window (VS Code does not bring the old one back when
     it is started on a file).
+18. A click on a drawn selection is taken for a click in the dead margin
+    (found 2026-10-03, *The second click on a drawing puts its source
+    away*). `style.css` lifts CodeMirror's selection layer above the text,
+    for the cards, and leaves it the pointer (`pointer-events: auto`, read
+    in the page), so a press on what is selected lands on
+    `.cm-selectionBackground`, which is outside `.cm-content`, and
+    `deadMargin` answers it: the document loses the focus and the selection
+    stays as it was. Measured in a real VS Code 1.133.0 on this tree: the
+    third press of a triple click made at a hand's pace, 180 ms between
+    presses, leaves the word selected and the document without the focus,
+    the line not taken; a click inside a selection that was dragged puts
+    no caret; and in the harness a table under a selection does not open
+    on a click. *A triple click selects the line under the pointer* passes
+    because its three presses arrive before the layer is drawn. The layer's
+    rule and `deadMargin`'s test are both in `v0.7.1` as tagged (read, not
+    run there). Not fixed: `pointer-events: none` on the layer, which the
+    caret's layer already has from CodeMirror, is the likely fix and was
+    not tried.

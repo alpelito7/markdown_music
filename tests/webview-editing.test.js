@@ -3973,8 +3973,13 @@ test("a click that closes a block, or lands on a drawing, keeps the other carets
   assert.ok((await srcLines()) > 0, "the score never opened at its source");
 
   // Without the modifier it still replaces them: a plain click means "put the
-  // caret here", as it does anywhere else in the document.
+  // caret here", as it does anywhere else in the document. On the drawing of
+  // a score that is shut, so the two carets go back to the prose first: a
+  // plain click on one whose source is open puts the source away instead
+  // (the test of the second click, below).
+  await setSelection(h.page, [{ anchor: first }, { anchor: tail }]);
   await sleep(600); // two clicks in a row on one spot read as a double
+  assert.equal(await srcLines(), 0, "the score stayed open with no caret in it");
   const again = await drawing();
   await h.page.mouse.click(again.x, again.y);
   await sleep(250);
@@ -4028,6 +4033,321 @@ test("a click that closes a block, or lands on a drawing, keeps the other carets
     after.split("Z").length - before.split("Z").length,
     3,
     "typing did not land at every caret"
+  );
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The second click on a drawing. The first opens its source; the owner asked
+// (2026-10-02) for the next one to put it away again, "the same as a click
+// outside the text", for a table, an equation and a score: the hand that
+// opened it shuts it. Each block has a screen of prose above and below it,
+// so the page has room to hold the drawing where it was clicked, the score
+// has a heading straight under it, which is where the caret goes when it
+// leaves and whose `##` says whether the document was left to nobody, and
+// the table has a formula in a cell, which is part of the table's drawing.
+const SECOND_CLICK = (function () {
+  const filler = function (tag) {
+    const out = [];
+    for (let i = 1; i <= 12; i++) {
+      out.push("Filler " + tag + " " + i + ", so that the page has somewhere to scroll to.", "");
+    }
+    return out;
+  };
+  return []
+    .concat(
+      filler("a"),
+      ["| a | b |", "|---|---|", "| 1 | 2 |", "| $k^2$ | 4 |", ""],
+      filler("b"),
+      ["$$", "e^{i\\pi} + 1 = 0", "$$", ""],
+      filler("c"),
+      ["```abc", "X:1", "K:C", "CDEF|", "```", "## Under the score", ""],
+      filler("d"),
+      ["A paragraph with $x^2 + y^2$ inside it, and words after the equation.", ""],
+      filler("e")
+    )
+    .join("\n");
+})();
+
+// What the tests of the second click read: the source lines on show, the
+// source of an inline equation, whether anybody is in the document, and the
+// marks of a heading, which only a caret in a document that is somebody's
+// brings up.
+function secondClickRig(h) {
+  return {
+    state: () =>
+      h.page.evaluate(() => ({
+        source: document.querySelectorAll("#app .cm-line.mdm-src-line").length,
+        inline: document.querySelectorAll("#app .mdm-math-src").length,
+        focus: window.__mdm.view.hasFocus,
+        marks: Array.from(document.querySelectorAll("#app .cm-line")).some(
+          (l) => l.textContent.indexOf("## ") === 0
+        ),
+      })),
+    head: () => h.page.evaluate(() => window.__mdm.view.state.selection.main.head),
+    // The middle of a drawing, which has to be in the pane: a press sent to
+    // a point under the pane's foot lands on the page and not on the
+    // drawing, and reads as a click outside the text.
+    box: (sel) =>
+      h.page.evaluate((sel) => {
+        const r = document.querySelector(sel).getBoundingClientRect();
+        const pane = window.__mdm.view.scrollDOM.getBoundingClientRect();
+        const at = { x: r.x + r.width / 2, y: r.y + r.height / 2, top: r.top };
+        if (at.y <= pane.top || at.y >= pane.bottom) {
+          throw new Error(sel + " is off the pane, at " + Math.round(at.y));
+        }
+        return at;
+      }, sel),
+    // The block brought to the middle of the pane: CodeMirror draws what is
+    // on screen and little else, so a drawing has to be scrolled to before
+    // it can be clicked.
+    centre: async (needle) => {
+      const at = await posOf(h.page, needle);
+      await h.page.evaluate((at) => {
+        const view = window.__mdm.view;
+        view.dispatch({ effects: window.__mdm.CM.EditorView.scrollIntoView(at, { y: "center" }) });
+      }, at);
+      await sleep(400);
+    },
+    // The caret in the prose just above the block, and the block centred.
+    bring: async function (caret, needle) {
+      await setSelection(h.page, await posOf(h.page, caret));
+      await this.centre(needle);
+    },
+    // Two clicks less than half a second apart on one spot read as a double.
+    click: async (at, options) => {
+      await sleep(600);
+      await h.page.mouse.click(at.x, at.y, options || {});
+      await sleep(350);
+    },
+    margin: () =>
+      h.page.evaluate(() => {
+        const c = window.__mdm.view.contentDOM.getBoundingClientRect();
+        const s = window.__mdm.view.scrollDOM.getBoundingClientRect();
+        return { x: c.right + 60, y: s.top + 20 };
+      }),
+  };
+}
+
+test("a second click on a drawing puts its source away, as a click outside the text does", { skip }, async () => {
+  const h = await open({ text: SECOND_CLICK, withFrontMatter: false, scores: 1 });
+  await h.page.setViewport({ width: 1400, height: 700 });
+  await sleep(400);
+  const rig = secondClickRig(h);
+  const shut = { source: 0, inline: 0, focus: false, marks: false };
+  const cases = [
+    { name: "a table", caret: "Filler a 12", needle: "| 1 | 2 |", block: "#app .mdm-table", on: "#app .mdm-table td" },
+    { name: "a display equation", caret: "Filler b 12", needle: "e^{i", block: "#app .mdm-math--block", on: "#app .mdm-math--block" },
+    { name: "a score", caret: "Filler c 12", needle: "CDEF", block: "#app .mdm-score", on: "#app .mdm-score code.language-abc svg" },
+  ];
+  for (const one of cases) {
+    await rig.bring(one.caret, one.needle);
+    assert.equal((await rig.state()).source, 0, one.name + " was open before it was clicked");
+    await rig.click(await rig.box(one.on));
+    const opened = await rig.state();
+    assert.ok(opened.source > 0 && opened.focus, one.name + " did not open on the first click: " + JSON.stringify(opened));
+
+    // The second click, on the drawing that now stands under its source.
+    const before = await rig.box(one.block);
+    await rig.click(await rig.box(one.on));
+    assert.deepEqual(await rig.state(), shut, one.name + " was not put away by the second click");
+    const head = await rig.head();
+    // Held under the pointer: the source stood above the drawing, and its
+    // lines going would have lifted the drawing by their height.
+    const after = await rig.box(one.block);
+    assert.ok(
+      Math.abs(after.top - before.top) <= 2,
+      one.name + " moved " + Math.round(after.top - before.top) + "px from under the pointer as its source went"
+    );
+
+    // The same as a click outside the text: open again, shut from the
+    // margin, and the caret is left where the second click left it.
+    await rig.click(await rig.box(one.on));
+    assert.ok((await rig.state()).source > 0, one.name + " did not open again");
+    await rig.click(await rig.margin());
+    assert.deepEqual(await rig.state(), shut, one.name + " was not put away from the margin");
+    assert.equal(head, await rig.head(), one.name + ": the second click and the margin leave the caret in different places");
+  }
+
+  // An inline equation shows its drawing beside its source while it is
+  // edited (the preview), and that is the drawing its second click lands on.
+  await rig.bring("Filler d 12", "x^2");
+  await rig.click(await rig.box("#app .mdm-math:not(.mdm-math--block)"));
+  const inline = await rig.state();
+  assert.ok(inline.inline > 0 && inline.focus, "the inline equation did not open: " + JSON.stringify(inline));
+  await rig.click(await rig.box("#app .mdm-math--preview"));
+  assert.deepEqual(await rig.state(), shut, "the inline equation was not put away by a click on its preview");
+  const head = await rig.head();
+  await rig.click(await rig.box("#app .mdm-math:not(.mdm-math--block)"));
+  await rig.click(await rig.margin());
+  assert.equal(head, await rig.head(), "the preview and the margin leave the caret in different places");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("the click that puts a source away is one plain click, on a drawing that was open when it was pressed", { skip }, async () => {
+  const h = await open({ text: SECOND_CLICK, withFrontMatter: false, scores: 1 });
+  await h.page.setViewport({ width: 1400, height: 700 });
+  await sleep(400);
+  const rig = secondClickRig(h);
+
+  // A double click is the gesture that says "edit this" elsewhere, and its
+  // second press must not shut what its first one opened. Where the page
+  // can hold the line that was clicked, that press lands on the source,
+  // which opened under the pointer; where it cannot (a block at the head of
+  // the document) it lands on the drawing, open by then. That is the press
+  // sent here, on its own: the second of a double, on an open drawing.
+  await rig.bring("Filler a 12", "| 1 | 2 |");
+  await setSelection(h.page, await posOf(h.page, "1 | 2"));
+  await rig.centre("| 1 | 2 |");
+  assert.ok((await rig.state()).source > 0, "a caret in the table did not open it");
+  const twice = await rig.box("#app .mdm-table td");
+  await h.page.mouse.move(twice.x, twice.y);
+  await h.page.mouse.down({ clickCount: 2 });
+  await h.page.mouse.up({ clickCount: 2 });
+  await sleep(350);
+  const doubled = await rig.state();
+  assert.ok(doubled.source > 0 && doubled.focus, "the second press of a double click put the table away: " + JSON.stringify(doubled));
+
+  // With the multicursor modifier the click adds a caret, as it does on a
+  // drawing that is shut. On another cell: a caret added where one stands
+  // already is the same caret.
+  await sleep(600);
+  const cell = await rig.box("#app .mdm-table tbody tr:last-child td");
+  await h.page.keyboard.down("Alt");
+  await h.page.mouse.click(cell.x, cell.y);
+  await h.page.keyboard.up("Alt");
+  await sleep(300);
+  assert.equal((await selectionRanges(h.page)).length, 2, "Alt+click on an open table added no caret");
+  assert.ok((await rig.state()).source > 0, "Alt+click put the table away");
+
+  // The carets that are elsewhere stay where they are, as they do for a
+  // click in the margin: the one in the table is the one that comes out.
+  const above = await posOf(h.page, "Filler a 12");
+  const below = await posOf(h.page, "Filler b 1,");
+  await setSelection(h.page, [{ anchor: above }, { anchor: await posOf(h.page, "1 | 2") }, { anchor: below }]);
+  await rig.centre("| 1 | 2 |");
+  assert.ok((await rig.state()).source > 0, "a caret in the table did not open it");
+  await rig.click(await rig.box("#app .mdm-table td"));
+  const kept = await selectionRanges(h.page);
+  assert.equal(kept.length, 3, "the second click swallowed the other carets");
+  assert.deepEqual(kept[0], [above, above]);
+  assert.deepEqual(kept[2], [below, below]);
+  assert.equal((await rig.state()).source, 0, "the table stayed open with three carets");
+
+  // A press on an open drawing that is dragged off it and let go in the
+  // prose is no click on the drawing: nothing is put away, and nothing of
+  // it is kept for the next click, which adds its caret with the modifier
+  // down and, without it, opens a table drawn shut.
+  await rig.centre("| 1 | 2 |");
+  await rig.click(await rig.box("#app .mdm-table td"));
+  assert.ok((await rig.state()).source > 0, "the table did not open again");
+  await rig.centre("| 1 | 2 |");
+  await sleep(200);
+  const pressed = await rig.box("#app .mdm-table td");
+  const released = await coordsAt(h.page, above);
+  await h.page.mouse.move(pressed.x, pressed.y);
+  await h.page.mouse.down();
+  await h.page.mouse.move(released.x, released.y, { steps: 3 });
+  await h.page.mouse.up();
+  await sleep(300);
+  assert.ok((await rig.state()).source > 0, "a press dragged off the drawing put its source away");
+  await sleep(600);
+  const other = await rig.box("#app .mdm-table tbody tr:last-child td");
+  await h.page.keyboard.down("Alt");
+  await h.page.mouse.click(other.x, other.y);
+  await h.page.keyboard.up("Alt");
+  await sleep(300);
+  assert.equal((await selectionRanges(h.page)).length, 2, "Alt+click after a press that was dragged off added no caret");
+  assert.ok((await rig.state()).source > 0, "Alt+click after a press that was dragged off put the table away");
+  await rig.click(await rig.margin());
+  assert.equal((await rig.state()).source, 0, "the margin did not put the table away");
+  await rig.click(await rig.box("#app .mdm-table td"));
+  assert.ok((await rig.state()).source > 0, "a table drawn shut did not open after a press that was dragged off it");
+
+  // A slow click, the button held for longer than the half second a press
+  // accounts for a focus that went nowhere (leftByHand): the document is
+  // left to nobody all the same, which the heading under the score tells,
+  // the caret having gone to it.
+  await rig.bring("Filler c 12", "CDEF");
+  await rig.click(await rig.box("#app .mdm-score code.language-abc svg"));
+  assert.ok((await rig.state()).source > 0, "the score did not open");
+  await sleep(600);
+  const score = await rig.box("#app .mdm-score code.language-abc svg");
+  await h.page.mouse.move(score.x, score.y);
+  await h.page.mouse.down();
+  await sleep(700);
+  // The press is held, so the caret the click will bring out of the block
+  // is still in the text while the button is down. Left to the browser the
+  // press takes the native selection away, and in a real VS Code window a
+  // slow click then found the caret at the head of the document (see
+  // handleMouseDown); here the selection gone is all there is to see.
+  assert.equal(
+    await h.page.evaluate(() => {
+      const s = getSelection();
+      return !!s.anchorNode && window.__mdm.view.contentDOM.contains(s.anchorNode);
+    }),
+    true,
+    "the press on an open drawing took the native selection out of the text"
+  );
+  await h.page.mouse.up();
+  await sleep(350);
+  assert.deepEqual(
+    await rig.state(),
+    { source: 0, inline: 0, focus: false, marks: false },
+    "a slow click did not leave the document as a click outside the text does"
+  );
+  assert.equal(await rig.head(), await posOf(h.page, "## Under the score"), "the caret is not on the line under the score");
+
+  // Open is what the reader saw when the button went down. A table that is
+  // the whole document keeps its caret when the margin is clicked (there is
+  // no line to send it to) and is drawn shut, the document being nobody's:
+  // the press on it hands the focus back, and by the click the caret reads
+  // as a block open again. That click is the first on a shut drawing.
+  // Typed over the document and not sent by the host: `update` waits for a
+  // line of text, and a table drawn shut leaves none.
+  await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "| a | b |\n|---|---|\n| 1 | 2 |" } });
+  });
+  await sleep(300);
+  await setSelection(h.page, await posOf(h.page, "1 | 2"));
+  await sleep(250);
+  assert.ok((await rig.state()).source > 0, "the table that is the document never opened");
+  await rig.click(await rig.margin());
+  const left = await rig.state();
+  assert.deepEqual([left.source, left.focus], [0, false], "the margin did not leave the table drawn shut");
+  await rig.click(await rig.box("#app .mdm-table td"));
+  const back = await rig.state();
+  assert.ok(back.source > 0 && back.focus, "the first click on a table drawn shut did not open it: " + JSON.stringify(back));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A formula in a cell is drawn as an equation in the prose is, and was taken
+// for one: a click on it opened the table with the caret at the table's
+// end, where a click on the rest of the cell puts it at the cell (measured
+// on 86ad194, 2026-10-03). It is the table's drawing, for the click that
+// opens the table and for the one that puts it away.
+test("a formula in a table's cell is the table's drawing: a click on it opens the table at the cell, and the next puts it away", { skip }, async () => {
+  const h = await open({ text: SECOND_CLICK, withFrontMatter: false, scores: 1 });
+  await h.page.setViewport({ width: 1400, height: 700 });
+  await sleep(400);
+  const rig = secondClickRig(h);
+  await rig.bring("Filler a 12", "| 1 | 2 |");
+  await rig.click(await rig.box("#app .mdm-table .mdm-math"));
+  const opened = await rig.state();
+  assert.ok(opened.source > 0 && opened.focus, "the table did not open: " + JSON.stringify(opened));
+  assert.deepEqual(
+    await selectionRanges(h.page),
+    [[await posOf(h.page, "$k^2$"), await posOf(h.page, "$k^2$")]],
+    "the caret is not at the cell of the formula that was clicked"
+  );
+  await rig.click(await rig.box("#app .mdm-table .mdm-math"));
+  assert.deepEqual(
+    await rig.state(),
+    { source: 0, inline: 0, focus: false, marks: false },
+    "a click on the formula of an open table did not put the table away"
   );
   assert.deepEqual(h.errors, []);
   await h.close();

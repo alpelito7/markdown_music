@@ -134,6 +134,17 @@
   shows for a moment first. A document you reopen yourself with
   `Reopen Editor With...` > `Text Editor` stays in the text editor, and is
   still there when VS Code is opened again.
+- A click on the drawing of a table, an equation or a score whose source
+  is open puts the source away, as a click outside the text does: the hand
+  that opened it shuts it, and the drawing stays under the pointer while
+  the lines above it go. Until now that click sent the caret back to the
+  head of the source, which stayed open. The preview beside an equation
+  being edited in a line does the same. With the key that adds a caret
+  held (`Alt`, or `Ctrl` where the setting says so) the click still adds
+  one.
+- A click on a formula in a table's cell opens the table with the caret at
+  that cell, as a click on the rest of the cell does. It left the caret at
+  the end of the table.
 
 ## 0.7.1
 
