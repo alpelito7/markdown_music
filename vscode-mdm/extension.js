@@ -1351,6 +1351,28 @@ function pdfAsks(quarto, copy, dir) {
   });
 }
 
+// What a page rendered to be printed is told and a page for the screen is
+// not: to come with the roman's faces in TrueType outlines (ensure_look in
+// mdm.lua, where the measurements are). The editor and the page a reader
+// keeps draw the roman from CFF outlines, which a screen hints to the pixel,
+// and Chrome's PDF writer embeds a face with CFF outlines as a Type 3 font, a
+// drawing for each glyph: the prose of a printed PDF came out thinner than
+// the editor's, and thinner than its own equations, in every viewer that
+// fills a drawing otherwise than it sets a letter (the owner's report of
+// 2026-10-04, measured that day). The same faces with TrueType outlines go
+// into the PDF as the fonts they are, and a screen draws those a pixel
+// softer, so they are the print's and nobody else's: a page set in the roman
+// is printed from a render of its own (printPage), which is one more run of
+// Quarto on an export of both, 6.0 to 7.9 s against 3.7 to 3.9 on
+// example.mdm, and nothing on a PDF asked alone, whose page was always its
+// own. A page in the sans names
+// the reader's own fonts, which go into a PDF as fonts already.
+const PRINT_FACES = ["-M", "mdm-print-faces:truetype"];
+
+// Whether the look a render is given (exportLook) sets the words in the roman.
+function inRoman(look) {
+  return look.indexOf("mdm-text-font:roman") !== -1;
+}
 
 // Chrome refuses to start as root without this, the normal case inside a
 // container; harmless everywhere else. Mirrors chrome_sandbox_flag in

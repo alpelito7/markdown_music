@@ -1314,15 +1314,31 @@ local function ensure_look()
   -- self-contained export takes every dependency inside the file, so a page in
   -- the sans would carry a face it never draws a letter with.
   if look.text_font == "roman" then
+    -- Which outlines the four faces come with. A page read on a screen takes
+    -- the ones the editor draws with, whose outlines are CFF: FreeType hints
+    -- them to the pixel, and the page has to be drawn as the editor is. A
+    -- page the extension renders to print it (look.print_faces, set in Meta)
+    -- takes the same four with TrueType outlines, resources/lm/print/, under
+    -- the names the stylesheet already asks for, so the sheet is one and the
+    -- page does not know the difference. Chrome's PDF writer embeds a face
+    -- with CFF outlines as a Type 3 font, a drawing for each glyph, and a
+    -- viewer fills those as shapes: the prose came out 9 % lighter than the
+    -- editor draws it in pdf.js and 8 % in Chrome's own viewer, and lighter
+    -- than the equations beside it, whose faces are embedded as fonts; with
+    -- TrueType outlines it is 1 % and 6 % (one row of prose, MDM Dark,
+    -- measured 2026-10-04). On a screen the TrueType ones are not hinted and
+    -- stand a pixel softer, so they are for paper alone
+    -- (tools/lm-print-faces/make.py makes them and says the rest).
+    local faces = look.print_faces == "truetype" and "resources/lm/print/" or "resources/lm/fonts/"
     quarto.doc.add_html_dependency({
       name = "mdm-roman",
       version = "2.004",
       stylesheets = { "resources/lm/mdm-roman.css" },
       resources = {
-        { name = "fonts/LatinModernRoman-Regular.woff2", path = "resources/lm/fonts/LatinModernRoman-Regular.woff2" },
-        { name = "fonts/LatinModernRoman-Italic.woff2", path = "resources/lm/fonts/LatinModernRoman-Italic.woff2" },
-        { name = "fonts/LatinModernRoman-Bold.woff2", path = "resources/lm/fonts/LatinModernRoman-Bold.woff2" },
-        { name = "fonts/LatinModernRoman-BoldItalic.woff2", path = "resources/lm/fonts/LatinModernRoman-BoldItalic.woff2" },
+        { name = "fonts/LatinModernRoman-Regular.woff2", path = faces .. "LatinModernRoman-Regular.woff2" },
+        { name = "fonts/LatinModernRoman-Italic.woff2", path = faces .. "LatinModernRoman-Italic.woff2" },
+        { name = "fonts/LatinModernRoman-Bold.woff2", path = faces .. "LatinModernRoman-Bold.woff2" },
+        { name = "fonts/LatinModernRoman-BoldItalic.woff2", path = faces .. "LatinModernRoman-BoldItalic.woff2" },
       },
     })
   end
@@ -2907,6 +2923,11 @@ function Meta(meta)
   -- work out what the header comes to for each format, which a filter
   -- cannot see from inside one render (pdfAsks in vscode-mdm/extension.js).
   look.print_toc = meta_word(meta, "mdm-print-toc", { shown = true, hidden = true }, "shown")
+  -- The outlines of the roman on a page the extension renders to print
+  -- (printPage in vscode-mdm/extension.js), which ensure_look spends. Any
+  -- other render, the page a reader keeps among them, has the faces the
+  -- screen draws with.
+  look.print_faces = meta_word(meta, "mdm-print-faces", { cff = true, truetype = true }, "cff")
   local changed = false
   if meta.bibliography or meta.references then
     -- Citations linked to their entries on paper as they are on the page.

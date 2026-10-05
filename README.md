@@ -306,6 +306,14 @@ Metadata is whatever the command line carried, and these values reach a
 `<style>` block, so the filter lets nothing through that is not one of the
 words above or six hex digits.
 
+Two more keys are the extension's alone, for a page it renders to print it:
+`mdm-print-toc: hidden` keeps off the paper the contents a header asks of
+the page and not of the PDF, and `mdm-print-faces: truetype` brings the roman
+in TrueType outlines (`resources/lm/print/`, made by
+`tools/lm-print-faces/make.py`), which Chrome embeds in a PDF as fonts. A
+page for the screen keeps the faces the editor draws with, whose CFF
+outlines a screen hints to the pixel.
+
 One thing is as close as it gets rather than identical, and the reason is
 the engine underneath. The code is tokenized by skylighting here and by
 Lezer in the editor, so the palette is shared but the cut into tokens is
@@ -874,10 +882,13 @@ abcjs 6.7.0, CodeMirror 6 with its Lezer packages, and KaTeX 0.18.4 are all
 MIT. Three things are not. The piano the editor plays with is the Musyng
 Kite soundfont, CC BY-SA 3.0, included unmodified, so the notice is the
 attribution the licence asks for. The roman the prose and the scores are set
-in is Latin Modern Roman 2.004, four woff2 files under the GUST Font
-Licence, which is LPPL 1.3c with a renaming clause the notice names. The
-words a document is divided at come from the hyph-utf8 patterns, which are
-MIT but for Portuguese (BSD-3-Clause) and Russian (LPPL 1.3c).
+in is Latin Modern Roman 2.004, four faces as woff2 files, and once more
+with TrueType outlines for a printed PDF, a change the notice declares,
+under the GUST Font Licence, which is LPPL 1.3c with a renaming clause the
+notice names. The words a document is divided at come from the hyph-utf8
+patterns, which are MIT but for English (a notice of its own, which lets
+it be redistributed with that notice), Portuguese (BSD-3-Clause) and
+Russian (LPPL 1.3c).
 
 The one program that is not vendored is abcm2ps, which engraves the scores
 of a PDF typeset with LaTeX on a machine with neither Chrome nor Edge: somebody else's work

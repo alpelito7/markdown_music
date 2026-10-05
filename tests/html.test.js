@@ -2147,6 +2147,69 @@ test("on paper every sheet carries its number at its foot, in the face and at th
   }
 });
 
+// The roman goes into a printed PDF as the fonts it is. Chrome's PDF writer
+// embeds a face with CFF outlines as a Type 3 font, a drawing for each glyph,
+// and a viewer fills those as shapes: the prose of the owner's PDF read
+// thinner than his editor and thinner than its own equations (2026-10-04; in
+// pdf.js 9 % less ink than the editor on one row, 8 % in Chrome's viewer,
+// against 1 % and 6 % with the faces embedded as fonts). So a page the
+// extension renders to print (`mdm-print-faces: truetype`, which printPage
+// passes) comes with the same four faces in TrueType outlines,
+// resources/lm/print/, under the names the stylesheet already asks for, and a
+// page for the screen keeps the CFF ones the editor draws with, which a
+// screen hints to the pixel (ensure_look in mdm.lua). The first four bytes of
+// a WOFF2 after its signature say which outlines it carries.
+test("on paper the roman's faces are embedded as fonts, from the outlines kept for the print", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, () => {
+  const body = "Regular words, *italic words*, **bold words** and ***bold italic words***, enough of each to be set.";
+  sheetDoc("faces-print", ["mdm-print-faces: truetype"], body);
+  sheetDoc("faces-screen", [], body);
+  const FACES = ["Regular", "Italic", "Bold", "BoldItalic"];
+  const carried = (name, face) => {
+    const libs = path.join(DIR, name + "_files", "libs", "quarto-contrib");
+    const roman = fs.readdirSync(libs).find((n) => n.startsWith("mdm-roman"));
+    return fs.readFileSync(path.join(libs, roman, "fonts", "LatinModernRoman-" + face + ".woff2"));
+  };
+  const shipped = (folder, face) =>
+    fs.readFileSync(path.join(ROOT, "_extensions", "mdm", "resources", "lm", folder, "LatinModernRoman-" + face + ".woff2"));
+  const outlines = (woff2) => woff2.subarray(4, 8).toString("latin1");
+  for (const face of FACES) {
+    assert.ok(carried("faces-print", face).equals(shipped("print", face)), "the page for the print does not carry the print's " + face);
+    assert.ok(carried("faces-screen", face).equals(shipped("fonts", face)), "the page for the screen does not carry the screen's " + face);
+    assert.equal(outlines(shipped("print", face)), "\x00\x01\x00\x00", "the print's " + face + " has no TrueType outlines");
+    assert.equal(outlines(shipped("fonts", face)), "OTTO", "the screen's " + face + " is not the CFF face the editor draws with");
+  }
+  const embedded = (name) =>
+    spawnSync("pdffonts", [printPdf(name)], { encoding: "utf8" }).stdout
+      .split("\n")
+      .filter((line) => /LMRoman10-/.test(line))
+      .map((line) => ({
+        face: /LMRoman10-(\w+)/.exec(line)[1],
+        type3: /\bType 3\b/.test(line),
+        truetype: /\bTrueType\b/.test(line),
+      }));
+  const print = embedded("faces-print");
+  assert.deepEqual(
+    Array.from(new Set(print.map((f) => f.face))).sort(),
+    FACES.slice().sort(),
+    "the PDF does not hold the four faces: " + JSON.stringify(print)
+  );
+  assert.deepEqual(
+    print.filter((f) => f.type3 || !f.truetype),
+    [],
+    "a face of the roman went into the PDF as something other than a TrueType font"
+  );
+  // And why the print has faces of its own: the screen's go in as Type 3. The
+  // day this fails, Chrome embeds CFF outlines as fonts, and the print's own
+  // faces, with the second render they cost an export of both, can go.
+  const screen = embedded("faces-screen");
+  assert.ok(
+    screen.length >= 4 && screen.every((f) => f.type3),
+    "the screen's faces no longer go into a PDF as Type 3: " + JSON.stringify(screen)
+  );
+});
+
 // The headings are the PDF's bookmarks, each once. A heading that opened a
 // sheet came out of Chrome with its words twice in its bookmark ("Heading
 // number 5Heading number 5"), which the clip on the headings in mdm-look.css's
