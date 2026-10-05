@@ -5547,8 +5547,8 @@ the README at the head of "Writing Markdown", after "Writing a score", where
 the owner placed it; the section's text was cut round it from 377 words to
 139. Two tests in `packaging.test.js`: *the README shows the tour first and
 the Markdown clip under Writing Markdown*, and *Writing Markdown is kept under
-half the words it had before its clip* (188 at most, headings, markers and
-the GIF line not counted). Each mutated in place and undone in the same
+half the words it had before its clip* (188 at most then and 92 since
+2026-10-05, below; headings, markers and the GIF line not counted). Each mutated in place and undone in the same
 command, the README checked back by its hash:
 
 - **CL1** the Markdown clip moved to the end of "Writing a score" → the
@@ -8374,6 +8374,48 @@ guards of `tests/tmp/title-rig/guarded.sh`, the ten tests of
 `extension-host.test.js`. The webview suites were not run: nothing of the
 editor was touched. The rest of `render.test.js`, which typesets with
 LaTeX, was not run either.
+
+### Writing Markdown halved a second time (2026-10-05)
+
+Under its cap of 188 words the section of the Marketplace README had grown
+back from 139 to 184 in a week: numbered sections, the works cited, and a
+key for every clause, a dozen chords in one paragraph. The owner asked for
+half or less, and for fewer keys spelled out. It is 90 words now and names
+four (`Ctrl+B`, `Ctrl+I`, `Ctrl+1` to `Ctrl+6`, `Ctrl+F`); the others are in
+the tooltips of the toolbar and in the README of the repository. What the
+paragraph no longer says: the list of works cited and `Ctrl+click` on a
+citation, `number-sections: true` by name, a mark typed over selected words
+and an address pasted over them, `Shift+Enter`, a picture dropped with Shift
+held and taken to the trash by a save without it, `Ctrl+click` on a link and
+`Ctrl+H`. The cap of *Writing Markdown is kept under half the words it had
+before its clip* went from 188 to 92, half of what the paragraph had grown
+to, so that a sentence added takes one out.
+
+The two other passages that had grown a clause per feature that week were
+cut in the same pass. The line of the **YAML** button in the list of the
+toolbar had gone from 6 words to 93 as the title block was built, and is
+49: what a header is drawn as, what a click on the drawing does and what
+the button does. It no longer names `mdm.frontMatter`, the date and the
+keywords among what makes a title block, the affiliations and the DOI, the
+copy button, or the block drawn under the YAML while it is edited.
+**Export** had gone from 68 to 152 as the printed PDF got its sheet, and is
+102: what the PDF needs, what it has (numbered sheets, bookmarks, the
+header's `papersize`), where its notes come, and the setting that hands it
+to LaTeX. It no longer says that `toc: true` opens it with its contents,
+that what the header says under `format: pdf:` holds for it, that its
+contents carry no page numbers, or what LaTeX does otherwise. All of that
+is in the README of the repository (read there, under *Export from the
+toolbar* and *The YAML header, drawn as the page's title block*). One test,
+*the YAML button's line and Export are kept at the words they were cut
+to*, each cap two words over its passage as Writing Markdown's is; a line
+of the list is counted without its dash.
+
+- **WM1** the cap lowered with the paragraph as it stood → 184 words.
+- **WM2** the new test on the YAML button's line as it stood → 93 words.
+- **WM3** the same with the line cut and Export as it stood → 152 words.
+
+Run on this state: `packaging.test.js`, 14 of 14. Nothing else reads the
+README of the extension.
 
 ## Pending
 

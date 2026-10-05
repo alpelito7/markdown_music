@@ -197,8 +197,12 @@ test("the README writes no ABC as plain code", () => {
 // under the introduction, and the Markdown one at the head of "Writing
 // Markdown", after "Writing a score", as the picture of what that section
 // says. The section's text was halved round it the same day, from 377 words to
-// 139, and it is held under half of what it had: a README that grows a
-// sentence per feature is what the owner has asked twice to be undone.
+// 139, and held under 188. Under that cap it grew back to 184 in a week, a
+// clause for each feature and a key for each clause, and the owner had it
+// halved again (2026-10-05), to 90: the keys worth a line there are a few,
+// and a tooltip names the rest. The cap is half of what it had grown to, so
+// a sentence added is a sentence taken out: a README that grows a sentence
+// per feature is what the owner has asked three times to be undone.
 function readmeSection(md, heading) {
   const from = md.indexOf(`\n## ${heading}\n`);
   if (from < 0) return null;
@@ -229,7 +233,30 @@ test("Writing Markdown is kept under half the words it had before its clip", () 
     .join(" ")
     .split(/\s+/)
     .filter(Boolean).length;
-  assert.ok(words <= 188, `Writing Markdown has ${words} words; it was cut from 377 to under half on 2026-09-28`);
+  assert.ok(words <= 92, `Writing Markdown has ${words} words; it was cut from 377 to 139 on 2026-09-28 and from 184 to 90 on 2026-10-05`);
+});
+
+// The two other passages that grew a clause per feature in the same week,
+// cut in the same pass (2026-10-05). The line of the YAML button in the list
+// of the toolbar went from 6 words to 93 as the title block was built, and
+// Export from 68 to 152 as the printed PDF got its sheet, its contents and
+// the keys of its header. They are 49 and 102: what a header is drawn as and
+// what the button does with it, and what a PDF needs, what it has and where
+// it falls short. The rest is in the README of the repository, which is
+// where a reader who wants every key goes. Each cap is the passage and two
+// words, as Writing Markdown's is.
+test("the YAML button's line and Export are kept at the words they were cut to", () => {
+  const md = read(EXT, "README.md");
+  const count = (text) => text.split(/\s+/).filter(Boolean).length;
+  const yaml = md.split("\n").filter((l) => /^- \*\*YAML\*\*:/.test(l));
+  assert.equal(yaml.length, 1, "the toolbar's list does not have one line for the YAML button");
+  const y = count(yaml[0].replace(/^- /, ""));
+  assert.ok(y <= 51, `the YAML button's line has ${y} words; it was cut from 93 to 49 on 2026-10-05`);
+  const from = md.indexOf("\n### Export\n");
+  assert.ok(from > 0, "the README has no Export under its toolbar");
+  const to = md.indexOf("\n## ", from + 1);
+  const e = count(md.slice(from, to < 0 ? md.length : to).replace(/^\s*### Export\s*/, ""));
+  assert.ok(e <= 104, `Export has ${e} words; it was cut from 152 to 102 on 2026-10-05`);
 });
 
 // A clip's alt text is two or three sentences (owner, 2026-09-28): the
