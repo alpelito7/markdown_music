@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.2
 
 - In a printed PDF the roman is embedded as the font it is. Chrome wrote
   Latin Modern into a PDF as drawings, one for each letter, and a viewer
