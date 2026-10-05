@@ -11,8 +11,8 @@ Implemented as a Quarto extension, which brings everything else for free
 
 The editor for it is a **VS Code extension**, "Markdown Music", published on
 the [Marketplace](https://marketplace.visualstudio.com/items?itemName=alpelito7.mdm-editor): it opens an `.mdm` file as a rendered, editable document,
-with the equations as KaTeX, the scores engraved in place and a player on the
-ones that ask for one, and every part still plain Markdown underneath. Its
+with the equations as KaTeX, the scores engraved in place, each with a
+player, and every part still plain Markdown underneath. Its
 source is in [`vscode-mdm/`](vscode-mdm/) and it has [a section of its own below](#visual-editor-for-vs-code-vscode-mdm). The format
 does not depend on it: the Quarto filter renders an `.mdm` from the command
 line with no editor anywhere.
@@ -113,8 +113,9 @@ copy that is rendered can be written the way Pandoc wants it, the export
 follows the editor; where neither is possible, the editor follows Pandoc. The
 document itself is never changed, only the temporary copy Quarto is handed.
 That copy is given a blank line before a list, a table, a `***` or a spaced
-rule written straight under a line of text, and after a line of dashes under
-a list item; a heading set in one to three spaces is brought to the margin,
+rule written straight under a line of text, before a line of dashes under a
+list item, and after any line of dashes with text straight under it; a
+heading set in one to three spaces is brought to the margin,
 and so is the underline of a setext heading; a `#` that ends a heading with
 no space before it (`## Sonata in F#`) is escaped so that Pandoc keeps it;
 and the reader is asked for `autolink_bare_uris`, so an address written bare
@@ -200,6 +201,12 @@ PDF typeset with LaTeX is told the same. A `#` that carries a number
 anywhere in the document, or `crossref: chapters: true` in the header, and
 the first level is in every number again, as Quarto prints it. The same
 file rendered by Quarto without the MDM filter keeps the 0.1.
+
+One thing the editor, the page and the paper draw that Markdown does not
+have: a short list in a table's cell. A cell written `- [ ] Tune the A`
+shows a task's box, which a click ticks, one written `- Rosin` a bullet, and
+a `<br>` starts the next item in the same cell. On GitHub and in other
+editors these cells read as they are written.
 
 Differences that are left standing, each on the record in `tests/README.md`:
 the page's callouts have the editor's colours and Quarto's build, a row with
@@ -291,14 +298,19 @@ write:
 | `mdm-staff-lines` | `gray`, `ink`                                                                                                                                                                             |
 | `mdm-score-fill`  | `none`, `paper`, `slate`, `brass`                                                                                                                                                         |
 | `mdm-score-align` | `center`, `left`                                                                                                                                                                          |
+| `mdm-text-font`   | `roman`, `sans`: the face of the prose (`sans` unless told)                                                                                                                               |
+| `mdm-text-align`  | `justify`, `left`: how the prose meets the right edge (`left` unless told)                                                                                                                |
+| `mdm-hyphenation` | `auto`, `none`: whether a word is divided at the end of a line (`none` unless told)                                                                                                       |
 | `mdm-engraver`    | `abcjs` (the default: the editor's engines, abcjs and KaTeX, through a headless Chrome), `abcm2ps` (the fallback for scores and LaTeX's own maths, picked outright)                       |
 | `mdm-front-matter`| `shown`, `hidden`: whether the title block is drawn from the YAML (`shown` unless told; the extension passes neither)                                                                     |
 | `mdm-syn-*`       | the ten syntax slots (`base`, `bg`, `comment`, `string`, `number`, `keyword`, `attr`, `name`, `type`, `variable`), as six hex digits **without** the `#`, which would open a YAML comment |
 
-So a render from a terminal comes out in the editor's default look with the
-palette the editor itself falls back to (stackoverflow-light), and one from
-the toolbar comes out in whatever the editor was showing, its colour theme
-included:
+So a render from a terminal comes out on the light side, in the sans and
+ragged right, with no word divided and the palette the editor itself falls
+back to (stackoverflow-light): the page as it was before the editor had a
+roman or justified a line, which are its defaults now and have to be named
+(`-M mdm-text-font:roman -M mdm-text-align:justify`). One from the toolbar
+comes out in whatever the editor was showing, its colour theme included:
 
 ```sh
 ./bin/mdm render example.mdm --to html \
@@ -325,18 +337,21 @@ The equations are the same on both sides: the filter puts the vendored
 KaTeX on the page (`ensure_katex_dep` in `mdm.lua`), which is the editor's
 own copy.
 
-The PDF is dressed from the same metadata, by a LaTeX preamble the filter
-writes (`look_tex` in `mdm.lua`, the other half of the stylesheet): the page
+A PDF typeset with LaTeX is dressed from the same metadata, by a preamble the
+filter writes (`look_tex` in `mdm.lua`, the other half of the stylesheet): the page
 takes the ground of the side the editor is on, the text its ink, the headings
 its sizes and weight, and code the same card with the same ten slots over it.
 The measure travels in ems, the editor's 51.25 of them, centred; on paper too
 narrow to hold it the text keeps 3 cm of margin instead. A document that sets
 a `geometry`, a `mathfont` or a `fontsize` of its own keeps what it asked for.
 
-Prose breaks where the editor breaks it: the PDF is set ragged right with
-microtype's expansion off, the way a browser sets text. A line carrying
-inline code can still break elsewhere, since the editor sets code in the
-system's monospace and the PDF in DejaVu Sans Mono.
+Its prose breaks where the editor breaks it as far as TeX allows. Microtype's
+expansion is off, since a browser squeezes no glyph to fit a word in, and the
+right edge is the one the render was told (`mdm-text-align`): ragged from a
+terminal, and justified from an editor that justifies, where TeX weighs the
+whole paragraph and may take a word more into a row. A line carrying inline
+code can still break elsewhere, since the editor sets code in the system's
+monospace and the PDF in DejaVu Sans Mono.
 
 The block Quarto draws at the top from the YAML (the title, the subtitle,
 whoever wrote it and when) is on every page whose header asks for it: the
@@ -414,7 +429,12 @@ asked for, where what it needs is missing the other makes the PDF and a
 notice says so. To go
 back to the plain text editor: right click the file, `Open With...`. Both
 can be open at once on the same file (Reopen Editor With... in a second
-group): they share the document.
+group): they share the document. A document VS Code is started on, by a
+double click on the file with VS Code shut, comes up in the text editor, a
+fault of VS Code's own
+([microsoft/vscode#325506](https://github.com/microsoft/vscode/issues/325506)),
+and the extension moves it to this one once the window has started; one
+reopened by hand in the text editor stays there.
 
 What it does:
 
@@ -586,8 +606,8 @@ What it does:
   that brings the picture back puts the file back. Only pictures the
   editor wrote are ever moved.
 - **Clicks.** A click on a bullet or a number puts the caret after the
-  marker; a task's box is ticked by a click, in a quote and after `1)` as
-  well; `Ctrl+click` on a link follows it (`Alt+click` where
+  marker; a task's box is ticked by a click, in a quote, after `1)` and in a
+  table's cell as well; `Ctrl+click` on a link follows it (`Alt+click` where
   `editor.multiCursorModifier` gives `Ctrl+click` to the carets): an address
   opens outside, a relative path opens in VS Code, and `#heading` moves the
   caret to the heading the page gives that identifier (Pandoc's: without
@@ -670,8 +690,13 @@ What it does:
   Quarto, no TeX, no Chrome and no abcm2ps. Those are looked for the moment
   an export is asked for and never at start-up: whichever is missing is named
   in the notification, with the whole story (the command, Quarto's own
-  output) in the MDM output channel, one "Show log" away. A PDF asks for an
-  engraver only when the document actually holds a score.
+  output) in the MDM output channel, one "Show log" away. A printed PDF asks
+  for nothing but the browser, and a typeset one for an engraver only when
+  the document actually holds a score. One thing the editor itself asks
+  Quarto for: the citations of a document whose header names a bibliography,
+  which Quarto's Pandoc resolves when the document is opened or edited.
+  Without Quarto they are drawn as written, and the output channel says so
+  once.
 - **Playback**: under the copy button of a score (the two stand in the margin
   right of the text, beside the top of the score, while the pointer is on it
   or its source is open) a pair of headphones
@@ -745,8 +770,8 @@ What it does:
   on the host (JSON with comments, the `include` chain, and
   `editor.tokenColorCustomizations` on top) and sends the webview a palette
   of ten colours, spent over the tokens of each fenced language (Python,
-  JavaScript, JSON, YAML, HTML, CSS and C++ with full parsers; a couple of
-  dozen more with the lighter stream modes). With no usable palette, and on
+  JavaScript with TypeScript and JSX, JSON, YAML, HTML, CSS and C++ with full
+  parsers; fifteen more with the lighter stream modes). With no usable palette, and on
   the three MDM looks whatever the palette is, the fallbacks of `style.css`
   come in: Monokai's colours on the dark side and
   stackoverflow-light on the light one. The ground under the dark one is not
@@ -783,17 +808,19 @@ What it does:
   text is typed; a toolbar toggle (`mdm.textAlign`) sets them ragged right.
   Headings and the source of a block stay ragged. Chromium justifies a row
   after choosing where it breaks, so the words each row ends on are the same
-  either way, and the exported page ends them there too. On paper TeX
-  justifies the whole paragraph at once and may take a word more into a row,
-  which it does on two rows of `example.mdm`. The score alignment toggle beside
-  it draws a quarter note between two lines of text, so the two alignments of
+  either way, and the exported page ends them there too, as does the PDF
+  printed from it. In a PDF typeset with LaTeX, TeX justifies the whole
+  paragraph at once and may take a word more into a row, which it does on two
+  rows of `example.mdm`. The score alignment toggle further
+  along the row draws a quarter note between two lines of text, so the two alignments of
   the bar do not look alike.
 
 - **Scores**: no background by default, so a score reads as part of the
   document the way an equation does (`mdm.scoreFill`: `none`, `paper`,
   `slate`, `brass`); centred like a display equation or lined up left
   (`mdm.scoreAlign`); staff lines grey Guitar Pro style or in ink
-  (`mdm.staffLines`), with notes, clefs and barlines always in ink; scaled to
+  (`mdm.staffLines`), the ledger lines of a high or a low note with them,
+  and notes, clefs and barlines always in ink; scaled to
   the width of the panel, and narrow ones (`%%staffwidth`) centred.
 - **Tables drawn**: a pipe table is set as a table, the maths of its cells
   rendered and each column taking the alignment its second row asks for. A
@@ -801,7 +828,10 @@ What it does:
   stands, in the code's face and colours; a row too long for the column is
   kept whole and the card scrolls to it, and the drawing below is the live
   preview. A click on a cell opens the source at that cell, and the page is
-  held where it was instead of sliding down by the height the source took.
+  held where it was instead of sliding down by the height the source took. A
+  cell can hold a short list (`- [ ] x`, `- y`, a `<br>` between two items),
+  drawn as boxes and bullets, and a click on a task's box there ticks it
+  where a click on the rest of the table opens the source.
 - **Outline panel**: the button leading the bar opens a column down the left
   edge with the headings of the whole document, however long, indented by
   level, the section the caret is in marked and every row a jump to it. A row
@@ -889,9 +919,12 @@ comments of `vscode-mdm/media/main.js` and `extension.js`.
 What is in the bundle: `vscode-mdm/media/vendor/cm6/cm6.bundle.js` is built
 by `vscode-mdm/vendor-src/` (`npm install && npm run vendor`, the one place
 that needs the network) from CodeMirror 6, its Markdown and language
-packages, KaTeX and the three Lezer extensions of this project, maths
-(`$…$`, `$$…$$` inline and as a block, Pandoc's rules for the dollars, an
-unterminated pair stays text), the YAML header and the callouts; the
+packages, KaTeX, the ABC mode that colours a score's source and the nine
+Lezer extensions of this project: maths (`$…$`, `$$…$$` inline and as a
+block, Pandoc's rules for the dollars, an unterminated pair stays text),
+the YAML header, the callouts, the long runs of `*` and `_` that are text,
+links that know their definitions, a heading written with a tab, the pipe
+table, the Pandoc syntax the export reads and its footnotes; the
 bundle, KaTeX's stylesheet and fonts are committed, and the extension at
 run time is plain JS with no build step. `VERSIONS.json` beside the bundle
 says what went in. The decisions behind the engine change, and the ones
