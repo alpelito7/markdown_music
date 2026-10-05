@@ -258,6 +258,10 @@ local function look_css(l)
   -- On the dark side it is the accent itself: it already reads there.
   put("play-accent-ink", side.accent_ink)
   put("svg-ink", side.svg_ink)
+  -- And the root of the drawing, which the editor repaints on the dark side
+  -- alone (mdm-look.css, `.mdm-paper svg`): on a light one it keeps the
+  -- colour of the text, which is what abcjs gives it.
+  if dark then put("svg-root", side.svg_ink) end
   put("syn-card", side.card)
   put("syn-page", side.page)
   put("highlight", side.highlight)

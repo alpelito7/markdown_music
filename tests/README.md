@@ -8081,6 +8081,134 @@ tree the owner's VS Code runs from is never written):
 
 Ten of ten caught.
 
+**Tables.** His table on paper against his editor: the page drew Quarto's
+table, Bootstrap's `.table`. Measured on six tables in MDM Dark
+(`tests/tmp/pdf-review/tables/`, not kept): every table the whole measure
+wide, three short columns spread over 820 px where the editor sets them in
+216; on a table whose source has a line over 72 characters, the columns at
+the percentages Pandoc makes of the dashes under the head (`<col
+style="width: 34%">`) and not where their words ask, so "index and type"
+broke into two rows with room to spare; cells padded 8.5 px all round
+(0.5rem, and 7.33 under print, where Quarto sets the root to 11pt), against
+the editor's 4.48 by 13.6 with none outside the first and last columns; the
+head's cells at the foot of their row; a rule over the table, under it and
+under every row in #d3d3d4 and #909294, greys of Quarto's light theme that
+are a row of bright lines on the dark side, where the editor has a rule
+under the head at 34 % of the ink, one between rows at 10 % and no frame.
+A row stood 45.19 px against 36.63, and the text under a table 45.18 px from
+its last row against 52.45.
+
+The Tables rules of `mdm-look.css` are the editor's (`#app .mdm-table` in
+`style.css`): the table is its own scroll box, a block the width of the
+column padded 0.3em over and under, as the editor's is inside its widget,
+and its rows form a table as wide as what they hold; Pandoc's widths are
+taken off (`!important`, they are in the element's own style); the
+editor's padding, alignment and rules. With them each of the 90 cells of
+the six tables is at the editor's x to 0.00 px and has its width to 0.02 (a
+cell with a chip of code aside: 1.86 px, the code face), and every distance
+around a table is the editor's to 0.01 px on the page; under print a row is
+0.13 px taller (a 1 px rule is 1.2045 after the print's zoom).
+
+Left as it was: a caption (`: text` under the table), which the page sets
+over the table, centred on the column, and the editor draws as the line of
+text it is, colon and all, under the table.
+
+Test: *a table is set on the page and on paper as the editor draws it: its
+width, its columns, its rules and its air* in `html.test.js`, in either
+face: three tables between lines of prose (three short columns, a column of
+each alignment, and one with a long source line and cells that wrap), every
+cell read on both surfaces (its place in the column, its box, its padding,
+its alignment, the rule under it), the frame of the table, the air over and
+under it; then the design said once (a short table under 300 px, the first
+cell with no padding on its left, the head's rule at 0.34 and a row's at
+0.1, none under the last row); and in the PDF printed from the page five
+words, one of each kind of column, within 0.6 pt of where the editor has
+them, and the rows at the editor's pitch.
+
+Mutations, on the copy: **TA1** the table no box of its own, **TA2**
+Pandoc's widths left on, **TA3** Bootstrap's padding, **TA4** the head at
+the foot of its row, **TA5** a cell with no alignment taking what it
+inherits, **TA6** and **TA7** the outer padding back on the first and the
+last cell, **TA8** the head's rule a row's, **TA9** a rule under the last
+row, **TA10** Quarto's rule over and under the table, **TA11** Quarto's
+margins, **TA12** the box with no padding, **TA13** the rule between rows
+at the head's strength. Thirteen of thirteen caught.
+
+**The blocks.** What five audits by family (text in a line, blocks, maths
+and scores, what paper does, the material of the PDF) found standing or
+painted otherwise on the page than in the editor, where the page was the
+side that was off. Each is a rule of Quarto's or Bootstrap's that
+`mdm-look.css` had not answered, or one of its own in the wrong unit:
+
+- A quotation was set in a measure 25.5 px short of the editor's (22 on
+  paper): Bootstrap pads `.blockquote` 1.5rem on its right. Its first row
+  ends on "so" at the column's edge in the editor, and the page sent "so"
+  down.
+- The code of a card stood 3.7 px further in than the editor has it (16.3 px
+  for 12.67) and the card was 3.7 px taller: Bootstrap pads every `<code>`.
+  A card stood 14 px from another card and from the text under it for the
+  editor's 16: its margin was `1em` of its own 14.08 px. An empty fenced
+  block was its padding alone, 19 px for the editor's 37.
+- Across a display equation the text was 5 px nearer on the page (92.79 px
+  from the row above a formula to the row below it for 97.78), and 6.4 px
+  nearer across a numbered one: the editor's widget carries 0.2em of its own
+  over and under the formula's box.
+- A score stood 9.5 px further from its neighbours: a margin of 1.5rem where
+  the editor has a blank line.
+- The two lines beside a `***` were 25.6 px nearer each other (54.79 px for
+  80.37): the rule's air was a margin, which collapsed into the paragraph's
+  own over it and stood alone under it, where the editor pads a row of its
+  own.
+- Headings 3 to 6 were at 0.9 of the ink (Quarto's theme): rgb(194, 194,
+  194) for rgb(212, 212, 212) in MDM Dark. A tune's title was black on the
+  light sides beside words in the ink (the root of the drawing was painted
+  on every side). Code in a link was in the code's ink and code in a strong
+  run at weight 400 (Bootstrap). A highlight had corners rounded by 2 px.
+  The text of a note stood 3.58 px after its number for the editor's space
+  of 6.52.
+
+After: each of thirteen marks at the editor's x and every distance across a
+block the editor's to 0.01 px on the page; on paper within a row's pixel (a
+baseline is drawn on a whole pixel, as on a screen).
+
+Tests in `html.test.js`: *a quotation, a card of code, an equation, a score
+and a rule stand on the page and on paper where the editor stands them, in
+its inks* (in MDM Light and MDM Dark: the marks are words of prose over and
+under each block, so what is read is where a block puts the text around it
+whatever face the code is in, with the first letter of a card's code, the
+word that opens a quotation's second row and the first word of a note; the
+opacity of the four lower headings, the colour of code in a link, the weight
+of code in a strong run, the corners of a highlight and the fill of a
+score's root, which paints its title) and *a display equation and a rule
+leave on the page and on paper the air the editor leaves* (a formula of one
+row, a taller one, a numbered one, a rule under a paragraph and one under a
+list, each between two lines of plain prose).
+
+Mutations, on the copy: **BL1** the quotation padded on its right, **BL2**
+the code with Bootstrap's padding, **BL3** the card's margin in its own em,
+**BL4** the empty card its padding alone, **BL5** code in a strong run at
+400, **BL6** code in a link in the code's ink, **BL7** the highlight's
+corners round, **BL8** the lower headings at 0.9, **BL9** a note's text
+0.3em after its number, **BL10** the root of a score painted on every side,
+**BL11** the filter writing the root's ink on the light side too, **BL12**
+a score 1.5rem from its neighbours, **BL13** the rule's air a margin,
+**BL14** the rule's box sized by its border, **BL15** a display equation
+with 0.25em, **BL16** a numbered one with 0.25em, **BL17** no blank line
+under a rule. Sixteen caught at once; BL1 passed, the mark of the quotation
+being a word that does not move when its measure shortens, and was caught
+once the test read the word that opens the second row.
+
+A callout was Quarto's box as Quarto dresses it for a light page, on every
+side: in MDM Dark its title in rgb(185, 185, 185) on a band of rgb(201,
+209, 221), 1.28 to 1 where the prose has 10.89, with a pale line round the
+box; in MDM Light a bar of 4.67 px in Bootstrap's five colours where the
+editor has its own; and its text at 0.9rem, 0.825 of the prose on paper. It
+has the editor's bar, 3 px in the colour of its kind, its ground at 5 % of
+that colour, no frame, and its text in the ink at the size of the prose:
+ink and ground are the editor's to a level in both looks for the five
+kinds. Its build is still Quarto's, a row with an icon and the name of the
+kind, where the editor keeps the `:::` fences in view, small and faint.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -8276,6 +8404,13 @@ Ten of ten caught.
     and cannot print ends in an error that names the setting; a confined
     snap or flatpak is the case that comes to mind, and none was tried. The
     measurements are the report of 2026-10-02, kept outside the repository.
+17. Settled on 2026-10-04 (*The printed PDF against the editor, reviewed*,
+    the blocks), and kept here so that the entries under it keep their
+    numbers. The page drew a heading of the third level and under at an
+    opacity of 0.9, which Quarto's theme gives them, where the editor draws
+    every heading in the whole of the ink; `mdm-look.css` now sets
+    `opacity: 1` on the headings, with the two inks it was measured between
+    in its comment.
 18. A click on a drawn selection is taken for a click in the dead margin
     (found 2026-10-03, *The second click on a drawing puts its source
     away*). `style.css` lifts CodeMirror's selection layer above the text,

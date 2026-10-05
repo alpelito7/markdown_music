@@ -202,7 +202,10 @@ the first level is in every number again, as Quarto prints it. The same
 file rendered by Quarto without the MDM filter keeps the 0.1.
 
 Differences that are left standing, each on the record in `tests/README.md`:
-the page's callouts are Quarto's, with a heading and an icon; a numbered list
+the page's callouts have the editor's colours and Quarto's build, a row with
+an icon and the name of the kind where the editor keeps the fences in view; a
+table's caption stands over the table on the page, where the editor draws
+the line it is written on; a numbered list
 written `3)` keeps its delimiter in the editor where Pandoc prints a point; a
 setext heading written over several lines is a heading in the editor and a
 paragraph to Pandoc; Pandoc reads the inside of a `<div>` as Markdown and the
@@ -909,9 +912,9 @@ the Latin Modern faces and the hyphenation patterns.
   route would be a `lilypond` block the filter compiles the way it does ABC.
 - The exported HTML matches the editor as far as two different tokenizers
   let it: the code is highlighted by skylighting rather than by Lezer, so
-  the palette is shared while the cut into tokens is not. Callouts are left
-  to Quarto as well, which draws them with a heading and an icon where the
-  editor draws an accent bar over the source.
+  the palette is shared while the cut into tokens is not. A callout has the
+  editor's colours and Quarto's build, a row with an icon and the name of
+  its kind where the editor keeps the fences in view.
 - `bin/mdm` renders single files; for a whole book (a Quarto `book`
   project) the chapters would go as `.qmd` with the filter.
 
