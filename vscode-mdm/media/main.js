@@ -1282,6 +1282,119 @@
     }
   }
 
+  // ---- An undo whose text has gone ----
+  //
+  // The header's lines come into the text and leave it as changes of the
+  // host's (replaceText), and CodeMirror's history maps what it holds over
+  // them. An edit made in the open header is still in the history once the
+  // header has been put away, as the same change with nowhere to stand: a
+  // word typed there is undone by deleting nothing, and a word deleted
+  // there by putting it back where its lines collapsed to, which is the
+  // head of the body. Ctrl+Z after a word of the title had been replaced
+  // and the header put away wrote the old word into the first line of the
+  // document (measured in the harness, 2026-10-04: "Music " at the head of
+  // the body). Opening the header again does not mend it, the lines being
+  // new ones to the history.
+  //
+  // So every change in the history says where it was made (`wroteAt`, as an
+  // effect kept with the change, which the history maps along with it), and
+  // a place whose text has since been deleted from around it by a change
+  // from outside is gone for good. A step of the history that has nothing
+  // but such places changes nothing when it is taken (historyStep): the
+  // press does nothing here, and inside VS Code the workbench's own undo
+  // of the file, which every Ctrl+Z also runs (disarmNativeHistory), is
+  // what puts the header back as it was, with the title redrawn from it
+  // (seen in VS Code 1.133, 2026-10-04: a word of the title replaced, the
+  // header left, and two presses took back the typing and then the
+  // deletion, the body untouched; two of Ctrl+Y put them back). The
+  // toolbar's arrow has no workbench behind it, and its press on such a
+  // step is a press that does nothing.
+  //
+  // Any change from outside does the same, the header going being the one
+  // that happens every day: the undo of a word deleted in a paragraph that
+  // the text editor beside this one has since deleted is dropped as well,
+  // where it would have put the word back at the seam.
+  //
+  // The place is the head of the change in the text before it, which is
+  // where an effect of the history stands. A place is also mapped when two
+  // changes are joined into one step, over the earlier change taken back,
+  // and typing inside what was just typed reads there as text deleted from
+  // around it; the place of the earliest change of a step is mapped by
+  // nothing but changes from outside, so a step is gone only when every
+  // place it has is.
+  const wroteAt = CM.StateEffect.define({
+    map: function (at, mapping) {
+      if (at < 0) return at;
+      let gone = false;
+      // Deleted on both sides of it, or after it at the head of the text,
+      // where nothing stands before.
+      mapping.iterChangedRanges(function (from, to) {
+        if (from <= at && at < to && (from < at || from === 0)) gone = true;
+      });
+      return gone ? -1 : mapping.mapPos(at, 1);
+    },
+  });
+  const wroteWhere = CM.invertedEffects.of(function (tr) {
+    const places = [];
+    tr.changes.iterChangedRanges(function (from) {
+      places.push(wroteAt.of(from));
+    });
+    return places;
+  });
+
+  // Undo and redo, CodeMirror's own, with the step that has no place left
+  // taken out of the history instead of applied. The step is what the
+  // command would have dispatched. It is applied and taken straight back,
+  // the two as one update of the editor, so that nothing is drawn or sent
+  // in between: the history then counts the step as done, and what it
+  // holds under it, which was written for a text that has the step in it,
+  // is mapped over its going like over any other change from outside.
+  // (Taken out without being applied, the next undo was made for a longer
+  // text than the one on screen, and CodeMirror refused it: after the
+  // header's three steps the body's own was lost, measured 2026-10-04.)
+  // The carets stay where they are. A step with places left and nothing to
+  // change, which typing in the header leaves, goes the same way: applied,
+  // it would only move the caret to where the header was.
+  function historyStep(command) {
+    return function (target) {
+      return command({
+        state: target.state,
+        dispatch: function (tr) {
+          const places = tr.effects.filter(function (e) {
+            return e.is(wroteAt);
+          });
+          const gone = places.every(function (e) {
+            return e.value < 0;
+          });
+          // A step of the selection alone has no place and is not this.
+          if (!places.length || !(gone || tr.changes.empty)) return target.dispatch(tr);
+          const back = tr.state.update({
+            changes: tr.changes.invert(tr.startState.doc),
+            selection: tr.startState.selection,
+            annotations: CM.Transaction.addToHistory.of(false),
+            filter: false,
+          });
+          target.update([tr, back]);
+          updateUndoButtons();
+        },
+      });
+    };
+  }
+  const mdmUndo = historyStep(CM.undo);
+  const mdmRedo = historyStep(CM.redo);
+  const HISTORY_STEPS = new Map([
+    [CM.undo, mdmUndo],
+    [CM.redo, mdmRedo],
+    [CM.undoSelection, historyStep(CM.undoSelection)],
+    [CM.redoSelection, historyStep(CM.redoSelection)],
+  ]);
+  // CodeMirror's keys for the history, each on its command as wrapped above.
+  function historyKeys() {
+    return CM.historyKeymap.map(function (binding) {
+      return Object.assign({}, binding, { run: HISTORY_STEPS.get(binding.run) || binding.run });
+    });
+  }
+
   function replaceText(incoming, version, changes, keepCarets) {
     // The text of this editor is LF (the host sends it that way, see
     // transforms.js). A CR that got through would not survive the dispatch
@@ -13822,7 +13935,18 @@
         CM.EditorState.allowMultipleSelections.of(true),
         CM.drawSelection(),
         CM.dropCursor(),
+        // Ahead of the history's own handler, which answers the browser's
+        // undo and redo (the Edit menu, a gesture) with its bare commands.
+        CM.EditorView.domEventHandlers({
+          beforeinput: function (e, v) {
+            const step = e.inputType === "historyUndo" ? mdmUndo : e.inputType === "historyRedo" ? mdmRedo : null;
+            if (!step) return false;
+            e.preventDefault();
+            return step(v);
+          },
+        }),
         CM.history(),
+        wroteWhere,
         gestures.of(gestureExtensions()),
         CM.highlightSelectionMatches(),
         // What the clipboard and a drop bring, ahead of CodeMirror's own
@@ -13869,7 +13993,7 @@
             // (addKeymap below): Enter, Backspace, Delete and Tab are the
             // editor's own (mdmEnter, mdmBackspace, mdmDelete, mdmTab).
             CM.defaultKeymap,
-            CM.historyKeymap,
+            historyKeys(),
             CM.searchKeymap
           )
         ),
@@ -14880,8 +15004,8 @@
           ),
       },
       "|",
-      { name: "undo", icon: UNDO_ICON, tip: "Undo", click: run(CM.undo) },
-      { name: "redo", icon: REDO_ICON, tip: "Redo", click: run(CM.redo) },
+      { name: "undo", icon: UNDO_ICON, tip: "Undo", click: run(mdmUndo) },
+      { name: "redo", icon: REDO_ICON, tip: "Redo", click: run(mdmRedo) },
       "|",
       { name: "headings", icon: HEADING_ICON, tip: "Heading", build: headingMenuItems, caret: true },
       // `key` is the letter of the Mod- binding the button shares (the

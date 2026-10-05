@@ -7679,6 +7679,12 @@ What is decided in it, each with its test:
   on stays where it is when the header's lines leave the text or come into
   it*, which also holds a click on the title going to the top, and the top
   being reached after the header was put away below it.
+- **An undo whose text has gone writes nothing.** *an undo of what was
+  written in the header leaves the body alone once the header is put
+  away*, *the header opened again does not give its old steps back their
+  place* (the keys, the toolbar's arrow, the browser's own undo and the
+  undo of the selection), and *an undo is dropped only when the text around
+  its place was deleted from outside*.
 - **Both halves against each other**: *from a click to a click away, with
   the host on the other end* and *a header that draws nothing is kept in
   view through every click, with the host on the other end* run the editor
@@ -7687,6 +7693,20 @@ What is decided in it, each with its test:
 
 Four things found on the way, each measured before it was mended:
 
+- **Ctrl+Z wrote into the body.** An edit made in the open header is still
+  in CodeMirror's history once the header's lines have left the text, and
+  the history maps it over their going: a word deleted in the title was
+  put back by its undo at the head of the body ("Music " in front of the
+  first line, in the harness). It was there before this round, behind the
+  button; a click away makes it an everyday gesture. Every step of the
+  history now carries where it was made (`wroteAt`, through
+  `invertedEffects`, which the vendored bundle had to export), a place is
+  gone once a change from outside has deleted the text on both sides of
+  it, and a step with no place left is applied and taken straight back in
+  one update of the editor (`historyStep`). Taken out without being
+  applied, as it was first written, the next undo was made for a longer
+  text than the one on screen and CodeMirror refused it: the body's own
+  step was lost behind the header's three.
 - **The clicked line went 676 px up and out of the pane.** A header of 31
   lines open, the page scrolled down to the body, a click on a line there
   (VS Code 1.133). CodeMirror does not hold the page through a change of
@@ -7718,6 +7738,13 @@ inside VS Code lasts while a caret is in the header: a test that plays no
 host sees one more `header` message when its caret first leaves the header.
 `update()` in `helpers.js` takes `pinned` for the tests that play the
 button's answer, and two tests of `webview-look.test.js` now pass it.
+
+**The bundle.** `vscode-mdm/vendor-src/src/index.js` exports
+`invertedEffects`, `undoSelection` and `redoSelection` from
+`@codemirror/commands`. Built before the change into a scratch folder, the
+bundle came out byte for byte the one committed (sha256 `af7ec872...`), so
+the rebuild adds the exports and nothing else: 65 bytes, and
+`VERSIONS.json`, the stylesheet and the fonts unchanged.
 
 **Mutations**, on a copy of the tree and never on the tree itself, 60 of
 them, each applied where its text stands exactly once, run against the tests
@@ -7762,6 +7789,19 @@ round.
   the blank line that goes with the header, the drawing not held on a
   second click, the title's height not noted, the header coming in not
   held. All caught.
+- The history, 17 (`PW31` to `PW47`): no place recorded, a place at the
+  head of the text never gone, a change that only comes up to a place
+  taking it, from either side, a step dropped when any of its places is
+  gone, a step applied and not taken back, a step of the selection taken
+  out, a step with nothing to change applied, the caret left where the
+  step put it, the taking back kept in the history, the toolbar, the
+  browser's undo, the keys and the undo of the selection each on the bare
+  command, redo on the bare command, a place not moved with its text, and
+  a place that is gone mapped again. 15 caught at once. `PW35` and `PW45`
+  survived: the test of joined changes put an arrow between the typing and
+  the deletion, which keeps them from joining, and nothing redid a step
+  whose text had gone. Both tests were made to do what they said, and both
+  mutations are caught.
 
 Run on the state the round left: `test:fast` (310 of 310); every editor
 suite, one file at a time under the guards and under the lock the sessions

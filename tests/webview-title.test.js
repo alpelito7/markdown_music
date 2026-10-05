@@ -1045,6 +1045,229 @@ test("the line the reader is on stays where it is when the header's lines leave 
   await b.close();
 });
 
+// ---------- An undo whose text has gone ----------
+
+// The header's lines leave the text when it is put away, and what was
+// written in them is still in the history, with nowhere to stand. Measured
+// before this was mended (2026-10-04): a word of the title deleted, the
+// header put away, Ctrl+Z, and the word was written into the first line of
+// the body. Every step of the history now says where it was made, and one
+// whose place has been deleted from around it by a change from outside is
+// taken out without being applied (historyStep in main.js).
+const ctrl = async (page, key) => {
+  await page.keyboard.down("Control");
+  await page.keyboard.press(key);
+  await page.keyboard.up("Control");
+  await sleep(150);
+};
+// The host's acknowledgement of the last edit the page sent, so that the
+// text of that edit is what the two sides agree on.
+const acknowledge = async (page) => {
+  await page.evaluate(() => {
+    const edits = window.__posts.filter((m) => m.type === "edit");
+    if (edits.length) window.postMessage({ type: "applied", seq: edits[edits.length - 1].seq }, "*");
+  });
+  await sleep(50);
+};
+// A change made as the reader makes one, each a step of the history of its
+// own: the wait is longer than the half second that joins two.
+const change = async (page, find, insert) => {
+  await page.evaluate(
+    (f, text) => {
+      const view = window.__mdm.view;
+      const at = view.state.doc.toString().indexOf(f);
+      view.dispatch({ changes: { from: at, to: at + f.length, insert: text }, userEvent: text ? "input.type" : "delete.backward" });
+    },
+    find,
+    insert
+  );
+  await sleep(650);
+};
+
+test("an undo of what was written in the header leaves the body alone once the header is put away", { skip }, async () => {
+  const h = await editor(TITLED, true);
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  // A step in the body, then four in the header: a word deleted, a word
+  // replaced, a word typed, and the opening fence typed over itself, which
+  // is a change at the very head of the text.
+  await change(h.page, "ordinary ", "");
+  await change(h.page, "Music ", "");
+  await change(h.page, "alpelito7", "somebody");
+  await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    const at = view.state.doc.toString().indexOf("somebody") + "somebody".length;
+    view.dispatch({ changes: { from: at, insert: " else" }, userEvent: "input.type" });
+  });
+  await sleep(650);
+  await h.page.evaluate(() => window.__mdm.view.dispatch({ changes: { from: 0, to: 3, insert: "---" }, userEvent: "input.paste" }));
+  await sleep(650);
+  await acknowledge(h.page);
+  const edited = await docText(h.page);
+  assert.ok(edited.startsWith('---\ntitle: "A Markdown prototype"'), edited.slice(0, 60));
+  assert.ok(edited.includes("author: somebody else\n"), edited.slice(0, 140));
+  const body = BODY.replace("ordinary ", "");
+  // Put away, and the caret left in the body, where the reader went on.
+  await answer(h.page, edited, false);
+  assert.equal(await docText(h.page), body);
+  const caret = body.indexOf("More prose") + 4;
+  await setSelection(h.page, caret);
+  const where = () => h.page.evaluate(() => [window.__mdm.view.state.selection.main.head, window.__mdm.view.state.selection.main.empty]);
+  // Four presses for the header's four steps, none of which writes
+  // anything or takes the caret anywhere, and the fifth is the body's own.
+  for (const step of ["the fence", "the word typed", "the name", "the word of the title"]) {
+    await ctrl(h.page, "z");
+    assert.equal(await docText(h.page), body, "the undo of " + step + " wrote into the body");
+    assert.deepEqual(await where(), [caret, true], "the undo of " + step + " moved the caret");
+  }
+  await ctrl(h.page, "z");
+  assert.equal(await docText(h.page), BODY, "the body's own step was lost with the header's");
+  // And forward again: the body's, and nothing after it.
+  await ctrl(h.page, "y");
+  assert.equal(await docText(h.page), body);
+  const redone = await where();
+  for (let i = 0; i < 4; i++) {
+    await ctrl(h.page, "y");
+    assert.equal(await docText(h.page), body, "a redo of the header's steps wrote into the body");
+    assert.deepEqual(await where(), redone, "a redo of the header's steps moved the caret");
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("the header opened again does not give its old steps back their place", { skip }, async () => {
+  const h = await editor(TITLED, true);
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  await change(h.page, "Music ", "");
+  await acknowledge(h.page);
+  const edited = await docText(h.page);
+  await answer(h.page, edited, false);
+  await answer(h.page, edited, true);
+  assert.equal(await docText(h.page), edited);
+  // The lines are new ones to the history: the word would go in at the head
+  // of the text, over the opening fence, or at the head of the body.
+  await ctrl(h.page, "z");
+  assert.equal(await docText(h.page), edited);
+  // A redo is a step like any other: a word typed in the header and taken
+  // back there with Ctrl+Z, the header put away, and Ctrl+Y would write the
+  // word at the head of the body.
+  const redo = await editor(TITLED, true);
+  await redo.page.evaluate(() => window.__mdm.view.focus());
+  await redo.page.evaluate((at) => window.__mdm.view.dispatch({ changes: { from: at, insert: "working " }, userEvent: "input.type" }), TITLED.indexOf("prototype"));
+  await sleep(650);
+  await ctrl(redo.page, "z");
+  assert.equal(await docText(redo.page), TITLED, "the undo in the open header did not take the word back");
+  await acknowledge(redo.page);
+  await answer(redo.page, TITLED, false);
+  await ctrl(redo.page, "y");
+  assert.equal(await docText(redo.page), BODY, "the redo wrote the header's word into the body");
+  assert.deepEqual(redo.errors, []);
+  await redo.close();
+  // The same from the toolbar's arrow, from the browser's own undo, and
+  // from the undo of the selection (Ctrl+U), each on a header of its own.
+  for (const how of ["button", "browser", "selection"]) {
+    const again = await editor(TITLED, true);
+    await again.page.evaluate(() => window.__mdm.view.focus());
+    await change(again.page, "Music ", "");
+    await acknowledge(again.page);
+    const text = await docText(again.page);
+    await answer(again.page, text, false);
+    const left = await docText(again.page);
+    if (how === "button") await again.page.click('#app button[data-type="undo"]');
+    else if (how === "selection") await ctrl(again.page, "u");
+    else {
+      await again.page.evaluate(() =>
+        window.__mdm.view.contentDOM.dispatchEvent(new InputEvent("beforeinput", { inputType: "historyUndo", bubbles: true, cancelable: true }))
+      );
+    }
+    await sleep(150);
+    assert.equal(await docText(again.page), left, how + ": the word deleted in the title was written into the body");
+    assert.deepEqual(again.errors, []);
+    await again.close();
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The rule is about any change from outside, the header going being the one
+// that happens every day: a place is gone when the text on both sides of it
+// has been deleted, and not when a change from outside only came up to it.
+test("an undo is dropped only when the text around its place was deleted from outside", { skip }, async () => {
+  const text = "First paragraph of the document.\n\nSecond paragraph, with a word to delete.\n\nThird paragraph, to the end.\n";
+  const gone = "First paragraph of the document.\n\nThird paragraph, to the end.\n";
+  const cases = [
+    // The paragraph the word was deleted in, taken out from outside.
+    [gone, gone],
+    // Another paragraph: the word goes back where it was.
+    ["First paragraph of the document.\n\nSecond paragraph, with a to delete.\n", "First paragraph of the document.\n\nSecond paragraph, with a word to delete.\n"],
+    // What follows the place, from the place on, and what comes before it,
+    // up to the place: it still has a side to stand on.
+    ["First paragraph of the document.\n\nSecond paragraph, with a \n\nThird paragraph, to the end.\n", "First paragraph of the document.\n\nSecond paragraph, with a word \n\nThird paragraph, to the end.\n"],
+    ["First paragraph of the document.\n\nto delete.\n\nThird paragraph, to the end.\n", "First paragraph of the document.\n\nword to delete.\n\nThird paragraph, to the end.\n"],
+  ];
+  for (const [outside, undone] of cases) {
+    const h = await open({ text: text, scores: 0, withFrontMatter: false, frontMatter: "" });
+    await h.page.evaluate(() => window.__mdm.view.focus());
+    await change(h.page, "word ", "");
+    await acknowledge(h.page);
+    await update(h.page, outside, false, 0, "");
+    assert.equal(await docText(h.page), outside);
+    await ctrl(h.page, "z");
+    assert.equal(await docText(h.page), undone, JSON.stringify(outside));
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+  // The place follows the text through a change from outside that moves
+  // it: a paragraph written over the first, and then the paragraph of the
+  // deleted word taken out.
+  const moved = await open({ text: text, scores: 0, withFrontMatter: false, frontMatter: "" });
+  await moved.page.evaluate(() => window.__mdm.view.focus());
+  await change(moved.page, "word ", "");
+  await acknowledge(moved.page);
+  const above = "A paragraph written over the first, from outside.\n\n";
+  await update(moved.page, above + text.replace("word ", ""), false, 0, "");
+  await update(moved.page, above + gone, false, 0, "");
+  await ctrl(moved.page, "z");
+  assert.equal(await docText(moved.page), above + gone, "a place that had moved was looked for where it used to be");
+  assert.deepEqual(moved.errors, []);
+  await moved.close();
+  // A word typed here and deleted from outside: the step has its place and
+  // nothing left to take back, and its undo leaves the caret where it is.
+  const typed = await open({ text: text, scores: 0, withFrontMatter: false, frontMatter: "" });
+  await typed.page.evaluate(() => window.__mdm.view.focus());
+  await typed.page.evaluate((at) => window.__mdm.view.dispatch({ changes: { from: at, insert: "lovely " }, userEvent: "input.type" }), text.indexOf("word"));
+  await sleep(650);
+  await acknowledge(typed.page);
+  await update(typed.page, text, false, 0, "");
+  await setSelection(typed.page, text.indexOf("Third"));
+  await ctrl(typed.page, "z");
+  assert.equal(await docText(typed.page), text);
+  assert.equal(await typed.page.evaluate(() => window.__mdm.view.state.selection.main.head), text.indexOf("Third"), "an undo with nothing to take back moved the caret");
+  assert.deepEqual(typed.errors, []);
+  await typed.close();
+  // Typing joined into one step with a deletion inside what was typed is
+  // undone as ever: the place of the later change is inside text the step
+  // itself takes back, and that is no change from outside.
+  const h = await open({ text: text, scores: 0, withFrontMatter: false, frontMatter: "" });
+  await setSelection(h.page, text.indexOf("word"));
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  await h.page.keyboard.type("lovely");
+  await h.page.keyboard.press("Backspace");
+  await h.page.keyboard.press("Backspace");
+  await sleep(100);
+  assert.ok((await docText(h.page)).includes("a loveword"), "the typing did not land");
+  assert.equal(await h.page.evaluate(() => window.CM.undoDepth(window.__mdm.view.state)), 1, "the typing and the deletion were not joined, so nothing was under test");
+  await ctrl(h.page, "z");
+  assert.equal(await docText(h.page), text, "a step made of joined changes was dropped");
+  // And a step of the selection alone, which has no place of its own, is
+  // taken as ever: Ctrl+U brings the caret back from where it went.
+  await setSelection(h.page, 5);
+  await setSelection(h.page, 40);
+  await ctrl(h.page, "u");
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.state.selection.main.head), 5, "the undo of the selection was taken out with nothing done");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 // ---------- With the host on the other end ----------
 
 // The same gestures with extension.js answering them, in Node over the mock
