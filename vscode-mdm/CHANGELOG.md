@@ -52,6 +52,17 @@
   references. Quarto alone prints them 0.1, 0.1.1, 0.2, since an unnumbered
   `#` is still its first level. A `#` that carries a number, or `crossref:
   chapters: true`, keeps the first level in every number.
+- The keys of the heading levels are `Ctrl+0` to `Ctrl+6`, where they were
+  `Ctrl+Shift+0` to `Ctrl+Shift+6`: `Ctrl+2` makes the line a heading of the
+  second level, the level a line already has takes its heading off, and
+  `Ctrl+0` makes a paragraph of it. They are the editor's while the caret
+  is in the text, and VS Code's again after a click in the margin, where
+  `Ctrl+0` is Focus Side Bar and `Ctrl+1` to `Ctrl+8` go to its editor
+  groups. Only the digits of the row over the letters: one pressed on the
+  number pad is left to VS Code, which resets its zoom on `Ctrl+Numpad0`.
+  `Ctrl+Shift` and a digit is no longer the editor's. On a Mac the levels
+  stay on `Cmd+Option` and a digit, and `Ctrl+Shift+C` and `Ctrl+Shift+T`
+  are where they were.
 - A field of a tune (`K:G`, `M:6/8`, `X:1`) or a Windows path (`C:\Music`)
   pasted over selected words is pasted as the text it is, where it made
   the words a link to it: an address is a scheme of two letters or more

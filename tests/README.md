@@ -7128,6 +7128,61 @@ the outline numbered.
 
 Left standing, item 19 of the list below.
 
+### The heading levels on Ctrl and a digit (2026-10-03)
+
+The owner, after the numbered sections: the headings on `Ctrl` and a digit,
+where they were on `Ctrl+Shift` and a digit since 2026-09-19. Asked for an
+opinion first, the answer was yes with the cost named, and the owner took
+it: VS Code binds the chord (`Ctrl+0` Focus Side Bar, `Ctrl+1` to `8` its
+editor groups, `Ctrl+2` opening a second one; read in 1.133.0), so from the
+text `Ctrl+2` no longer jumps to the group beside it. The owner's wording
+of what follows is three meanings for one chord: VS Code's while the
+document is nobody's, a level while the caret is in the text, and the
+score navigation mode's own once that mode is in the editor. The first two
+are the layers of D20 as they already worked for `Ctrl+B`; the third is on
+another branch and is not in this tree.
+
+What is decided in it, each with its test in `webview-editing.test.js`:
+
+- **`Ctrl+0` to `Ctrl+6` on a PC, and nothing left on `Ctrl+Shift` and a
+  digit.** No alias: the old chord leaves the line alone, on the Spanish
+  board and on the US one, and reaches VS Code (*Ctrl+<digit> sets the
+  heading of that level...*, which was *Ctrl+Shift+<digit> sets...*; *the
+  formatting keys stop at the text...*).
+- **The key is the digit and not the character.** With no Shift the
+  Spanish board writes the digit itself, so the layout that proves it is
+  the French one, where the same key writes an e with an accent
+  (`levelChord` with "fr").
+- **Not the number pad.** CodeMirror names the pad's digit as the row's,
+  and VS Code resets its zoom on `Ctrl+Numpad0`: a pad's digit sets no
+  level and is heard by the workbench, and the row's digit pressed straight
+  after it is answered again.
+- **A Mac keeps `Cmd+Option` and a digit**, and `Cmd` and a digit is not
+  the editor's there. Not tried on a Mac.
+- **The rows of the heading menu name the new keys** (*the heading menu
+  lists Paragraph and the six levels...*), `Ctrl+2` on a PC and the same
+  `Cmd+Option` on a Mac.
+
+Eight mutations in `main.js`, swapped in place and back with the hash
+checked, on a base seen green first (a first pass was thrown away: one of
+the three tests was red before any mutation, from an assertion of this
+round that pressed the key with the caret in a code block), and all caught:
+a level's binding without its `stopPropagation`; the pad answered; a pad's
+key remembered for the keys after it; one level left on `Ctrl+Shift`; the
+menu naming `Ctrl+Shift`; the menu naming no modifier on a Mac; a level
+with no binding of its own on a Mac; the observer that says where a key is
+not installed.
+
+Run on this state: `test:fast` (283 of 283), the whole of
+`webview-editing.test.js` (150 of 150) and the menu and key tests of
+`webview-look.test.js` (4 of 4). The other suites were not run again for
+this. Seen in a real VS Code 1.133.0, in a window off the
+owner's screen and pressed through CDP: with the caret in a paragraph,
+`Ctrl+2`, `Ctrl+1`, `Ctrl+1`, `Ctrl+3` and `Ctrl+0` gave `## `, `# `, a
+paragraph, `### ` and a paragraph, the window keeping one editor group and
+the focus staying in the text; after a click in the dead margin `Ctrl+2`
+left the line alone and the window had two groups.
+
 ### The sections under a title (2026-10-03)
 
 With the numbers drawn, the owner asked for two things: sections that take
@@ -7246,8 +7301,10 @@ What is left, in item 19 below.
    bullets, the numbers and the quote have no key at all since
    `Ctrl+Shift+U` opened fcitx5's `U+` prompt on his machine (see the
    section on it), so what is left to press on his own keyboard is
-   `Ctrl+Shift+0` to `6`, `C` and `T`, and `Ctrl+H`, which the text keeps
-   from the workbench.
+   `Ctrl+0` to `6`, `Ctrl+Shift+C` and `T`, and `Ctrl+H`, which the text
+   keeps from the workbench. The digits were pressed in a real VS Code
+   window on 2026-10-03, through CDP and not on his keyboard (*The heading
+   levels on Ctrl and a digit*).
 5. The three webview files share `webview/helpers.js`; a cold-start flake
    was seen once (the first `open()` of a run timing out on its three SVGs)
    and not reproduced. A second flake, *the caret keeps its place in the

@@ -8470,6 +8470,25 @@
     };
   }
 
+  // A level's key is its digit in the row over the letters. The number pad
+  // writes the same digit and CodeMirror names the two keys alike, but to
+  // VS Code they are two: Ctrl+Numpad0 resets the zoom (primary 2146, read
+  // in 1.133.0), which a paragraph's key would have taken from it. A digit
+  // from the pad is not answered here, so it is not stopped and goes on to
+  // the workbench. A binding is handed no event, so the key going down
+  // leaves word of where it is (noteKey, an observer, which CodeMirror
+  // calls ahead of the keymap).
+  let padKey = false;
+  function noteKey(e) {
+    padKey = e.location === 3;
+  }
+  function levelKey(level) {
+    const apply = applyHeading(level);
+    return function (v) {
+      return !padKey && apply(v);
+    };
+  }
+
   // The rows of the heading menu: Paragraph and the six levels, the one the
   // caret's line is on ticked, each naming its key. The Paragraph row was
   // taken off when the ticked level picked again started taking the heading
@@ -8485,7 +8504,7 @@
           (level ? "Heading " + level : "Paragraph") +
           (level === current ? '<span class="mdm-swatch__tick">✓</span>' : "") +
           '<span class="mdm-menu__key">' +
-          shortcutLabel(String(level), BLOCK_MOD) +
+          shortcutLabel(String(level), LEVEL_MOD) +
           "</span>",
         click: function () {
           if (!view) return;
@@ -13038,17 +13057,31 @@
       // since the workbench would open its own replace widget on the same
       // message. Ctrl+F is searchKeymap's own.
       { key: "Mod-h", mac: "Cmd-Alt-f", run: openReplace, scope: "editor search-panel", stopPropagation: true },
-      // The block keys, all on one second modifier (BLOCK_MOD, Shift on a
-      // PC and Option on a Mac): a digit for a line that has a level, the
-      // digit being the level, with 0 for the paragraph, and a letter for
-      // the blocks that have none. The code block was Notion's Ctrl+Shift+8
-      // for a day and is C now (2026-09-19, the owner's call, for the
-      // symmetry): with it there is no exception left to the rule, every
-      // digit is a level and every block without one is a letter. Notion's
-      // row is where the 0 comes from; it spends 4 to 7 on its blocks
-      // because its headings stop at 3, and the six levels of a .mdm want
-      // the whole row.
-      // The letters: C for the code block and not E, the letter of its
+      // The block keys: a digit for a line that has a level, the digit
+      // being the level, with 0 for the paragraph, and a letter for the
+      // blocks that have none.
+      // The digits are on Ctrl alone (2026-10-03, the owner's call): two
+      // keys for the block gesture a writer makes most. They were on
+      // Ctrl+Shift from 2026-09-19, Notion's row, which is where the 0
+      // comes from, taken then because VS Code binds nothing to it that a
+      // .mdm can be in. Ctrl and a digit it does bind (read in 1.133.0): 0
+      // is Focus Side Bar, 1 Focus First Editor Group, and 2 to 8 go to
+      // that group, 2 opening a second one where there is only one. So the
+      // chord means what the holder of the keyboard makes of it: a level
+      // while the caret is in the text, which is when CodeMirror hears it
+      // and stops it here (the stopPropagation, above), and VS Code's own
+      // once the document is nobody's, after a click in the dead margin.
+      // What it costs is the jump from the text to the group beside it.
+      // Only the digits of the row over the letters: one from the number
+      // pad is left to VS Code (levelKey). On a Mac the digits stay under
+      // Option with the letters, Cmd and a digit not having been tried in
+      // a window there.
+      // The letters are on a second modifier (BLOCK_MOD, Shift on a PC and
+      // Option on a Mac), since Ctrl+C copies and Ctrl+T is VS Code's. The
+      // code block was Notion's Ctrl+Shift+8 for a day and is C now
+      // (2026-09-19, the owner's call): every digit is a level and every
+      // block without one is a letter.
+      // C for the code block and not E, the letter of its
       // inline twin, since Ctrl+Shift+E is Show Explorer and is wanted far
       // more often than the external terminal C takes. (Typora's
       // Ctrl+Shift+K for a code block is Delete Line here, as it is in VS
@@ -13065,19 +13098,16 @@
       // primary 3123 with a linux override).
       // Their buttons name no key now, and the three chords go to VS Code
       // from the text like any key the page does not bind.
-      // What the set takes from the workbench, read in VS Code 1.133.0 and
-      // only while the caret is in the text (the stopPropagation): of
-      // Ctrl+Shift+0 to 9 it binds 1 (replace, inside the search view) and 5
-      // (split, with the terminal focused), neither of which a .mdm can be
-      // in; of the letters, T is Reopen Closed Editor and C opens an
-      // external terminal.
-      { key: "Mod-Shift-0", mac: "Mod-Alt-0", run: applyHeading(0), stopPropagation: true },
-      { key: "Mod-Shift-1", mac: "Mod-Alt-1", run: applyHeading(1), stopPropagation: true },
-      { key: "Mod-Shift-2", mac: "Mod-Alt-2", run: applyHeading(2), stopPropagation: true },
-      { key: "Mod-Shift-3", mac: "Mod-Alt-3", run: applyHeading(3), stopPropagation: true },
-      { key: "Mod-Shift-4", mac: "Mod-Alt-4", run: applyHeading(4), stopPropagation: true },
-      { key: "Mod-Shift-5", mac: "Mod-Alt-5", run: applyHeading(5), stopPropagation: true },
-      { key: "Mod-Shift-6", mac: "Mod-Alt-6", run: applyHeading(6), stopPropagation: true },
+      // What the letters take from the workbench, read in VS Code 1.133.0
+      // and only while the caret is in the text: T is Reopen Closed Editor
+      // and C opens an external terminal.
+      { key: "Mod-0", mac: "Mod-Alt-0", run: levelKey(0), stopPropagation: true },
+      { key: "Mod-1", mac: "Mod-Alt-1", run: levelKey(1), stopPropagation: true },
+      { key: "Mod-2", mac: "Mod-Alt-2", run: levelKey(2), stopPropagation: true },
+      { key: "Mod-3", mac: "Mod-Alt-3", run: levelKey(3), stopPropagation: true },
+      { key: "Mod-4", mac: "Mod-Alt-4", run: levelKey(4), stopPropagation: true },
+      { key: "Mod-5", mac: "Mod-Alt-5", run: levelKey(5), stopPropagation: true },
+      { key: "Mod-6", mac: "Mod-Alt-6", run: levelKey(6), stopPropagation: true },
       { key: "Mod-Shift-c", mac: "Mod-Alt-c", run: toggleCodeBlock, stopPropagation: true },
       { key: "Mod-Shift-t", mac: "Mod-Alt-t", run: toggleTask, stopPropagation: true },
       { key: "ArrowDown", run: stepIntoBlock(1), shift: stepIntoBlock(1, true) },
@@ -13150,7 +13180,7 @@
           },
         }),
         CM.EditorView.inputHandler.of(surroundSelection),
-        CM.EditorView.domEventObservers({ scroll: notePlace }),
+        CM.EditorView.domEventObservers({ scroll: notePlace, keydown: noteKey }),
         CM.search({ top: true, createPanel: searchPanel }),
         CM.keymap.of(
           mdmKeymap.concat(
@@ -13895,12 +13925,14 @@
     if (view) view.focus();
   }
 
-  // The second modifier every block key carries: Shift on a PC, Option on a
+  // The second modifier a block's letter carries: Shift on a PC, Option on a
   // Mac. Not Shift on a Mac, where the system takes Cmd+Shift+3, 4 and 5 for
   // its screenshots and Cmd+Shift+Q logs the account out; Notion binds its
   // own row to Cmd+Option for the same reason, and the code block was bound
-  // that way before this row existed.
+  // that way before this row existed. A level's digit carries none on a PC
+  // since 2026-10-03 and keeps Option on a Mac (the keymap says why).
   const BLOCK_MOD = { pc: "Shift", mac: "Alt" };
+  const LEVEL_MOD = { pc: "", mac: "Alt" };
 
   // The name of a shortcut as VS Code writes it on the platform in use, for
   // a button's tip and for a menu row, which have to agree. Written from the

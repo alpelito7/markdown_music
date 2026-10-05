@@ -658,11 +658,30 @@ test("the formatting keys stop at the text, and reach VS Code from anywhere else
   }
   assert.notEqual(await docText(h.page), "one word here\n");
   assert.deepEqual(await heard(), []);
-  // The block keys too, pressed as a keyboard presses them (blockChord): of
-  // these VS Code keeps Ctrl+Shift+T for Reopen Closed Editor and
-  // Ctrl+Shift+C for an external terminal, and neither may fire from the
-  // text.
-  for (const name of [2, "c", "t"]) await blockChord(h.page, name);
+  // The block keys too, pressed as a keyboard presses them (levelChord,
+  // blockChord): VS Code keeps Ctrl+0 for Focus Side Bar and Ctrl+1 to 8
+  // for its editor groups, Ctrl+2 opening a second one, and Ctrl+Shift+T
+  // for Reopen Closed Editor and Ctrl+Shift+C for an external terminal, and
+  // none of them may fire from the text.
+  for (const level of [0, 1, 2]) await levelChord(h.page, level);
+  for (const name of ["c", "t"]) await blockChord(h.page, name);
+  assert.deepEqual(await heard(), []);
+  // What the levels do not take is VS Code's from the text as well: a digit
+  // past the sixth level, a digit of the number pad (Ctrl+Numpad0 resets
+  // its zoom) and the chord the levels had until 2026-10-03.
+  const before3 = await docText(h.page);
+  await levelChord(h.page, 7);
+  await levelChord(h.page, 0, "pad");
+  await levelChord(h.page, 2, "pad");
+  await blockChord(h.page, 2);
+  assert.deepEqual(await heard(), ["Digit7", "Numpad0", "Numpad2", "Shift+Digit2"]);
+  assert.equal(await docText(h.page), before3);
+  // A key of the pad says nothing about the next one: the row's digit is
+  // answered again straight after it (on the first line, the caret having
+  // gone into the code block Ctrl+Shift+C wrote).
+  await setSelection(h.page, 4);
+  await levelChord(h.page, 3);
+  assert.equal((await docText(h.page)).slice(0, 8), "### one ");
   assert.deepEqual(await heard(), []);
   // And the other way for the three the editor gave back: a chord the page
   // does not bind is VS Code's from the text as well, which is the whole of
@@ -674,11 +693,14 @@ test("the formatting keys stop at the text, and reach VS Code from anywhere else
   // Ctrl+S is VS Code's to save, from the text as well.
   await chord(h.page, ["Control"], "s");
   assert.deepEqual(await heard(), ["KeyS"]);
-  // Out of the text the key is VS Code's, and the text is left alone.
+  // Out of the text the key is VS Code's, and the text is left alone: the
+  // same Ctrl+2 that made a heading goes to the second editor group once
+  // the document is nobody's.
   const before = await docText(h.page);
   await h.page.evaluate(() => document.activeElement.blur());
   await chord(h.page, ["Control"], "b");
-  assert.deepEqual(await heard(), ["KeyB"]);
+  await levelChord(h.page, 2);
+  assert.deepEqual(await heard(), ["KeyB", "Digit2"]);
   assert.equal(await docText(h.page), before);
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -1709,13 +1731,13 @@ test("the heading menu lists Paragraph and the six levels, the caret's line tick
   await setSelection(h.page, 4);
   await h.page.click('#app button[data-type="headings"]');
   assert.deepEqual(await menuRows(h.page), [
-    ["paragraph", "ParagraphCtrl+Shift+0"],
-    ["heading-1", "Heading 1Ctrl+Shift+1"],
-    ["heading-2", "Heading 2✓Ctrl+Shift+2"],
-    ["heading-3", "Heading 3Ctrl+Shift+3"],
-    ["heading-4", "Heading 4Ctrl+Shift+4"],
-    ["heading-5", "Heading 5Ctrl+Shift+5"],
-    ["heading-6", "Heading 6Ctrl+Shift+6"],
+    ["paragraph", "ParagraphCtrl+0"],
+    ["heading-1", "Heading 1Ctrl+1"],
+    ["heading-2", "Heading 2✓Ctrl+2"],
+    ["heading-3", "Heading 3Ctrl+3"],
+    ["heading-4", "Heading 4Ctrl+4"],
+    ["heading-5", "Heading 5Ctrl+5"],
+    ["heading-6", "Heading 6Ctrl+6"],
   ]);
   // Read again at each opening: on a paragraph the tick is on Paragraph.
   await h.page.click('#app button[data-type="headings"]');
@@ -1728,7 +1750,9 @@ test("the heading menu lists Paragraph and the six levels, the caret's line tick
   assert.deepEqual(h.errors, []);
   await h.close();
 
-  // On a Mac the row names Cmd+Option, which is what the keymap binds there.
+  // On a Mac the row names Cmd+Option, which is what the keymap binds there
+  // (the digits left Shift for Ctrl alone on a PC, 2026-10-03, and stayed
+  // under Option on a Mac).
   const mac = await open({ text: "Body.\n", scores: 0, platform: "MacIntel" });
   await setSelection(mac.page, 2);
   await mac.page.click('#app button[data-type="headings"]');
@@ -1984,7 +2008,9 @@ test("a button held down leaves the caret's line showing its source, and the foc
 // ---- The rest of the block keys ----
 
 // The digit is the level, 0 the paragraph, and a letter names the block that
-// has no level (D19). The keys are the page's own keymap and carry
+// has no level (D19). The digits are on Ctrl alone since 2026-10-03 (the
+// owner's call; they were on Ctrl+Shift) and the letters on Ctrl+Shift. The
+// keys are the page's own keymap and carry
 // CodeMirror's stopPropagation, so a key answered here never reaches the
 // workbench as well. Two of the letters are left: C for the code block and T
 // for the boxes. U, O and Q were the bullets, the numbers and the quote for
@@ -2049,24 +2075,83 @@ async function blockKeyOn(text, pos, name, layout) {
   return out;
 }
 
-test("Ctrl+Shift+<digit> sets the heading of that level, the level a line has takes it off, and 0 is the paragraph", { skip }, async () => {
-  assert.equal(await blockKeyOn("Title\n\nBody.\n", 2, 2), "## Title\n\nBody.\n");
+// Ctrl+<digit>, the key of a level, as a keyboard sends it: on the row over
+// the letters, where a Spanish or a US board writes the digit and a French
+// one another character on the same key (`from` "fr": the level has to be
+// the key's own and not the character it prints, which is CodeMirror's
+// fall back to the key's base name by keyCode), or on the number pad
+// ("pad"), which writes the same digit from another key.
+const AZERTY_ROW = ["\u00e0", "&", "\u00e9", '"', "'", "(", "-", "\u00e8"];
+async function levelChord(page, level, from) {
+  const pad = from === "pad";
+  const cdp = await page.createCDPSession();
+  for (const type of ["rawKeyDown", "keyUp"]) {
+    await cdp.send("Input.dispatchKeyEvent", {
+      type: type,
+      key: from === "fr" ? AZERTY_ROW[level] : String(level),
+      code: (pad ? "Numpad" : "Digit") + level,
+      windowsVirtualKeyCode: (pad ? 96 : 48) + level,
+      nativeVirtualKeyCode: (pad ? 96 : 48) + level,
+      isKeypad: pad,
+      // Ctrl alone, as CDP numbers the modifiers.
+      modifiers: 2,
+    });
+  }
+  await cdp.detach();
+}
+
+// `text` with the caret at `pos` and Ctrl+<level> pressed, `from` as above.
+async function levelKeyOn(text, pos, level, from) {
+  const h = await open({ text, scores: 0 });
+  await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
+  await levelChord(h.page, level, from);
+  await sleep(120);
+  const out = await docText(h.page);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  return out;
+}
+
+test("Ctrl+<digit> sets the heading of that level, the level a line has takes it off, and 0 is the paragraph", { skip }, async () => {
+  assert.equal(await levelKeyOn("Title\n\nBody.\n", 2, 2), "## Title\n\nBody.\n");
   // The level the line already is, as the ticked row of the menu does.
-  assert.equal(await blockKeyOn("## Title\n", 4, 2), "Title\n");
-  // Another level over it, and the levels past Notion's row of three.
-  assert.equal(await blockKeyOn("## Title\n", 4, 5), "##### Title\n");
-  assert.equal(await blockKeyOn("## Title\n", 4, 6), "###### Title\n");
+  assert.equal(await levelKeyOn("## Title\n", 4, 2), "Title\n");
+  // Another level over it, and the first and the last of the six.
+  assert.equal(await levelKeyOn("## Title\n", 4, 1), "# Title\n");
+  assert.equal(await levelKeyOn("## Title\n", 4, 5), "##### Title\n");
+  assert.equal(await levelKeyOn("## Title\n", 4, 6), "###### Title\n");
   // 0 is the paragraph whatever the level was, which is what it is for: at
   // the keyboard nothing says what level the line is.
-  assert.equal(await blockKeyOn("###### Title\n", 8, 0), "Title\n");
-  assert.equal(await blockKeyOn("Body.\n", 2, 0), "Body.\n");
+  assert.equal(await levelKeyOn("###### Title\n", 8, 0), "Title\n");
+  assert.equal(await levelKeyOn("Body.\n", 2, 0), "Body.\n");
   // Every selected line, blank lines left alone, as a row does.
-  assert.equal(await blockKeyOn("one\n\ntwo\n", [{ anchor: 0, head: 8 }], 3), "### one\n\n### two\n");
+  assert.equal(await levelKeyOn("one\n\ntwo\n", [{ anchor: 0, head: 8 }], 3), "### one\n\n### two\n");
   // Not in a score, where no heading belongs: the line is left as it is.
-  assert.equal(await blockKeyOn("```abc\nX:1\n```\n", 9, 1), "```abc\nX:1\n```\n");
-  // The same key on a US board, where the 2 writes an at sign and not a
-  // quote: the level is the key's own, not the character it prints.
-  assert.equal(await blockKeyOn("Title\n", 2, 2, "us"), "## Title\n");
+  assert.equal(await levelKeyOn("```abc\nX:1\n```\n", 9, 1), "```abc\nX:1\n```\n");
+  // The same key on a French board, where it writes an e with an accent
+  // and not a 2: the level is the key's own, not the character it prints.
+  assert.equal(await levelKeyOn("Title\n", 2, 2, "fr"), "## Title\n");
+  // There are six levels, and a seventh digit is no key of the editor's.
+  assert.equal(await levelKeyOn("Title\n", 2, 7), "Title\n");
+  // The digit of the number pad is another key, which VS Code tells apart
+  // too (Ctrl+Numpad0 resets its zoom): it sets no level and no paragraph.
+  assert.equal(await levelKeyOn("Title\n", 2, 2, "pad"), "Title\n");
+  assert.equal(await levelKeyOn("## Title\n", 4, 0, "pad"), "## Title\n");
+  // And the chord the levels had until 2026-10-03 is given back: on the
+  // Spanish board and on the US one it leaves the line as it is.
+  assert.equal(await blockKeyOn("Title\n", 2, 2), "Title\n");
+  assert.equal(await blockKeyOn("Title\n", 2, 2, "us"), "Title\n");
+
+  // On a Mac the levels are where they were, under Cmd+Option with the
+  // letters, and Cmd and a digit is not the editor's.
+  const mac = await open({ text: "Title\n", scores: 0, platform: "MacIntel" });
+  await setSelection(mac.page, 2);
+  await chord(mac.page, ["Meta"], "2");
+  assert.equal(await docText(mac.page), "Title\n");
+  await chord(mac.page, ["Meta", "Alt"], "2");
+  assert.equal(await docText(mac.page), "## Title\n");
+  assert.deepEqual(mac.errors, []);
+  await mac.close();
 });
 
 test("Ctrl+Shift+T does what its button does, and the lists and the quote name no key", { skip }, async () => {

@@ -514,11 +514,14 @@ What it does:
   makes it a score), under the paragraph the caret is in otherwise, around
   the lines selected, and from inside a block it takes the fences off. A
   button that acts on the selection leaves the caret in the block it was in.
-  What is worth a key has one, on one modifier: `Ctrl+Shift+0` to
-  `Ctrl+Shift+6` for a paragraph and the six heading levels, the digit being
-  the level, and `Ctrl+Shift+C` and `Ctrl+Shift+T` for the code block and
-  the task list (`Cmd+Option` on a Mac, where the system takes `Cmd+Shift`
-  with a digit for its screenshots). The bullets, the numbers and the quote
+  What is worth a key has one: `Ctrl+0` to `Ctrl+6` for a paragraph and the
+  six heading levels, the digit being the level, and `Ctrl+Shift+C` and
+  `Ctrl+Shift+T` for the code block and the task list (all of them under
+  `Cmd+Option` on a Mac, where the system takes `Cmd+Shift` with a digit
+  for its screenshots). The digits are those of the row over the letters,
+  not the number pad's, and they are the editor's while the caret is in the
+  text: after a click in the margin `Ctrl+2` is VS Code's again and goes to
+  its second editor group. The bullets, the numbers and the quote
   had `U`, `O` and `Q` for a day and have no key: `- `, `1. ` and `> ` are
   so little to type at the head of a line that the chord bought nothing, and
   `Ctrl+Shift+U` is the desktop's on Linux before it is any editor's, where

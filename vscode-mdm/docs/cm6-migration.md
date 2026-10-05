@@ -300,8 +300,9 @@ D19. **The digit is the level, and a letter names the block that has none**
   (2026-09-19, the owner's call, after a day with none). The rule: a letter
   changes words inside a line (`Ctrl+B`, `Ctrl+I`, `Ctrl+E`, `Ctrl+K`), and
   the second modifier of the code block changes what a line is. The digit is
-  the heading's level, `Ctrl+Shift+1` to `6`, with `Ctrl+Shift+0` for the
-  paragraph; a letter names the block that has no level. What is bound at
+  the heading's level, `Ctrl+1` to `6`, with `Ctrl+0` for the paragraph
+  (on `Ctrl+Shift` until 2026-10-03, see the foot of this decision); a
+  letter names the block that has no level. What is bound at
   the end of the day is `Ctrl+Shift+C` for the code block and `Ctrl+Shift+T`
   for the task list: the bulleted and numbered lists and the quote held `U`,
   `O` and `Q` for a day and gave them back, for the reason at the foot of
@@ -322,8 +323,8 @@ D19. **The digit is the level, and a letter names the block that has none**
   it, out of the marks and to the head of the blocks, so that inline code
   and the code block stand on either side of the toolbar's separator: the
   cut the separator makes is the cut between a mark on words inside a line
-  and what makes the line a block, which is the cut the keys make too. Weighed and not taken: `Ctrl+1`..`6`
-  (Typora's, which is go to editor group N), a `Ctrl+M` prefix for
+  and what makes the line a block, which is the cut the keys make too. Weighed and not taken that day: `Ctrl+1`..`6`
+  (Typora's, which is go to editor group N; taken on 2026-10-03), a `Ctrl+M` prefix for
   everything (VS Code's own idiom, two strokes each), and the four classics
   alone. `Ctrl+Alt+<digit>` is out on any layout where AltGr is Ctrl+Alt: on
   the Spanish one `Ctrl+Alt+2` is the at sign, and brackets go the same way.
@@ -349,10 +350,14 @@ D19. **The digit is the level, and a letter names the block that has none**
 
   What the set takes from the workbench, read in 1.133.0's
   `workbench.desktop.main.js` and only while the caret is in the text: of
-  `Ctrl+Shift+0` to `9` it binds 1 (replace, inside the search view) and 5
-  (split, with the terminal focused), neither of which a .mdm can be in; of
-  the letters, `Ctrl+Shift+T` is Reopen Closed Editor and `Ctrl+Shift+C`
-  opens an external terminal. No built-in extension binds
+  the digits, `Ctrl+0` is Focus Side Bar, `Ctrl+1` Focus First Editor
+  Group, and `Ctrl+2` to `8` go to that group (one loop, `primary: 2048 |
+  o(e)`), `Ctrl+2` adding a second group where there is one; of the
+  letters, `Ctrl+Shift+T` is Reopen Closed Editor and `Ctrl+Shift+C` opens
+  an external terminal. While the digits were on `Ctrl+Shift` they took
+  nothing: of `Ctrl+Shift+0` to `9` the workbench binds 1 (replace, inside
+  the search view) and 5 (split, with the terminal focused), neither of
+  which a .mdm can be in, and no built-in extension binds
   `ctrl+shift+<digit>`.
 
   The Paragraph row is back in the heading menu with the keys, after a day
@@ -400,10 +405,38 @@ D19. **The digit is the level, and a letter names the block that has none**
   editor no longer answers is a tip that lies.
 
   Still open: a key has not been pressed on the owner's own keyboard inside
-  a real VS Code window. The harness presses the whole set on the Spanish
-  layout through CDP, which is where it matters (`Ctrl+Shift+2` arrives as
-  `"` there and not as a 2; CodeMirror falls back to the key's base
+  a real VS Code window. The harness presses the letters on the Spanish
+  layout through CDP, and the digits on a French one, which is where it
+  matters now that they carry no Shift (`Ctrl+2` arrives as an e with an
+  accent there and not as a 2; CodeMirror falls back to the key's base
   name by keyCode, so the binding is the digit and not the character).
+
+  **The digits on Ctrl alone (2026-10-03, the owner's call).** Two keys in
+  place of three for the block gesture a writer makes most, asked for after
+  the numbered sections. It was weighed on 2026-09-19 and left, because VS
+  Code binds the chord (above), and it is taken now with that known. What
+  makes it possible is the mechanism of this decision and the layers of
+  D20, and the owner put it as three meanings of one chord: VS Code's while
+  the document is nobody's, after a click in the dead margin; a heading's
+  level while the caret is in the text; and, once the score navigation mode
+  is in the editor, that mode's own while it holds the keyboard. Seen in a
+  real VS Code 1.133.0 the same day, in a window off the owner's screen and
+  pressed through CDP: with the caret in a paragraph `Ctrl+2`, `Ctrl+1`,
+  `Ctrl+3` and `Ctrl+0` wrote `## `, `# `, `### ` and took them off, the
+  window keeping its one editor group and the focus staying in the text
+  (the side bar did not take it on `Ctrl+0`); after a click in the dead
+  margin `Ctrl+2` left the line alone and VS Code opened its second group.
+  What it costs: from the text there is no jumping to the group beside it
+  with `Ctrl+2`, which now writes a heading there.
+  Three things decided with it. The number pad is left out (`levelKey` in
+  main.js): CodeMirror names a pad's digit as the row's, and VS Code tells
+  them apart and resets its zoom on `Ctrl+Numpad0` (primary 2146), which a
+  paragraph's key would have taken. A Mac keeps `Cmd+Option` and a digit:
+  `Cmd` and a digit is VS Code's there too, and whether the page hears it
+  before the menu does has not been tried on one. And the old chord is
+  given back with no alias, the extension having three users: `Ctrl+Shift`
+  and a digit goes to VS Code from the text like any key the page does not
+  bind.
 
 D20. **The keyboard works in layers** (2026-09-27, the owner's model). A key
   is answered by the innermost layer that is active and binds it, and falls
