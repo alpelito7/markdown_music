@@ -35,6 +35,13 @@
   two, and the choice is remembered. The setting no longer reaches the
   export: it used to take the title off the exported page when it hid the
   header.
+- `Ctrl+Z` after the YAML header had been put away no longer writes into the
+  text what was undone in the header. A word deleted in the title, the
+  header hidden, and the undo put that word at the head of the first line of
+  the document. The editor now drops an undo whose text it no longer holds,
+  and the file's own undo, which `Ctrl+Z` also runs in VS Code, is what
+  takes the header back, the title following it. The Undo button of the
+  toolbar does nothing on such a step.
 - The YAML header coming into view or going while the page is scrolled down
   leaves the line being read where it is. It used to move by the height of
   the header.

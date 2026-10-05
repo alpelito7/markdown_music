@@ -14,7 +14,7 @@ export {
 } from "@codemirror/view";
 export {
   defaultKeymap, historyKeymap, history, undo, redo, undoDepth, redoDepth,
-  indentWithTab, insertNewlineAndIndent, selectLine, cursorLineUp,
+  undoSelection, redoSelection, invertedEffects, indentWithTab, insertNewlineAndIndent, selectLine, cursorLineUp,
   cursorLineDown, deleteCharBackward, deleteCharForward, standardKeymap,
   toggleComment,
 } from "@codemirror/commands";
