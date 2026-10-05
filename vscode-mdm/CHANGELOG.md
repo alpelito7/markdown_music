@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.2
 
 - What a document's YAML header puts at the head of the page is drawn at
   the head of the document, as the exported page sets it and at the page's
