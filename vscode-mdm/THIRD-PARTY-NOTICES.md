@@ -56,7 +56,8 @@ The build script and its lockfile are in the repository, under `vscode-mdm/vendo
 
 ## KaTeX 0.18.4
 
-Renders the equations, in the editor and in a PDF export (where the bundled
+Renders the equations, in the editor, on the exported page and so in the
+PDF printed from it, and in a PDF typeset with LaTeX (where the bundled
 Quarto filter loads it into a headless Chrome and prints). Copyright (c)
 2013-2020 Khan Academy and other contributors, <https://katex.org>. Licensed
 under the MIT licence.
@@ -133,16 +134,18 @@ themselves, apart from this collection, does so under CC BY-SA 3.0.
 
 ## Not shipped, but needed for an export
 
-An export calls Quarto, and a PDF of a document with scores calls a Chrome,
-Chromium or Microsoft Edge, into which the filter loads the vendored abcjs
-and KaTeX so the PDF shows the very drawings the editor does; on a machine
-without one it calls abcm2ps instead. None of the three is part of this
+An export calls Quarto, and a PDF calls a Chrome, Chromium or Microsoft
+Edge, which prints the exported page. A PDF typeset with LaTeX
+(`mdm.pdfEngine`) calls TeX instead, and for a document with scores the same
+browser, into which the filter loads the vendored abcjs and KaTeX so the PDF
+shows the very drawings the editor does; on a machine without one it calls
+abcm2ps. None of these is part of this
 package: they are looked for on the machine when an export is asked for
 (Chrome, then Edge, by their common names on the PATH and in the folders
-their installers use, or at a path the document's YAML names in
-`mdm.chrome`; abcm2ps at a path named in the document's YAML header, then
-at `tools/bin/abcm2ps` beside the document, then on the PATH), and the
-editor works without them. abcm2ps is
+their installers use, or, for the scores of a typeset PDF, at a path the
+document's YAML names in `mdm.chrome`; abcm2ps at a path named in the
+document's YAML header, then at `tools/bin/abcm2ps` beside the document,
+then on the PATH), and the editor works without them. abcm2ps is
 licensed under the GNU Lesser General Public License version 3 or later,
 copyright (C) 1998-2019 Jean-Francois Moine, <http://moinejf.free.fr>.
 

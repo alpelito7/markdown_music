@@ -1408,7 +1408,8 @@ body {
   user-select: none;
 }
 /* Raw TeX (G013): what Pandoc's reader takes as a raw inline or block, which
-   the HTML page leaves out and the PDF sets. Drawn as the source it is,
+   the HTML page leaves out, the PDF printed from it with the page, and a PDF
+   typeset with LaTeX sets. Drawn as the source it is,
    faint and in the code face; the tooltip says what becomes of it. And an
    attribute block, `{#id .class}`, shown the same way while the caret is on
    it (G014). */

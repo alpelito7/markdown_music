@@ -290,7 +290,7 @@ body main.content li {
    reaches the caption of a cross-referenced figure, a figcaption whose
    classes Quarto gives no colour. The size is the editor's 0.956 of the
    text, in ems of it: Quarto's 0.9rem is 15.3px on screen, but the page
-   printed without TeX sets its root at 11pt and the prose stays at 16px,
+   printed into a PDF sets its root at 11pt and the prose stays at 16px,
    so the caption came out of the print at 0.825 of the text (13.2px,
    measured in the PDF and in the page under print media, 2026-09-28). */
 body figcaption,
@@ -628,7 +628,7 @@ body main.content section.footnotes ol > li > p:first-child::before {
    coloured emoji in a box all the same, whatever the page asked
    (font-variant-emoji: text did nothing in Chrome 151; only a face that has
    the glyph draws it as text, and which faces a reader has is theirs); it
-   went onto the paper too, from the page printed without TeX. The number of
+   went onto the paper too, in the PDF printed from the page. The number of
    the call shows the note under the pointer, and leads to it. */
 body main.content .footnote-back {
   display: none;
@@ -1305,8 +1305,9 @@ body .mdm-audio .abcjs-loading-svg circle {
    Nothing here reaches the screen. The exported page in a browser is the page
    it is today; these rules are only what it is set by when it is printed, and
    that is two occasions: a reader's Ctrl+P on the export, and the PDF the
-   extension hands back when there is no TeX to typeset one, since printInstead
-   in vscode-mdm/extension.js prints this same file with headless Chrome. The
+   extension makes, which is this same file printed by a headless Chrome
+   (printPage in vscode-mdm/extension.js) unless the reader has asked LaTeX to
+   typeset it (mdm.pdfEngine). The
    isolated pages mdm.lua engraves a single score on are not reached, since
    chrome_page writes its own stylesheet and never links this one.
 
@@ -1405,7 +1406,7 @@ body .mdm-audio .abcjs-loading-svg circle {
      the typeset PDF breaks it. The drawing is one SVG, which the printer
      cannot divide, so a score longer than what was left of the sheet went on
      to the next one whole and left a blank foot under the prose (example.mdm
-     printed without TeX, 2026-09-19). mdm.js keeps a slice of it per system
+     printed, 2026-09-19). mdm.js keeps a slice of it per system
      (sliceForPrint), and on paper the slices stand in for it, stacked with no
      gap so they print the drawing they were cut from (a six-system score
      that fits its sheet printed within one pixel of the whole drawing at

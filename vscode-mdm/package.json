@@ -163,10 +163,20 @@
           "default": "justify",
           "description": "How the prose meets the right edge of the text: paragraphs, list items and quotations. Headings, code, equations, tables and scores are not affected. The toolbar toggle writes it, and an export from the toolbar carries it to the page and to the paper."
         },
+        "mdm.pdfEngine": {
+          "type": "string",
+          "enum": ["browser", "latex"],
+          "enumDescriptions": [
+            "Google Chrome, Chromium or Microsoft Edge prints the PDF from the exported HTML page, which is the document as the editor shows it: its faces, and its scores and equations as they are drawn on screen. No TeX is needed.",
+            "LaTeX typesets the PDF, with TeX's own line breaking and page layout, the class and packages the document names, and the raw LaTeX the page leaves out. TeX has to be installed, and the scores are still drawn by a browser."
+          ],
+          "default": "browser",
+          "description": "What makes the PDF of an export. When what it asks for is not on this computer, the other one makes the PDF and a warning says so: with no browser the PDF is typeset with LaTeX, and with no TeX it is printed from the page."
+        },
         "mdm.showPdfFallbackNotice": {
           "type": "boolean",
           "default": true,
-          "description": "Show a warning when a PDF is printed from the HTML page because TeX is unavailable. The PDF is still created when this is off. The warning's Don't show again button turns this setting off; turn it on here to restore the warning."
+          "description": "Show a warning when a PDF is made the other way than mdm.pdfEngine asks for, because what that way needs is not on this computer: printed from the HTML page where there is no TeX, or typeset with LaTeX where there is no Chrome, Chromium or Edge. The PDF is still created when this is off. The warning's Don't show again button turns this setting off; turn it on here to restore the warning."
         }
       }
     },

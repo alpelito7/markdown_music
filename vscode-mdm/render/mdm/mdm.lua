@@ -5,6 +5,10 @@
 -- printed to a vector PDF (see the engraver section); a machine without a
 -- Chrome falls back to abcm2ps -> EPS -> epstopdf. Either way the engraving
 -- is inserted as an image, cached by a hash of the source.
+-- That PDF is bin/mdm's, and the VS Code extension's when mdm.pdfEngine asks
+-- for LaTeX. The extension's own default prints the HTML page instead
+-- (printPage in vscode-mdm/extension.js), and nothing of the PDF branch here
+-- runs for it.
 
 local CACHE_DIR = "mdm_cache"
 
@@ -1356,8 +1360,8 @@ end
 
 -- The folder the filter keeps its drawings in, made by Pandoc rather than by
 -- a shell: `mkdir -p` goes to cmd.exe on Windows, which has no `-p` and makes
--- a folder of that name beside the document as well as the cache, and the PDF
--- road runs it on a machine with no TeX too, when a document holds an
+-- a folder of that name beside the document as well as the cache, and a PDF
+-- asked of LaTeX runs it on a machine with no TeX too, when a document holds an
 -- equation and no score (read in the code, 2026-09-28). Like `mkdir -p`, it
 -- makes what is missing and is quiet about what is there.
 local function make_cache()

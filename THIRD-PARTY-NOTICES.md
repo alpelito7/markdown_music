@@ -59,8 +59,9 @@ The build script and its lockfile are in `vscode-mdm/vendor-src/`.
 
 ## KaTeX 0.18.4
 
-Renders the equations, in the editor and in a PDF export (where the Quarto
-filter loads it into a headless Chrome and prints). Copyright (c) 2013-2020
+Renders the equations, in the editor, on the exported page and so in the
+PDF the editor prints from it, and in a PDF typeset with LaTeX (where the
+Quarto filter loads it into a headless Chrome and prints). Copyright (c) 2013-2020
 Khan Academy and other contributors, <https://katex.org>. Licensed under the
 MIT licence.
 
@@ -137,8 +138,8 @@ themselves, apart from this collection, does so under CC BY-SA 3.0.
 
 ## abcm2ps 8.14.15
 
-Engraves the scores of a PDF export when neither Chrome nor Edge is at
-hand (the default engraver is the vendored abcjs, which the filter loads
+Engraves the scores of a PDF typeset with LaTeX when neither Chrome nor
+Edge is at hand (the default engraver is the vendored abcjs, which the filter loads
 into a Chrome, Chromium or Microsoft Edge found on the machine; the
 browser is somebody else's separate program too and is not distributed
 here). Called as a separate program.

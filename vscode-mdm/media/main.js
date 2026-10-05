@@ -5202,7 +5202,7 @@
           kind: "mark",
           tag: "span",
           cls: "mdm-rawtex",
-          title: "Raw TeX: set in the PDF, left out of the HTML page",
+          title: "Raw TeX: set only in a PDF typeset with LaTeX",
           parts: [{ kind: "text", text: text(child.from, child.to) }],
         });
       } else if (CELL_TAGS[name]) {
@@ -7002,15 +7002,17 @@
 
         if (name === "RawTeX" || name === "RawTeXBlock") {
           // Raw TeX (G013): what Pandoc's reader takes as a raw inline or
-          // block, which the HTML page leaves out and the PDF sets. Drawn
-          // as the source it is, faint and in the code face, with what
-          // becomes of it in the tooltip, where the prose used to show it
-          // as words the page then lost.
+          // block, which the HTML page leaves out and a PDF typeset with
+          // LaTeX sets; the PDF printed from the page, which is the default
+          // (mdm.pdfEngine), leaves it out with the page. Drawn as the
+          // source it is, faint and in the code face, with what becomes of
+          // it in the tooltip, where the prose used to show it as words the
+          // page then lost.
           if (name === "RawTeXBlock") lines.add(n.from, n.to, "mdm-rawtex-line");
           decos.push(
             Decoration.mark({
               class: "mdm-rawtex",
-              attributes: { title: "Raw TeX: set in the PDF, left out of the HTML page" },
+              attributes: { title: "Raw TeX: set only in a PDF typeset with LaTeX" },
             }).range(n.from, n.to)
           );
           return false;
@@ -13255,7 +13257,8 @@
   const EXPORT_ICON =
     '<svg viewBox="0 0 16 16"><path d="M8 1.6 4.7 5.5h2.1v4.7h2.4V5.5h2.1Z"/><path d="M2.6 9.3h1.7v2.6q0 .7.7.7h6q.7 0 .7-.7V9.3h1.7v3q0 1.9-1.9 1.9H4.5q-1.9 0-1.9-1.9Z"/></svg>';
 
-  // What bin/mdm can be asked for; `to` is the wire value the host expects.
+  // What the host can be asked for; `to` is the wire value it expects. Which
+  // road a PDF takes is the host's to read (mdm.pdfEngine), not the menu's.
   const EXPORT_FORMATS = [
     { to: "html", label: "HTML" },
     { to: "pdf", label: "PDF" },
@@ -13960,9 +13963,11 @@
       "|",
       // The export menu next: the one button that leaves the editor. It has
       // two branches, and the headers are what tells them apart. Document is
-      // the page: the host saves the file first, then runs the same bin/mdm
-      // the command line uses. Audio is the music: the editor renders it
-      // itself, one file per score, and needs nothing installed.
+      // the page: the host saves the file first, then renders it with the
+      // filter the command line uses (bin/mdm), and prints the PDF from that
+      // page unless LaTeX is asked to typeset it. Audio is the music: the
+      // editor renders it itself, one file per score, and needs nothing
+      // installed.
       //
       // The line under the Audio header is there because the rail of every
       // score carries this same icon: pressed there it writes that one score,

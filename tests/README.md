@@ -6413,6 +6413,96 @@ Run on this state: the ten, `test:fast` (269 of 269), `webview-memory`
 that activates the extension. The rest of the Chrome suites and
 `render.test.js` were not run.
 
+### The PDF printed unless LaTeX is asked for (2026-10-02)
+
+The owner turned the export of a PDF round: it is the exported page printed
+by Chrome, Chromium or Microsoft Edge, whether or not the computer has TeX,
+and LaTeX typesets it only when `mdm.pdfEngine` says `latex` (`browser` is
+the default). Until then every PDF was asked of LaTeX and the print stood in
+where Quarto found no TeX, under a warning. Of four layouts of the export
+menu he kept the menu as it was: the setting is the only way to LaTeX.
+Where what the setting asks for is missing, the other road makes the PDF and
+a notice says so (`fallbackNotice`, both directions, silenced by
+`mdm.showPdfFallbackNotice`): with no browser LaTeX typesets it, and with no
+TeX, or without the helpers of a complete TeX its scores need, the page is
+printed. A road that was taken and failed is not replaced: a browser that
+does not print fails the export, as a LaTeX error always has. With no
+browser and no LaTeX able to stand in, the notice asks for a browser
+(`browserMissing`), and the page of a "both" is offered.
+
+In `extension.js`: `printInstead` became `printPage`, and the LaTeX render
+`typesetPdf`, which holds the score preflight now; "both" renders its page
+first on either road, so a notice that ends in something missing offers the
+page (a "both" with scores LaTeX could not draw and no Chrome used to render
+nothing); `printedNotice` became `fallbackNotice`; the TeX notices say
+"typeset with LaTeX" and their logs name the setting that asked for it; the
+log's entry for an export names the engine, `doc.mdm → pdf (mdm.pdfEngine:
+browser)`; `exportFailed` offers what landed. The editor's tooltip of raw
+TeX reads "Raw TeX: set only in a PDF typeset with LaTeX".
+
+In `extension-host.test.js` the tests that held the LaTeX road set
+`mdm.pdfEngine` to `latex` and keep their assertions, with the notice texts
+that moved. Eight are new, for the default: *a PDF is printed from the page
+by default, with TeX on the computer, and nothing of LaTeX runs*; *a value of
+mdm.pdfEngine that is not one of its two prints the PDF* (and the manifest's
+values are `PDF_ENGINES`); *both formats printed are one render of the page,
+and the page printed is the one kept*; *without a browser, the PDF is typeset
+by LaTeX, and the notice says so*; *without a browser or TeX, the notice asks
+for a browser, and offers the page that landed*; *without a browser, scores
+LaTeX cannot draw start no render, and the notice asks for a browser*;
+*without a browser, a LaTeX that fails is said to have been tried, and a
+document's own trouble is told as it is*; *a browser that does not print
+fails the export, offers the page that landed, and tries no LaTeX*. Four run
+on both engines now (*a PDF keeps its document's name*, *Quarto and Chrome
+start with no console window*, *a PDF held open by a viewer*, *a page the
+print cannot render*), and *a Chrome that never finishes printing* is on the
+default road, where it ends in an error. In `webview-markdown.test.js` RT01
+reads the whole tooltip, where it read its first seven characters, and
+TB12c the cell's.
+
+Each mutation swapped in place and back in the same command, the file
+checked by its hash:
+
+- **PE1** the engines in the other order, LaTeX the default → *printed from
+  the page by default* and *a value of mdm.pdfEngine*. **PE2** any value of
+  the setting taken as it is → *a value of mdm.pdfEngine* (the log's entry).
+- **PE3** no LaTeX in place of a missing browser → *the PDF is typeset by
+  LaTeX*. **PE4** the notice deaf to `mdm.showPdfFallbackNotice` → the same,
+  and *asked of LaTeX with Chrome but incomplete TeX*. **PE12** the typeset
+  notice sending its reader to TeX → *the PDF is typeset by LaTeX*.
+- **PE5** LaTeX tried behind a print that failed → *a browser that does not
+  print* and *a Chrome that never finishes printing*.
+- **PE6** the `.tex` put aside for a printed PDF → *printed from the page by
+  default*. **PE13** the log's entry without the engine → the same.
+- **PE7** no check of the scores before LaTeX → *scores LaTeX cannot draw*
+  and *a PDF with scores asked of LaTeX names what it lacks*.
+- **PE8** a document's own trouble taken for a missing browser, **PE11** a
+  LaTeX that failed in the browser's place not said to have been tried →
+  *a LaTeX that fails is said to have been tried* each.
+- **PE9** a page of its own rendered to print a "both" → *both formats
+  printed are one render of the page*.
+- **PE10** no print in place of a missing TeX → *asked of LaTeX with Chrome
+  but no TeX, a PDF asked alone*. **PE14** the TeX notice's log without the
+  setting → *a PDF asked of LaTeX that Quarto finds no TeX for*.
+- **PE15**, **PE16** the old tooltip back, in the prose and in a cell →
+  RT01 and TB12c.
+
+All sixteen failed; the files came back byte for byte. End to end, with
+this machine's Quarto 1.9.37, Chrome 151 and TeX Live 2025, the extension
+driven through the mock on copies of documents and not in a VS Code window:
+`example.mdm` to PDF by default was one render of the page and one print,
+three Letter pages from Skia/PDF, 7.4 s; as both, one render and one print,
+6.0 s; asked of LaTeX, LuaTeX, 17.3 s with a cold cache. With no browser on
+the PATH a document without scores came out of LuaTeX under the notice that
+says so, and `example.mdm` as both left its page and the notice asking for a
+browser. Asked of LaTeX with no TeX on the PATH, both documents were
+printed under the notice of before.
+
+Run on this state: `test:fast` (277 of 277), RT01 and TB10 to TB12c of
+`webview-markdown.test.js` (6 of 6), and the five tests of `html.test.js`
+that print a page (5 of 5). The rest of the Chrome suites and
+`render.test.js` were not run; the filter changed in its comments alone.
+
 ### A list in a table's cell (2026-10-02)
 
 The owner asked to see tasks and bullets in a cell

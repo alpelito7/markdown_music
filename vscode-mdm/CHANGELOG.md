@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- A PDF is the exported page printed by Chrome, Chromium or Microsoft Edge,
+  whether or not the computer has TeX: the document as the editor shows it,
+  in its faces and with its scores and equations as they are drawn on
+  screen. Until now a PDF was typeset with LaTeX wherever TeX was installed,
+  and printed only where it was not, under a warning. To have LaTeX typeset
+  it, with TeX's line breaking and page layout and the raw LaTeX a document
+  holds, set `mdm.pdfEngine` to `latex` in the Settings. Whichever is set,
+  where what it needs is not installed the other makes the PDF and a notice
+  says so: with no browser the PDF is typeset, with no TeX it is printed.
+  `mdm.showPdfFallbackNotice` turns that notice off, in both directions. A
+  browser that is there and does not print is a failed export, with what it
+  said in the log, and the tooltip of raw TeX in the editor says that only a
+  PDF typeset with LaTeX sets it.
 - A field of a tune (`K:G`, `M:6/8`, `X:1`) or a Windows path (`C:\Music`)
   pasted over selected words is pasted as the text it is, where it made
   the words a link to it: an address is a scheme of two letters or more

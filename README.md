@@ -128,7 +128,8 @@ cross-references (`[@key, p. 3]`, `@fig-x`), attributes (`{#id .class
 key=val}` after a heading, an image, a link, a code span or a bracketed span,
 an image's `width` applied), bracketed spans (`[text]{.smallcaps}`), raw TeX
 (`\command{...}` and `\begin{env}` to `\end{env}`, drawn as the source it is,
-since the HTML page leaves it out and the PDF sets it), sub and superscript,
+since the HTML page leaves it out, and the PDF printed from it with it, and
+only a PDF typeset with LaTeX sets it), sub and superscript,
 and the punctuation of Pandoc's `smart` extension: curly quotes, an
 apostrophe, an en dash for `--`, an em dash for `---` and an ellipsis for
 `...`, drawn while a line is untouched with the rules of Pandoc's own reader,
@@ -202,7 +203,9 @@ Pandoc's own dialect and none of the copy's corrections.
   show a formula at all and set them to widths the editor does not use, so
   the same paragraph broke at a different word on the page than in the
   editor.
-- **PDF**: the filter engraves each block with the same vendored abcjs,
+- **PDF, typeset with LaTeX** (every PDF `bin/mdm` makes, and the
+  extension's when `mdm.pdfEngine` says `latex`): the filter engraves each
+  block with the same vendored abcjs,
   loaded into a headless Chrome and printed to a vector PDF, then trimmed to
   the ink with `pdfcrop`, so the engraving on paper is the drawing the
   editor and the HTML show. It is inserted at text width if it is wide, at
@@ -304,10 +307,14 @@ put it in.
 
 ## Requirements
 
-- Quarto >= 1.4 and a TeX installation (for PDF; `pdfcrop`, `epstopdf` and
-  the ghostscript they and the filter lean on all ship with TeX Live).
-- Chrome, Chromium or Microsoft Edge (for PDF): it is what draws the scores
-  and the equations with the editor's own abcjs and KaTeX. The filter looks
+- Quarto >= 1.4, and a TeX installation for a PDF typeset with LaTeX, which
+  is the PDF `bin/mdm` makes (`pdfcrop`, `epstopdf` and the ghostscript they
+  and the filter lean on all ship with TeX Live). The VS Code extension
+  prints its PDF from the HTML page with a browser, and asks for TeX only
+  when `mdm.pdfEngine` says `latex` (below).
+- Chrome, Chromium or Microsoft Edge (for PDF): in a typeset PDF it is what
+  draws the scores and the equations with the editor's own abcjs and KaTeX,
+  and the VS Code extension prints its PDF with it. The filter looks
   for Chrome under its common names in the PATH, then for Edge, and then in
   the folders their installers use on macOS and Windows; another binary can
   be named in the YAML header, and `mdm-engraver: abcm2ps` picks the
@@ -317,7 +324,7 @@ put it in.
   mdm:
     chrome: /path/to/chrome
   ```
-- `abcm2ps` (for PDF with neither Chrome nor Edge). Not included: install
+- `abcm2ps` (for a typeset PDF with neither Chrome nor Edge). Not included: install
   it from the system's packages (Debian and Ubuntu `apt install abcm2ps`,
   macOS `brew install abcm2ps`) or build it from
   [https://github.com/lewdlime/abcm2ps](https://github.com/lewdlime/abcm2ps). The filter looks for
@@ -349,9 +356,12 @@ into `~/.vscode/extensions/alpelito7.mdm-editor` and a reload (`Developer:
 Reload Window`) does the same. The folder name carries no version: VS Code
 reads the version out of the manifest, so a name without one is a name that
 does not go stale at the next release. The editor needs nothing else; an
-export needs Quarto, and a PDF needs TeX or, where there is none, Chrome,
-Chromium or Microsoft Edge to print the exported page; with TeX, the scores
-are engraved by that browser or by abcm2ps, the fallback engraver. To go
+export needs Quarto, and a PDF needs Chrome, Chromium or Microsoft Edge,
+which prints the exported page. With `mdm.pdfEngine` set to `latex` the PDF
+is typeset by LaTeX instead, which needs TeX, and its scores are engraved by
+that browser or by abcm2ps, the fallback engraver. Whichever of the two is
+asked for, where what it needs is missing the other makes the PDF and a
+notice says so. To go
 back to the plain text editor: right click the file, `Open With...`. Both
 can be open at once on the same file (Reopen Editor With... in a second
 group): they share the document.
@@ -680,10 +690,11 @@ What it does:
   glyphs until their x-height is the sans's. The exported page carries the
   equivalent adjustment on each embedded font face: unlike an inherited
   `font-size-adjust`, Chrome preserves that scale when it prints the page to a
-  PDF without TeX. The maths keeps KaTeX's own 1.21, which is the compensation
+  PDF. The maths keeps KaTeX's own 1.21, which is the compensation
   a Computer Modern needs beside a sans and is exactly right for a page set at
-  the sans's x-height; the engraving keeps its own pixels. With TeX, the roman
-  is what LaTeX is already set in and fontspec applies the same scale.
+  the sans's x-height; the engraving keeps its own pixels. In a PDF typeset
+  with LaTeX, the roman is what LaTeX is already set in and fontspec applies
+  the same scale.
 - **Justified prose**: paragraphs, list items and quotations are set to both
   edges of the column, every row but the last, with the spaces widened as the
   text is typed; a toolbar toggle (`mdm.textAlign`) sets them ragged right.
@@ -792,7 +803,7 @@ words a document is divided at come from the hyph-utf8 patterns, which are
 MIT but for Portuguese (BSD-3-Clause) and Russian (LPPL 1.3c).
 
 The one program that is not vendored is abcm2ps, which engraves the scores
-of a PDF on a machine with neither Chrome nor Edge: somebody else's work
+of a PDF typeset with LaTeX on a machine with neither Chrome nor Edge: somebody else's work
 (LGPL-3.0-or-later, copyright Jean-Francois Moine, adapted from Michael
 Methfessel's abc2ps), called as a separate process and never linked into
 anything here. Neither the repository nor the `.vsix` carries the binary;

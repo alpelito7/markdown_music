@@ -321,7 +321,9 @@ async function writeSetting(document, key, value) {
 
 // ---------- Export ----------
 
-// What each export entry asks Quarto for, and what it leaves on disk.
+// What each export entry leaves on disk, and what a render of its format asks
+// Quarto for. A PDF is asked of Quarto only when LaTeX typesets it: printed,
+// it is the page's render and a browser ("The two roads to a PDF", below).
 //
 // The two formats are named on the command line rather than left to the
 // document. Quarto renders the formats the header declares, and a header that
@@ -330,23 +332,28 @@ async function writeSetting(document, key, value) {
 // document that does declare both, since `--to` picks the formats and the
 // options written under each one still apply.
 //
-// Both is the two exports one after the other, and not one render of two
-// formats. Quarto 1.9.37 gives up a render of several formats at the first
-// one that fails and leaves the page it had begun as it stood, before its
-// resources are put in: with no TeX, `--to html,pdf` left a page of 49,682
-// bytes with no KaTeX and no look in it, where `--to html` alone wrote
-// 1,876,897 of the finished page from the same copy; and with TeX and a LaTeX
-// error it left 17,103 bytes against 1,843,445 (both measured 2026-09-14).
-// That page was printed into the PDF with no TeX, and kept as the HTML either
-// way. Rendered in a step of its own, the page is finished before the PDF is
-// tried, whatever becomes of the PDF. The cost is a second start of Quarto:
-// 7.75 and 7.80 s against 7.42 and 7.35 for example.mdm with TeX and a warm
-// cache. The PDF's render takes nothing of the page's with it, measured with
-// the resources left beside the page rather than embedded.
+// Both is the page and then the PDF, and never one render of two formats.
+// Printed, the PDF is that page on paper: rendered once and printed, unless
+// the print needs a page of its own, which a document set in the roman does
+// (PRINT_FACES below) and so does one whose header asks the PDF for what it
+// does not ask the page (pdfAsks). Typeset, it is a render of its own after
+// the page's: Quarto 1.9.37
+// gives up a render of several formats at the first one that fails and leaves
+// the page it had begun as it stood, before its resources are put in: with no
+// TeX, `--to html,pdf` left a page of 49,682 bytes with no KaTeX and no look
+// in it, where `--to html` alone wrote 1,876,897 of the finished page from
+// the same copy; and with TeX and a LaTeX error it left 17,103 bytes against
+// 1,843,445 (both measured 2026-09-14). That page was printed into the PDF
+// with no TeX, and kept as the HTML either way. Rendered in a step of its
+// own, the page is finished before the PDF is tried, whatever becomes of the
+// PDF. The cost is a second start of Quarto: 7.75 and 7.80 s against 7.42 and
+// 7.35 for example.mdm with TeX and a warm cache. The PDF's render takes
+// nothing of the page's with it, measured with the resources left beside the
+// page rather than embedded.
 const EXPORT_TARGETS = {
   html: { args: ["--to", "html"], outputs: [".html"] },
   pdf: { args: ["--to", "pdf"], outputs: [".pdf"] },
-  both: { steps: ["html", "pdf"], outputs: [".html", ".pdf"] },
+  both: { outputs: [".html", ".pdf"] },
 };
 
 // A target the webview named, or null. The lookup goes through
@@ -387,7 +394,8 @@ function audioFormat(format) {
 // bar in the HTML and the heading sizes in the PDF), and what the editor is
 // showing right now travels to the renderer as metadata the Lua filter reads:
 // see the look section of _extensions/mdm/mdm.lua, which holds the other end
-// of this in look_css for the page and look_tex for the paper. A render with none of it, `bin/mdm render` from a
+// of this in look_css for the page, and so for the PDF printed from it, and
+// look_tex for a PDF typeset with LaTeX. A render with none of it, `bin/mdm render` from a
 // terminal, comes out in the editor's default look with the palette it falls
 // back to.
 
@@ -446,7 +454,8 @@ function metaColor(value) {
 // names no language keeps its words whole on screen, yet Quarto hands the
 // filter `lang: en` for it (measured on 1.9.37), so the page and the paper
 // would divide it as English; and a language without patterns here, Catalan
-// say, would go to TeX with division on and be divided on paper alone.
+// say, would go to TeX with division on and be divided in a typeset PDF
+// alone.
 function exportHyphenation(setting, text) {
   const lang = langOf(text).split("-")[0];
   return setting === "auto" && LANGUAGES.indexOf(lang) !== -1 ? "auto" : "none";
@@ -601,8 +610,10 @@ function findQuarto() {
 // the extension was installed from a .vsix or symlinked from a clone.
 const FILTER = path.join(__dirname, "render", "mdm", "mdm.lua");
 
-// What engraves the scores of a PDF, and what the filter needs around it
-// (render_latex in mdm.lua). Its first choice is a Chrome, into which it
+// What engraves the scores of a PDF that LaTeX typesets, and what the filter
+// needs around it (render_latex in mdm.lua). A printed PDF asks for none of
+// this: its scores are the ones the page draws, printed with the rest of it.
+// The filter's first choice is a Chrome, into which it
 // loads the editor's own abcjs and prints, and the print is trimmed to the
 // ink with pdfcrop; failing that it is abcm2ps, a separate LGPL-3.0-or-later
 // program credited in THIRD-PARTY-NOTICES.md, whose EPS goes through
@@ -629,7 +640,8 @@ const FILTER = path.join(__dirname, "render", "mdm", "mdm.lua");
 function chromeInstalls(platform, env) {
   // Microsoft Edge after Chrome, everywhere: it is Chromium, it prints a page
   // with the same flags, and every Windows 10 and 11 has it, where a machine
-  // with no Chrome and no TeX made no PDF at all.
+  // with no Chrome and no TeX made no PDF at all (2026-09-28, when LaTeX was
+  // still asked first).
   if (platform === "darwin") {
     const out = [];
     [
@@ -683,11 +695,11 @@ function findAbcm2ps(dir) {
   return onPath("abcm2ps");
 }
 
-// What a PDF with scores still lacks, or null when one of the filter's two
-// roads is whole: `chrome` when there is no Chrome, and in `tex` the helpers
-// of a complete TeX that are missing, by the names they go by on the PATH.
-// What is asked for is always Chrome's road, the one that draws the scores
-// the editor draws; abcm2ps is offered in the log and nowhere else.
+// What a typeset PDF with scores still lacks, or null when one of the filter's
+// two roads is whole: `chrome` when there is no Chrome, and in `tex` the
+// helpers of a complete TeX that are missing, by the names they go by on the
+// PATH. What is asked for is always Chrome's road, the one that draws the
+// scores the editor draws; abcm2ps is offered in the log and nowhere else.
 function scoresLack(dir) {
   const gs = onPath("gs");
   const chrome = findChrome();
@@ -702,7 +714,7 @@ function scoresLack(dir) {
 
 // Whether the document holds a score at all, in either of the two forms that
 // give Pandoc the class: ```abc and ```{.abc}. One that holds none never
-// engraves, so it exports to PDF with none of the tools the scores need.
+// engraves, so LaTeX typesets it with none of the tools the scores need.
 function hasScores(text) {
   return /^[ \t]*(?:`{3,}|~{3,})[ \t]*(?:\{[^}\n]*\.abc\b|abc\b)/m.test(text);
 }
@@ -719,12 +731,18 @@ function namesChrome(text) {
 // other. A toast truncates, does not scroll
 // and cannot be copied, and Quarto's answer when something is wrong is a page
 // of it.
-function exportFailed(summary, detail) {
+// `files` (label to path) is for what the same run did land, as in
+// exportNeeds below: a "both" whose PDF failed has still written its page.
+function exportFailed(summary, detail, files) {
   channel().appendLine(detail);
+  const opens = Object.keys(files || {});
   vscode.window
-    .showErrorMessage("MDM: " + summary, "Show log")
+    .showErrorMessage("MDM: " + summary, ...opens, "Show log")
     .then(function (choice) {
       if (choice === "Show log") channel().show(true);
+      else if (opens.indexOf(choice) !== -1) {
+        vscode.env.openExternal(vscode.Uri.file(files[choice]));
+      }
     });
 }
 
@@ -736,9 +754,10 @@ function exportFailed(summary, detail) {
 // where to get it in the log, on the line after a PATH of 33 folders in the
 // report that came from a Mac on 2026-09-12.
 // `files` (label to path) is for what the same run did land: an export of
-// "both" whose PDF wants TeX still wrote its page, and a notice that only
-// names what is missing leaves the reader looking for it. Those buttons come
-// first, since they are the only ones that do something now.
+// "both" whose PDF wants a program that is not there still wrote its page,
+// and a notice that only names what is missing leaves the reader looking for
+// it. Those buttons come first, since they are the only ones that do
+// something now.
 function exportNeeds(summary, detail, pages, files) {
   channel().appendLine(detail);
   const opens = Object.keys(files || {});
@@ -883,8 +902,8 @@ function exportTrouble(log, pretty, dir, text) {
 const QUARTO_PAGE = "https://quarto.org/docs/get-started/";
 const CHROME_PAGE = "https://www.google.com/chrome/";
 
-// For TeX, the distribution that brings everything a PDF of this filter leans
-// on, for the system in hand. On a Mac that is MacTeX, which installs
+// For TeX, the distribution that brings everything a typeset PDF of this
+// filter leans on, for the system in hand. On a Mac that is MacTeX, which installs
 // Ghostscript beside TeX Live (tug.org/mactex). TinyTeX, the TeX Quarto
 // itself suggests, is not the one offered: neither of its package lists
 // (tools/pkgs-custom.txt and tools/pkgs-yihui.txt in rstudio/tinytex) holds
@@ -910,7 +929,7 @@ function texStep(platform) {
   );
 }
 
-// What Quarto says when a PDF is asked of a machine with no TeX at all
+// What Quarto says when a PDF is asked of it on a machine with no TeX at all
 // (src/command/render/latexmk/latex.ts in quarto-dev/quarto-cli, worded the
 // same in 1.9.37 and on main on 2026-09-12). Read out of its log rather than
 // looked for beforehand: Quarto finds a TeX in more places than the PATH
@@ -932,8 +951,31 @@ function steps(lines) {
   });
 }
 
-// The three notices of a missing tool. Each log opens on the way out and
-// ends on where the tool was looked for, which is for whoever helps.
+// The notices of a missing tool. Each log opens on the way out and ends on
+// where the tool was looked for, which is for whoever helps.
+
+// Where a browser to print with was looked for, for the foot of a log.
+function browserSearch() {
+  const installs = chromeInstalls(process.platform, process.env);
+  return [
+    "Looked for Chrome, or Microsoft Edge, as google-chrome, google-chrome-stable, " +
+      "chromium, chromium-browser, chrome, microsoft-edge or microsoft-edge-stable " +
+      "in every folder of the PATH" +
+      (installs.length ? ", and at:" : "."),
+  ].concat(
+    installs.map(function (p) {
+      return "  " + p;
+    })
+  );
+}
+
+// What the log says of the setting behind a notice that asks for TeX: it is
+// reached only with mdm.pdfEngine on latex, and whoever reads it may not be
+// the one who set it, or may have set it long ago.
+const LATEX_ASKED =
+  "mdm.pdfEngine is set to latex in the Settings, which is what asks LaTeX for " +
+  "the PDF. Left at browser, its default, the PDF is the HTML page printed by " +
+  "Chrome, Chromium or Microsoft Edge, and needs no TeX.";
 
 // No Quarto, so no export of any kind. Installing it is the whole way out:
 // its installer writes a folder quartoInstalls looks in, so no restart.
@@ -968,42 +1010,43 @@ function quartoMissing() {
   );
 }
 
-// A PDF with scores that neither road of the filter can draw (scoresLack).
+// A PDF asked of LaTeX, with scores that neither road of the filter can draw
+// (scoresLack).
 // What TeX brings is found on the PATH, which the editor reads only when it
 // starts, so a notice that asks for TeX asks for a restart as well. One that
 // asks for Chrome alone does not: on a Mac Chrome is found in /Applications,
 // where its installer puts it, and on Linux its package links it into
 // /usr/bin, which is on the PATH already.
 // `printed` says a Chrome was there and the page was printed with it and that
-// did not work either, which is the only way the TeX-only wording is reached
-// now: with a Chrome and without it, the export prints the page rather than
-// stop (printInstead). Without saying so the notice sent the reader off to
-// install TeX for a PDF that had just failed for a second reason, which is in
-// the log. `page` is the HTML of a "both" that did land.
+// did not work either, which is the only way the TeX-only wording is reached:
+// with a Chrome and without the whole of TeX, the export prints the page
+// rather than stop (printPage). Without saying so the notice sent the reader
+// off to install TeX for a PDF that had just failed for a second reason, which
+// is in the log. `page` is the HTML of a "both" that did land.
 function scoresMissing(lack, dir, printed, page) {
   const app = appName();
   const platform = process.platform;
-  const installs = chromeInstalls(platform, process.env);
   const tex = lack.tex.length > 0;
   let summary;
   if (printed) {
     summary =
-      "the PDF could not be made. Its scores need a complete TeX, and " +
-      "printing the page with Chrome instead did not work either. The log " +
-      "says what Chrome said.";
+      "the PDF could not be made. Typeset with LaTeX, its scores need a " +
+      "complete TeX, and printing the page with Chrome instead did not work " +
+      "either. The log says what Chrome said.";
   } else if (lack.chrome && tex) {
     summary =
-      "a PDF with scores needs Google Chrome and a complete TeX to draw them, " +
-      "and this computer does not have them. Install both, then quit " + app +
-      ", open it again and export.";
+      "a PDF typeset with LaTeX needs Google Chrome and a complete TeX to draw " +
+      "its scores, and this computer does not have them. Install both, then " +
+      "quit " + app + ", open it again and export.";
   } else if (lack.chrome) {
     summary =
-      "a PDF with scores needs Google Chrome to draw them, and it is not " +
-      "installed on this computer. Install it and export again.";
+      "a PDF typeset with LaTeX needs Google Chrome to draw its scores, and it " +
+      "is not installed on this computer. Install it and export again.";
   } else {
     summary =
-      "a PDF with scores needs a complete TeX to draw them, and this computer " +
-      "does not have one. Install it, then quit " + app + ", open it again and export.";
+      "a PDF typeset with LaTeX needs a complete TeX to draw its scores, and " +
+      "this computer does not have one. Install it, then quit " + app +
+      ", open it again and export.";
   }
   const pages = {};
   if (lack.chrome) pages["Download Chrome"] = CHROME_PAGE;
@@ -1022,8 +1065,9 @@ function scoresMissing(lack, dir, printed, page) {
   }
   todo.push("Export again.");
   const lines = [
-    "A PDF draws its scores as the editor does with three programs: Google " +
-      "Chrome prints them, and pdfcrop, with Ghostscript, trims them to the ink.",
+    "A PDF typeset with LaTeX draws its scores as the editor does with three " +
+      "programs: Google Chrome prints them, and pdfcrop, with Ghostscript, " +
+      "trims them to the ink.",
     "Not found on this computer: " + missing.join(", ") + ".",
   ]
     .concat(steps(todo))
@@ -1032,21 +1076,16 @@ function scoresMissing(lack, dir, printed, page) {
       "abcm2ps can draw the scores instead of Chrome, in a look of its own (on a " +
         "Mac: brew install abcm2ps; on Debian or Ubuntu: sudo apt install " +
         "abcm2ps). It needs epstopdf and Ghostscript as well, which come with TeX.",
+      LATEX_ASKED,
     ]);
   if (platform === "win32") {
     lines.push(
-      "On Windows the scores of a PDF have not been tried, and may not come out " +
-        "even with all of this installed."
+      "On Windows the scores of a typeset PDF have not been tried, and may not " +
+        "come out even with all of this installed."
     );
   }
-  lines.push(
-    "Looked for Chrome, or Microsoft Edge, as google-chrome, google-chrome-stable, " +
-      "chromium, chromium-browser, chrome, microsoft-edge or microsoft-edge-stable " +
-      "in every folder of the PATH" +
-      (installs.length ? ", and at:" : ".")
-  );
-  installs.forEach(function (p) {
-    lines.push("  " + p);
+  browserSearch().forEach(function (line) {
+    lines.push(line);
   });
   lines.push(
     "Looked for abcm2ps at " + path.join(dir, "tools", "bin", "abcm2ps") +
@@ -1061,17 +1100,21 @@ function scoresMissing(lack, dir, printed, page) {
   );
 }
 
-// A PDF Quarto found no TeX for (NO_TEX). Quarto's own words are already in
-// the log, above this. Called only when printInstead (below) found no
-// Chrome to print with either, or printed and it still failed.
-// `page` is the HTML of a "both" that did land: Quarto writes the page before
-// it reports that the PDF half found no TeX (measured on 1.9.37), so the run
-// that ends here has still produced something, and a notice that says only
-// what is missing leaves the reader hunting for it.
+// A PDF asked of LaTeX that Quarto found no TeX for (NO_TEX). Quarto's own
+// words are already in the log, above this. Called only when no browser was
+// found to print the page instead (printPage), or one printed it and that
+// failed.
+// `page` is the HTML of a "both" that did land: the page is rendered before
+// the PDF is tried, so the run that ends here has still produced something,
+// and a notice that says only what is missing leaves the reader hunting for
+// it.
 function texMissing(page) {
   const app = appName();
   const platform = process.platform;
-  const lines = ["A PDF needs TeX, and Quarto found none on this computer (its own words are above)."]
+  const lines = [
+    "A PDF typeset with LaTeX needs TeX, and Quarto found none on this computer " +
+      "(its own words are above).",
+  ]
     .concat(
       steps([
         texStep(platform),
@@ -1079,12 +1122,12 @@ function texMissing(page) {
         "Export again.",
       ])
     )
-    .concat(["An export to HTML needs no TeX."]);
+    .concat(["An export to HTML needs no TeX.", LATEX_ASKED]);
   if (page) lines.push(path.basename(page) + " was exported and is beside the document.");
   exportNeeds(
-    "a PDF needs TeX, a free program that lays out the pages, and it is not " +
-      "installed on this computer. Install it, then quit " + app +
-      ", open it again and export." +
+    "a PDF typeset with LaTeX needs TeX, a free program that lays out the " +
+      "pages, and it is not installed on this computer. Install it, then quit " +
+      app + ", open it again and export." +
       (page ? " " + path.basename(page) + " was exported." : ""),
     lines.join("\n"),
     { "Download TeX": texPage(platform) },
@@ -1092,24 +1135,109 @@ function texMissing(page) {
   );
 }
 
-// ---------- Printing the page, when there is no TeX to typeset it ----------
+// A PDF asked of the browser, which is what a PDF is asked of unless
+// mdm.pdfEngine says latex, on a computer with none to print it, where LaTeX
+// could not make it in its place either: had it, the PDF would be there and
+// fallbackNotice would be saying how it was made. `why` is what stopped
+// LaTeX: "notex" when Quarto found no TeX, "scores" when the document holds
+// scores a typeset PDF cannot draw on this computer (scoresLack), and "latex"
+// when it ran and failed, which is the one the notice itself speaks of, since
+// the reader has just waited for it and its words are in the log.
+// What is asked for is the browser, whatever stopped LaTeX: it is the road
+// the reader was on, and the one program that brings the PDF by itself. It
+// asks for no restart, a browser being found where its installer puts it
+// (chromeInstalls) or on a PATH that already held its folder.
+// `page` is the HTML of a "both" that did land.
+function browserMissing(why, page) {
+  const tried = why === "latex";
+  const lines = [
+    "A PDF is printed from the exported HTML page by Google Chrome, Chromium or " +
+      "Microsoft Edge, and none of them was found on this computer.",
+  ]
+    .concat(
+      steps([
+        "Install Google Chrome from " + CHROME_PAGE +
+          " (Chromium and Microsoft Edge print it as well).",
+        "Export again.",
+      ])
+    )
+    .concat([
+      why === "scores"
+        ? "With no browser the PDF is typeset with LaTeX instead, and LaTeX cannot " +
+          "draw the scores of this document on this computer: that takes a " +
+          "browser as well, or abcm2ps with epstopdf and Ghostscript."
+        : tried
+          ? "With no browser the PDF was typeset with LaTeX instead, and that " +
+            "failed: what it said is above."
+          : "With no browser the PDF is typeset with LaTeX instead, and Quarto " +
+            "found no TeX on this computer either (its own words are above).",
+      "An export to HTML needs no browser.",
+    ]);
+  if (page) lines.push(path.basename(page) + " was exported and is beside the document.");
+  exportNeeds(
+    (tried
+      ? "the PDF could not be made. It is printed by Google Chrome, Chromium or " +
+        "Microsoft Edge, and none of them is installed on this computer; " +
+        "typesetting it with LaTeX instead did not work either. Install one of " +
+        "them and export again."
+      : "a PDF is printed by Google Chrome, Chromium or Microsoft Edge, and none " +
+        "of them is installed on this computer. Install one and export again.") +
+      (page ? " " + path.basename(page) + " was exported." : ""),
+    lines.concat(browserSearch(), ["PATH: " + (process.env.PATH || "")]).join("\n"),
+    { "Download Chrome": CHROME_PAGE },
+    page ? { "Open HTML": page } : null
+  );
+}
+
+// ---------- The two roads to a PDF ----------
 //
-// A PDF Quarto could not draw for want of TeX is not the only page this
-// project already prints rather than typesets: the filter does the same for
-// one score at a time, loading the editor's own abcjs into a headless Chrome
-// and asking it to print (engrave_abcjs in mdm.lua) or, for a figure, one SVG
-// (svg_as_pdf). This does the same for the whole document: it prints the
-// HTML export Quarto already makes, which the export rule already holds to
-// the editor's own look, so the reader gets a real PDF instead of a
-// notification with nothing behind it. It is a page, not a typeset book: no
-// hyphenation to the measure, no TeX-quality justification, nothing beyond
-// what a browser's own print does. Verified end to end on 2026-09-12:
-// `quarto render --to html` on example.mdm, printed with the flags below,
-// came back a real four-page PDF with its title and its equations, read back
-// with pdftotext; the reader that suggested it had just gotten a PDF the same
-// way, of a document with none of this filter's own KaTeX or scores, from
-// cweijan.vscode-office (out/extension.js: markdown-it and KaTeX render the
-// page, puppeteer-core's page.pdf() prints it, no TeX anywhere in it).
+// A PDF is made one of two ways, and mdm.pdfEngine says which one is asked
+// for.
+//
+// `browser` prints the page. Quarto renders the HTML export, which the export
+// rule already holds to the editor's own look, and a headless Chrome,
+// Chromium or Microsoft Edge prints it: the document the reader has on
+// screen, in its faces and with its scores and its equations as the editor
+// draws them. The filter does the same for one score at a time, loading the
+// editor's own abcjs into a headless Chrome and asking it to print
+// (engrave_abcjs in mdm.lua) or, for a figure, one SVG (svg_as_pdf). It is a
+// page, not a typeset book: no hyphenation to the measure, no TeX-quality
+// justification, nothing beyond what a browser's own print does. Verified end
+// to end on 2026-09-12: `quarto render --to html` on example.mdm, printed
+// with the flags below, came back a real four-page PDF with its title and its
+// equations, read back with pdftotext; the reader that suggested it had just
+// gotten a PDF the same way, of a document with none of this filter's own
+// KaTeX or scores, from cweijan.vscode-office (out/extension.js: markdown-it
+// and KaTeX render the page, puppeteer-core's page.pdf() prints it, no TeX
+// anywhere in it).
+//
+// `latex` has Quarto typeset it: TeX's line breaking and page layout, the
+// document's own class and packages, the raw LaTeX the page leaves out, and a
+// TeX to install first.
+//
+// The printed one is the default, with TeX on the computer or without (the
+// owner's call, 2026-10-02). Until then every PDF was asked of LaTeX, and the
+// print stood in where Quarto found no TeX, under a warning that sent the
+// reader to install one; now a reader who wants LaTeX says so in the
+// Settings, and the export button asks for nothing a browser cannot do.
+//
+// Each road stands in for the other when what it needs is not on the
+// computer, and a notice says so (fallbackNotice): asked of the browser with
+// none to be found, the PDF is typeset; asked of LaTeX with no TeX, or
+// without the helpers of a complete TeX its scores are drawn with, it is
+// printed. A road that was taken and failed is not replaced: a LaTeX error
+// and a browser that did not print are the failures they are, each with its
+// own words in the log, and a second try by other means would cover them.
+
+// The values of mdm.pdfEngine. The first is the fallback as well as the
+// default, so a settings.json that carries anything else prints.
+const PDF_ENGINES = ["browser", "latex"];
+
+function pdfEngine() {
+  const value = vscode.workspace.getConfiguration("mdm").get("pdfEngine");
+  return PDF_ENGINES.indexOf(value) !== -1 ? value : PDF_ENGINES[0];
+}
+
 
 // Chrome refuses to start as root without this, the normal case inside a
 // container; harmless everywhere else. Mirrors chrome_sandbox_flag in
@@ -1257,55 +1385,90 @@ function printHtmlToPdf(chrome, htmlPath, pdfPath) {
   });
 }
 
-// What the reader is told when this ran and produced the PDF: still a
-// warning, and not the plain "exported" of a render that went as asked,
-// because what was asked for was a LaTeX PDF and what came out is a page
-// printed by a browser. Offers the file it made alongside the way to the
-// real one.
-function printedNotice(pretty, pdfPath, htmlPath, lack) {
+// What the reader is told when the PDF was made, and by the other road than
+// the one mdm.pdfEngine asks for: still a warning, and not the plain
+// "exported" of an export that went as asked, because what came out is not
+// what was asked for. `made` is the road it came by. "printed" is a PDF asked
+// of LaTeX on a computer with no TeX, or without the helpers of a complete
+// TeX its scores are drawn with (`lack`, as scoresLack names them);
+// "typeset" is one asked of the browser on a computer with none. Offers the
+// file it made alongside the way to the one that was asked for, and a button
+// that turns the notice off for good, in both directions
+// (mdm.showPdfFallbackNotice): the log is written either way.
+function fallbackNotice(made, pretty, pdfPath, htmlPath, lack) {
   const app = appName();
   const platform = process.platform;
+  const pdfName = path.basename(pdfPath);
+  const typeset = made === "typeset";
   const missing = lack
     ? lack.tex.map(function (name) {
         return name === "gs" ? "Ghostscript (gs)" : name;
       })
     : [];
-  const lines = [
-    lack
-      ? "This computer lacks " + missing.join(" and ") + ", so " + pretty +
-        " could not typeset its scores with LaTeX."
-      : "This computer has no TeX, so " + pretty + " could not be typeset with LaTeX.",
-    path.basename(pdfPath) + " was printed from the exported HTML page instead: a " +
-      "real PDF, but with the page's own line breaks and spacing, not LaTeX's.",
-  ]
-    .concat(
-      steps([
-        texStep(platform),
-        "Quit " + app + " completely and open it again, so it finds what was installed.",
-        "Export again for the LaTeX PDF.",
-      ])
-    );
+  const lines = typeset
+    ? [
+        "No Google Chrome, Chromium or Microsoft Edge was found on this computer, " +
+          "so " + pretty + " could not be printed from its HTML page.",
+        pdfName + " was typeset with LaTeX instead: a real PDF, but with LaTeX's " +
+          "own line breaks and page layout, not the page's.",
+      ]
+        .concat(
+          steps([
+            "Install Google Chrome from " + CHROME_PAGE +
+              " (Chromium and Microsoft Edge print it as well).",
+            "Export again for the printed PDF.",
+          ])
+        )
+        .concat([
+          "To have LaTeX typeset every PDF, set mdm.pdfEngine to latex in the " +
+            "Settings: this notice is for a PDF that was asked of the browser.",
+        ])
+        .concat(browserSearch(), ["PATH: " + (process.env.PATH || "")])
+    : [
+        lack
+          ? "This computer lacks " + missing.join(" and ") + ", so " + pretty +
+            " could not typeset its scores with LaTeX."
+          : "This computer has no TeX, so " + pretty + " could not be typeset with LaTeX.",
+        pdfName + " was printed from the exported HTML page instead: a " +
+          "real PDF, but with the page's own line breaks and spacing, not LaTeX's.",
+      ]
+        .concat(
+          steps([
+            texStep(platform),
+            "Quit " + app + " completely and open it again, so it finds what was installed.",
+            "Export again for the LaTeX PDF.",
+          ])
+        )
+        .concat([LATEX_ASKED]);
+  // The way to the road that was asked for: the page of the program it lacks.
+  const get = typeset ? "Download Chrome" : "Download TeX";
   const buttons = ["Open PDF"];
   if (htmlPath) buttons.push("Open HTML");
-  buttons.push("Download TeX", "Show log", "Don't show again");
+  buttons.push(get, "Show log", "Don't show again");
   channel().appendLine(lines.join("\n"));
   if (vscode.workspace.getConfiguration("mdm").get("showPdfFallbackNotice") === false) {
     return;
   }
   vscode.window
     .showWarningMessage(
-      "MDM: " + (lack ? "a complete TeX was not found" : "no TeX was found") +
-        ", so " +
-        pretty.replace(/\.[^.]+$/, "") +
-        ".pdf was printed from the HTML page instead of typeset with LaTeX. " +
-        "Install TeX for a typeset PDF.",
+      "MDM: " +
+        (typeset
+          ? "no Chrome or Edge was found, so " + pdfName +
+            " was typeset with LaTeX instead of printed from the HTML page. " +
+            "Install Chrome for the printed PDF."
+          : (lack ? "a complete TeX was not found" : "no TeX was found") +
+            ", so " + pdfName +
+            " was printed from the HTML page instead of typeset with LaTeX. " +
+            "Install TeX for a typeset PDF."),
       ...buttons
     )
     .then(function (choice) {
       if (choice === "Open PDF") vscode.env.openExternal(vscode.Uri.file(pdfPath));
       else if (choice === "Open HTML") vscode.env.openExternal(vscode.Uri.file(htmlPath));
-      else if (choice === "Download TeX") {
-        vscode.env.openExternal(vscode.Uri.parse(texPage(platform)));
+      else if (choice === get) {
+        vscode.env.openExternal(
+          vscode.Uri.parse(typeset ? CHROME_PAGE : texPage(platform))
+        );
       } else if (choice === "Show log") channel().show(true);
       else if (choice === "Don't show again") {
         vscode.workspace
@@ -1998,20 +2161,8 @@ async function runExport(document, to) {
     quartoMissing();
     return;
   }
-  let printLack = null;
-  if (wantsPdf && hasScores(text) && !namesChrome(text)) {
-    const lack = scoresLack(dir);
-    if (lack) {
-      // Chrome can print the finished HTML, scores included, without the TeX
-      // helpers its LaTeX road uses. With no Chrome there is no such fallback
-      // and the export still has to stop before producing score source as PDF.
-      if (!lack.chrome) printLack = lack;
-      else {
-        scoresMissing(lack, dir);
-        return;
-      }
-    }
-  }
+  // The road the PDF is asked of ("The two roads to a PDF", above).
+  const engine = wantsPdf ? pdfEngine() : null;
   const copy = withoutExtension(file) + ".qmd";
   if (fs.existsSync(copy)) {
     exportNeeds(
@@ -2028,7 +2179,8 @@ async function runExport(document, to) {
   const base = withoutExtension(file);
   // The LaTeX goes under the name Quarto spells it with, so a document named
   // with a space or a bracket found its `.tex` left beside it after every PDF
-  // made without TeX, and a reader's own file of that name written over.
+  // asked of LaTeX with no TeX, and a reader's own file of that name written
+  // over.
   const texPath = path.join(dir, texSafeFilename(path.basename(base)) + ".tex");
   const filesPath = base + "_files";
   const hadTex = fs.existsSync(texPath);
@@ -2039,11 +2191,13 @@ async function runExport(document, to) {
   // in the folder Quarto runs in (runQuartoStep: the document's).
   const cachePath = path.join(dir, "mdm_cache");
   const hadCache = fs.existsSync(cachePath);
-  // The export opens its own entry in the log here, above anything the guard
-  // below or the render itself has to say, so no line of theirs lands under
-  // the previous export's header.
+  // The export opens its own entry in the log here, above anything the render
+  // itself has to say, so no line of theirs lands under the previous export's
+  // header. A PDF's entry names the road it is asked of, which is the first
+  // thing whoever reads the log of one has to know.
   channel().appendLine(
-    "[" + new Date().toISOString() + "] " + pretty + " \u2192 " + to
+    "[" + new Date().toISOString() + "] " + pretty + " \u2192 " + to +
+      (engine ? " (mdm.pdfEngine: " + engine + ")" : "")
   );
   // Quarto names its LaTeX after the copy's own stem and leaves it there when
   // the engine fails, so a .tex of the reader's at that name is written over
@@ -2052,10 +2206,12 @@ async function runExport(document, to) {
   // no TeX on the PATH). cleanFailedLatex below only declines to delete it,
   // which is too late. Nothing can stop Quarto writing there, so the file is
   // moved out of the way for the length of the render and put back after it.
-  // Only for a render that goes to LaTeX; an HTML one never touches it.
+  // Only for a render that goes to LaTeX (typesetPdf calls this): the page's
+  // never touches it, and neither does a PDF printed from the page.
   const keptTex = texPath + ".mdm-kept-" + process.pid;
   let texAside = false;
-  if (wantsPdf && hadTex) {
+  function setTexAside() {
+    if (!hadTex || texAside) return;
     try {
       fs.renameSync(texPath, keptTex);
       texAside = true;
@@ -2090,20 +2246,20 @@ async function runExport(document, to) {
     }
   }
   const look = exportLook(document, text);
-  // The PDF is named after the document: Quarto names it after the stem of
-  // its LaTeX (texSafeFilename), and a document with a space, a bracket or an
-  // apostrophe in its name came out under another name than the one the
-  // notice offered to open.
-  const steps = (target.steps || [to]).map(function (name) {
+  // The command line of a render of the copy to one format, the page or a
+  // typeset PDF. The PDF is named after the document: Quarto names it after
+  // the stem of its LaTeX (texSafeFilename), and a document with a space, a
+  // bracket or an apostrophe in its name came out under another name than
+  // the one the notice offered to open.
+  function argsFor(name) {
     const named = name === "pdf" ? ["--output", path.basename(base) + ".pdf"] : [];
-    return { name: name, args: renderArgs(text, copy, EXPORT_TARGETS[name].args.concat(named, look)) };
-  });
+    return renderArgs(text, copy, EXPORT_TARGETS[name].args.concat(named, look));
+  }
 
-  // Every Quarto call, announced and logged as it happens: normally the one
-  // render asked for, or for both the page and then the PDF; an HTML-only call
-  // instead when the score preflight has already found that LaTeX's road is
-  // incomplete; and a second HTML call after a PDF-only render reports that no
-  // TeX exists. A .qmd that fails to write never spawns.
+  // Every Quarto call, announced and logged as it happens: the page, when it
+  // is asked for, and a page of its own for a PDF asked alone and printed
+  // (printPage); the PDF, when LaTeX typesets it (typesetPdf). A .qmd that
+  // fails to write never spawns.
   function runQuartoStep(stepArgs) {
     channel().appendLine("  " + quarto + " " + stepArgs.join(" ") + "  (in " + dir + ")");
     return new Promise(function (resolve) {
@@ -2139,16 +2295,18 @@ async function runExport(document, to) {
     });
   }
 
-  // Reached whenever a PDF cannot be typeset: before rendering when a score
-  // lacks LaTeX's helper programs, or after Quarto reports no TeX. `ok` says
-  // a PDF now sits at the requested path anyway, printed rather than typeset.
-  // Otherwise `why` is what stopped it, so that the caller does not report
-  // one failure as another: "render" carries Quarto's own exit code, since a
-  // page Quarto could not render is not a missing program and a reader sent
-  // to install one would get the same failure back.
-  async function printInstead(htmlReady) {
+  // The printed road: the page, rendered by Quarto and printed by a browser.
+  // `ok` says the PDF is at the path asked for. Otherwise `why` is what
+  // stopped it, so that the caller does not report one failure as another:
+  // "nobrowser" when there is none to print with; "render" with Quarto's own
+  // exit code, since a page Quarto could not render is not a missing program
+  // and a reader sent to install one would get the same failure back;
+  // "nohtml" when Quarto went through without writing the page; "print" when
+  // the browser did not print it; and "write" when the PDF it made could not
+  // take its place.
+  async function printPage() {
     const chrome = findChrome();
-    if (!chrome) return { ok: false, why: "nochrome" };
+    if (!chrome) return { ok: false, why: "nobrowser" };
     // A PDF-only export must not render its intermediate page as doc.html:
     // that could be a previous export the reader means to keep. A temporary
     // .qmd beside the document preserves relative links and gives Quarto a
@@ -2161,28 +2319,32 @@ async function runExport(document, to) {
     const scratchHtml = scratch + ".html";
     const scratchFiles = scratch + "_files";
     const stagedPdf = scratch + ".pdf";
-    const htmlPath = wantsHtml ? base + ".html" : scratchHtml;
+    // And a page of its own for the print of a "both" whose PDF is asked for
+    // what its page is not (pdfAsks): the page beside the document stays the
+    // one the header asks for. And for one set in the roman, whose faces on
+    // paper are not the ones a screen draws with (PRINT_FACES): the page
+    // beside the document keeps the screen's.
+    const own = !wantsHtml || asks.page.length > 0 || inRoman(look);
+    const htmlPath = own ? scratchHtml : base + ".html";
     // The page's own render, when this is what renders it, for the notices
     // that read the log (citationWarnings).
     let log = "";
     try {
-      if (!htmlReady) {
-        const htmlCopy = wantsHtml ? copy : scratchCopy;
-        if (!wantsHtml) fs.copyFileSync(copy, scratchCopy, fs.constants.COPYFILE_EXCL);
-        const htmlArgs = renderArgs(
-          text,
-          htmlCopy,
-          EXPORT_TARGETS.html.args.concat(exportLook(document, text))
+      if (own) {
+        fs.copyFileSync(copy, scratchCopy, fs.constants.COPYFILE_EXCL);
+        const step = await runQuartoStep(
+          renderArgs(
+            text,
+            scratchCopy,
+            EXPORT_TARGETS.html.args.concat(look, asks.page, asks.paper, PRINT_FACES)
+          )
         );
-        const step = await runQuartoStep(htmlArgs);
         log = step.log;
         if (step.code !== 0) return { ok: false, why: "render", code: step.code, log: log };
-        if (!isFile(htmlPath)) return { ok: false, why: "nohtml" };
-      } else if (!isFile(htmlPath)) {
-        // Both renders its page in a step of its own before the PDF is tried
-        // (EXPORT_TARGETS); nothing can be printed without it.
-        return { ok: false, why: "nohtml" };
       }
+      // Otherwise a "both" has rendered its page beside the document before
+      // the PDF is tried; nothing can be printed without one.
+      if (!isFile(htmlPath)) return { ok: false, why: "nohtml" };
       if (!(await printHtmlToPdf(chrome, htmlPath, stagedPdf))) {
         return { ok: false, why: "print" };
       }
@@ -2202,7 +2364,7 @@ async function runExport(document, to) {
       }
       return { ok: true, log: log };
     } catch (e) {
-      channel().appendLine("Printing the HTML fallback failed: " + String(e.message || e));
+      channel().appendLine("Printing the page failed: " + String(e.message || e));
       return { ok: false, why: "print" };
     } finally {
       [scratchCopy, scratchHtml, stagedPdf].forEach(function (p) {
@@ -2218,6 +2380,45 @@ async function runExport(document, to) {
         // the temporary HTML was self-contained, or never rendered
       }
     }
+  }
+
+  // The typeset road: LaTeX, through Quarto. `ok` as above. Otherwise `why`
+  // is "scores" when the document holds scores that neither road of the
+  // filter can draw on this computer (`lack`, from scoresLack), found before
+  // Quarto is started, since the filter would only warn and leave them in
+  // the PDF as text; "notex" when Quarto found no TeX; and "render" when
+  // LaTeX ran and failed, with Quarto's exit code and its log. A document
+  // that names a chrome of its own (mdm.chrome) is let through to the
+  // filter, which resolves it.
+  async function typesetPdf() {
+    if (hasScores(text) && !namesChrome(text)) {
+      const lack = scoresLack(dir);
+      if (lack) return { ok: false, why: "scores", lack: lack };
+    }
+    setTexAside();
+    const step = await runQuartoStep(argsFor("pdf"));
+    if (step.code === 0) return { ok: true, log: step.log };
+    if (NO_TEX.test(step.log)) {
+      cleanFailedLatex();
+      return { ok: false, why: "notex", code: step.code, log: step.log };
+    }
+    removeFailedFolders();
+    return { ok: false, why: "render", code: step.code, log: step.log };
+  }
+
+  // What a print that did not land ends the export in, whichever road the
+  // PDF was asked of. Null for the two the roads answer each in its own way:
+  // no browser, and a browser that did not print.
+  function printFailure(print, log) {
+    if (print.why === "render") return { code: print.code, log: log + print.log };
+    if (print.why === "write") return { code: -1, pdfHeld: print.code };
+    if (print.why === "nohtml") {
+      return {
+        code: -1,
+        detail: "Quarto finished without writing the page the PDF was to be printed from.",
+      };
+    }
+    return null;
   }
 
   // A failed LaTeX render leaves these beside the document (measured on
@@ -2293,47 +2494,63 @@ async function runExport(document, to) {
           // on 2026-09-13 with the document's folder at mode 555).
           return { code: -1, unwritable: String(e.message || e) };
         }
-        if (printLack) {
-          const print = await printInstead(false);
-          if (print.ok) return { code: 0, printed: true, printLack: printLack, log: print.log };
-          if (print.why === "render") return { code: print.code, log: print.log };
-          if (print.why === "write") return { code: -1, pdfHeld: print.code };
-          if (print.why === "nohtml") {
-            return {
-              code: -1,
-              detail:
-                "Quarto finished without writing the page the PDF was to be " +
-                "printed from.",
-            };
-          }
-          return { code: -1, scoresLack: printLack, printTried: true };
-        }
-        let primary;
-        let failed = null;
-        // Every step's log, for what the notices read out of it at the end
+        // Every render's log, for what the notices read out of it at the end
         // (citationWarnings, exportTrouble): a "both" warns in each.
         let log = "";
-        for (const step of steps) {
-          primary = await runQuartoStep(step.args);
-          log += primary.log;
-          if (primary.code !== 0) {
-            failed = step.name;
-            break;
+        // The page first, when it is asked for: alone, or ahead of the PDF,
+        // which is printed from it or typeset after it.
+        if (wantsHtml) {
+          const step = await runQuartoStep(argsFor("html").concat(asks.paper));
+          log = step.log;
+          if (step.code !== 0) {
+            // A failed page leaves its empty `_files/mediabag` as a failed PDF
+            // does (a bibliography that is not there, measured 2026-09-29), and
+            // the same care takes it away.
+            removeFailedFolders();
+            return { code: step.code, log: log };
           }
         }
-        if (primary.code === 0) return { code: 0, log: log };
-        if (failed === "pdf" && NO_TEX.test(primary.log)) {
-          const print = await printInstead(wantsHtml);
-          cleanFailedLatex();
-          if (print.ok) return { code: 0, printed: true, log: log + (print.log || "") };
-          if (print.why === "write") return { code: -1, pdfHeld: print.code };
-          return { code: primary.code, noTex: true };
+        if (!wantsPdf) return { code: 0, log: log };
+        if (engine === "latex") {
+          const set = await typesetPdf();
+          if (set.ok) return { code: 0, log: log + set.log };
+          if (set.why === "render") return { code: set.code, log: log + set.log };
+          // No TeX, or not the whole of one the scores need: the page is
+          // printed in the PDF's place, when a browser is there to print it.
+          channel().appendLine(
+            set.why === "scores"
+              ? "LaTeX cannot draw the scores on this computer, so the page is printed instead."
+              : "Quarto found no TeX, so the page is printed instead."
+          );
+          const print = await printPage();
+          if (print.ok) {
+            return { code: 0, fallback: "printed", lack: set.lack, log: log + print.log };
+          }
+          const failed = printFailure(print, log);
+          if (failed) return failed;
+          return set.why === "scores"
+            ? { code: -1, scoresLack: set.lack, printTried: print.why === "print" }
+            : { code: set.code, noTex: true };
         }
-        // A failed page leaves its empty `_files/mediabag` as a failed PDF
-        // does (a bibliography that is not there, measured 2026-09-29), and
-        // the same care takes it away.
-        removeFailedFolders();
-        return { code: primary.code, log: log };
+        const print = await printPage();
+        if (print.ok) return { code: 0, log: log + print.log };
+        const failed = printFailure(print, log);
+        if (failed) return failed;
+        if (print.why === "print") return { code: -1, printFailed: true };
+        // No browser on this computer: LaTeX typesets the PDF in its place,
+        // when it can.
+        channel().appendLine(
+          "No Chrome, Chromium or Microsoft Edge was found to print the page, so LaTeX typesets the PDF instead."
+        );
+        const set = await typesetPdf();
+        if (set.ok) return { code: 0, fallback: "typeset", log: log + set.log };
+        // A render stopped by something of the document's own, a bibliography
+        // that is not in its folder or a header that is not YAML, is told as
+        // that: a browser would have met it as well.
+        if (set.why === "render" && exportTrouble(set.log, pretty, dir, text)) {
+          return { code: set.code, log: log + set.log };
+        }
+        return { code: -1, noBrowser: set.why === "render" ? "latex" : set.why };
       }
     );
   } finally {
@@ -2366,6 +2583,24 @@ async function runExport(document, to) {
     texMissing(page);
     return;
   }
+  if (outcome.noBrowser) {
+    browserMissing(outcome.noBrowser, page);
+    return;
+  }
+  // A browser that was there and did not print: a failure, with the
+  // browser's own words in the log, and not a road to replace. Its way out is
+  // in the log too, since nothing here knows what kept it from printing.
+  if (outcome.printFailed) {
+    exportFailed(
+      "the PDF of " + pretty + " could not be printed. The log says what the browser said." +
+        (page ? " " + path.basename(page) + " was exported." : ""),
+      "The browser did not print " + pretty + "; what it said is above. To have " +
+        "LaTeX typeset the PDF instead, which needs TeX, set mdm.pdfEngine to " +
+        "latex in the Settings.",
+      page ? { "Open HTML": page } : null
+    );
+    return;
+  }
   if (outcome.unwritable) {
     exportFailed(
       "the export could not write beside " + pretty + ". It has to be in a " +
@@ -2392,15 +2627,16 @@ async function runExport(document, to) {
     return base + ext;
   });
   const warned = citationWarnings(outcome.log);
-  if (outcome.printed) {
-    printedNotice(
+  if (outcome.fallback) {
+    fallbackNotice(
+      outcome.fallback,
       pretty,
       base + ".pdf",
       wantsHtml ? base + ".html" : null,
-      outcome.printLack
+      outcome.lack
     );
-    // The printed notice has its own news to give; what went wrong in the
-    // citations comes after it, on its own.
+    // The notice of the other road has its own news to give; what went wrong
+    // in the citations comes after it, on its own.
     if (warned) {
       channel().appendLine(warned.detail);
       vscode.window
@@ -4506,6 +4742,7 @@ module.exports = {
   chromeInstalls,
   findChrome,
   texPage,
+  PDF_ENGINES,
   FILTER,
   READER,
   LANGUAGES,

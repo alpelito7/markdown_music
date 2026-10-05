@@ -668,7 +668,7 @@
   // The same drawing once more per staff system, for paper. An SVG is atomic
   // to Chrome's printer, so a score longer than what was left of the sheet
   // went on to the next one whole and left the foot of the sheet blank under
-  // the prose above it (example.mdm printed without TeX, 2026-09-19). The
+  // the prose above it (example.mdm printed, 2026-09-19). The
   // typeset PDF already breaks a score between two systems (score_cuts and
   // abcjs_score_tex in mdm.lua), and the cuts here are its cuts: down the
   // middle of the gap between two system wrappers, none where two overlap,
@@ -722,8 +722,9 @@
   // title at 20 pt comes out at 27 px). What this table changes is the face
   // and nothing else, so a title stays at 27 px, a part label at 20, the lyric
   // at 17 in bold. The editor carries the same table (renderScore in
-  // vscode-mdm/media/main.js) and so does the page the PDF is printed from
-  // (chrome_page in mdm.lua), which is what keeps the three drawing one
+  // vscode-mdm/media/main.js) and so does the page the scores of a typeset
+  // PDF are printed from (chrome_page in mdm.lua), which is what keeps the
+  // three drawing one
   // document.
   //
   // The third slot is the family. Two roles come to this table out of a sans

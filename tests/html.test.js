@@ -1613,8 +1613,9 @@ test("the link on a heading costs the heading nothing", { skip }, async () => {
 });
 
 // The same page on paper, which is the other surface the export has: a
-// reader's Ctrl+P, and the PDF the extension prints with headless Chrome when
-// there is no TeX to typeset one (printInstead in vscode-mdm/extension.js).
+// reader's Ctrl+P, and the PDF the extension prints with headless Chrome
+// unless LaTeX is asked to typeset it (printPage in vscode-mdm/extension.js,
+// mdm.pdfEngine).
 // Paper cannot scroll, so the card that holds a wide score back on screen
 // would simply cut it, and it did: printed at Chrome's own page box, the
 // partials of example.mdm lost "8:7" and the chord row lost its whole A7 bar,
@@ -1695,7 +1696,7 @@ test("on paper the page is scaled, the scores fit and the transport is gone", { 
 });
 
 // A card of code longer than what is left of a sheet, printed the way the
-// extension prints a page when there is no TeX (printHtmlToPdf in
+// extension prints a PDF (printHtmlToPdf in
 // vscode-mdm/extension.js: headless Chrome's --print-to-pdf, with its flags).
 // Chrome gives a box broken across two sheets its padding once, over the first
 // piece and under the last, so the card went on at the head of the next sheet
@@ -1851,7 +1852,7 @@ test("on paper a card of code that goes on past the foot of a sheet opens the ne
 // came out with a paper-white band over and under the text, a white frame on
 // the dark side (seen on 2026-09-19 in an export from a machine with no TeX).
 // @page is given the ground in mdm-look.css. Printed the way the extension
-// prints when there is no TeX, and read in the raster: the four edges of
+// prints a PDF, and read in the raster: the four edges of
 // every sheet against the ground the middle of its left edge carries, which
 // is the body's. The light fallback is used, a wash of #f6f6f6 and not white,
 // so a white margin cannot pass for the ground.
@@ -1927,7 +1928,7 @@ test("on paper the ground reaches the four edges of every sheet", {
 // between two of its systems" in render.test.js). The drawing is one SVG, which
 // Chrome prints whole, so a score longer than what was left of the sheet went
 // on to the next one entire and left the foot of the sheet blank under the
-// prose (example.mdm printed without TeX, 2026-09-19). mdm.js keeps a slice of
+// prose (example.mdm printed, 2026-09-19). mdm.js keeps a slice of
 // the drawing per system and the print sheet shows the slices in its place.
 // Six paragraphs leave room on the first sheet for the first system and not
 // for the six (measured: before the slices every one of them printed on the
@@ -3171,14 +3172,14 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
   }
 });
 
-// A caption printed without TeX keeps the size the editor gives it, 0.956
+// A caption printed into a PDF keeps the size the editor gives it, 0.956
 // of the text. The page printed by Chrome sets its root at 11pt and leaves the
 // prose at 16px, so Quarto's 0.9rem made a caption 0.825 of the text on paper,
 // a figure's and a table's alike (13.2px, measured 2026-09-28), where the
 // screen had it right; mdm-look.css sets it in ems of the text. Printed with
 // the extension's flags and read off pdftotext's word boxes, which grow with
 // the size a face is set at.
-test("printed without TeX, a caption keeps the editor's size beside the text", {
+test("printed into a PDF, a caption keeps the editor's size beside the text", {
   skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
 }, () => {
   fs.copyFileSync(path.join(ROOT, "vscode-mdm", "media", "icon.png"), path.join(DIR, "icon.png"));

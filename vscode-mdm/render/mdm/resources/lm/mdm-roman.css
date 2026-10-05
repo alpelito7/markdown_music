@@ -76,8 +76,8 @@
    `"Latin Modern Roman"` would therefore be engraved 22.5% larger on this page
    than in the editor it was written in, which is the difference the export
    rule exists to forbid. The editor's stylesheet declares this family on the
-   same terms, and so does the page mdm.lua prints the PDF from, so the three
-   surfaces draw one document.
+   same terms, and so does the page mdm.lua prints the scores of a typeset PDF
+   from, so the three surfaces draw one document.
 
    No `size-adjust` on it, and no size named anywhere: the words keep the sizes
    abcjs gives them (the table of roles in resources/mdm.js).

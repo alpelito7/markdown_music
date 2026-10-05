@@ -492,7 +492,9 @@ const CASES = [
   },
   {
     id: "RT01",
-    name: "raw TeX is drawn as the source it is, inline and as a block, and the tooltip says the page leaves it out (G013)",
+    // The page leaves raw TeX out, and so does the PDF printed from it, which
+    // is the default since 2026-10-02 (mdm.pdfEngine): only LaTeX sets it.
+    name: "raw TeX is drawn as the source it is, inline and as a block, and the tooltip says only a PDF typeset with LaTeX sets it (G013)",
     text: "A \\textbf{bold} word and \\alpha here, C:\\Users\\bach too.\n\n\\begin{center}\nx\n\\end{center}\n",
     rows: [
       [1, "", "A \\textbf{bold} word and \\alpha here, C:\\Users\\bach too."],
@@ -506,16 +508,16 @@ const CASES = [
       page.evaluate(() =>
         Array.from(document.querySelectorAll("#app .mdm-rawtex"))
           .filter((e) => !e.parentElement.closest(".mdm-rawtex"))
-          .map((e) => e.textContent + "|" + e.title.slice(0, 7))
+          .map((e) => e.textContent + "|" + e.title)
       ),
     domExpected: [
-      "\\textbf{bold}|Raw TeX",
-      "\\alpha|Raw TeX",
-      "\\Users|Raw TeX",
-      "\\bach|Raw TeX",
-      "\\begin{center}|Raw TeX",
-      "x|Raw TeX",
-      "\\end{center}|Raw TeX",
+      "\\textbf{bold}|Raw TeX: set only in a PDF typeset with LaTeX",
+      "\\alpha|Raw TeX: set only in a PDF typeset with LaTeX",
+      "\\Users|Raw TeX: set only in a PDF typeset with LaTeX",
+      "\\bach|Raw TeX: set only in a PDF typeset with LaTeX",
+      "\\begin{center}|Raw TeX: set only in a PDF typeset with LaTeX",
+      "x|Raw TeX: set only in a PDF typeset with LaTeX",
+      "\\end{center}|Raw TeX: set only in a PDF typeset with LaTeX",
     ],
   },
   {
@@ -1317,7 +1319,7 @@ const CASES = [
     domExpected: [
       'A claim<span class="mdm-note-ref mdm-sup" title="Footnote 1">1</span>',
       '<span class="mdm-cite" title="Citation [@knuth, p. 3]">[@knuth, p. 3]</span>',
-      '<span class="mdm-rawtex" title="Raw TeX: set in the PDF, left out of the HTML page">\\emph{x}</span>',
+      '<span class="mdm-rawtex" title="Raw TeX: set only in a PDF typeset with LaTeX">\\emph{x}</span>',
     ],
   },
   {
