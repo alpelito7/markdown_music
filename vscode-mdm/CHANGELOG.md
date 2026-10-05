@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- In a printed PDF the roman is embedded as the font it is. Chrome wrote
+  Latin Modern into a PDF as drawings, one for each letter, and a viewer
+  filled them thinner than it sets text: the prose read weaker than in the
+  editor, and weaker than the equations beside it. The page that is printed
+  now comes with the same four faces in TrueType outlines, which go in as
+  fonts. An export of HTML + PDF in the roman renders the page twice for it,
+  once for the screen and once for the paper, and takes two to four seconds
+  longer.
 - What a document's YAML header puts at the head of the page is drawn at
   the head of the document, as the exported page sets it and at the page's
   sizes and places: the title and the subtitle, the categories and the

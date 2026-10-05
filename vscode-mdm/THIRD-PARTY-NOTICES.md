@@ -78,7 +78,10 @@ carries. Full text in `licenses/GUST-FONT-LICENSE.txt`.
 
 Four text faces, `LatinModernRoman-{Regular,Italic,Bold,BoldItalic}.woff2`,
 under `media/fonts/` and, for the bundled Quarto filter, under
-`render/mdm/resources/lm/fonts/`.
+`render/mdm/resources/lm/fonts/`. And the same four once more under the same
+names, with TrueType outlines, in `render/mdm/resources/lm/print/`: the faces
+of a page rendered to be printed into a PDF, which a browser embeds as fonts
+only from such outlines.
 
 Changes from the original Work, as clause 6b of the licence asks for them:
 only these four files were taken from the Latin Modern 2.005 distribution,
@@ -88,6 +91,15 @@ nothing else was touched. Outlines, metrics, name table and the 794 characters
 of the character map are those of the originals. The files themselves still
 report Version 2.004: the 2.005 release of the distribution changed the maths
 fonts and not these.
+
+The four under `lm/print/` are a further change to those four, made by
+`tools/lm-print-faces/make.py` of the project's repository: the cubic curves
+of every glyph's outline were turned into the quadratic curves of a TrueType
+face, each within half a font unit, a two-thousandth of an em, of the curve it
+stands for, and the CFF table gave way to `glyf` and `loca`. The advance of
+every glyph, the kerning and the ligatures, the character map, the glyph names
+and the name table are those of the originals, which the script checks before
+it writes a file.
 
 The complete, unmodified Work is at <https://ctan.org/pkg/lm>, which is what
 clause 6d of the licence asks be named. GUST and the authors provide no

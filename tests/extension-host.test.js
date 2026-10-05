@@ -3322,6 +3322,67 @@ test("both formats printed in the sans are one render of the page, and the page 
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// The roman on paper. Chrome's PDF writer embeds a face with CFF outlines as
+// a Type 3 font, a drawing for each glyph, and a viewer fills those thinner
+// than it sets a letter: the owner's printed PDF read weaker than his editor
+// (2026-10-04). So the page that is printed is rendered with the roman's
+// faces in TrueType outlines (PRINT_FACES in extension.js, read by ensure_look
+// in mdm.lua), which a screen draws a pixel softer than the CFF ones and so
+// the page a reader keeps must not have. A PDF asked alone is printed from a
+// page of its own already and that render carries the flag; a "both" set in
+// the roman gets a page of its own for the print, and the page beside the
+// document is rendered without it. That the faces then go into the PDF as
+// fonts is read in a real print, in html.test.js.
+test("a page set in the roman is printed from a render of its own that asks for the print's faces, and the page kept is the screen's", async () => {
+  for (const to of ["pdf", "both"]) {
+    vscode._reset();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+    const bin = fakeQuartoNames(tmp);
+    fakeChromePrint(bin);
+    const restorePath = usePath(bin);
+    const doc = path.join(tmp, "doc.mdm");
+    fs.writeFileSync(doc, SOURCE);
+    // The roman is the editor's default, and is named here all the same.
+    const h = boot("Body\n", { "mdm.textFont": "roman" }, null, "file://" + doc);
+    vscode._state.workspaceFolder = tmp;
+
+    await h.receive({ type: "export", to: to });
+    await settle();
+    restorePath();
+
+    assert.deepEqual(vscode._state.warningMessages, [], to);
+    assert.deepEqual(vscode._state.errorMessages, [], to);
+    assert.equal(
+      vscode._state.infoMessages[0].message,
+      to === "pdf" ? "MDM: exported doc.pdf" : "MDM: exported doc.html and doc.pdf"
+    );
+    const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.equal(calls.length, to === "pdf" ? 1 : 2, to + ": " + JSON.stringify(calls));
+    const faces = (call) => {
+      const at = call.indexOf("mdm-print-faces:truetype");
+      return at > 0 && call[at - 1] === "-M";
+    };
+    const printed = calls[calls.length - 1];
+    assert.match(printed[1], /\.mdm-print-\d+-\d+-\d+\.qmd$/, to + ": the print's page was not rendered under a private name");
+    assert.equal(printed[printed.indexOf("--to") + 1], "html", to);
+    assert.ok(faces(printed), to + ": the page that is printed was not asked for the print's faces: " + JSON.stringify(printed));
+    assert.ok(printed.indexOf("mdm-text-font:roman") !== -1, to + ": the print's page lost the look");
+    assert.match(chromeCalls(tmp)[0], /\.mdm-print-\d+-\d+-\d+\.html$/, to + ": the page printed is not the one rendered for the print");
+    if (to === "both") {
+      assert.equal(calls[0][1], path.join(tmp, "doc.qmd"));
+      assert.ok(!faces(calls[0]), "the page a reader keeps was asked for the print's faces: " + JSON.stringify(calls[0]));
+      assert.equal(fs.readFileSync(path.join(tmp, "doc.html"), "utf8"), FINISHED_PAGE);
+    }
+    assert.deepEqual(
+      fs.readdirSync(tmp).sort(),
+      (to === "pdf" ? ["bin", "calls.txt", "chrome-calls.txt", "chrome-page.txt", "chrome-profile.txt", "doc.mdm", "doc.pdf"]
+        : ["bin", "calls.txt", "chrome-calls.txt", "chrome-page.txt", "chrome-profile.txt", "doc.html", "doc.mdm", "doc.pdf"]),
+      to + ": something of the print's own page was left beside the document"
+    );
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ---------- What the header asks of the PDF and not of the page ----------
 
 // A printed PDF is the page, and a render to HTML takes the options of
