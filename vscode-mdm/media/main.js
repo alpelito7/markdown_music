@@ -4369,6 +4369,126 @@
     return true;
   }
 
+  // ---------- Sections by number ----------
+  //
+  // With `number-sections: true` in the header the page numbers its
+  // headings, 1, 1.1, 1.2, and the editor draws the same number before the
+  // text of each, in the heading's own face and ink and with the space the
+  // page sets after it (the owner, 2026-10-03: the key in the header drew
+  // nothing here). The count is Quarto's and not Pandoc's, and its rules are
+  // in media/mdm-crossref.js (sectionNumbers); what is read here is which
+  // lines are headings and what each says of itself, as measured on the page
+  // that day:
+  //
+  // - Every heading counts wherever it is written: in a quote, in an item
+  //   of a list, in a fenced div.
+  // - The heading a callout opens with is the callout's title and no
+  //   heading, neither numbered nor counted, unless the callout names its
+  //   title itself (`title="..."`), which leaves the heading one. A callout
+  //   is what Quarto makes one of, the class `callout` or one of its five
+  //   kinds: `.callout-custom` is a div, and its heading counts.
+  // - `{.unnumbered}` or `{-}` among a heading's attributes leaves it
+  //   without a number.
+  //
+  // Not matched: the page counts a heading written inside a footnote where
+  // the note is called, and the editor where it is written, so the two
+  // number it otherwise when another heading stands between the two places.
+  //
+  // The header is read where the language is (documentLanguage), and the
+  // document is not walked while it asks for no numbers. An index is one
+  // tree's under one reading of the header, so a number that changes is a
+  // different index, which is what the document is drawn again by (rebuilt).
+  let sectionHeader = null;
+  let sectionLookNow = null;
+  function sectionLook(state) {
+    const fm = editorFrontMatter && CM.syntaxTree(state).topNode.getChild("FrontMatter");
+    const header = fm ? state.doc.sliceString(fm.from, fm.to) : headerText;
+    if (header !== sectionHeader || !sectionLookNow) {
+      sectionHeader = header;
+      sectionLookNow = window.MDM_CROSSREF.sectionLook(header);
+    }
+    return sectionLookNow;
+  }
+
+  // Whether a heading is the title of the callout it opens.
+  const TITLED_CALLOUT = /^callout(?:-(?:note|warning|important|tip|caution))?$/;
+  function titlesCallout(state, heading) {
+    const callout = heading.parent;
+    if (!callout || callout.name !== "Callout") return false;
+    // The first block of the callout: what comes before it are marks, the
+    // opening fence and the `>` of a quote the callout stands in.
+    let first = callout.firstChild;
+    while (first && /Mark$/.test(first.name)) first = first.nextSibling;
+    if (!first || first.from !== heading.from) return false;
+    const fence = callout.getChild("CalloutMark");
+    const open = fence && /^:{3,}[ \t]*(?:(\{.*\})|([A-Za-z0-9_-]+))/.exec(state.sliceDoc(fence.from, fence.to));
+    if (!open) return false;
+    const classes = open[1] ? attributeClasses(open[1]) : [open[2]];
+    return classes.some(function (c) {
+      return TITLED_CALLOUT.test(c);
+    }) && !(open[1] && attributeValue(open[1], "title") !== null);
+  }
+
+  // Pandoc's attributes on a heading, `{#id .class}` at the end of its text
+  // (headingTextEnd), or null. A setext heading carries them at the end of
+  // its last line of text, over the underline.
+  function headingAttribute(state, heading) {
+    const underline = /^Setext/.test(heading.name) ? heading.getChild("HeaderMark") : null;
+    const attr = /[ \t]+(\{[^{}\n]*\})\s*$/.exec(state.sliceDoc(heading.from, underline ? underline.from : heading.to));
+    return attr && isAttribute(attr[1]) ? attr[1] : null;
+  }
+
+  // The number of every heading that has one, by where the heading starts.
+  // Only the nodes that hold blocks are entered: the count is taken again
+  // for every tree, and the tree of a paragraph is most of a document's.
+  const NO_SECTIONS = { look: null, byHeading: new Map() };
+  const HOLDS_BLOCKS = /^(?:Document|Blockquote|BulletList|OrderedList|ListItem|Callout)$/;
+  const sectionsByTree = new WeakMap();
+  let secNow = NO_SECTIONS;
+  function sectionIndex(state, parsed) {
+    const look = sectionLook(state);
+    if (!look.numbered) return NO_SECTIONS;
+    const tree = parsed || CM.syntaxTree(state);
+    const held = sectionsByTree.get(tree);
+    if (held && held.look === look) return held;
+    const found = [];
+    tree.iterate({
+      enter: function (n) {
+        if (!HEADING_NODE.test(n.name)) return HOLDS_BLOCKS.test(n.name);
+        const heading = n.node;
+        if (!titlesCallout(state, heading)) {
+          const attr = headingAttribute(state, heading);
+          const items = attr ? attributeItems(attr) : [];
+          found.push({
+            from: n.from,
+            level: Number(n.name.slice(-1)),
+            unnumbered: items.indexOf("-") !== -1 || items.indexOf(".unnumbered") !== -1,
+          });
+        }
+        return false;
+      },
+    });
+    const index = { look: look, byHeading: new Map() };
+    window.MDM_CROSSREF.sectionNumbers(found, look).forEach(function (number, i) {
+      if (number !== null) index.byHeading.set(found[i].from, number);
+    });
+    sectionsByTree.set(tree, index);
+    return index;
+  }
+
+  // Whether a heading carries another number now than the one it was drawn
+  // with, the places of the old index taken through the changes. One written
+  // above renumbers every heading under it, in blocks no change fell in.
+  function sectionsMoved(before, now, changes) {
+    if (before === now) return false;
+    if (before.byHeading.size !== now.byHeading.size) return true;
+    let moved = false;
+    before.byHeading.forEach(function (number, pos) {
+      if (!moved && now.byHeading.get(changes.mapPos(pos, 1)) !== number) moved = true;
+    });
+    return moved;
+  }
+
   // A rendered equation. Inline ones replace their source; a display one is a
   // block widget that sits under the source lines, which are hidden while no
   // caret is in them (the live preview of the block that is being edited).
@@ -6119,6 +6239,7 @@
     const ranges = activeRanges(state);
     citesNow = state.field(citesField, false) || NO_CITES;
     eqNow = equationIndex(state);
+    secNow = sectionIndex(state);
     // What the host kept back, which every number counts from (hiddenLines).
     const hidden = state.field(hiddenLinesField, false) || 0;
     const tree = CM.syntaxTree(state);
@@ -6280,6 +6401,16 @@
     };
     const hide = function (from, to) {
       if (to > from) decos.push(Decoration.replace({}).range(from, to));
+    };
+    // The number of a numbered section (sectionIndex), before the text of
+    // its heading at `at` with the space the page sets after it. It is no
+    // part of the source, so it stands while the heading is open too, past
+    // the #s: the text moves by what the marks take and by nothing else.
+    const sectionNumber = function (heading, at) {
+      const number = secNow.byHeading.get(heading);
+      if (number) {
+        decos.push(Decoration.widget({ widget: new TextWidget(number + " ", "mdm-section-number"), side: -1 }).range(at));
+      }
     };
     // ---- Links and the definitions they may point to ----
     //
@@ -6659,6 +6790,12 @@
           const level = name.slice(-1);
           lines.add(n.from, n.to, "mdm-h mdm-h" + level + " mdm-h-first mdm-h-last");
           sampleProof(n.from, n.to);
+          // Where the text starts, which is where the opening run is hidden
+          // up to (below).
+          const opening = node.getChild("HeaderMark");
+          let textFrom = opening ? markWithSpace(opening).to : n.from;
+          while (textFrom < n.to && /[ \t]/.test(text(textFrom, textFrom + 1))) textFrom++;
+          sectionNumber(n.from, textFrom);
           // From the head of the line: a caret in the spaces before the #
           // opens the heading as one in its text does (G041).
           if (!touched(doc.lineAt(n.from).from, n.to)) {
@@ -6697,6 +6834,7 @@
           // every line of it used to draw both (G049).
           lines.add(n.from, n.from, "mdm-h-first");
           lines.add(lastText.from, lastText.from, "mdm-h-last");
+          sectionNumber(n.from, n.from);
           if (mark) {
             if (!touched(n.from, n.to)) hideLines(mark.from, mark.to);
             else {
@@ -7409,6 +7547,7 @@
       lines: state.doc.lines,
       cites: (state.field(citesField, false) || NO_CITES).version,
       equations: equationIndex(state).key,
+      sections: sectionIndex(state),
     });
     return set;
   }
@@ -7492,10 +7631,12 @@
     const cites = (state.field(citesField, false) || NO_CITES).version;
     // So does a label or a number of an equation that changed, or the
     // header's say about them: every number after it and every reference
-    // to one may read otherwise now (equationIndex).
+    // to one may read otherwise now (equationIndex). And so does a section
+    // that is numbered otherwise (sectionsMoved).
     if (
       !built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines ||
-      built.cites !== cites || built.equations !== equationIndex(state).key
+      built.cites !== cites || built.equations !== equationIndex(state).key ||
+      sectionsMoved(built.sections, sectionIndex(state), tr.changes)
     ) {
       rebuilds.whole++;
       return remember(buildDecorations(state), state);
@@ -7636,6 +7777,8 @@
         // header kept out of the text changes with no change to the text
         // (applyHyphenation dispatches for it).
         (builtFrom.get(value) && builtFrom.get(value).equations !== equationIndex(tr.state).key) ||
+        // And the sections, numbered or not by the same header.
+        (builtFrom.get(value) && builtFrom.get(value).sections !== sectionIndex(tr.state)) ||
         // The configuration, which is how a changed editor.multiCursorModifier
         // comes in (gestures), and with it the click a link's tooltip names.
         tr.reconfigured;
@@ -13429,8 +13572,9 @@
   // forms are covered: ATX (`## Title`) and Setext (a line underlined with
   // `===` or `---`). Each entry carries the level, the heading's inline
   // content as parts (the same reading a table cell gets: the marks gone,
-  // a link its label, an equation set), its plain text for the tooltip, and
-  // the position to jump to (the start of the heading line). The tree may be
+  // a link its label, an equation set), its plain text for the tooltip, the
+  // position to jump to (the start of the heading line) and where the
+  // heading itself starts, which its number is kept by. The tree may be
   // one parsed further than the state's own (the panel asks for the whole
   // document). What is read is what the editor draws (G112, G113): the
   // closing `#` run is the one the parser marks, so `Sonata in F#` keeps its
@@ -13467,6 +13611,7 @@
         const plain = partsText(parts).trim();
         out.push({
           level: level,
+          from: node.from,
           pos: state.doc.lineAt(node.from).from,
           parts: plain ? parts : [{ kind: "text", text: "(untitled)" }],
           text: plain || "(untitled)",
@@ -13574,6 +13719,7 @@
     // The state's own tree, or the one a slice parsed further for the panel.
     const state = view.state;
     const heads = outlineHeadings(state, parsed || null);
+    const numbers = sectionIndex(state, parsed || null).byHeading;
     outlineHeads = heads;
     const caret = state.selection.main.head;
     parseForOutline();
@@ -13596,8 +13742,17 @@
         "mdm-outline__row mdm-outline__l" + h.level +
         (i === current ? " mdm-outline__row--current" : "");
       row.style.paddingLeft = 8 + (h.level - 1) * 14 + "px";
+      // The number of a numbered section before its title, as the page's
+      // contents carry it.
+      const number = numbers.get(h.from);
+      if (number) {
+        const mark = document.createElement("span");
+        mark.className = "mdm-outline__number";
+        mark.textContent = number + " ";
+        row.appendChild(mark);
+      }
       paintParts(row, h.parts);
-      row.title = h.text;
+      row.title = (number ? number + " " : "") + h.text;
       row.addEventListener("click", function () {
         if (!view) return;
         view.dispatch({

@@ -185,6 +185,15 @@ body h5 {
 body h6 {
   font-size: 1em;
 }
+/* The number of a numbered section (`number-sections: true`) in the ink of
+   its heading, which is how the editor draws it and how LaTeX sets it.
+   Quarto's theme greys it (`.header-section-number`, hsl(210, 10.8%, 39.5%),
+   which is #5a6570; read off a page of 1.9.37 on 2026-10-03), and a heading
+   has one ink in the editor. The number in the contents of the page's margin
+   is left as Quarto draws it. */
+body main.content :is(h1, h2, h3, h4, h5, h6) > .header-section-number {
+  color: inherit;
+}
 /* The air around a heading, which is the editor's. There a heading is a line
    carrying padding over its text, 0.4em over an h1 and 0.6em over the other
    five (`#app .cm-line.mdm-h`), and the blank lines of the Markdown on either

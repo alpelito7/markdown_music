@@ -2354,3 +2354,263 @@ test("a citation that names a cross-reference is Quarto's, and Pandoc is not ask
     await h.close();
   }
 });
+
+// ---------- Sections by number ----------
+//
+// `number-sections: true` in the header numbers the headings of the page, and
+// the editor draws the same numbers (the owner, 2026-10-03: the key in the
+// header drew nothing in the editor). The count is Quarto's, held against
+// what it printed in crossref.test.js; what is held here is what the editor
+// hands that count, which lines are headings and what each says of itself,
+// and what it draws with the answer. The numbers below are the ones
+// `quarto render` printed for this document on 1.9.37 that day, and
+// html.test.js sets the page beside the editor on a copy of it.
+
+const SECTIONS_HEADER = "---\ntitle: \"Numbered\"\nnumber-sections: true\n---\n";
+const SECTIONS_BODY =
+  "\n# Strings\n\nText.\n\n" +
+  "## Modes {#sec-modes}\n\n" +
+  "### Fifths ###\n\n" +
+  "> ## Quoted heading\n\n" +
+  "- ## Listed heading\n\n" +
+  "1. Item\n\n   ### Itemed heading\n\n" +
+  "::: {.callout-note}\n## Titled callout\n\nBody.\n\n## Second in a callout\n:::\n\n" +
+  "::: {.callout-tip title=\"Given\"}\n## Given a title\n:::\n\n" +
+  "::: {.callout-custom}\n## Boxed in a div\n:::\n\n" +
+  "::: {.callout}\n# Bare callout\n:::\n\n" +
+  "# Winds {-}\n\n" +
+  "## Reeds {.unnumbered}\n\n" +
+  "## Flutes {#flutes -}\n\n" +
+  "## Horns {.Unnumbered}\n\n" +
+  "## Bells {unnumbered}\n\n" +
+  "Drums\n=====\n\n" +
+  "Gongs {-}\n---------\n\n" +
+  "##### Deep\n\n" +
+  "#\n\n" +
+  "## *Emphasis* and `code`\n";
+const SECTIONS = SECTIONS_HEADER + SECTIONS_BODY;
+// Each heading by its first word, with the number the page prints on it:
+// none on the title of a callout (which the callout that names its own
+// title, and the div that is no callout, leave a heading), none on a
+// heading that says `{-}` or `{.unnumbered}` as Pandoc reads them, a 0 for
+// every level stepped over, and a number on a heading with no text.
+const SECTIONS_PRINTED = [
+  "1 Strings", "1.1 Modes", "1.1.1 Fifths", "1.2 Quoted", "1.3 Listed", "1.3.1 Itemed",
+  "- Titled", "1.4 Second", "1.5 Given", "1.6 Boxed", "- Bare",
+  "- Winds", "- Reeds", "- Flutes", "1.7 Horns", "1.8 Bells",
+  "2 Drums", "- Gongs", "2.0.0.0.1 Deep", "3 ", "3.1 Emphasis",
+];
+
+// Every heading line as it is drawn: its number, or `-`, and the first word
+// of its text, the number and what stands before it (the bullet of an item,
+// the #s of an open heading) left out.
+function sectionLines(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .cm-line.mdm-h")).map((line) => {
+      const number = line.querySelector(".mdm-section-number");
+      let text = "";
+      let past = !number;
+      const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (number && number.contains(n)) past = true;
+        else if (past) text += n.textContent;
+      }
+      const word = text.replace(/^[^\p{L}]+/u, "").split(/\s+/)[0] || "";
+      return (number ? number.textContent.trim() : "-") + " " + word;
+    })
+  );
+}
+
+test("with number-sections in the header every heading carries the number the page prints, in its own face and ink, and past its marks while it is open", { skip }, async () => {
+  const h = await open({ text: SECTIONS, scores: 0, height: 2600 });
+  try {
+    await reading(h.page);
+    assert.deepEqual(await sectionLines(h.page), SECTIONS_PRINTED);
+    // The number is the heading's own text to the eye: its face, its size,
+    // its weight and its ink, with one space after it, and it stands first
+    // on the line.
+    const look = await h.page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll("#app .cm-line.mdm-h")).find((l) => /Modes/.test(l.textContent));
+      const number = line.querySelector(".mdm-section-number");
+      const of = (el) => {
+        const cs = getComputedStyle(el);
+        return [cs.fontFamily, cs.fontSize, cs.fontWeight, cs.color].join(" | ");
+      };
+      return { line: of(line), number: of(number), raw: number.textContent, text: line.textContent };
+    });
+    assert.equal(look.number, look.line);
+    assert.equal(look.raw, "1.1 ");
+    assert.equal(look.text, "1.1 Modes");
+    // Open, the heading shows its source, and the number stands past the
+    // #s, before the text: it is no part of what is written.
+    await setSelection(h.page, SECTIONS.indexOf("Modes") + 2);
+    await new Promise((r) => setTimeout(r, 150));
+    const opened = await h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .cm-line.mdm-h")).find((l) => /Modes/.test(l.textContent)).textContent
+    );
+    assert.equal(opened, "## 1.1 Modes {#sec-modes}");
+    assert.equal(await h.page.evaluate(() => window.__mdm.view.state.doc.toString()), SECTIONS);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a header that does not ask for numbered sections draws none, and neither does one that asks the PDF alone", { skip }, async () => {
+  for (const header of [
+    "---\ntitle: \"Numbered\"\n---\n",
+    "---\nnumber-sections: false\n---\n",
+    "---\nformat:\n  pdf:\n    number-sections: true\n---\n",
+    "---\nnumber-sections: true\nformat:\n  html:\n    number-sections: false\n---\n",
+  ]) {
+    const h = await open({ text: header + SECTIONS_BODY, scores: 0, height: 2600 });
+    try {
+      await reading(h.page);
+      assert.equal(await h.page.evaluate(() => document.querySelectorAll("#app .mdm-section-number").length), 0, header);
+      assert.equal(await h.page.evaluate(() => document.querySelectorAll("#app .cm-line.mdm-h").length), SECTIONS_PRINTED.length, header);
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+test("the numbers follow the document and the header as they change, a header kept out of the text included", { skip }, async () => {
+  // The header hidden, which is the editor's default: it is the host's copy
+  // that says the sections are numbered, and it changes with no change to
+  // the text. On the same count of lines, so that the header's say is all
+  // that changes: a header a line shorter moves the count of the lines kept
+  // back, which draws the document again by itself.
+  const off = "---\ntitle: \"Numbered\"\nnumber-sections: false\n---\n";
+  const h = await open({ text: SECTIONS, scores: 0, height: 2600, withFrontMatter: false, frontMatter: SECTIONS_HEADER });
+  try {
+    await reading(h.page);
+    assert.deepEqual(await sectionLines(h.page), SECTIONS_PRINTED);
+    await update(h.page, off + SECTIONS_BODY, false, 0, off);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(await h.page.evaluate(() => document.querySelectorAll("#app .mdm-section-number").length), 0);
+    await update(h.page, SECTIONS, false, 0, SECTIONS_HEADER);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual(await sectionLines(h.page), SECTIONS_PRINTED);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+
+    // A letter typed into a paragraph renumbers nothing, and only its block
+    // is drawn again.
+    const typed = await h.page.evaluate(() => {
+      const { view } = window.__mdm;
+      window.__mdm.rebuilds.whole = 0;
+      window.__mdm.rebuilds.part = 0;
+      const at = view.state.doc.toString().indexOf("Text.") + 4;
+      view.dispatch({ changes: { from: at, insert: "s" } });
+      return { whole: window.__mdm.rebuilds.whole, part: window.__mdm.rebuilds.part, differs: window.__mdm.checkDecorations() };
+    });
+    assert.deepEqual(typed, { whole: 0, part: 1, differs: null });
+
+    // A `#` taken off `## Modes` makes it a section of the first level, and
+    // every heading under it is numbered again, in blocks the change did
+    // not fall in and on the same count of lines.
+    const raised = await h.page.evaluate(() => {
+      const { view } = window.__mdm;
+      const at = view.state.doc.toString().indexOf("## Modes");
+      view.dispatch({ changes: { from: at, to: at + 1 } });
+      return window.__mdm.checkDecorations();
+    });
+    assert.equal(raised, null);
+    await reading(h.page);
+    assert.deepEqual(await sectionLines(h.page), [
+      "1 Strings", "2 Modes", "2.0.1 Fifths", "2.1 Quoted", "2.2 Listed", "2.2.1 Itemed",
+      "- Titled", "2.3 Second", "2.4 Given", "2.5 Boxed", "- Bare",
+      "- Winds", "- Reeds", "- Flutes", "2.6 Horns", "2.7 Bells",
+      "3 Drums", "- Gongs", "3.0.0.0.1 Deep", "4 ", "4.1 Emphasis",
+    ]);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("the rows of the outline carry the numbers of the sections, and lose them with the header's say", { skip }, async () => {
+  const off = "---\ntitle: \"Numbered\"\nnumber-sections: false\n---\n";
+  const outline = (page) =>
+    page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-outline__row")).map((r) => r.textContent));
+  const h = await open({
+    text: SECTIONS,
+    scores: 0,
+    height: 2600,
+    withFrontMatter: false,
+    frontMatter: SECTIONS_HEADER,
+    seed: { settings: { outline: "shown" } },
+  });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    const rows = await outline(h.page);
+    assert.deepEqual(rows.slice(0, 7), [
+      "1 Strings", "1.1 Modes", "1.1.1 Fifths", "1.2 Quoted heading", "1.3 Listed heading", "1.3.1 Itemed heading", "Titled callout",
+    ]);
+    assert.equal(rows[rows.length - 1], "3.1 Emphasis and code");
+    assert.equal(rows.length, SECTIONS_PRINTED.length);
+    // The tooltip, which is what a row cut short is read by, has it too.
+    assert.equal(
+      await h.page.evaluate(() => document.querySelectorAll("#app .mdm-outline__row")[1].title),
+      "1.1 Modes"
+    );
+    // The header alone changing, with the text as it was.
+    await update(h.page, off + SECTIONS_BODY, false, 0, off);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual((await outline(h.page)).slice(0, 3), ["Strings", "Modes", "Fifths"]);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+// The one rule of the count that is the owner's and not Quarto's
+// (2026-10-03): a title written `# Title {-}` is not a level to count from,
+// so the sections under it read 1, 1.1, 2 where Quarto prints 0.1, 0.1.1,
+// 0.2. A second title goes on with the count, and the first level is back in
+// every number with the first `#` that carries one.
+const TITLED =
+  "---\nnumber-sections: true\n---\n" +
+  "\n# Scales {-}\n\nText.\n\n## Major\n\n### Thirds\n\n## Minor\n\n" +
+  "# Chords {.unnumbered}\n\n## Triads\n\n## Sources {-}\n";
+
+test("under a title with its number off the sections count from the second level, in the text and in the outline, and from the first again once the title is numbered", { skip }, async () => {
+  const outline = (page) =>
+    page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-outline__row")).map((r) => r.textContent));
+  const h = await open({ text: TITLED, scores: 0, height: 1600, seed: { settings: { outline: "shown" } } });
+  try {
+    await reading(h.page);
+    const counted = ["- Scales", "1 Major", "1.1 Thirds", "2 Minor", "- Chords", "3 Triads", "- Sources"];
+    assert.deepEqual(await sectionLines(h.page), counted);
+    assert.deepEqual(await outline(h.page), ["Scales", "1 Major", "1.1 Thirds", "2 Minor", "Chords", "3 Triads", "Sources"]);
+
+    // The mark taken off the title makes it section 1, and every heading
+    // under it is numbered again though the change fell in none of them.
+    const numbered = await h.page.evaluate(() => {
+      const { view } = window.__mdm;
+      const at = view.state.doc.toString().indexOf(" {-}");
+      view.dispatch({ changes: { from: at, to: at + 4 } });
+      return window.__mdm.checkDecorations();
+    });
+    assert.equal(numbered, null);
+    await reading(h.page);
+    assert.deepEqual(await sectionLines(h.page), ["1 Scales", "1.1 Major", "1.1.1 Thirds", "1.2 Minor", "- Chords", "1.3 Triads", "- Sources"]);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual(await outline(h.page), ["1 Scales", "1.1 Major", "1.1.1 Thirds", "1.2 Minor", "Chords", "1.3 Triads", "Sources"]);
+
+    // And written back, they count from the second level again.
+    const back = await h.page.evaluate(() => {
+      const { view } = window.__mdm;
+      const at = view.state.doc.toString().indexOf("# Scales") + "# Scales".length;
+      view.dispatch({ changes: { from: at, insert: " {-}" } });
+      return window.__mdm.checkDecorations();
+    });
+    assert.equal(back, null);
+    await reading(h.page);
+    assert.deepEqual(await sectionLines(h.page), counted);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});

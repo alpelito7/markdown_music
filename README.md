@@ -173,6 +173,34 @@ page printed the label as text and every reference as "?@eq-mass".
 `crossref: chapters`, which numbers the equations of a book by chapter, is
 not followed.
 
+The sections of a document whose header says `number-sections: true` are
+numbered, 1, 1.1, 1.2, before the text of each heading and in its ink, in
+the editor and on the page alike, and in the rows of the editor's outline.
+The number is no part of the text, so a heading that is open shows it past
+its `#`s. The count is Quarto's own, which the editor follows rule by rule:
+a document written from `##` down reads 1, 1.1 (and one written from `###`
+down 0.1), a level stepped over stays in the number as a 0, a heading with
+`{.unnumbered}` or `{-}` has no number, the heading a callout opens with is
+its title and no section, and `number-depth` and `number-offset` are read
+as Quarto reads them, what the header says under `format: html:` going
+over what it says for the document. The printed PDF is the page; one
+typeset with LaTeX is numbered by LaTeX, which agreed with the page on a
+document written from `##` down and was not measured on the rest. A
+reference to a section (`@sec-modes`) is not resolved in the editor yet.
+
+One rule of the count is MDM's and not Quarto's: a `#` whose number is
+turned off is not counted from. A document that opens on its title,
+`# Title {-}`, and writes its sections from `##` down reads 1, 1.1, 2,
+where Quarto alone prints 0.1, 0.1.1, 0.2, the unnumbered `#` still being
+its first level; a second `#` without a number goes on with the count. The
+editor draws them so, a second filter (`mdm-after.lua`, run after Quarto's
+own) takes the first counter off what Quarto wrote into the page (the
+headings, the contents and the references), and a
+PDF typeset with LaTeX is told the same. A `#` that carries a number
+anywhere in the document, or `crossref: chapters: true` in the header, and
+the first level is in every number again, as Quarto prints it. The same
+file rendered by Quarto without the MDM filter keeps the 0.1.
+
 Differences that are left standing, each on the record in `tests/README.md`:
 the page's callouts are Quarto's, with a heading and an icon; a numbered list
 written `3)` keeps its delimiter in the editor where Pandoc prints a point; a

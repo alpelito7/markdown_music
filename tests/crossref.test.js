@@ -164,3 +164,139 @@ test("a reference prints what Quarto printed for it, quirks and all", () => {
   const spanish = X.look("lang: es\n");
   assert.equal(X.reference("[@eq-a; @eq-b]", equations, spanish).map((p) => p.text).join(""), "Ecuación 1, Ecuación 2");
 });
+
+// ---------- Sections by number ----------
+//
+// `number-sections: true` and the keys beside it, as Quarto 1.9.37 printed
+// them on 2026-10-03: each row below is a document rendered with
+// `bin/mdm render x.mdm --to html` and the numbers read out of the
+// `header-section-number` of its headings. The editor says which lines are
+// headings and which of them are unnumbered (webview-markdown.test.js), and
+// the page is held against the editor in html.test.js. The rows of the last
+// test are the one rule that is the owner's and not Quarto's.
+
+// The headings of a row, written as their levels: `2` is a `##`, `2-` one
+// with `{.unnumbered}` on it. The numbers come back with `-` where the page
+// prints none.
+function numbered(header, levels) {
+  const headings = levels.split(" ").map((h) => ({ level: Number(h.charAt(0)), unnumbered: h.slice(1) === "-" }));
+  return X.sectionNumbers(headings, X.sectionLook(header)).map((n) => (n === null ? "-" : n)).join(" ");
+}
+
+test("the header says whether the sections are numbered, how deep and from where, and the page's say goes over the document's", () => {
+  assert.deepEqual(X.sectionLook(""), { numbered: false, depth: 6, offsets: [], chapters: false });
+  assert.deepEqual(X.sectionLook("---\ntitle: T\nnumber-sections: true\n---\n"), { numbered: true, depth: 6, offsets: [], chapters: false });
+  // A comment after the value, and the two other spellings Quarto takes.
+  assert.deepEqual(
+    X.sectionLook("number-sections: true # yes\nnumber-depth: 2 # two\n"),
+    { numbered: true, depth: 2, offsets: [], chapters: false }
+  );
+  assert.equal(X.sectionLook("number-sections: True\n").numbered, true);
+  assert.equal(X.sectionLook("number-sections: TRUE\n").numbered, true);
+  // `yes` and `on` are not YAML 1.2's true: Quarto refuses the header
+  // ("Validation of YAML front matter failed") and exports nothing.
+  assert.equal(X.sectionLook("number-sections: yes\n").numbered, false);
+  assert.equal(X.sectionLook("number-sections: on\n").numbered, false);
+  assert.equal(X.sectionLook("number-sections: false\n").numbered, false);
+  // Under `format: html:`, alone or over what the document says; what is
+  // written for the PDF is the PDF's.
+  const page = (top, html) => "---\n" + top + "format:\n  html:\n    embed-resources: true\n" + html + "  pdf:\n    documentclass: article\n---\n";
+  assert.equal(X.sectionLook(page("", "    number-sections: true\n")).numbered, true);
+  assert.equal(X.sectionLook(page("number-sections: false\n", "    number-sections: true\n")).numbered, true);
+  assert.equal(X.sectionLook(page("number-sections: true\n", "    number-sections: false\n")).numbered, false);
+  assert.equal(X.sectionLook(page("number-sections: true\nnumber-depth: 2\n", "    number-depth: 3\n")).depth, 3);
+  assert.equal(X.sectionLook("format:\n  pdf:\n    number-sections: true\n").numbered, false);
+  assert.equal(X.sectionLook("number-sections: true\nformat: html\n").numbered, true);
+  // The offsets: a number, a list in either style, and what repeats in it
+  // dropped as Quarto drops it; the page's list added and not put over.
+  assert.deepEqual(X.sectionLook("number-offset: 3\n").offsets, [3]);
+  assert.deepEqual(X.sectionLook("number-offset: [2, 5]\n").offsets, [2, 5]);
+  assert.deepEqual(X.sectionLook("number-offset: [2,5]\n").offsets, [2, 5]);
+  assert.deepEqual(X.sectionLook("number-offset:\n  - 2\n  - 5\n").offsets, [2, 5]);
+  assert.deepEqual(X.sectionLook("number-offset: [1, 1, 1]\n").offsets, [1]);
+  assert.deepEqual(X.sectionLook("number-offset: [0, 0, 4]\n").offsets, [0, 4]);
+  assert.deepEqual(X.sectionLook(page("number-offset: [2, 5]\n", "    number-offset: [3]\n")).offsets, [2, 5, 3]);
+  assert.deepEqual(X.sectionLook(page("number-offset: 3\n", "    number-offset: [4, 4]\n")).offsets, [3, 4]);
+  assert.equal(X.sectionLook("crossref:\n  chapters: true\n").chapters, true);
+});
+
+test("the sections are numbered as Quarto printed them, quirks and all", () => {
+  const on = "number-sections: true\n";
+  const page = (top, html) => top + "format:\n  html:\n" + html;
+  const rows = [
+    // The plain case, and the same document written one level down.
+    [on, "1 2 2 3 1- 1", "1 1.1 1.2 1.2.1 - 2"],
+    [on, "2 3 3 4 2- 2", "1 1.1 1.2 1.2.1 - 2"],
+    // Written from `###` down, the second level is a 0.
+    [on, "3 3 4", "0.1 0.2 0.2.1"],
+    // A level stepped over stays as a 0, and is counted from 1 once written.
+    [on, "1 3 2 3 1 2", "1 1.0.1 1.1 1.1.1 2 2.1"],
+    [on, "1 2 3 4 5 6 6 4 1 6", "1 1.1 1.1.1 1.1.1.1 1.1.1.1.1 1.1.1.1.1.1 1.1.1.1.1.2 1.1.1.2 2 2.0.0.0.0.1"],
+    // A numbered `#` anywhere makes the first level part of every number.
+    [on, "2 2 1 2", "0.1 0.2 1 1.1"],
+    // The depth is counted in `#`, and what is past it is still counted.
+    [on + "number-depth: 1\n", "1 2 1- 2 1", "1 - - - 2"],
+    [on + "number-depth: 2\n", "2 3 4 3", "1 - - -"],
+    [on + "number-depth: 0\n", "1", "-"],
+    [page(on + "number-depth: 2\n", "    number-depth: 3\n"), "1 2 3 1 2", "1 1.1 1.1.1 2 2.1"],
+    // The offsets, the repeated ones dropped and the page's added.
+    [on + "number-offset: 0\n", "1 2 3 1 2", "1 1.1 1.1.1 2 2.1"],
+    [on + "number-offset: 3\n", "1 2 1 2", "4 4.1 5 5.1"],
+    [on + "number-offset: [2, 5]\n", "1 2 1 2", "3 3.6 4 4.6"],
+    [on + "number-offset: [2,5]\n", "1 2 3 1 2", "3 3.6 3.6.1 4 4.6"],
+    [on + "number-offset:\n  - 2\n  - 5\n", "1 2 3 1 2", "3 3.6 3.6.1 4 4.6"],
+    [on + "number-offset: [2, 5]\n", "2 3 2 3", "6 6.1 7 7.1"],
+    [on + "number-offset: [1, 0, 2]\n", "1 2 3 2 3", "2 2.1 2.1.3 2.2 2.2.3"],
+    [on + "number-offset: [1,1,1]\n", "1 2 3 1 2", "2 2.1 2.1.1 3 3.1"],
+    [on + "number-offset: [1, 0, 1]\n", "1 2 3 1 2", "2 2.1 2.1.1 3 3.1"],
+    [on + "number-offset: [0, 0, 4]\n", "1 2 3 1 2", "1 1.5 1.5.1 2 2.5"],
+    [on + "number-offset: [1,1,1]\nnumber-depth: 3\n", "2 3 4 2 3", "1 1.1 - 2 2.1"],
+    [on + "number-depth: 2\nnumber-offset: [1, 1, 1]\n", "2 3 4 2 3", "1 - - 2 -"],
+    [page(on + "number-offset: [2, 5]\n", "    number-offset: [3]\n"), "1 2 3 1 2", "3 3.6 3.6.4 4 4.6"],
+    [page(on + "number-offset: 3\n", "    number-offset: [4, 4]\n"), "1 2 3 1 2", "4 4.5 4.5.1 5 5.5"],
+    // For the page alone, or not for the page.
+    [page("", "    number-sections: true\n    number-depth: 2\n    number-offset: 4\n"), "1 2 3", "5 5.1 -"],
+    [page("number-sections: false\n", "    number-sections: true\n"), "1 2", "1 1.1"],
+    [page(on, "    number-sections: false\n"), "1 2", "- -"],
+    // Chapters count from the first level whatever the document has.
+    [on + "crossref:\n  chapters: true\n", "2 3", "0.1 0.1.1"],
+    // And a header that asks for nothing numbers nothing.
+    ["title: T\n", "1 2", "- -"],
+  ];
+  for (const [header, levels, expected] of rows) {
+    assert.equal(numbered(header, levels), expected, JSON.stringify(header) + " over " + levels);
+  }
+});
+
+// Where the editor leaves Quarto, on the owner's word of 2026-10-03. Quarto
+// prints the `##` under `# Title {-}` as 0.1, 0.2: the unnumbered `#` is
+// still its first level, with a counter that never moves. Here a first level
+// that carries no number is not counted from, and the page is brought to it
+// by mdm-after.lua (html.test.js) and the paper by mdm.lua (render.test.js).
+test("a first level with its number turned off is not counted from", () => {
+  const on = "number-sections: true\n";
+  const rows = [
+    // A title and its sections; Quarto has these at 0.1, 0.1.1, 0.2.
+    [on, "1- 2 3 2", "- 1 1.1 2"],
+    // A second title does not start the count again, and an unnumbered
+    // section under it takes nothing from it.
+    [on, "1- 2 3 2 1- 2 2- 2", "- 1 1.1 2 - 3 - 4"],
+    // The levels under it are counted as in a document with no `#` at all:
+    // one written from `###` down opens on the 0 of its second level.
+    [on, "1- 3 3", "- 0.1 0.2"],
+    [on, "1- 2 4 2", "- 1 1.0.1 2"],
+    // The offset of the first level is in no number, and the others count.
+    [on + "number-offset: [3, 4]\n", "1- 2 2", "- 5 6"],
+    // The depth is still counted in `#`.
+    [on + "number-depth: 2\n", "1- 2 3", "- 1 -"],
+    // One `#` that carries a number and the first level is back in every
+    // number, as Quarto prints it.
+    [on, "1- 2 1 2", "- 0.1 1 1.1"],
+    [on, "1 2 1- 2", "1 1.1 - 1.2"],
+    // And so it is where the header asks for chapters.
+    [on + "crossref:\n  chapters: true\n", "1- 2 2", "- 0.1 0.2"],
+  ];
+  for (const [header, levels, expected] of rows) {
+    assert.equal(numbered(header, levels), expected, JSON.stringify(header) + " over " + levels);
+  }
+});

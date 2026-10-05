@@ -7035,6 +7035,187 @@ the pointer, so a second click made without moving the pointer lands on
 the source and not on the drawing, which by then stands lower: the hand
 has to go down to it. And item 18 of the list below, found on the way.
 
+### Sections by number, in the editor (2026-10-03)
+
+Asked whether the headings could carry numbers, 1, 1.1, 1.2, the answer
+was Quarto's key, `number-sections: true`, and the owner wrote back with a
+picture: the key in the header of `example.mdm`, and the editor drawing
+nothing. The key numbered the page and both PDFs and no line of `main.js`
+or of `style.css` read it, a difference the export rule does not allow and
+that was written down nowhere.
+
+The editor now draws the number before the text of each heading, a widget
+holding the number and one space (`mdm-section-number`), and the rows of
+the outline carry it. What is decided in it, each with its test:
+
+- **The count is Quarto's and not Pandoc's.** Quarto numbers the sections
+  in a filter of its own (`sections.lua` and `sectionNumber`, read in
+  1.9.37's `main.lua`), and Pandoc's writer is not asked. The rules are in
+  `vscode-mdm/media/mdm-crossref.js` (`sectionLook`, `sectionNumbers`) and
+  every one was rendered before it was written, 48 documents through
+  `bin/mdm render x.mdm --to html`. What a reader would not guess, and is
+  kept: a document written from `##` down reads 1, 1.1 and one written
+  from `###` down 0.1; a level stepped over is a 0 (`#` then `###` is
+  1.0.1); an unnumbered `#` still makes the first level part of every
+  number (0.1, 0.2 under it; this one was given up the same day, *The
+  sections under a title*, below); `number-depth` counts `#`s and not the parts
+  of the number, so at 2 a document written from `##` down numbers its
+  `##` alone; a `number-offset` list loses what repeats in it (`[1, 1, 1]`
+  is `[1]`, `[0, 0, 4]` is `[0, 4]`) and the one written under `format:
+  html:` is added to the document's; `yes` and `on` are refused by Quarto,
+  which exports nothing.
+- **What a heading is.** Every heading counts wherever it is written, in a
+  quote, an item or a fenced div. The heading a callout opens with is the
+  callout's title and no heading, unless the callout names its title
+  (`title="..."`); `.callout-custom` is a div and `.callout` alone is a
+  callout. `{-}` and `{.unnumbered}` leave a heading without a number,
+  `{.Unnumbered}` and `{unnumbered}` do not, and a setext heading carries
+  them at the end of its text.
+- **The number stands while the heading is open**, past the `#`s
+  (`## 1.1 Modes {#sec-modes}`): it is no part of the source, and the text
+  moves by what the marks take. Decided here and said to the owner.
+- **In the ink of its heading, and the page follows.** Quarto's theme
+  greys `.header-section-number` (#5a6570), and `mdm-look.css` gives it
+  the heading's colour in both copies. Decided here, after the contents on
+  paper, which the owner chose in the ink the same day, and said to the
+  owner as a rule to take out.
+- **Drawn again when a number moves, and only then.** The index is one
+  tree's under one reading of the header (`sectionIndex`). The field
+  compares it by identity, since a header kept out of the text changes
+  with no change to the text, and `rebuilt` compares it place by place
+  through the changes (`sectionsMoved`), so that a letter typed in a
+  paragraph still takes the partial road. While the header asks for no
+  numbers the document is not walked, and the walk enters only the nodes
+  that hold blocks.
+
+The tests, by file: `crossref.test.js` two (the header, and thirty rows of
+what Quarto printed); `webview-markdown.test.js` four; `html.test.js` one,
+the page against the editor in either face. Twenty-six mutations, each
+swapped in place, run and swapped back with the file's hash checked, and
+every one caught:
+
+- `mdm-crossref.js`: the first level always in the number; the repeated
+  offsets kept; the depth not read; the page's say not taken over the
+  document's; the deeper counters never set back; an unnumbered heading
+  counted; `yes` and `on` taken for true; the page's offsets put over the
+  document's and not added.
+- `main.js`, what a heading is: no heading a callout's title; a callout
+  that names its title still titled by its heading; any `callout-x` a
+  callout; `{-}` not read; a setext heading's attributes looked for after
+  its underline; a quote not entered; an ordered list not entered.
+- `main.js`, the drawing: the number set before the `#`s of an open
+  heading; no number on a setext heading; no space after the number; the
+  header read from the host's copy while it is shown.
+- `main.js`, the redrawing: `sectionsMoved` answering no; only a heading
+  that lost its number counted as moved; the field's comparison taken out.
+  That last one was not caught at first: the test changed the header for
+  one a line shorter, and the count of hidden lines redrew the document by
+  itself. The header now changes on the same count of lines.
+- The outline: no number in the row; none in its tooltip; no repaint when
+  the header alone changes.
+- `mdm-look.css`: the rule emptied (the page test, by the ink).
+
+Run on this state: `test:fast` (283 of 283), the whole of
+`webview-markdown.test.js` (100 of 100) and of `webview-scale.test.js` (8
+of 8), the outline and heading tests of `webview-editing.test.js` (16 of
+16), the heading tests of `webview-look.test.js` (4 of 4) and the heading,
+contents and section tests of `html.test.js` (12 of 12). `render.test.js`
+and the rest were not run. Seen in a real VS Code 1.133.0 the same day, in
+a window of its own off the owner's screen, on a copy of `example.mdm`
+with the key in its header and the header hidden: "1 From equations to
+score" and "2 From code to scores" in the document, and the three rows of
+the outline numbered.
+
+Left standing, item 19 of the list below.
+
+### The sections under a title (2026-10-03)
+
+With the numbers drawn, the owner asked for two things: sections that take
+no number (the contents, the references), and no number on the `#`, which
+tends to be the document's title. The first was there already, `{-}` or
+`{.unnumbered}` on the heading, and with it he took the second back: the
+number of a title can be turned off by hand. What that gives was measured
+before answering. Under `# Title {-}` Quarto prints the `##` as 0.1, 0.1.1,
+0.2, in the editor's copy of its count too: an unnumbered `#` is still the
+first level of its document, with a counter no heading moves. A title in
+the header and sections from `##` down read 1, 1.1, 2. He chose the rule
+below, which is the one place the count leaves Quarto.
+
+**A first level with its number turned off is not counted from.** Where no
+`#` of the document carries a number the sections read 1, 1.1, 2 from the
+second level, through a second unnumbered `#` (3 under it, not 1 again).
+One `#` that is numbered and the first level is back in every number, as
+Quarto prints it, and so it is under `crossref: chapters: true`. On three
+surfaces:
+
+- **The editor**: one condition in `sectionNumbers`
+  (`vscode-mdm/media/mdm-crossref.js`).
+- **The page**: Quarto cannot be told, so what it wrote is corrected. A
+  second filter, `mdm-after.lua`, takes the first counter off the heading
+  (which the contents are made from), off the `number` attribute and off a
+  reference to the heading. It has to run after Quarto's own filters,
+  where `mdm.lua` runs before them: `_extension.yml` hands it in at
+  `post-quarto`, and the VS Code export, whose copy names the filter by
+  path, passes it as a `--lua-filter` on the command line, which Pandoc
+  runs after Quarto's. On the command line and not in the copy's header,
+  where it would be one line more and every line of the author's under it
+  one off in an error. It reads what Quarto printed and counts nothing
+  again: a number that opens with the first counter has as many parts as
+  its heading has `#`s.
+- **A PDF typeset with LaTeX**: LaTeX counts for itself, 0.1 under a
+  `\section*`, and under the KOMA classes (Quarto's default) 0.1 once more
+  after every `\section*`, since KOMA-Script 3.31 sets the counters back at
+  a starred heading too. `\counterwithout` on the commands the writer gives
+  the first two levels does both (`title_sections` in `mdm.lua`).
+
+Measured before the tests were written: fourteen documents through
+`bin/mdm render --to html` against `sectionNumbers`, nine of them the rows
+of the new rule and five that the second filter has to leave alone, all
+agreeing, the `data-number` with them; and the sheet under `scrartcl`,
+`article`, `report` and `scrreprt` (1, 1.1, 1.1.1, 2, 3, "See Section 1 and
+1.1").
+
+The tests: one in `crossref.test.js` (nine rows), one in
+`webview-markdown.test.js`, one in `html.test.js` (the editor against the
+page by both ways the filter is called, and the two documents it leaves
+alone), one in `extension-host.test.js` and a clause in the one that pins
+the two render trees, one in `render.test.js` (four sheets).
+
+**The round**, eighteen mutations, each swapped in place and back in one
+command with the file's hash checked, on a baseline seen green. All
+caught:
+
+- `mdm-crossref.js`: the condition taken out (the three suites); any `#`
+  left out of the rule, numbered or not.
+- `mdm-after.lua`: a document with a numbered `#` shortened too (caught by
+  the older page test, on its twenty-one headings); the chapters asked for
+  not honoured; a document with no `#` shortened; the `number` attribute
+  left as it was; the reference left as it was; the heading left as it
+  was, once in each tree, which fails the page by name and the page by
+  path apart.
+- `_extension.yml`: the second filter handed in before Quarto's; not
+  handed in; and the first again in both trees at once, since with one
+  tree changed it is the comparison of the trees that answers.
+- `extension.js`: the argument not passed; `FILTER_AFTER` pointing at the
+  first filter.
+- `mdm.lua`: a numbered `#` not looked at; the two commands the other way
+  round; the chapters not honoured; the pass taken off the list.
+
+Run on this state: `crossref.test.js` (10 of 10), the section, outline and
+title tests of `webview-markdown.test.js` (19 of 19), the two section
+tests of `html.test.js`, the new test of `render.test.js`, and the whole
+of `extension-host.test.js` before its new test was added (190 of 190).
+`test:fast` stood at 273 of 285 when the round ended, the twelve red all
+of `mdm.frontMatter`, which another session had taken out of
+`package.json` minutes before and was still working on; none of them is
+of this change. The rest of `render.test.js` and of the Chrome suites was
+not run. Seen in a real VS Code 1.133.0, off the owner's screen: the
+editor drawing Scales, 1 Major, 1.1 Thirds, 2 Minor, Chords, 3 Triads,
+Sources, and the HTML exported from that window carrying the same numbers
+in its headings, its contents and its references.
+
+What is left, in item 19 below.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -7246,3 +7427,34 @@ has to go down to it. And item 18 of the list below, found on the way.
     run there). Not fixed: `pointer-events: none` on the layer, which the
     caret's layer already has from CodeMirror, is the likely fix and was
     not tried.
+19. Numbered sections (*Sections by number, in the editor*), what is not
+    matched or not measured. A reference to a section (`@sec-modes`) is
+    drawn as written in the editor, where the page prints "Section 1.2" as
+    a link. A heading written inside a footnote is counted by the page
+    where the note is called and by the editor where it is written. A PDF
+    typeset with LaTeX is numbered by LaTeX: it agreed with the page on a
+    document written from `##` down (1, 1.1, 1.2, 1.2.1, an unnumbered
+    one, 2), and a document written from `###` down, a callout's title,
+    `number-depth` and `number-offset` were not measured on paper. A
+    `_quarto.yml` beside the document is not read. Of the rule for a
+    title (*The sections under a title*): the first counter stays, as
+    Quarto prints it, in the formats where the number is plain text in the
+    heading (docx, epub; Typst numbers its own and was not measured), and
+    in a reference under `crossref: ref-hyperlink: false`, which is text
+    with nothing around it to know it by. And found on the way, older than
+    the rule and wider than it: under the KOMA classes an unnumbered
+    heading sets the counters under it back (`scrartcl.cls` does it from
+    KOMA-Script 3.31 on; measured on a `\section*`, the `\subsection`
+    after it counted from 1 again where `article` goes on with the count,
+    as the page does). Only the case of the title is put right; a document
+    with a numbered `#` and an unnumbered one after it is still counted
+    otherwise on a sheet typeset under KOMA than on the page, which was
+    read and not measured. And three differences
+    that are not the numbers' and were found beside them, none looked
+    into: a setext heading keeps its attributes on screen in the editor
+    (`Gongs {-}` over its underline), where the page prints none; a
+    heading inside a callout is smaller on the page than in the editor
+    ("1.4 Second in a callout", 311.48 px wide on the roman page and
+    325.75 in the editor); and a heading with code in it is 1.71 px wider
+    on the page (329.55 against 327.84).
+

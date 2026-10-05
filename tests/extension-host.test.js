@@ -3930,6 +3930,34 @@ test("the Quarto filter inside the extension is the one the repository renders w
   }
   // And it is the file the export actually points at.
   assert.equal(ext.FILTER, path.join(__dirname, "..", "vscode-mdm", "render", "mdm", "mdm.lua"));
+  // With the part of it that runs after Quarto's own filters, which the
+  // extension in a repository hands in from its _extension.yml.
+  assert.ok(names.includes("mdm-after.lua"), "the part of the filter that reads what Quarto wrote is not there");
+  assert.equal(ext.FILTER_AFTER, path.join(shipped, "mdm-after.lua"));
+  assert.match(
+    fs.readFileSync(path.join(source, "_extension.yml"), "utf8"),
+    /^ {4}- mdm\.lua\n(?: {4}#.*\n)* {4}- path: mdm-after\.lua\n {6}at: post-quarto\n/m,
+    "the extension does not hand the second filter in after Quarto's"
+  );
+});
+
+// The copy names mdm.lua by its path, which leaves out what the extension's
+// _extension.yml says beside it: that mdm-after.lua runs once Quarto has
+// numbered the document. It goes on the command line, where Pandoc runs it
+// after every filter of Quarto's, and not into the header's list, which
+// would be a line more in the copy and every line of the author's under it
+// one off in an error about the header (withHeaderLines).
+test("an export hands Quarto the second half of the filter on the command line, and the copy's header gains no line for it", async () => {
+  assert.deepEqual(
+    ext.renderArgs("---\nformat-links: true\n---\n\nBody\n", "copy.qmd", ["--to", "html"]),
+    ["render", "copy.qmd", "--lua-filter", ext.FILTER_AFTER, "--to", "html"]
+  );
+  const args = (await exportWith("html", {}, seedTheme("#e6db74"))).split(/\s+/);
+  const at = args.indexOf("--lua-filter");
+  assert.ok(at > 0, "the export does not name the second filter: " + args.join(" "));
+  assert.equal(args[at + 1], ext.FILTER_AFTER);
+  const block = "---\ntitle: T\nfilters:\n  - mdm\nlang: es\n---\n\nBody\n";
+  assert.equal(ext.withFilter(block, ext.FILTER).split("\n").length, block.split("\n").length);
 });
 
 // ---------- The look the export carries ----------

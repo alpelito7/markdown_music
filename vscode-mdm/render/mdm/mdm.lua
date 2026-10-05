@@ -3360,6 +3360,51 @@ local function document(doc)
   return render_math_pass(doc)
 end
 
+-- The sections under a title, on paper. A document that opens on
+-- `# Title {-}` and writes its sections from `##` down has them 1, 1.1, 2 in
+-- the editor and on the page (mdm-after.lua tells the whole of it; the
+-- owner's word of 2026-10-03). LaTeX counts for itself: the `#` is a
+-- \section* and the `##` under it a \subsection, numbered 0.1 with the
+-- section's counter in front, and under the KOMA classes, Quarto's default,
+-- counted again from 1 after every \section* of the document, since
+-- KOMA-Script 3.31 sets the counters under a heading back at a starred one
+-- too (0.1, 0.2, then 0.1 once more under a second unnumbered `#`, where
+-- article goes on to 0.3 and the page to 3; all of it measured).
+--
+-- \counterwithout is the kernel's word for both: the second level's counter
+-- leaves the first level's list of counters to set back, and its number is
+-- written without the first level's in front. 1, 1.1, 2, 3 under article,
+-- scrartcl, report and scrreprt, in the headings, the contents and a \ref
+-- alike (measured on TeX Live 2025). The two commands are the ones the
+-- writer gives the first two levels (look.heads), so a class of chapters
+-- takes its \section out of its \chapter. A kernel older than 2018 has no
+-- such command and a class may lack one of the counters: the document then
+-- keeps LaTeX's own numbers and is typeset all the same.
+--
+-- Only where no `#` of the document carries a number, read here as the editor
+-- reads it: the title of a callout is no heading by the time this runs
+-- (measured), and `crossref: chapters: true` keeps the first level.
+local function title_sections(doc)
+  if not quarto.doc.is_format("latex") or not (look and look.heads) then return nil end
+  local crossref = doc.meta.crossref
+  if pandoc.utils.type(crossref) == "table" and crossref.chapters then return nil end
+  local first, counted = false, false
+  doc:walk({
+    Header = function(h)
+      if h.level ~= 1 then return nil end
+      first = true
+      if not h.classes:includes("unnumbered") then counted = true end
+    end,
+  })
+  if not first or counted then return nil end
+  local over, under = look.heads[1], look.heads[2]
+  quarto.doc.include_text("in-header",
+    "\\makeatletter\\@ifundefined{counterwithout}{}{\\@ifundefined{c@" .. over ..
+    "}{}{\\@ifundefined{c@" .. under .. "}{}{\\counterwithout{" .. under .. "}{" ..
+    over .. "}}}}\\makeatother")
+  return nil
+end
+
 -- A sixth-level heading on paper. Pandoc writes a level past \subparagraph
 -- as a plain paragraph, which in an article is `######`, and on paper it read
 -- as a line of prose: the regular face, with no more air over it than two
@@ -3537,12 +3582,14 @@ end
 
 -- Meta has to run before the CodeBlocks, since it settles the abcm2ps path,
 -- and before the headings, since it settles which command each level of them
--- is written as (look.heads). The equations are numbered next, before Math
--- writes any formula out and the maths pass sets them on paper. Within the
--- last table the Pandoc function runs after the element ones.
+-- is written as (look.heads), which title_sections reads too. The equations
+-- are numbered next, before Math writes any formula out and the maths pass
+-- sets them on paper. Within the last table the Pandoc function runs after
+-- the element ones.
 return {
   { Meta = Meta },
   { Pandoc = equations },
+  { Pandoc = title_sections },
   { CodeBlock = CodeBlock, Header = sixth_heading, HorizontalRule = horizontal_rule,
     Figure = figure_on_paper, Image = Image, Math = Math, Table = table_lists, Pandoc = document },
 }

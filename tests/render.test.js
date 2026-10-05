@@ -4046,3 +4046,55 @@ test("on paper a cell written as a list sets its boxes and bullets, and breaks i
     assert.ok(at(under).y0 > at(over).y1, under + " is not on a line under " + over);
   }
 });
+
+// The owner's rule for a title, on paper (2026-10-03; title_sections in
+// mdm.lua): under `# Title {-}` the sections count from the second level, as
+// the editor draws them and the page prints them, where LaTeX has them at
+// 0.1, and under the KOMA classes at 0.1 once more after a second title.
+// Read off the sheet under the class Quarto gives a PDF that names none,
+// which is KOMA's, and under a class of chapters; and a document with a `#`
+// that carries a number keeps LaTeX's count, with no word of this in its
+// .tex.
+test("on paper the sections under a title with its number off count from the second level, through a second title, and a numbered `#` keeps the first", {
+  skip: spawnSync("pdftotext", ["-v"]).status !== 0 && "needs pdftotext",
+}, () => {
+  const dir = freshDir("pdf-title-sections");
+  const doc = (cls, mark, extra) =>
+    "---\nnumber-sections: true\n" + (extra || "") + (cls ? "format:\n  pdf:\n    documentclass: " + cls + "\n" : "") + "filters:\n  - mdm\n---\n\n" +
+    "# Scales" + mark + "\n\nSee @sec-major and @sec-triads.\n\n## Major {#sec-major}\n\n### Thirds\n\n## Minor\n\n" +
+    "# Chords {-}\n\n## Triads {#sec-triads}\n\n## Sources {-}\n\nText.\n";
+  const sheet = (name, cls, mark, extra) => {
+    fs.writeFileSync(path.join(dir, name + ".mdm"), doc(cls, mark, extra));
+    const r = runMdm(["render", name + ".mdm", "--to", "pdf", "-M", "keep-tex:true"], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const text = spawnSync("pdftotext", ["-layout", path.join(dir, name + ".pdf"), "-"], { encoding: "utf8" }).stdout;
+    return {
+      // The lines of the sheet, the page numbers left out.
+      lines: text.split("\n").map((l) => l.trim().replace(/\s+/g, " ")).filter((l) => l && !/^\d+$/.test(l)),
+      tex: fs.readFileSync(path.join(dir, name + ".tex"), "utf8"),
+    };
+  };
+  const counted = ["Scales", "See Section 1 and Section 3.", "1 Major", "1.1 Thirds", "2 Minor", "Chords", "3 Triads", "Sources", "Text."];
+
+  const koma = sheet("koma", null, " {-}");
+  assert.match(koma.tex, /\\documentclass\[[^\]]*\]\{scrartcl\}/, "the class of a PDF that names none is no longer KOMA's");
+  assert.deepEqual(koma.lines, counted);
+  assert.match(koma.tex, /\\counterwithout\{subsection\}\{section\}/);
+
+  // A class of chapters: the `#` is a \chapter and the `##` a \section.
+  const chapters = sheet("chapters", "report", " {-}");
+  assert.deepEqual(chapters.lines, counted);
+  assert.match(chapters.tex, /\\counterwithout\{section\}\{chapter\}/);
+
+  // One `#` with a number on it and the first level is LaTeX's to count.
+  const first = sheet("first", "article", "");
+  assert.deepEqual(first.lines, [
+    "1 Scales", "See Section 1.1 and Section 1.3.", "1.1 Major", "1.1.1 Thirds", "1.2 Minor", "Chords", "1.3 Triads", "Sources", "Text.",
+  ]);
+  assert.doesNotMatch(first.tex, /\\counterwithout\{/);
+
+  // And so it is where the header asks for chapters, as on the page.
+  const asked = sheet("asked", "article", " {-}", "crossref:\n  chapters: true\n");
+  assert.deepEqual(asked.lines.slice(2, 5), ["0.1 Major", "0.1.1 Thirds", "0.2 Minor"]);
+  assert.doesNotMatch(asked.tex, /\\counterwithout\{/);
+});

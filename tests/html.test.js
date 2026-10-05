@@ -4381,3 +4381,276 @@ test("a numbered equation is set as the editor draws it, and a reference to it p
   assert.ok(editorText.ends.length >= 3, "the paragraph is not long enough to test: " + JSON.stringify(editorText.ends));
   assert.deepEqual(editorText.ends, pageText.ends);
 });
+
+// ---------- Sections by number, page against editor ----------
+
+// `number-sections: true` numbers the headings of the page, and the editor
+// draws the same numbers (the owner, 2026-10-03: the key in the header drew
+// nothing in the editor). The count is Quarto's own, with a callout's title,
+// an unnumbered heading and a level stepped over each read its way, and the
+// editor writes the same rules a second time (media/mdm-crossref.js), so the
+// two are set side by side here on one document, the one the editor's own
+// test opens (SECTIONS in webview-markdown.test.js) with the filter named in
+// its header: every heading with its number, the number in the ink of its
+// heading on both (Quarto's theme greys it, and mdm-look.css gives it back
+// the heading's), and the heading as wide on the page as in the editor, which
+// is the number in the heading's face at its size with one space after it.
+const SECTIONS_DOC =
+  "---\ntitle: \"Numbered\"\nnumber-sections: true\nfilters:\n  - mdm\n---\n" +
+  "\n# Strings\n\nText.\n\n" +
+  "## Modes {#sec-modes}\n\n" +
+  "### Fifths ###\n\n" +
+  "> ## Quoted heading\n\n" +
+  "- ## Listed heading\n\n" +
+  "1. Item\n\n   ### Itemed heading\n\n" +
+  "::: {.callout-note}\n## Titled callout\n\nBody.\n\n## Second in a callout\n:::\n\n" +
+  "::: {.callout-tip title=\"Given\"}\n## Given a title\n:::\n\n" +
+  "::: {.callout-custom}\n## Boxed in a div\n:::\n\n" +
+  "::: {.callout}\n# Bare callout\n:::\n\n" +
+  "# Winds {-}\n\n" +
+  "## Reeds {.unnumbered}\n\n" +
+  "## Flutes {#flutes -}\n\n" +
+  "## Horns {.Unnumbered}\n\n" +
+  "## Bells {unnumbered}\n\n" +
+  "Drums\n=====\n\n" +
+  "Gongs {-}\n---------\n\n" +
+  "##### Deep\n\n" +
+  "#\n\n" +
+  "## *Emphasis* and `code`\n";
+
+// The headings of a surface: for each its number, or `-`, with the first
+// word of its text, whether the number is in the heading's ink, and how wide
+// the heading's run is, the number and its space in it. `number` is the
+// selector of a number inside a heading; the page's anchor link, which
+// stands after the text, is left out of the width.
+const SECTION_HEADINGS = function (headings, number) {
+  return headings.map((h) => {
+    const mark = h.querySelector(number);
+    let text = "";
+    let past = !mark;
+    const walk = document.createTreeWalker(h, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (n.parentElement.closest(".anchorjs-link")) continue;
+      if (mark && mark.contains(n)) past = true;
+      else if (past) text += n.textContent;
+    }
+    const run = document.createRange();
+    run.selectNodeContents(h);
+    const anchor = h.querySelector(".anchorjs-link");
+    if (anchor) run.setEndBefore(anchor);
+    return {
+      heading: (mark ? mark.textContent.trim() : "-") + " " + (text.replace(/^[^\p{L}]+/u, "").split(/\s+/)[0] || ""),
+      ink: mark ? getComputedStyle(mark).color === getComputedStyle(h).color : null,
+      width: +run.getBoundingClientRect().width.toFixed(2),
+    };
+  });
+}.toString();
+
+test("a numbered section carries on the page the number the editor draws on it, in the heading's ink and as wide, in either face", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  for (const face of ["roman", "sans"]) {
+    const name = "sections-" + face;
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), SECTIONS_DOC);
+    const r = spawnSync(
+      MDM,
+      ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:" + face],
+      { cwd: DIR, encoding: "utf8" }
+    );
+    assert.equal(r.status, 0, r.stderr);
+
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+    });
+    OPEN_BROWSERS.add(browser);
+    const page = await browser.newPage();
+    await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    const exported = await page.evaluate(
+      (fn) =>
+        eval("(" + fn + ")")(
+          Array.from(document.querySelectorAll("main.content :is(h1, h2, h3, h4, h5, h6):not(.title)")),
+          ".header-section-number"
+        ),
+      SECTION_HEADINGS
+    );
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+
+    const h = await openEditor({ text: SECTIONS_DOC, scores: 0, height: 2600, seed: { settings: { textFont: face } } });
+    let editor;
+    try {
+      await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+      await h.page.mouse.click(2, 2);
+      await new Promise((res) => setTimeout(res, 300));
+      await h.page.evaluate(() => document.fonts.ready);
+      editor = await h.page.evaluate(
+        (fn) => eval("(" + fn + ")")(Array.from(document.querySelectorAll("#app .cm-line.mdm-h")), ".mdm-section-number"),
+        SECTION_HEADINGS
+      );
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+
+    // The title of a callout is a heading's line in the editor and none on
+    // the page, and it has no number in either.
+    const titles = editor.filter((e) => /^- (?:Titled|Bare)$/.test(e.heading));
+    assert.equal(titles.length, 2, "the editor numbers the title of a callout: " + JSON.stringify(editor.map((e) => e.heading)));
+    const drawn = editor.filter((e) => titles.indexOf(e) === -1);
+    assert.equal(exported.length, 19, "the " + face + " page has other headings than the document: " + JSON.stringify(exported.map((e) => e.heading)));
+    assert.deepEqual(
+      drawn.map((e) => e.heading),
+      exported.map((e) => e.heading),
+      "the " + face + " editor numbers its sections otherwise than the page"
+    );
+    assert.equal(exported.filter((e) => e.ink !== null).length, 15, face);
+    for (const surface of [exported, drawn]) {
+      for (const e of surface) {
+        if (e.ink !== null) assert.equal(e.ink, true, "the number of " + JSON.stringify(e.heading) + " is not in the ink of its heading (" + face + (surface === exported ? " page)" : " editor)"));
+      }
+    }
+    // As wide on both, where both set the same words at the same size: an
+    // item's heading has its bullet on the editor's line, a setext heading
+    // keeps its attributes on screen there, and a heading inside a callout
+    // is smaller on the page than in the editor, numbered or not ("1.4
+    // Second in a callout" measured 311.48 px on the roman page and 325.75
+    // in the editor, 2026-10-03), which is the callout's difference and is
+    // not this test's; neither is that of the code in a heading (the last
+    // one, 329.55 px against 327.84).
+    for (const word of ["Strings", "Modes", "Fifths", "Quoted", "Horns", "Drums", "Deep"]) {
+      const at = exported.findIndex((e) => e.heading.split(" ")[1] === word);
+      assert.ok(at >= 0, word);
+      assert.ok(
+        Math.abs(exported[at].width - drawn[at].width) < 0.5,
+        JSON.stringify(exported[at].heading) + " is " + exported[at].width + " px wide on the " + face + " page and " + drawn[at].width + " in the editor"
+      );
+    }
+  }
+});
+
+// The one rule of the count that is the owner's and not Quarto's
+// (2026-10-03, sectionNumbers in mdm-crossref.js): under `# Title {-}` the
+// sections count from the second level, 1, 1.1, 2, where Quarto prints 0.1,
+// 0.1.1, 0.2. The page is brought to the editor by mdm-after.lua, which
+// takes the first counter off what Quarto wrote: off the heading, off the
+// contents made from it, off the data-number and off a reference to the
+// heading. Held on both ways the filter reaches a document: by the
+// extension's name, whose _extension.yml hands the second filter in after
+// Quarto's own, and by path with the second filter on the command line,
+// which is the VS Code export's way (withFilter and renderArgs, called here
+// as the export calls them).
+const TITLED_DOC =
+  "---\nnumber-sections: true\ntoc: true\nfilters:\n  - mdm\n---\n" +
+  "\n# Scales {-}\n\nSee @sec-major, [-@sec-thirds] and @sec-triads.\n\n" +
+  "## Major {#sec-major}\n\n### Thirds {#sec-thirds}\n\n" +
+  "::: {.callout-note}\n## A note\n\nBody.\n\n## Inside the note\n:::\n\n" +
+  "## Minor\n\n# Chords {.unnumbered}\n\n## Triads {#sec-triads}\n\n## Sources {-}\n\nText.\n";
+
+test("under a title with its number off the page counts its sections from the second level as the editor does, in the headings, the contents and the references, by either way the filter is called", { skip }, async () => {
+  const MOCK = path.join(__dirname, "mocks", "vscode.js");
+  const Module = require("node:module");
+  const resolve = Module._resolveFilename;
+  Module._resolveFilename = function (request, ...rest) {
+    return request === "vscode" ? MOCK : resolve.call(this, request, ...rest);
+  };
+  const ext = require("../vscode-mdm/extension.js");
+  Module._resolveFilename = resolve;
+  const { open: openEditor } = require("./webview/helpers.js");
+
+  // By the extension's name, as bin/mdm renders it.
+  fs.writeFileSync(path.join(DIR, "titled-name.mdm"), TITLED_DOC);
+  const named = spawnSync(MDM, ["render", "titled-name.mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(named.status, 0, named.stderr);
+  // By path, as the export's copy names it, with the export's own arguments.
+  const copy = ext.withFilter(TITLED_DOC, ext.FILTER);
+  assert.ok(!/mdm-after/.test(copy), "the copy's header names the second filter, which is a line more in it");
+  fs.writeFileSync(path.join(DIR, "titled-path.qmd"), copy);
+  const args = ext.renderArgs(copy, "titled-path.qmd", ["--to", "html"]);
+  const pathed = spawnSync("quarto", args, { cwd: DIR, encoding: "utf8" });
+  assert.equal(pathed.status, 0, pathed.stderr);
+
+  // And the two it has to leave as Quarto wrote them: a document with no `#`
+  // at all, whose numbers start at the second level already, and one that
+  // asks for chapters, which keeps the first level whatever it has (both
+  // rows of the editor's rule in crossref.test.js).
+  const untouched = {
+    "titled-none": ["", "## Major\n\n### Thirds\n\n## Minor\n", ["1 Major", "1.1 Thirds", "2 Minor"]],
+    "titled-chapters": ["crossref:\n  chapters: true\n", "# Scales {-}\n\n## Major\n\n## Minor\n", ["- Scales", "0.1 Major", "0.2 Minor"]],
+  };
+  for (const name of Object.keys(untouched)) {
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nnumber-sections: true\n" + untouched[name][0] + "filters:\n  - mdm\n---\n\n" + untouched[name][1]);
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  }
+
+  const h = await openEditor({ text: TITLED_DOC, scores: 0, height: 1800 });
+  let editor;
+  try {
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await h.page.mouse.click(2, 2);
+    await new Promise((res) => setTimeout(res, 300));
+    editor = await h.page.evaluate(
+      (fn) => eval("(" + fn + ")")(Array.from(document.querySelectorAll("#app .cm-line.mdm-h")), ".mdm-section-number"),
+      SECTION_HEADINGS
+    );
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  // The title of the callout is a heading's line in the editor and none on
+  // the page, with no number in either.
+  const drawn = editor.map((e) => e.heading).filter((e) => e !== "- A");
+  assert.deepEqual(drawn, ["- Scales", "1 Major", "1.1 Thirds", "2 Inside", "3 Minor", "- Chords", "4 Triads", "- Sources"]);
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+  });
+  OPEN_BROWSERS.add(browser);
+  // The headings of the document: the contents printed for paper are a nav
+  // inside the page's main with a heading of their own (mdm-toc.js).
+  try {
+    for (const name of ["titled-name", "titled-path"]) {
+      const page = await browser.newPage();
+      await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      const exported = await page.evaluate(
+        (fn) =>
+          eval("(" + fn + ")")(
+            Array.from(document.querySelectorAll("main.content :is(h1, h2, h3, h4, h5, h6):not(.title, nav *)")),
+            ".header-section-number"
+          ),
+        SECTION_HEADINGS
+      );
+      assert.deepEqual(exported.map((e) => e.heading), drawn, name + ": the page numbers its sections otherwise than the editor");
+      const rest = await page.evaluate(() => ({
+        data: Array.from(document.querySelectorAll("main.content :is(h1, h2, h3, h4, h5, h6):not(.title, nav *)")).map((el) => el.getAttribute("data-number") || "-"),
+        contents: Array.from(document.querySelectorAll("#TOC a")).map((a) => a.textContent.replace(/\s+/g, " ").trim()),
+        references: Array.from(document.querySelectorAll("main.content a.quarto-xref")).map((a) => a.textContent.replace(/ /g, " ")),
+      }));
+      assert.deepEqual(rest.data, drawn.map((e) => e.split(" ")[0]), name + ": the number a heading says it has is not the one it shows");
+      assert.deepEqual(rest.contents, ["Scales", "1 Major", "1.1 Thirds", "3 Minor", "Chords", "4 Triads", "Sources"], name);
+      assert.deepEqual(rest.references, ["Section 1", "1.1", "Section 4"], name);
+      await page.close();
+    }
+    for (const name of Object.keys(untouched)) {
+      const page = await browser.newPage();
+      await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      const exported = await page.evaluate(
+        (fn) =>
+          eval("(" + fn + ")")(
+            Array.from(document.querySelectorAll("main.content :is(h1, h2, h3, h4, h5, h6):not(.title, nav *)")),
+            ".header-section-number"
+          ),
+        SECTION_HEADINGS
+      );
+      assert.deepEqual(exported.map((e) => e.heading), untouched[name][2], name + ": numbers that were Quarto's to keep");
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+  }
+});

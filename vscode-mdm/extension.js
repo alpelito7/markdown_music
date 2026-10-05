@@ -610,6 +610,12 @@ function findQuarto() {
 // the extension was installed from a .vsix or symlinked from a clone.
 const FILTER = path.join(__dirname, "render", "mdm", "mdm.lua");
 
+// The part of the filter that reads what Quarto wrote, which has to run
+// after Quarto's own filters where mdm.lua runs before them (mdm-after.lua
+// says what it corrects). The extension in a repository hands it in from its
+// _extension.yml; the copy names its filter by path, so it is named here.
+const FILTER_AFTER = path.join(__dirname, "render", "mdm", "mdm-after.lua");
+
 // What engraves the scores of a PDF that LaTeX typesets, and what the filter
 // needs around it (render_latex in mdm.lua). A printed PDF asks for none of
 // this: its scores are the ones the page draws, printed with the rest of it.
@@ -2180,11 +2186,19 @@ function audioFileName(stem, number, title, format) {
 // `--to html` alone left every page pointing at a PDF that is not there. It
 // goes on the command line because Quarto settles the format options before
 // the filters run. A document that wants the links keeps them by saying so.
+//
+// The second filter (FILTER_AFTER) goes on the command line too, and not in
+// the header beside the first: Pandoc runs a --lua-filter after the filters
+// of the defaults file, which are Quarto's, so it comes last without a word
+// about where (measured on 1.9.37), and an entry in the header's list would
+// be a line more in it, with every line of the author's under it one off in
+// an error about it (withHeaderLines).
 function renderArgs(text, copy, extra) {
   const args = ["render", copy];
   if (!/^[ \t]*format-links[ \t]*:/m.test(text)) {
     args.push("-M", "format-links:false");
   }
+  args.push("--lua-filter", FILTER_AFTER);
   return args.concat(extra);
 }
 
@@ -4858,6 +4872,7 @@ module.exports = {
   PDF_ENGINES,
   asksFrom,
   FILTER,
+  FILTER_AFTER,
   READER,
   LANGUAGES,
   DOCUMENT_HYPHENATION,

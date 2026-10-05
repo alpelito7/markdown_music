@@ -7,7 +7,10 @@
 // among its filters, read on 1.9.37, and every form below checked against
 // what `quarto render` printed on 2026-09-30). Shared by the webview and the
 // tests, and written so that none of it needs a DOM: the webview finds the
-// equations in its syntax tree and hands this their text.
+// equations in its syntax tree and hands this their text. The numbers of
+// the sections (`number-sections`) are counted here too, by Quarto's rules
+// again (Sections by number, below), and so is what the header puts at the
+// head of the page (The title block, at the end).
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
@@ -370,11 +373,130 @@
     return out;
   }
 
+  // ---------- Sections by number ----------
+  //
+  // `number-sections: true` in the header numbers the headings, 1, 1.1,
+  // 1.2, and the numbers of the page are not Pandoc's: Quarto counts them in
+  // a filter of its own (sections.lua and sectionNumber among its crossref
+  // filters, read on 1.9.37), by rules a reader would not guess. They are
+  // written here as they are there, all but the one told apart below, and
+  // held against what `quarto render` printed for each of them on 2026-10-03
+  // (tests/crossref.test.js):
+  //
+  // - Every level has a counter. A heading takes the next number of its
+  //   level, and one that stands above the level counted last sets the
+  //   counters under it back.
+  // - The number is the counters from the first level down to the
+  //   heading's, so a level the document steps over stays in it as a 0 (`#`
+  //   then `###` is 1.0.1). Where the document has no heading of the first
+  //   level the number starts at the second: a document written from `##`
+  //   down reads 1, 1.1, and one written from `###` down reads 0.1.
+  // - A heading of the class `unnumbered` (`{.unnumbered}`, or `{-}`) has
+  //   no number and takes none from the count.
+  // - `number-depth` is the deepest level that is numbered, counted in `#`
+  //   and not in the parts of the number: at a depth of 2, a document
+  //   written from `##` down numbers its `##` and nothing under them. The
+  //   levels past it are still counted.
+  // - `number-offset` is where each level's counter starts, a number for
+  //   the first level or a list from the first level down. Quarto merges the
+  //   list and drops what repeats in it, so `[1, 1]` is `[1]` and
+  //   `[0, 0, 4]` is `[0, 4]`, and a list written for the page is added to
+  //   the document's where every other key written for the page replaces
+  //   it (measured: `[2, 5]` with `[3]` under `format: html:` counts from
+  //   2, 5 and 3).
+  // - `crossref: chapters: true` counts from the first level whatever the
+  //   document has.
+  //
+  // The one rule that is not Quarto's, on the owner's word of 2026-10-03: a
+  // first level with no number on it is not counted from. To Quarto an
+  // unnumbered `#` is still a heading of the first level, so a document that
+  // opens on `# Title {-}` has its `##` at 0.1, 0.2 (measured), which is
+  // nobody's meaning in turning the title's number off. Here the number
+  // starts at the first level only where a `#` carries a number, and such a
+  // document reads 1, 1.1, 2 like one with its title in the header; a second
+  // `#` that is unnumbered too does not start the count again. The export
+  // takes the first counter off what Quarto printed (mdm-after.lua in the
+  // render tree) and off what LaTeX would print (title_sections in mdm.lua).
+  //
+  // What the header says for the page (`format: html:`) is taken over what
+  // it says for the document, as Quarto takes it, since the editor draws
+  // the page. Only `true`, `True` and `TRUE` turn the numbers on: Quarto
+  // refuses a header that says `yes` or `on` and exports nothing. A
+  // `_quarto.yml` beside the document is not read.
+  function saysTrue(v) {
+    return typeof v === "string" && /^(?:true|True|TRUE)$/.test(v.trim());
+  }
+  function wholeNumber(v) {
+    return typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v.trim()) : null;
+  }
+
+  // What the sections take from the header: whether they are `numbered`,
+  // down to which `depth`, the `offsets` their counters start at and whether
+  // the document is counted in `chapters`.
+  function sectionLook(header) {
+    const keys = headerKeys(header);
+    const format = isMap(keys.format) ? keys.format : {};
+    const html = isMap(format.html) ? format.html : {};
+    const crossref = isMap(keys.crossref) ? keys.crossref : {};
+    const said = function (name) {
+      return html[name] !== undefined && html[name] !== null ? html[name] : keys[name];
+    };
+    const depth = wholeNumber(said("number-depth"));
+    const offsets = [];
+    [keys["number-offset"], html["number-offset"]].forEach(function (given) {
+      (Array.isArray(given) ? given : [given]).forEach(function (item) {
+        const n = wholeNumber(item);
+        if (n !== null && offsets.indexOf(n) === -1) offsets.push(n);
+      });
+    });
+    return {
+      numbered: saysTrue(said("number-sections")),
+      depth: depth === null ? 6 : depth,
+      offsets: offsets,
+      chapters: saysTrue(crossref.chapters),
+    };
+  }
+
+  // The number of each heading of a document, in the document's order, or
+  // null for one the page prints no number on. A heading is its `level`, 1
+  // to 6, and whether it is `unnumbered`; the title of a callout is not a
+  // heading and is not handed in (the editor says which those are).
+  const LEVELS = 7;
+  function sectionNumbers(headings, lookOf) {
+    const offsets = [];
+    for (let i = 0; i < LEVELS; i++) offsets.push(i < lookOf.offsets.length ? lookOf.offsets[i] : 0);
+    const section = offsets.slice();
+    // The level the number starts at: the first one where the document
+    // counts in chapters or numbers a `#`, and the second one otherwise.
+    let top = lookOf.chapters ? 1 : LEVELS;
+    headings.forEach(function (h) {
+      if (h.level < top && !(h.level === 1 && h.unnumbered)) top = h.level;
+    });
+    return headings.map(function (h) {
+      if (h.unnumbered) return null;
+      // The level counted last: the deepest counter that is not at 0.
+      let counted = 0;
+      for (let i = LEVELS; i >= 1 && !counted; i--) if (section[i - 1] !== 0) counted = i;
+      if (h.level < counted) for (let i = h.level; i < LEVELS; i++) section[i] = offsets[i];
+      section[h.level - 1] += 1;
+      if (!lookOf.numbered || h.level > lookOf.depth) return null;
+      // Down to the heading's own level, or to the deepest counter over it
+      // that has counted anything.
+      let last = 1;
+      for (let i = h.level; i >= 2 && last === 1; i--) if (section[i - 1] > 0) last = i;
+      const parts = top === 1 ? [section[0]] : [];
+      for (let i = 2; i <= last; i++) parts.push(section[i - 1]);
+      return parts.length ? parts.join(".") : null;
+    });
+  }
+
   return {
     PREFIXES: PREFIXES,
     languagePrefix: languagePrefix,
     headerKeys: headerKeys,
     look: look,
+    sectionLook: sectionLook,
+    sectionNumbers: sectionNumbers,
     number: number,
     labelAfter: labelAfter,
     kindOf: kindOf,

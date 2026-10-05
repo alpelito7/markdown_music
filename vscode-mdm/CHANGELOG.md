@@ -34,6 +34,24 @@
   under `format: html:`, stay in the page's margin and are not printed.
   Exporting HTML + PDF, the page beside the document is still the one the
   header asks for.
+- The sections of a document whose header says `number-sections: true` are
+  numbered in the editor as they are on the page, 1, 1.1, 1.2 before the
+  text of each heading, in the heading's face and ink, and in the rows of
+  the outline. The key numbered the exported page and the PDF and drew
+  nothing in the editor. The numbers are the page's own, counted as Quarto
+  counts them: a document written from `##` down reads 1, 1.1, a heading
+  with `{.unnumbered}` or `{-}` has no number, the heading a callout opens
+  with is its title and no section, and `number-depth` and `number-offset`
+  are followed, what the header says under `format: html:` going over what
+  it says for the document. A heading that is open shows its number past
+  its `#`s, since the number is no part of what is written. On the page the
+  number is in the ink of its heading, where Quarto's theme greyed it.
+- Under a title whose number is turned off, `# Title {-}`, the numbered
+  sections count from the second level: 1, 1.1, 2 in the editor, on the
+  exported page and in both PDFs, in the headings, the contents and the
+  references. Quarto alone prints them 0.1, 0.1.1, 0.2, since an unnumbered
+  `#` is still its first level. A `#` that carries a number, or `crossref:
+  chapters: true`, keeps the first level in every number.
 - A field of a tune (`K:G`, `M:6/8`, `X:1`) or a Windows path (`C:\Music`)
   pasted over selected words is pasted as the text it is, where it made
   the words a link to it: an address is a scheme of two letters or more
