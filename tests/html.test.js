@@ -1628,13 +1628,31 @@ test("the link on a heading costs the heading nothing", { skip }, async () => {
 // on screen; a drawing wider than the column is fitted to it instead of cut;
 // and nothing that answers a pointer is drawn. The measured page the numbers
 // come from is in tests/README.md.
+//
+// The scale is Chrome's own shrink of a page too wide for its sheet, and not
+// a zoom (2026-10-04): a zoom lays the page out again at other pixels, where
+// lines broke on other words than on screen, a 1 px rule came out 1.2 px and
+// a 2 px one 1.2 too. So the page is laid out at the screen's pixels, for a
+// window as wide as the sheet over the scale, and what makes Chrome shrink
+// it is a box on the root that wide, the rest clipped at the sheet's edge.
+// Read here as that: no zoom, the box, the two clips, and a root as large as
+// the screen's (Quarto prints with it at 11pt, which made every length left
+// in rem 0.86 of itself). The window is the one a Letter sheet is laid out
+// for, 816 px over the scale. That the print then comes out at the scale is
+// read in a real one, in the test of the sheets below.
 test("on paper the page is scaled, the scores fit and the transport is gone", { skip }, async () => {
   const h = await open();
+  await h.page.setViewport({ width: 983, height: 700 });
+  const screenRoot = await h.page.evaluate(() => getComputedStyle(document.documentElement).fontSize);
   await h.page.emulateMediaType("print");
   const out = await h.page.evaluate(() => {
     const main = document.querySelector("main.content");
+    const root = document.documentElement;
     return {
-      zoom: getComputedStyle(document.documentElement).zoom,
+      zoom: getComputedStyle(root).zoom,
+      probe: parseFloat(getComputedStyle(root, "::before").width) / window.innerWidth,
+      clips: [getComputedStyle(root).overflowX, getComputedStyle(document.body).overflowX],
+      root: getComputedStyle(root).fontSize,
       column: getComputedStyle(main).width,
       audio: Array.from(document.querySelectorAll(".mdm-audio")).map(
         (el) => getComputedStyle(el).display
@@ -1654,9 +1672,12 @@ test("on paper the page is scaled, the scores fit and the transport is gone", { 
 
   // 10 TeX pt on a 16 px body, which is what the typeset page sets the same
   // 51.25 em measure at: 10/12 with TeX's point converted to CSS's (800/803).
-  assert.equal(Math.round(Number(out.zoom) * 10000) / 10000, 0.8302);
-  // 819.982 and not 820: the column is measured after the scale above, and
-  // the scale is a ratio the browser has already rounded.
+  // The box is the window over that, so what Chrome shrinks by is that.
+  assert.equal(Number(out.zoom), 1, "the page is laid out a second time, at a zoom");
+  assert.equal(Math.round((1 / out.probe) * 10000) / 10000, 0.8302, "the box that makes Chrome shrink the page is not the sheet over the scale");
+  assert.deepEqual(out.clips, ["clip", "clip"], "what the page holds can make the overflow, and so the scale, its own");
+  assert.equal(out.root, screenRoot, "the root is not the size it is on screen");
+  assert.equal(screenRoot, "17px", "Quarto's root is no longer 17px, so the line above reads nothing");
   assert.ok(
     Math.abs(parseFloat(out.column) - 820) <= 0.05,
     "the printed column is " + out.column + " and not the editor's 820px"
@@ -2086,6 +2107,433 @@ test("on paper the sheet is the one the header names, and a narrow one keeps the
     near(wide("sheet-top-a5") / wide("sheet-none"), 1, 0.003),
     "a word is " + wide("sheet-top-a5").toFixed(2) + " pt wide on A5 and " + wide("sheet-none").toFixed(2) + " on Letter"
   );
+});
+
+// A line of the printed PDF ends on the word the editor ends it on, which is
+// the test the export rule is stated in and was only ever run on the page.
+// While the sheet was scaled with a `zoom`, the page was laid out a second
+// time at 0.83 of its pixels and a row that fitted or failed by a hair
+// changed sides: 6 of 2,282 row endings over 400 paragraphs of prose, and of
+// the first 120 printed, 5 of 674 against the editor (2026-10-04). These are
+// three of the paragraphs it happened in: twelve words 820.047 px long
+// against the measure's 820 on screen and 680.750 against 680.766 under the
+// zoom, and two out of that corpus. The sheet is now the page as it is laid
+// out for the screen, shrunk by Chrome as it prints (the print rules of
+// mdm-look.css), so there is one layout and its lines are the editor's.
+const PAPER_PROSE = [
+  "We first construct a family of vector fields whose fixed points can be placed in advance. Let the velocity be assigned at a state, and build the field from two ingredients: a scalar function, which governs motion along one distinguished coordinate and determines where fixed points can occur, and a matrix-valued function, which governs motion in the remaining coordinates and determines the local behavior around those points. Separating the distinguished coordinate from the remaining ones gives the compact form that the rest of the text relies on, written out in full below.",
+  "Package of feat markdown-editor that owes it the runner reports it without failing the run and. The fix takes the mark off in its own commit cases passing and owed at the start of the branch. Headings emphasis strikethrough links autolinks a quote bullets tasks, a code card a table inline and display. Maths and a callout pass sub sup, the stripped space of. A code span escapes entities reference links and bare brackets the margin number of a rule. Nested quote bars computed list numbers the, bullet of an item that opens a rule and empty.",
+  "Title where the editor showed YAML What is decided, in it each with. Its test The block is the page's TitleWidget draws the title, the subtitle the names and the date. Where Quarto's title block has them, at the sizes and with the spaces measured on the export the editor's sheet states them. The title block in style css html test js sets the. Two side by side on example mdm part by part. And in either.",
+];
+
+// The rows of one sheet of a PDF, each as its words in reading order.
+function pdfRows(words) {
+  const rows = [];
+  for (const w of words.slice().sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0)) {
+    const row = rows[rows.length - 1];
+    if (row && Math.abs(row.y - w.y0) < 3) row.words.push(w);
+    else rows.push({ y: w.y0, words: [w] });
+  }
+  rows.forEach((row) => row.words.sort((a, b) => a.x0 - b.x0));
+  return rows;
+}
+
+test("on paper every line ends on the word the editor ends it on", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const text = PAPER_PROSE.join("\n\n") + "\n";
+  fs.writeFileSync(
+    path.join(DIR, "paper-lines.mdm"),
+    "---\nmdm-text-font: roman\nmdm-text-align: justify\nfilters:\n  - mdm\n---\n\n" + text
+  );
+  const r = spawnSync(MDM, ["render", "paper-lines.mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+
+  const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" } }, height: 1400 });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1400 });
+    await h.page.evaluate(async () => {
+      await document.fonts.ready;
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    });
+    await h.page.mouse.click(2, 2);
+    await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+    editor = await h.page.evaluate(
+      (read) => eval("(" + read + ")")(Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => l.textContent.trim().length > 60)),
+      LINE_ENDS
+    );
+  } finally {
+    await h.close();
+  }
+  const plain = (word) => word.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+  const editorEnds = PAPER_PROSE.map((para) => {
+    const found = editor[para.slice(0, 30)] || Object.values(editor).find((e) => plain(e.text).startsWith(para.slice(0, 20)));
+    assert.ok(found, "the editor drew no paragraph that opens " + JSON.stringify(para.slice(0, 30)));
+    return found.ends.map(plain);
+  });
+  assert.ok(editorEnds.every((ends) => ends.length >= 4), "a paragraph is under five rows in the editor: " + JSON.stringify(editorEnds));
+
+  const words = pdfWords(printPdf("paper-lines"));
+  assert.equal(Math.max(...words.map((w) => w.sheet)), 1, "the fixture runs onto a second sheet");
+  const foot = sheetSize(path.join(DIR, "paper-lines.pdf")).height - 70.87;
+  const rows = pdfRows(words.filter((w) => w.y1 < foot));
+  // The rows of each paragraph: from the one that opens on its first word to
+  // the one that ends on its last.
+  const paperEnds = PAPER_PROSE.map((para) => {
+    const first = para.split(" ")[0];
+    const last = para.split(" ").pop();
+    const from = rows.findIndex((row) => plain(row.words[0].text) === first);
+    assert.ok(from !== -1, "the PDF has no row that opens on " + first);
+    const to = rows.findIndex((row, i) => i >= from && plain(row.words[row.words.length - 1].text) === last);
+    assert.ok(to !== -1, "the PDF has no row that ends on " + last);
+    return rows.slice(from, to).map((row) => plain(row.words[row.words.length - 1].text));
+  });
+  PAPER_PROSE.forEach((para, i) => {
+    assert.deepEqual(
+      paperEnds[i],
+      editorEnds[i],
+      "the paragraph that opens " + JSON.stringify(para.slice(0, 24)) + " breaks on other words on paper than in the editor"
+    );
+  });
+});
+
+// A rule on paper is as thick as the editor draws it. Chrome draws a border
+// in whole pixels of the layout it is in, and under the zoom the sheet used
+// to be scaled with that layout was 0.83 of the document's: a hairline of
+// 1 px came out 1.2045 px of the document, the 2 px of a `***` came out
+// 1.2045 as well and the 3 px bar of a quotation 2.409 (computed under print
+// media, and 1.25, 1.00 and 2.33 in rasters of the PDF, 2026-10-04). Read
+// here in the paper itself at eight pixels to one of the document: the line
+// under a heading, the rule, and the bar.
+test("on paper a rule is as thick as the editor draws it", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, () => {
+  sheetDoc("paper-rules", HTML_ALONE, [
+    "## Heading over a line",
+    "Before, a line of prose.",
+    "***",
+    "> Quoted, a line of prose beside its bar.",
+    "After, a line of prose.",
+  ].join("\n\n"));
+  const pdf = printPdf("paper-rules");
+  const words = pdfWords(pdf);
+  const at = (text) => {
+    const w = words.find((x) => x.text === text);
+    assert.ok(w, "the PDF has no word " + text);
+    return w;
+  };
+  // Eight pixels of the picture to one of the document.
+  const PT = 0.75 * (10 / 12) * (800 / 803);
+  const DPI = (72 / PT) * 8;
+  const crop = (name, x0, y0, x1, y1) => {
+    const prefix = path.join(DIR, "paper-rules-" + name);
+    const px = (pt) => Math.round((pt * DPI) / 72);
+    const c = spawnSync("pdftoppm", [
+      "-r", String(DPI), "-f", "1", "-l", "1", "-singlefile",
+      "-x", String(px(x0)), "-y", String(px(y0)), "-W", String(px(x1 - x0)), "-H", String(px(y1 - y0)),
+      pdf, prefix,
+    ]);
+    assert.equal(c.status, 0, String(c.stderr));
+    return readPpm(prefix + ".ppm");
+  };
+  // The runs of pixels that are not the ground, along one axis of a crop.
+  const runs = (img, across) => {
+    const { width, height, data } = img;
+    const level = (x, y) => data[(y * width + x) * 3] + data[(y * width + x) * 3 + 1] + data[(y * width + x) * 3 + 2];
+    const n = across ? width : height;
+    const m = across ? height : width;
+    const line = [];
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let j = 0; j < m; j++) sum += across ? level(i, j) : level(j, i);
+      line.push(sum / m);
+    }
+    const ground = line.slice().sort((a, b) => a - b)[line.length >> 1];
+    const peak = Math.max(...line.map((v) => Math.abs(v - ground)));
+    const out = [];
+    let start = -1;
+    for (let i = 0; i <= n; i++) {
+      const on = i < n && Math.abs(line[i] - ground) > peak / 2;
+      if (on && start < 0) start = i;
+      if (!on && start >= 0) {
+        out.push((i - start) / 8);
+        start = -1;
+      }
+    }
+    assert.ok(peak > 6, "nothing is drawn in the crop");
+    return out;
+  };
+  const left = (612 - 820 * PT) / 2;
+  const heading = at("Heading");
+  const before = at("Before,");
+  const quoted = at("Quoted,");
+  const after = at("After,");
+  // Under the heading's letters and over the next line's, clear of both: the
+  // hairline alone.
+  const hair = runs(crop("hair", left + 300 * PT, heading.y1 - 2, left + 400 * PT, before.y0 - 1), false);
+  assert.deepEqual(hair.length, 1, "between the heading and the text there is not one line: " + JSON.stringify(hair));
+  assert.ok(Math.abs(hair[0] - 1) <= 0.2, "the line under a heading is " + hair[0] + " px thick on paper and 1 in the editor");
+  // Between the two lines of prose the rule stands alone.
+  const rule = runs(crop("rule", left + 300 * PT, before.y1 + 2, left + 400 * PT, quoted.y0 - 2), false);
+  assert.deepEqual(rule.length, 1, "between the text and the quotation there is not one rule: " + JSON.stringify(rule));
+  assert.ok(Math.abs(rule[0] - 2) <= 0.2, "the rule is " + rule[0] + " px thick on paper and 2 in the editor");
+  // Left of the quoted words, across the bar.
+  const bar = runs(crop("bar", left - 3 * PT, quoted.y0 + 2, left + 12 * PT, quoted.y1 - 2), true);
+  assert.deepEqual(bar.length, 1, "left of the quoted words there is not one bar: " + JSON.stringify(bar));
+  assert.ok(Math.abs(bar[0] - 3) <= 0.2, "the bar of a quotation is " + bar[0] + " px wide on paper and 3 in the editor");
+  assert.ok(after.y0 > quoted.y1, "the fixture is not in the order it was written in");
+});
+
+// The type on paper is the sheet's size and not the document's. Chrome
+// shrinks a page too wide for its sheet, which is what the print's scale is
+// made of now, and it shrank a page for whatever was too wide in it: a word
+// of 159 letters or a table of fourteen columns made every word of its
+// document 0.83 or 0.67 of its size, with the block still cut at the sheet's
+// edge (2026-10-04). What the page holds is clipped at the sheet's edge, so
+// the scale is the same whatever is in it. A raw block 3000 px wide is the
+// thing too wide here, since nothing the page lays out itself is any longer.
+// And the title block at the size the page has it on screen: Quarto prints
+// with the root at 11pt for the screen's 17 px, and a subtitle, which it
+// sizes in rem, came out 0.86 of itself beside prose that kept its size.
+test("on paper the type is at the sheet's scale whatever the document holds, and the title block as large as on screen", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, async () => {
+  const prose = "Holdfast is the word to read, in a paragraph of prose long enough to run over a row of the measure and on.";
+  const subtitle = ['subtitle: "Undertitle of the fixture"'].concat(HTML_ALONE);
+  sheetDoc("paper-hold", subtitle, prose);
+  sheetDoc("paper-hold-wide", subtitle, prose + '\n\n<div style="width: 3000px; height: 8px; background: #888"></div>\n\nAfter the block.');
+  const PT = 0.75 * (10 / 12) * (800 / 803);
+  const wide = (name, text) => {
+    const w = pdfWords(printPdf(name)).find((x) => x.text === text);
+    assert.ok(w, name + ": the PDF has no word " + text);
+    return w.x1 - w.x0;
+  };
+  const screen = await readSheetDoc("paper-hold", null, () => {
+    const word = (root, text) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const i = node.data.indexOf(text);
+        if (i === -1) continue;
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + text.length);
+        return range.getBoundingClientRect().width;
+      }
+      return null;
+    };
+    return {
+      prose: word(document.querySelector("main.content"), "Holdfast"),
+      subtitle: word(document.querySelector(".subtitle"), "Undertitle"),
+      overflows: document.documentElement.scrollWidth,
+    };
+  });
+  const plainProse = wide("paper-hold", "Holdfast");
+  const plainSub = wide("paper-hold", "Undertitle");
+  assert.ok(
+    Math.abs(plainProse - screen.prose * PT) <= 0.05,
+    "a word of the prose is " + plainProse.toFixed(2) + " pt wide on paper and " + (screen.prose * PT).toFixed(2) + " at the scale"
+  );
+  assert.ok(
+    Math.abs(plainSub - screen.subtitle * PT) <= 0.05,
+    "the subtitle's word is " + plainSub.toFixed(2) + " pt wide on paper and " + (screen.subtitle * PT).toFixed(2) + " at the scale of what the page draws"
+  );
+  const held = wide("paper-hold-wide", "Holdfast");
+  assert.ok(
+    Math.abs(held - plainProse) <= 0.02,
+    "beside a block wider than the sheet a word is " + held.toFixed(2) + " pt wide, and " + plainProse.toFixed(2) + " without it"
+  );
+});
+
+// Nothing of the document is left off its paper. A screen scrolls a block
+// the column cannot hold, in the editor and on the page alike; a sheet has
+// nothing to scroll, and what stood past the column was not on it, nor in
+// the text of the PDF, with nothing to say so: 31 letters of a word of 159,
+// 67 of the 162 characters of a line of code, 10 of the 28 terms of a
+// display equation, the fourteenth column of a table (2026-10-04). The print
+// rules of mdm-look.css keep each: a word and a line of code go on in
+// another row, and a table and a display equation are drawn smaller, whole,
+// at what the measure has room for over what they need
+// (resources/mdm-paper.js measures that as the print begins). The prose
+// beside them keeps its size, and on screen each block still scrolls in its
+// own box and the long word breaks on the letter the editor breaks it on.
+const WIDE_DOC = (() => {
+  const columns = ["Chord", "Root", "Third", "Fifth", "Seventh", "Ninth", "Eleventh", "Thirteenth", "Inversion", "Voicing", "Function", "Cadence", "Register", "Fingering"];
+  const terms = Array.from({ length: 28 }, (_, i) => "a_{" + (i + 1) + "}").join(" + ");
+  const word = "Donaudampfschifffahrtsgesellschaftskapitaensmuetze".repeat(3) + "ENDOFWORD";
+  return {
+    word: word,
+    text: [
+      "Measureword, a paragraph of prose to read the type's size by, long enough to wrap onto a second row of the measure.",
+      "Longword paragraph with one word too long for the column: " + word + " and words after it.",
+      "| " + columns.join(" | ") + " |\n|" + columns.map(() => "---").join("|") + "|\n" +
+        [1, 2, 3].map((r) => "| " + columns.map((c) => c.toLowerCase() + r).join(" | ") + " |").join("\n"),
+      "Aftertable, a line of prose.",
+      "$$\n" + terms + " = z\n$$",
+      "Aftereq, a line of prose.",
+      "$$\n" + terms + " = z\n$$ {#eq-wide}",
+      "Afternum, a line of prose.",
+      "```python\nx = " + Array.from({ length: 29 }, (_, i) => "term_" + String(i + 1).padStart(2, "0")).join(" + ") + "  # ENDOFLINE\n```",
+      "Aftercode, a line of prose.",
+      // And a table inside a list item, where the room it has is the
+      // column's less the item's indent.
+      "- An item that holds a table:\n\n  | " + columns.join(" | ") + " |\n  |" + columns.map(() => "---").join("|") + "|\n  | " +
+        columns.map((c) => c.toLowerCase() + "item").join(" | ") + " |",
+      "Afteritem, a line of prose.",
+    ].join("\n\n") + "\n",
+  };
+})();
+
+test("on paper nothing of the document is left off the sheet: a long word and a long line of code go on in another row, and a table and an equation too wide are drawn smaller, whole", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const PT = 0.75 * (10 / 12) * (800 / 803);
+  sheetDoc("paper-wide", HTML_ALONE, WIDE_DOC.text);
+  sheetDoc("paper-wide-ref", HTML_ALONE, WIDE_DOC.text.split("\n\n")[0]);
+  const words = pdfWords(printPdf("paper-wide"));
+  const texts = words.map((w) => w.text);
+  const right = 612 - (612 - 820 * PT) / 2;
+  // Whole: the end of the word, the last column of the table, the last term
+  // and the right-hand side of each equation, the end of the line of code.
+  assert.ok(texts.some((t) => t.endsWith("ENDOFWORD")), "the end of the long word is not on the paper");
+  for (const cell of ["chord1", "fingering1", "fingering3", "chorditem", "fingeringitem"]) {
+    assert.ok(texts.includes(cell), "the table's cell " + cell + " is not on the paper");
+  }
+  assert.equal(texts.filter((t) => t === "28").length, 2, "the last term of an equation is not on the paper");
+  assert.equal(texts.filter((t) => t === "z").length, 2, "the right-hand side of an equation is not on the paper");
+  assert.ok(texts.includes("(1)"), "the number of the numbered equation is not on the paper");
+  assert.ok(texts.includes("ENDOFLINE"), "the end of the line of code is not on the paper");
+  // And inside the column, the number of the equation at its right edge.
+  const over = words.filter((w) => w.sheet === 1 && w.x1 > right + 0.5 && w.text.trim());
+  assert.deepEqual(over.map((w) => w.text), [], "words stand past the column's right edge, " + right.toFixed(1) + " pt");
+  const number = words.find((w) => w.text === "(1)");
+  assert.ok(Math.abs(number.x1 - right) <= 0.6, "the number of the equation is not at the column's edge: " + number.x1.toFixed(2));
+  // The prose at its size, and so is the number: what is drawn smaller is
+  // the block that needed it and nothing else.
+  const wide = (list, text) => {
+    const w = list.find((x) => x.text === text);
+    return w.x1 - w.x0;
+  };
+  const ref = pdfWords(printPdf("paper-wide-ref"));
+  assert.ok(
+    Math.abs(wide(words, "Measureword,") - wide(ref, "Measureword,")) <= 0.02,
+    "beside the wide blocks a word of the prose is " + wide(words, "Measureword,").toFixed(2) + " pt wide and " + wide(ref, "Measureword,").toFixed(2) + " without them"
+  );
+  const cell = words.find((w) => w.text === "chord1");
+  const prose = words.find((w) => w.text === "Aftertable,");
+  assert.ok(
+    cell.y1 - cell.y0 < 0.9 * (prose.y1 - prose.y0),
+    "the table of fourteen columns is not drawn smaller: a cell's word is " + (cell.y1 - cell.y0).toFixed(2) + " pt tall and the prose's " + (prose.y1 - prose.y0).toFixed(2)
+  );
+
+  // On screen: each wide block scrolls in a box of its own and the page does
+  // not, a cell of the squeezed table is not broken inside a word, and the
+  // long word breaks on the letters the editor breaks it on.
+  const screen = await readSheetDoc("paper-wide", null, new Function(
+    "const ends = (" + LINE_ENDS + ")(Array.from(document.querySelectorAll('main.content p')).filter((p) => p.textContent.startsWith('Longword')));" +
+    "const table = document.querySelector('main.content table');" +
+    "const pre = document.querySelector('main.content pre.sourceCode');" +
+    "const eq = document.querySelector('main.content .katex-display');" +
+    "return {" +
+    " page: document.documentElement.scrollWidth - document.documentElement.clientWidth," +
+    " table: table.scrollWidth - table.clientWidth, code: pre.scrollWidth - pre.clientWidth, eq: eq.scrollWidth - eq.clientWidth," +
+    " cell: table.rows[1].cells[7].getBoundingClientRect().height, row: table.rows[1].cells[0].getBoundingClientRect().height," +
+    " ends: Object.values(ends)[0].ends, measured: table.style.getPropertyValue('--mdm-natural') };"
+  ));
+  assert.ok(screen.page <= 0, "the page scrolls sideways by " + screen.page + " px");
+  assert.ok(screen.table > 0 && screen.code > 0 && screen.eq > 0, "a block the column cannot hold does not scroll in its own box: " + JSON.stringify(screen));
+  assert.equal(screen.cell, screen.row, "a cell of the squeezed table is broken inside a word");
+  assert.equal(screen.measured, "", "the page was measured for paper while it was only read");
+  const h = await openEditor({ text: WIDE_DOC.text, scores: 0, seed: { settings: { textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" } }, height: 1400 });
+  let editor;
+  try {
+    await h.page.setViewport({ width: 1200, height: 1400 });
+    await h.page.evaluate(async () => {
+      await document.fonts.ready;
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    });
+    await h.page.mouse.click(2, 2);
+    await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+    editor = await h.page.evaluate(
+      (read) => Object.values(eval("(" + read + ")")(Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => l.textContent.startsWith("Longword"))))[0].ends,
+      LINE_ENDS
+    );
+  } finally {
+    await h.close();
+  }
+  assert.ok(editor.length >= 2, "the long word does not wrap in the editor: " + JSON.stringify(editor));
+  assert.deepEqual(screen.ends, editor, "the long word breaks elsewhere on the page than in the editor");
+});
+
+// A picture and its caption on one sheet. With no rule to hold them, a
+// picture that just fitted at the foot of a sheet left its caption to open
+// the next one (the circle of fifths of examples/music-class/, 2026-10-04).
+// Five pictures, each after one line more of prose than the last, so that
+// one of them comes to the foot of its sheet with no room under it: a sheet
+// is opened by hand before each, and the picture is a magenta slab found in
+// a raster of the PDF.
+test("on paper a picture and its caption stay on one sheet", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, () => {
+  fs.writeFileSync(
+    path.join(DIR, "slab.svg"),
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="150"><rect width="400" height="150" fill="#ff00ff"/></svg>\n'
+  );
+  const lines = [16, 17, 18, 19, 20];
+  const parts = [];
+  lines.forEach((count, g) => {
+    if (g > 0) parts.push('<div style="break-before: page"></div>');
+    for (let n = 1; n <= count; n++) parts.push("Filler line " + n + " of group " + (g + 1) + ".");
+    parts.push("![Captionword of group " + (g + 1) + ", a caption long enough to be a line.](slab.svg)");
+    parts.push("Endgroup" + (g + 1) + ".");
+  });
+  sheetDoc("paper-figure", HTML_ALONE, parts.join("\n\n"));
+  const pdf = printPdf("paper-figure");
+  const words = pdfWords(pdf);
+  const captions = words.filter((w) => w.text === "Captionword");
+  assert.equal(captions.length, lines.length, "the PDF does not hold the five captions");
+  const prefix = path.join(DIR, "paper-figure-sheet");
+  for (const f of fs.readdirSync(DIR)) if (f.startsWith("paper-figure-sheet-")) fs.rmSync(path.join(DIR, f));
+  assert.equal(spawnSync("pdftoppm", ["-r", "36", pdf, prefix]).status, 0);
+  const slabs = [];
+  fs.readdirSync(DIR)
+    .filter((f) => f.startsWith("paper-figure-sheet-") && f.endsWith(".ppm"))
+    .sort((a, b) => parseInt(a.match(/-(\d+)\.ppm$/)[1], 10) - parseInt(b.match(/-(\d+)\.ppm$/)[1], 10))
+    .forEach((file) => {
+      const { width, height, data } = readPpm(path.join(DIR, file));
+      let last = -1;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 3;
+          if (data[i] > 240 && data[i + 1] < 30 && data[i + 2] > 240) {
+            last = y;
+            break;
+          }
+        }
+      }
+      // The foot of the slab, in points from the head of its sheet.
+      if (last >= 0) slabs.push({ sheet: parseInt(file.match(/-(\d+)\.ppm$/)[1], 10), foot: (last * 72) / 36 });
+    });
+  assert.equal(slabs.length, lines.length, "the PDF does not hold the five pictures, each on a sheet of its own: " + JSON.stringify(slabs));
+  const foot = sheetSize(pdf).height - 70.87;
+  // One of the five has to be the case: a picture whose caption would not
+  // have fitted under it had it stayed where the prose left it. It is the
+  // one that opens a sheet instead.
+  assert.ok(
+    slabs.some((slab) => slab.foot < 250),
+    "no picture was sent on to the next sheet, so the fixture puts none at the foot of one: " + JSON.stringify(slabs)
+  );
+  slabs.forEach((slab, g) => {
+    assert.equal(
+      captions[g].sheet,
+      slab.sheet,
+      "the picture of group " + (g + 1) + " is on sheet " + slab.sheet + " and its caption on sheet " + captions[g].sheet
+    );
+    assert.ok(captions[g].y0 > slab.foot && captions[g].y1 < foot, "the caption of group " + (g + 1) + " is not under its picture");
+  });
 });
 
 // A callout in the editor's colours, on the page and on paper. It was

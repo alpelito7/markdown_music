@@ -17,6 +17,15 @@
   whole column, rule it over, under and at every row in a grey that glared
   on the dark side, set the head at the foot of its row, and size the
   columns of a table with a long source line by the dashes under its head.
+- A printed PDF breaks every line where the editor breaks it. The sheet was
+  the page laid out a second time at a smaller size, where a line that
+  fitted by a hair on screen did not on paper, about one row in four
+  hundred; a hairline came out a fifth thicker, the `***` rule at little
+  over half its thickness and a quotation's bar thinner; a subtitle was
+  smaller than the editor draws it and the title block closer to the text;
+  and one block too wide for the sheet, a very long word or a table of many
+  columns, shrank the type of the whole document. The page is laid out once
+  now, as on screen, and scaled as it is printed.
 - On the exported page and in a printed PDF, where the editor draws them: a
   quotation runs to the edge of the column, where it stopped 25 px short and
   broke on other words; a block of code starts at the edge of its card and
@@ -30,6 +39,15 @@
   title is in the document's ink on the light looks, where it was black;
   code inside a link is in the link's blue and code inside bold text is
   bold; a highlight has square corners.
+- Nothing of a document is left off its paper. What the editor scrolls
+  sideways, a sheet used to cut: the end of a very long word or address,
+  the end of a long line of code, the right-hand side of a wide equation,
+  the last columns of a wide table. In a printed PDF the word and the line
+  of code now go on in the next row, and the table and the equation are
+  drawn smaller, whole, as a wide score already was. On the exported page a
+  word too long for the column breaks where the editor breaks it, and the
+  page no longer scrolls sideways for it.
+- In a printed PDF a picture and its caption stay on the same sheet.
 - A callout on the exported page and in a printed PDF has the editor's
   colours: the bar of its kind, its tinted ground and no frame, with its
   text in the document's ink at the size of the prose. On MDM Dark its

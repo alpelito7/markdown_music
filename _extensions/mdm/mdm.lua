@@ -1309,10 +1309,14 @@ local function ensure_look()
     quarto.doc.include_text("in-header", look_tex(look))
     return
   end
+  -- With the script that measures, when the page is about to be printed,
+  -- what a table and a display equation need (resources/mdm-paper.js): the
+  -- sheet's rules draw one the measure cannot hold smaller, and whole.
   quarto.doc.add_html_dependency({
     name = "mdm-look",
     version = "0.1.0",
     stylesheets = { "resources/mdm-look.css" },
+    scripts = { "resources/mdm-paper.js" },
   })
   -- The roman travels only for a page set in it: four faces are 191 KB, and a
   -- self-contained export takes every dependency inside the file, so a page in

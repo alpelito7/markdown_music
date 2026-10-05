@@ -42,7 +42,7 @@ a browser of its own and in parallel they trip over each other's waits.
 | `webview-title.test.js` | 35 tests of the title block in the editor (`TitleWidget` in `main.js`): a header that names a title drawn as the page's block over the first line, numbered 1 and under the hand, and one that prints nothing drawing nothing and opened from the YAML button; the block at the page's sizes and spaces, as numbers; a click on a part asking the host for the header's source and the caret landing on that part's line, the title staying under the card; a click on it open putting the source away; one request for a double click and none with a modifier; a held edit sent ahead of the request; the press never opening the table that opens the document; the title following what is typed in the open header and a header changed beside the editor, with the partial rebuild equal to the whole one; the body deleted whole leaving the header; the title read as Markdown, with its date in the document's language; and the copy button, beside the drawn title under the pointer and on the YAML's card for as long as it is shown, none for a header that draws nothing while it is put away, copying the header as written. And the rest of the block: every part the page prints drawn in the page's order with its key and its links, the names in the row of the date or beside their affiliations once the document has one, an abstract as paragraphs or as a run of text with the language's word over it, those parts at the page's sizes and places as numbers (the column of a long name with them), the categories and the description, a block with no title carrying the header's line number and its copy button on what it opens with, a click on a part landing the caret at the end of what its key says, a link of the block followed with the click that follows a link, and the browser's long months and weekdays against dayjs's for every locale, with the date left as written where the browser has no words. And the two ways a titled header is opened: what a click on the title opens put away when the carets leave it (at the release of the button, once, and not while a selection has an end in it), by a click in the margin or on the bar, and not by the scrollbar's handle or by the YAML button, which keeps it instead; what the button shows drawn with no title under it, lit, and left alone by every click, the title drawn under it only while a caret is in it and the caret left with the body by the press; a typed header the carets have left put away; a key written in quotes; the reader's line held where it is as the header's lines come and go, the drawing held under a second click, and the top reached afterwards; and an undo of what was written in the header writing nothing once the header has gone, from the keys, the toolbar, the browser and the undo of the selection, with the rule about changes from outside it rests on. The tests play the host, but for two, which run `extension.js` on the other end of the wire: a click to a click away where headers are put away, and every header as its YAML where they are kept in view. |
 | `webview-memory.test.js` | 2 tests end to end, the memory of word division and the life of a pasted picture (written by the real host, taken to the trash by a save without it, put back by an undo): the editor in Chrome and the real `extension.js` in Node on the other end of the wire (`open({ toHost })`, the harness's `window.__toHost`), with VS Code's `globalState` under both. A file left with the staff lines in ink, which is the editor's, and Spanish dividing its words, which is its own; the file beside it coming up with the ink and with no division, though its own header names a language; both of them as they were left after VS Code is started again; and `settings.json` holding the ink and nothing about the division. The configuration event that carries a `settings.json` write to every editor is fired by hand here, since the mock records the write without firing it. | google-chrome |
 | `webview-scale.test.js` | 8 tests of what keeps the editor's work in proportion to what changed. The partial rebuild of the decorations: every test moves the editor and asks it where the set on screen parts from a rebuild of the whole document (`window.__mdm.checkDecorations`, the link definitions read again), and reads the counts of whole and partial rebuilds. A caret move rebuilds the blocks it leaves and the ones it enters; the marker of an item whose text starts on the next line outlives the rebuild of the line under it; a change away from the caret and one that changes what the blocks below are (a fence opened over a list, a quote and a table) are drawn; a line more, another count of lines kept back by the host and a changed link definition rebuild the whole; the language taken up again with a new definition does too, in a document parsed at one go; and a walk of three hundred random steps with a fixed seed (carets, letters, deletions, selections, two carets typing, line breaks, undo) leaves what a whole rebuild gives at every step, most of them rebuilt in part. The equations kept rendered are bounded by the characters they hold, the one asked for longest ago going first and one asked for again kept as the render it was; and a caret move marks another row of the outline without painting any, typing paints the rows once it rests, and a row clicked in between still goes to its heading. | google-chrome |
-| `html.test.js` | 46 tests of the **rendered** HTML page, in Chrome: the punctuation Pandoc's `smart` prints, the first paragraph of the page reading as the first row of the editor glyph for glyph (G015); a setext heading whose underline is set in two spaces, a heading on both surfaces once the copy has brought the underline to the margin (G041); the blocks the two dialects part on drawn as the editor draws them once the copy has its blank lines, a table straight under a line of text, a `***` and a spaced rule under text or under an item, a `---` under an item, and the addresses, one with a scheme and a mail address links on both surfaces and a `www.` one text on both (G039, G017); what `_extensions/mdm/resources/mdm.js` and `mdm-look.css` do on load, which the pandoc output does not say. Every block engraved and boxed in a `.mdm-fit`, every one of them pinned to the `max-width` it was engraved at rather than stretched to the column, and the narrow one centred; the gap under the score equal to the height of the drawing (the percentage padding fix plus `height:0`); the audio controls on the `.play` block only (three buttons, `abcjs-inline-audio`); no script errors. And the look: the editor's ground with the code card darker than the page, its 16px at 1.7 and its 820px measure, code at 0.88em in the fallback palette with no bold keywords and the line wrappers in the base colour, inline code on the card, and the player bar redrawn (a 30px pill on the card, round 24px buttons, Play/Stop/Repeat, a 4px track with an 11px head and its fill written, the clock at 11px, the volume). A second render carries the look of a dark editor (`-M mdm-look:dark` and the rest) and checks it arrives: the ink, Monokai's colours, the fill under the scores, staff lines back in ink and scores lined up left. And the headings: the six levels drawn on the page at the size the editor draws them, level by level and in either face, against the editor opened on the same document, and the title of the YAML block at twice the body in either face; and the air around them, gap by gap against the editor and from the top of the column to the first line, in three documents (the six levels with a quotation under the prose, a paragraph and then `##` as `example.mdm` opens, and a column that opens on an `##`), which answers two rules of Quarto's own about the head of the document and Bootstrap's padding on a quotation. Verified to bite: commenting out `height: 0 !important` fails the gap test, dropping the `body` from the player rules hands the bar back to abcjs's own stylesheet, and engraving the first pass without `staffwidth` pins every score to abcjs's own page width. And the inline marks and the figure, against the editor opened on the same document in the roman: a subscript and a superscript drawn at the size and the drop or rise the page gives them (Bootstrap's three quarters, a quarter em down and half an em up, read as the box of the sub against a Range over the word beside it), and a figure's caption at the page's size, the gap between the picture and its caption, and the width the picture is drawn at, with the extension's own icon as the picture on both surfaces; the caption, and a table's caption on the page, in the ink of the prose on both sides and both surfaces (it was Quarto's grey, 2.71:1 on the dark page), and at 0.956 of the text on the page printed without TeX, a figure's and a table's. And the citations: the notes and the reference list in the flow of the page, set as the prose is and readable on either side; a formula in the bibliography set by KaTeX, with nothing fetched for it; the box over a citation in the look's colours, showing its entry whole; a numbered list's numbers flush right in a column as wide as the widest, the text half an em after it; and a paragraph that cites broken on the same words in the editor as on the page, the page dividing its words and none inside its citations. And the numbered equations set as the editor draws them, the number at the right of the column on the formula's baseline in the prose's face, the air of an equation with no number, the references the editor prints, and a paragraph of them broken on the same words in the editor as on the page. | quarto, google-chrome |
+| `html.test.js` | 68 tests of the **rendered** HTML page, in Chrome: the title block the editor draws set beside the page's, part by part and in either face, on `example.mdm` and on a document that has every part of it (authors beside their affiliations with the envelope and the ORCID mark, both dates and the DOI, the tags and the description, the abstract and the keywords, and a title written as a block of YAML), the punctuation Pandoc's `smart` prints, the first paragraph of the page reading as the first row of the editor glyph for glyph (G015); a setext heading whose underline is set in two spaces, a heading on both surfaces once the copy has brought the underline to the margin (G041); the blocks the two dialects part on drawn as the editor draws them once the copy has its blank lines, a table straight under a line of text, a `***` and a spaced rule under text or under an item, a `---` under an item, and the addresses, one with a scheme and a mail address links on both surfaces and a `www.` one text on both (G039, G017); what `_extensions/mdm/resources/mdm.js` and `mdm-look.css` do on load, which the pandoc output does not say. Every block engraved and boxed in a `.mdm-fit`, every one of them pinned to the `max-width` it was engraved at rather than stretched to the column, and the narrow one centred; the gap under the score equal to the height of the drawing (the percentage padding fix plus `height:0`); the audio controls on the `.play` block only (three buttons, `abcjs-inline-audio`); no script errors. And the look: the editor's ground with the code card darker than the page, its 16px at 1.7 and its 820px measure, code at 0.88em in the fallback palette with no bold keywords and the line wrappers in the base colour, inline code on the card, and the player bar redrawn (a 30px pill on the card, round 24px buttons, Play/Stop/Repeat, a 4px track with an 11px head and its fill written, the clock at 11px, the volume). A second render carries the look of a dark editor (`-M mdm-look:dark` and the rest) and checks it arrives: the ink, Monokai's colours, the fill under the scores, staff lines back in ink and scores lined up left. And the headings: the six levels drawn on the page at the size the editor draws them, level by level and in either face, against the editor opened on the same document, and the title of the YAML block at twice the body in either face; and the air around them, gap by gap against the editor and from the top of the column to the first line, in three documents (the six levels with a quotation under the prose, a paragraph and then `##` as `example.mdm` opens, and a column that opens on an `##`), which answers two rules of Quarto's own about the head of the document and Bootstrap's padding on a quotation. Verified to bite: commenting out `height: 0 !important` fails the gap test, dropping the `body` from the player rules hands the bar back to abcjs's own stylesheet, and engraving the first pass without `staffwidth` pins every score to abcjs's own page width. And the inline marks and the figure, against the editor opened on the same document in the roman: a subscript and a superscript drawn at the size and the drop or rise the page gives them (Bootstrap's three quarters, a quarter em down and half an em up, read as the box of the sub against a Range over the word beside it), and a figure's caption at the page's size, the gap between the picture and its caption, and the width the picture is drawn at, with the extension's own icon as the picture on both surfaces; the caption, and a table's caption on the page, in the ink of the prose on both sides and both surfaces (it was Quarto's grey, 2.71:1 on the dark page), and at 0.956 of the text on the page printed into a PDF, a figure's and a table's. And the citations: the notes and the reference list in the flow of the page, set as the prose is and readable on either side; a formula in the bibliography set by KaTeX, with nothing fetched for it; the box over a citation in the look's colours, showing its entry whole; a numbered list's numbers flush right in a column as wide as the widest, the text half an em after it; and a paragraph that cites broken on the same words in the editor as on the page, the page dividing its words and none inside its citations. And the numbered equations set as the editor draws them, the number at the right of the column on the formula's baseline in the prose's face, the air of an equation with no number, the references the editor prints, and a paragraph of them broken on the same words in the editor as on the page. And what paper adds to the printed PDF, read in the PDF itself: the sheet the header names and the measure on a narrow one, the number at the foot of every sheet, the headings as bookmarks, and the contents of a document that asks for them. And the numbered sections against the editor opened on the same document, in either face: every heading with the number the editor draws on it, the number in the ink of its heading on both, and the heading as wide. And the sections under a title with its number off, counted from the second level on the page as in the editor: in the headings, the `data-number` beside them, the contents and the references, by the extension's name and by path with the second filter on the command line as the VS Code export calls it, with a document that has no `#` and one that asks for chapters left as Quarto numbered them. | quarto, google-chrome |
 | `../vscode-mdm/vendor-src/test/markdown.test.js` | 63 tests of the nine Lezer Markdown extensions that go into the CodeMirror bundle (math, front matter, callouts, the Pandoc syntax the export reads, its footnotes, and the long delimiter runs that are text: a run of twenty or more `*` or `_` claims no emphasis, one short of it still nests, and 12,000 a side parse in the time a paragraph takes) (run with `npm test` inside `vscode-mdm/vendor-src/`, which needs its own `npm install`): maths by Pandoc's rules (`$` not followed by a space, not closed before a digit, `\$` escaped, the first unescaped `$` the only closer, `$$` inline display, a `$$` block over several lines with its exact ranges on `example.mdm`, in a quote and in a list, content never parsed as Markdown, every unterminated form left as a paragraph), the YAML header only at position 0 and only when closed (with YAML nodes mounted inside), and never over a blank line, which is the rule Pandoc reads there (G040), and the callouts (both opener forms, the closer, kinds, nesting, unterminated gives no node, `calloutKind`). And the links that know the document's definitions (`links.js`, replacing Lezer's LinkEnd alone): bracketed text with no definition is text and with one a link, in the shortcut, collapsed and full forms; an inline link needs none; balanced brackets inside a link's text stay in it and a defined inner reference spends the outer opener; an image by reference needs its definition and may hold a link; a label matches case-folded with its whitespace collapsed, and the definitions are read raw off the input, after their use, inside a quote, with the destination on the next line and never without one; the GFM autolinker still stops at the bracket of the link it is in; `:tada:` is an Emoji node in lang-markdown's language and text once the extensions are on; and the extension works on its own. The `$$` closer with text after it closes its block there and leaves the text as a paragraph of its own on that line, inline-parsed, in a quote too, while spaces alone after the closer are nothing; a callout opener takes Pandoc's trailing colons and a brace inside a quoted value, `calloutKind` answers null for any div that is no `callout-*`, and an opener straight under a paragraph line is the paragraph's, with or without a `$$` block after it, and a callout again once a blank line parts them; and an ATX heading written with a tab after its hashes is the heading Lezer builds for a space, closing run included, interrupting a paragraph and left to the code block when indented four. And the pipe table whose cells hold code and maths (`table.js`, GFM's parser ported with the shielded spans skipped whole): a pipe inside `$...$`, `$$...$$` or a code span is the cell's, as Pandoc reads it, where GFM's own parser splits there (held for the record); an escaped pipe is text, a run of backticks that does not close shields nothing, and `$5|$6` is no maths, the closer being followed by a digit; the header's count against the delimiter's and a table interrupting a paragraph as GFM has them; and the parser standing aside on a language without GFM's table nodes. And the Pandoc syntax (`pandoc.js`): raw TeX, a backslash before letters with its brace and bracket groups, inline, and `\begin{env}` down to its `\end{env}` as a block at the top level, closed on a later line or on its own, a paragraph with the inline raw in it when unclosed or inside a quote, and nothing inside code or maths; attributes taken straight after an image, a link, a code span and a bracketed span (`[text]{.class}`, a Span with its marks and its attribute, hooked into the link parser), and alone as the tail of a `$$` closer, never in prose or on a heading's line, with a quoted value holding spaces; and citations, bracketed or bare, Quarto's cross-references among them, never inside a word and never a bare `@`, read as Pandoc 3.8.3 reads them against rows of its own output (the key, what may stand before an `@`, the locator and the bracket a key takes, a bracketed citation over lines, what follows its `]`, the tree) and in linear time on long lines of unclosed brackets. And the footnotes (`footnote.js`): `[^label]` a reference and not a bracketed text, `^[text]` an inline note with its content inline-parsed and `^sup^` still the superscript it was, and `[^label]: text` at the head of a top-level line with the lines under it, lazily continued and, past a blank line, indented four, the note itself with a paragraph per run, where CommonMark read a link reference definition and an indented code block; a label with a space or a bracket is none, a definition under a paragraph line is the paragraph's, and one inside a quote is the link reference it was. | Node |
 | `../vscode-mdm/vendor-src/test/abc.test.js` | 15 tests of the ABC notation stream mode that colours the source of ```` ```abc ```` fences (same runner as the row above): the field labels with their three kinds of value (text, structured, lyrics, an unknown letter read as text, the `+:` continuation), `\%` escaped and `%` ending a field line, the bars of a `w:` line, inline `[M:3/4]` fields, pitches with accidentals, octave marks and lengths, rests dim with their lengths, broken rhythm and tuplets as time, slurs/ties/chord brackets left in the base ink, the whole bar family with variant endings, decorations long and short with grace braces (a lone `!` the old line break), chord symbols closed or cut short by the line, comments and `%%directives`; and the seat in the fence languages: ```` ```abc ```` reaches the mode, the Quarto info string `{.abc .play}` matches too, and a stream-mode fence (```` ```r ````) parses instead of throwing, the regression of the bare `StreamLanguage` that used to be handed to `LanguageDescription`. | Node |
 
@@ -8134,6 +8134,83 @@ row, **TA10** Quarto's rule over and under the table, **TA11** Quarto's
 margins, **TA12** the box with no padding, **TA13** the rule between rows
 at the head's strength. Thirteen of thirteen caught.
 
+**The sheet, scaled where it is painted.** The print rules scaled the page
+onto the sheet with a `zoom` on the root, which lays the page out a second
+time at 0.83 of its pixels. Measured against the editor and the page:
+
+- Lines broke on other words. Widths are snapped to a 64th of a pixel again
+  at the other size, so a row that fits or fails by less changes sides:
+  twelve words 820.047 px long against a measure of 820 on screen (they go
+  down) were 680.750 against 680.766 under the zoom (they stay). Over a
+  corpus of 400 paragraphs of prose (36,509 words, 2,279 rows) 6 row endings
+  of 2,282 stood elsewhere than on screen, in 2 paragraphs; of its first 120
+  paragraphs, printed, 6 of 697 against the page and 5 of 674 against the
+  editor.
+- Rules changed thickness. Chrome draws a border in whole pixels of the
+  layout it is in: 1 px computed to 1.2045 px under print media, 2 px to
+  1.2045 as well and 3 px to 2.409 (1.25, 1.00 and 2.33 in rasters of the
+  PDF): the hairlines a fifth thicker, the `***` rule at six tenths of
+  itself, the bar of a quotation at four fifths.
+- Rows of prose stood 26.5 and 27.7 px apart in turn for the editor's 27.19,
+  and the text of a heading up to 1.75 px off between its neighbours
+  (baselines on whole pixels of the zoomed layout).
+- A block too wide for the sheet shrank the whole document: Chrome shrinks a
+  page that overflows its sheet, down to two thirds, and a word of 159
+  letters or a table of fourteen columns made every word of its document
+  0.67 or 0.83 of its size, the block still cut at the sheet's edge.
+- And, not the zoom's: Quarto prints with the root at 11pt for the screen's
+  17 px, so every length left in rem was 0.86 of itself on paper. The
+  subtitle of example.mdm was 316.3 px long for the editor's 366.8, and a
+  title stood 33 px over the first paragraph for the editor's 36.
+
+The print rules now lay the page out once, at the screen's pixels, and have
+Chrome's own shrink scale it: a box on the root with nothing in it, as wide
+as the sheet over the scale, is the one thing too wide, the rest clipped at
+the sheet's edge (on the root and on the body: a body's overflow goes to the
+viewport when the root has none), so Chrome lays the page out for a sheet
+that much wider and prints it that much smaller. The margin and the folio
+are the paper's and are written as they are (2.5 cm; the folio's type at the
+scale). The root is given the size it has on screen. With it: none of 694
+row endings differs from the page and none of 671 from the editor; the rules
+are 1, 2 and 3 px; the prose keeps its size beside a block 3000 px wide; the
+subtitle is the editor's 366.83 px; and the title stands 36 px over the
+text. The folio and the margins are where they were (a folio's box and place
+the same to 0.01 px in the editor's units).
+
+What it costs, measured: on a sheet the header names in millimetres Chrome's
+pixels for the sheet and the paper's are about one apart, and the scale
+comes out 0.13 % large on A4 (a measure of 511.24 pt for Letter's 510.59)
+and 0.18 % on A5; on Letter and Legal it is exact. A4 needs 3 px of room in
+the measure's clamp where the zoom needed 2. A browser that does not shrink
+a wide page onto its paper would print this one at its screen size; Chrome
+and Edge do, and no other was tried.
+
+Tests, all in `html.test.js`: *on paper every line ends on the word the
+editor ends it on* (three paragraphs whose lines moved under the zoom, read
+in the editor and in the printed PDF); *on paper a rule is as thick as the
+editor draws it* (the line under a heading, the `***` and the bar of a
+quotation, read in the PDF at eight pixels to one of the document: 1, 2 and
+3 px to 0.2); *on paper the type is at the sheet's scale whatever the
+document holds, and the title block as large as on screen* (a word of the
+prose and one of the subtitle at the scale of what the page draws, and the
+same word beside a block 3000 px wide); *on paper the page is scaled, the
+scores fit and the transport is gone*, which read the zoom and now reads
+that there is none, the box, the two clips and the root; and *on paper the
+sheet is the one the header names, and a narrow one keeps the type at its
+size*, which now holds Letter to the editor's 820 px at the scale, A4 to the
+same 820 px of the document and the type on A4 and A5 to three thousandths
+of its size.
+
+Mutations, on the copy: **SH1** the zoom back as it was, with its measure,
+its margin and its folio → the lines, the rules and the box (three tests
+fail); **SH2** nothing clipped, **SH3** the clip on the body alone, **SH4**
+the box no wider than the sheet, **SH5** the box with no height, **SH6**
+the root at 11pt → the type test (and the test of the box for SH2, SH3, SH4
+and SH6); **SH7** the folio at the page's size, **SH8** the folio against
+the text, **SH12** a margin of 2 cm → the folio test; **SH9** A4 with 2 px
+of room, **SH10** the measure the editor's on any sheet, **SH11** the 3 cm
+not divided by the scale → the sheets test. Thirteen of thirteen caught.
+
 **The blocks.** What five audits by family (text in a line, blocks, maths
 and scores, what paper does, the material of the PDF) found standing or
 painted otherwise on the page than in the editor, where the page was the
@@ -8198,6 +8275,65 @@ under a rule. Sixteen caught at once; BL1 passed, the mark of the quotation
 being a word that does not move when its measure shortens, and was caught
 once the test read the word that opens the second row.
 
+**Nothing left off the paper.** A screen scrolls a block the column cannot
+hold, in the editor and on the page; a sheet has nothing to scroll, and what
+stood past the column was not on it, nor in the text of the PDF, with
+nothing to say so. Measured: 31 letters of a word of 159, in a paragraph, a
+list item, a quotation, and 83 in a heading; 67 of the 162 characters of a
+highlighted line of code (a block with no language already wrapped, by a
+print rule of Quarto's that the highlighted ones outranked); 10 of the 28
+terms of a display equation with its right-hand side, numbered or not; the
+fourteenth column of a table; and no warning on any of 33 exports. The
+print rules keep each in the way that leaves it readable: a word goes on in
+the next row, as the editor breaks it (`overflow-wrap: anywhere` on the
+column, on screen too, where the page used to scroll sideways for it; a
+table's cells excepted, as in the editor); a line of code goes on in a
+second row; a table and a display equation are drawn smaller, whole, as a
+score is. The scale of those two is what the column has room for over what
+the block needs, and `resources/mdm-paper.js`, new in both render trees and
+loaded with the look, writes on each one what it needs when the browser
+says it is about to print (`beforeprint`, which the extension's headless
+Chrome sends too): the width it cannot go under, and what stands beside it
+in its row (the indent of a list, the number of a numbered equation). The
+column is a size container under print so that the stylesheet can take the
+ratio against the measure of the sheet in hand. A block that fits is left
+at its size, and nothing is measured on a page that is only read.
+
+Left: a formula inside a sentence that no row can hold (KaTeX breaks one at
+its operators; one with none is cut at the sheet's edge), and a table that
+could have been squeezed to the measure and is drawn smaller instead when
+the sheet is narrower than the window it was read in.
+
+Test: *on paper nothing of the document is left off the sheet: a long word
+and a long line of code go on in another row, and a table and an equation
+too wide are drawn smaller, whole* in `html.test.js`: the end of the word,
+the first and the last column of the table, the last term and the
+right-hand side of both equations, the number of the numbered one at the
+column's edge, the end of the line of code and a table of fourteen columns
+inside a list item are all in the PDF's text, no word of it past the
+column; a word of the prose is as wide as in a document without them; a
+cell of the table is under nine tenths of the prose's height; on screen
+each block scrolls in its own box, the page does not, a cell of the
+squeezed table is not broken inside a word, nothing has been measured, and
+the long word breaks on the letters the editor breaks it on.
+
+Mutations, on the copy: **NL1** the word left whole, **NL2** the line of
+code not broken, **NL3** the two kept at their size, **NL4** the column no
+container, **NL5** the page without the script, **NL6** the number of a
+numbered equation not counted beside it, **NL7** a cell breaking inside a
+word, **NL8** the page measured as soon as it is read, **NL9** the indent
+of what a block stands in not counted. Eight caught at once; NL9 passed
+until the fixture had a table inside a list item, and was caught then.
+
+**A picture with its caption, and the callouts.** A picture that just
+fitted at the foot of a sheet left its caption to open the next (the circle
+of fifths of `examples/music-class/`, and one of five pictures 150 px tall
+set one line of prose further down each time). The print rules keep a
+figure whole unless it is a score, which has to break between its systems.
+Seen on the way and found right, with no rule of ours: a table that goes on
+over a sheet keeps each row whole and has its head set again at the top of
+the next sheet, and a display equation goes to the next sheet whole.
+
 A callout was Quarto's box as Quarto dresses it for a light page, on every
 side: in MDM Dark its title in rgb(185, 185, 185) on a band of rgb(201,
 209, 221), 1.28 to 1 where the prose has 10.89, with a pale line round the
@@ -8208,6 +8344,36 @@ that colour, no frame, and its text in the ink at the size of the prose:
 ink and ground are the editor's to a level in both looks for the five
 kinds. Its build is still Quarto's, a row with an icon and the name of the
 kind, where the editor keeps the `:::` fences in view, small and faint.
+
+Tests in `html.test.js`: *on paper a picture and its caption stay on one
+sheet* (five pictures, each a magenta slab found in a raster of the PDF,
+one of which has to be the one sent on to open a sheet) and *a callout is
+in the editor's colours on the page, its text at the size of the prose, on
+either side* (the five colours read out of the editor's own sheet; the bar,
+no frame, the ground at 0.05 of its kind's colour, the title's row on the
+callout's own ground in the ink, the text the prose's; and a word of a
+callout at the scale on paper). Mutations: **FG1** nothing holding the
+figure → the figure test; **CO1** Quarto's bar and frame, **CO2** no
+ground, **CO3** the title's row on Quarto's band, **CO4** the text at
+0.9rem, **CO5** a warning in the note's colour, **CO6** the bar 5 px wide
+→ the callout test. Seven of seven caught.
+
+**The scores** were compared and found the editor's: in `example.mdm` and
+`duet.mdm` every word on a staff (titles, tempo, lyrics, chord symbols,
+annotations, 37 of them) stands in the PDF where the editor has it and is
+as wide (0.02 px at most), and the engraving, put over the editor's, is the
+same drawing. Not put in a test of its own: the tests of the page already
+hold the engraving to the editor's, and the print is now that page.
+
+What the review found on the editor's side, or between the two dialects,
+is in Pending 21, with the numbers.
+
+Run on this state: `test:fast`, the whole of `html.test.js` under the
+guards of `tests/tmp/title-rig/guarded.sh`, the ten tests of
+`render.test.js` that read the page's look and its dependencies, and
+`extension-host.test.js`. The webview suites were not run: nothing of the
+editor was touched. The rest of `render.test.js`, which typesets with
+LaTeX, was not run either.
 
 ## Pending
 
@@ -8515,3 +8681,67 @@ kind, where the editor keeps the `:::` fences in view, small and faint.
     and its paragraph, and the block a callout draws. Not seen on Windows
     or on a Mac.
 
+21. The printed PDF against the editor (*The printed PDF against the editor,
+    reviewed*), what is left, with what was measured on 2026-10-04.
+    **On paper.** On a sheet the header names in millimetres the print's
+    scale comes out 0.13 % large on A4 and 0.18 % on A5 (Chrome's pixels for
+    the sheet and the paper's are about one apart, and the shrink is the one
+    over the other); a table of Chrome's own sheet sizes in the filter would
+    make it exact, and was not written. A browser that does not shrink a
+    page too wide for its paper would print the page at its screen size; no
+    other than Chrome was tried. A reader who prints the exported page
+    himself gets the screen's faces, Type 3 in a PDF. A formula inside a
+    sentence that no row can hold is cut at the sheet's edge. A table that
+    could be squeezed to a narrow sheet's measure is drawn smaller instead.
+    The text of the PDF holds small capitals as pieces ("S", "mall", "W",
+    "ord"), an inline formula in pieces, zero-width spaces in a display
+    formula, and the folios. A table's caption stands over the table,
+    centred, where the editor draws `: text` as a line of text under it. A
+    callout has Quarto's row with an icon and the name of its kind where the
+    editor keeps its fences in view.
+    **Between the editor and the page, on the editor's side or in the
+    dialect**, none of it touched, each for the owner to say: a note's call
+    is its label in the editor and the number of its appearance on the page,
+    and a note called twice is printed twice; a note written in the line
+    (`^[…]`) is drawn in the line in the editor, on a card of three rows,
+    and is a number on the page; of two definitions on consecutive lines
+    the second is drawn "label: text" (the parser's `parseFootnoteDef`
+    takes every line under a definition as its continuation; the owner's
+    `vfdd_.md` has it). `a.`, `i.`, `(1)`, `#.` and `(@)` are text in the
+    editor and a numbered list on the page, numbered 1, 2; `1)` is "1)" in
+    the editor and "1." on the page; two lists that differ in their bullet
+    are two lists in the editor and one loose list on the page, 16 px more
+    between its items; a list straight under a paragraph, or under a list
+    of another kind, stands 16 px lower on the page. A paragraph written
+    over several lines is drawn row by row in the editor and as one
+    paragraph on the page. A backslash before a space, and one ending a
+    paragraph, are drawn in the editor and read by Pandoc. The mark of a
+    hard break is drawn in the editor with the caret away. A character
+    Latin Modern has not got (Greek, Cyrillic, a music symbol, an arrow) is
+    0.72 to 0.89 of its editor size on the page, since the editor's
+    `font-size-adjust` reaches the face that stands in and the page's
+    `size-adjust` is the roman's alone: 11 of the 24 rows that held one
+    broke elsewhere. The code face is VS Code's in the editor and the
+    page's own stack on the page, and the editor's `font-size-adjust`
+    reaches it: a chip of 26 characters was 3.14 px wider on paper in the
+    harness. Code is cut into tokens by two highlighters: 19 words of
+    example.mdm's Python block are in another colour on a light page. In
+    the editor a justified row that ends before an inline formula stops a
+    space short (7.27 px); the paragraph goes on a space in from the margin
+    after a `$$…$$` written inside it (6.5 px), and that formula has 6 px
+    less over it and 4 less under it than on the page; a card of code in a
+    list item starts 2.9 px left of the item's text. A formula KaTeX
+    refuses is kept as its source in the editor and drawn as KaTeX's own
+    error on the page (read, not measured). An abstract in the header drew
+    31 words in the editor where the PDF had 65 (seen before a restart, not
+    measured again).
+    **Not audited.** Citations and the reference list on paper; the text
+    in a line in MDM Light and MDM White, in the sans, ragged, and with
+    words divided; the PDF's links, bookmarks beyond what the tests hold,
+    and metadata; names of files and folders with spaces and accents, a
+    `.md`, a document with no header, pictures by absolute path or from
+    the network; a document of sixty sheets, of four hundred equations, of
+    forty scores, against the six seconds the print gives the page; what
+    the header asks of a PDF beyond contents and numbers (`geometry`,
+    `fontsize`, `\newpage`); and Windows and macOS. The audits by family
+    are in `tests/tmp/pdf-review/audit-*/REPORT.md`, which is not kept.

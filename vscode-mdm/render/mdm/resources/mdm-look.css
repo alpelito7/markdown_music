@@ -434,6 +434,15 @@ body .mdm-hyphen::after {
 }
 body main.content {
   hyphens: manual;
+  /* A word the column cannot hold is broken where the column ends, as the
+     editor breaks it (CodeMirror wraps its lines with `overflow-wrap:
+     anywhere`): an address longer than a row, or one very long word. The
+     page left such a word whole, out of the column and across the margin:
+     the page scrolled sideways for it, and on paper its end was off the
+     sheet, 31 letters of a word of 159 (measured 2026-10-04). With the rule
+     a paragraph and a list item break on the letter the editor breaks on. A
+     table's cells are the exception, there as here (the cell rule above). */
+  overflow-wrap: anywhere;
 }
 body a,
 body a:visited {
@@ -1562,11 +1571,12 @@ body .mdm-audio .abcjs-loading-svg circle {
   /* The sheet, and the document scaled onto it rather than re-flowed into it.
      The typeset page sets the editor's own measure, 51.25 em, at the class's
      10 pt, where the editor sets it at 16 px; so the page is printed at the
-     ratio between those two ems, and the prose, the engravings, the rules and
-     the cards all arrive at the size they have on screen. That is what the
-     export rule asks of a PDF: one document at two sizes, not two documents.
-     800/803 is TeX's point expressed in CSS's (1/72.27 of an inch against
-     1/72), without which the measure lands 1.9 bp wide.
+     ratio between those two ems (--mdm-sheet-scale), and the prose, the
+     engravings, the rules and the cards all arrive at the size they have on
+     screen. That is what the export rule asks of a PDF: one document at two
+     sizes, not two documents. 800/803 is TeX's point expressed in CSS's
+     (1/72.27 of an inch against 1/72), without which the measure lands 1.9 bp
+     wide.
 
      Measured after: 50.7 to 561.3, a measure of 510.6 against the typeset
      511.5, and the ratios row 383.4 bp against 384.3.
@@ -1579,12 +1589,71 @@ body .mdm-audio .abcjs-loading-svg circle {
      score at the width of the box it is drawn in and the clamp below can only
      shrink what it is handed.
 
+     Scaled where it is painted, and not where it is laid out. Until
+     2026-10-04 the scale was a `zoom` on the root, which lays the page out a
+     second time at 0.83 of its pixels, and a layout at other pixels is
+     another layout, measured that day against the editor and the page:
+     - A line breaks elsewhere. Widths are snapped to a 64th of a pixel again,
+       so a row that fits or fails by less changes sides: twelve words 820.047
+       px against a measure of 820 on screen (they do not fit) were 680.750
+       against 680.766 under the zoom (they do). Over 400 paragraphs of prose,
+       6 of 2,282 row endings stood elsewhere than on screen; over the first
+       120 of them printed, 6 of 697 against the page and 5 of 674 against the
+       editor, and none of 694 and of 671 now.
+     - A rule changes thickness. Chrome draws a border in whole pixels of the
+       layout it is in: 1 px came out 1.2045 px of the document (the hairlines
+       under a heading and in a table, the edge of a chip), 2 px came out
+       1.2045 as well (the `***` rule, at 0.6 of itself) and 3 px 2.409 (the
+       bar of a quotation). They are 1, 2 and 3 now.
+     - Rows of prose stood 26.5 and 27.7 px apart in turn where the editor
+       has 27.19 every time, baselines landing on whole pixels of the zoomed
+       layout, and the text of a heading up to 1.75 px off between its
+       neighbours.
+     Now the page is laid out once, at the pixels of the screen, and Chrome
+     shrinks it onto the sheet as it prints, which is what a browser does
+     with a page too wide for its paper (the shrink the note on A5 below met
+     by accident). What is too wide is a box on the root with nothing in it,
+     as wide as the sheet over the scale: 100vw is the sheet while Chrome
+     measures the overflow, so the ratio it finds is the inverse of the scale
+     on any sheet, and it lays the page out again for a sheet that much wider
+     and prints it that much smaller. On paper the document is the page in a
+     window 983 px wide, for Letter: the same rules at the same pixels, and
+     the same breaks.
+     That box has to be the only thing too wide, or the scale is the
+     document's and not the sheet's: a block the sheet cannot hold (a word of
+     159 letters, a table of fourteen columns) made every word of its
+     document 0.83 or 0.67 of its size, prose at 8.27 or 6.64 pt for 9.96,
+     with the block still cut at the sheet's edge (measured 2026-10-04, when
+     the zoom was there to be shrunk further). So what the page holds is
+     clipped at the sheet's edge, on the body, and on the root as well: a
+     body's overflow goes to the viewport when the root has none of its own,
+     and the body would be left with none. With the two, the prose of those
+     documents is at its size to 0.0001.
+     How exact it is. On Letter, which is what Chrome prints on when the
+     header names no sheet, each word is as wide as under the zoom to 0.01 pt.
+     On a sheet the header names, Chrome's own pixels for the sheet and the
+     paper's are up to one apart and the scale comes out that much large: a
+     run of a heading 263.50 pt long on Letter is 263.83 on A4, 263.74 on A3
+     and 263.97 on A5, 0.09 to 0.18 %. The margin and the folio are the
+     paper's and not the page's, so neither is shrunk: the margin is written
+     as it is, and the folio at the scale.
+     A browser that does not shrink a wide page onto its paper would print
+     this one at its screen size, the type at 12 pt; Chrome and Edge, which
+     are what the extension prints with, shrink it. Not tried in another.
+
+     The size of the root is the screen's. Quarto prints with the root at
+     11pt, and its screen's is 17 px: every length Quarto or Bootstrap writes
+     in rem, and this sheet has not answered in px or em, was 0.86 of itself
+     on paper beside prose that stayed at 16 px. The subtitle of example.mdm
+     was 316.3 px long for the editor's 366.8 (type of 18.3 px for 21.25),
+     and a title stood 33 px over the first paragraph for the editor's 36.
+     The variable is Quarto's own, the one its screen rule reads.
+
      The block margin belongs to @page. Padding on a fragmented body looked
      right at the first and last edge but Chrome did not repeat all of it at
      an automatic page break: prose could end 15 pt above one edge and resume
      13 pt below the next. A physical page margin is the boundary Chrome does
-     honour on every sheet. Chrome scales that margin with the html below, so
-     the inverse factor leaves 2.5 cm on paper.
+     honour on every sheet.
 
      The margin is outside the document's canvas, so the ground the body
      paints stops at it, and every sheet came out with a paper-white band
@@ -1611,9 +1680,15 @@ body .mdm-audio .abcjs-loading-svg circle {
      and 0 of 2,627 with its header shown (2026-10-02). The 15.4 pt are
      measured in the roman, whose ascent the top of the box starts the line
      from. */
+  :root {
+    --mdm-sheet-scale: calc(10 / 12 * 800 / 803);
+  }
+  html:root {
+    font-size: var(--bs-root-font-size);
+  }
   @page {
     size: auto;
-    margin: calc(2.5cm * 12 / 10 * 803 / 800) 0;
+    margin: 2.5cm 0;
     background: var(--mdm-syn-page);
     @bottom-center {
       content: counter(page);
@@ -1625,8 +1700,18 @@ body .mdm-audio .abcjs-loading-svg circle {
       padding-top: 15.4pt;
     }
   }
-  html {
-    zoom: calc(10 / 12 * 800 / 803);
+  html::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: calc(100vw / var(--mdm-sheet-scale));
+    height: 1px;
+    visibility: hidden;
+  }
+  html,
+  body {
+    overflow-x: clip;
   }
   body {
     /* The ground carries the look, and on the dark and the white sides the
@@ -1722,17 +1807,48 @@ body .mdm-audio .abcjs-loading-svg circle {
      the property does not inherit and `body { scrollbar-width: thin }` above
      outranks a bare `*`: with the star alone, getComputedStyle on the body
      still came back "thin" under print media.
-     The overflow itself is left alone, so nothing about where a line breaks
-     changes. A score no longer needs it, the clamp above having fitted the
-     drawing to the card, but a line of code longer than its card is still
-     cut at the card's edge on paper, and with the bar gone there is nothing
-     left on the sheet to say it was cut. That one is written down and not
-     answered here: the typeset page breaks such a line instead, and making
-     the printed page break it is a change to what the page shows and not to
-     what the printer does. */
+     The overflow itself is left alone, and what it used to cut on paper is
+     answered by the rules that follow. */
   *,
   body {
     scrollbar-width: none;
+  }
+  /* What a screen scrolls and paper cannot. The editor keeps a block the
+     column cannot hold whole and scrolls it in its own box, and so does the
+     page; a sheet has nothing to scroll, and what stood past the column was
+     simply not on it, nor in the text of the PDF, with nothing to say so
+     (measured 2026-10-04): 67 of the 162 characters of a line of code, 10 of
+     the 28 terms of a display equation and its right-hand side, the
+     fourteenth column of a table. Nothing of the document is left off its
+     paper, each kind in the way that keeps it readable:
+     - A line of code goes on in a second row, as a typeset page breaks it.
+       It is text, so it can; the type keeps its size and the rows after the
+       first hang under it (Pandoc's own print rule for a highlighted line).
+       A block with no language already did, by a rule of Quarto's that the
+       highlighted ones outranked.
+     - A table and a display equation are drawn smaller, whole, as a score
+       is (the clamp above): a table's cells cannot break inside a word and
+       a formula cannot break at all. The scale is what the column has room
+       for over what the block needs. What it needs is measured by the page
+       when it is about to be printed (resources/mdm-paper.js, which writes
+       it on each one, with what stands beside it in its row: the number of
+       a numbered equation, the indent of a list); what the column has is
+       the measure, which is why the column is a container here and nowhere
+       else. One that fits is left at its size.
+     A formula inside a sentence that no row can hold is still cut at the
+     sheet's edge: KaTeX breaks one at its operators, and one with none to
+     break at was not met outside a fixture built for it. */
+  body pre > code,
+  body pre > code.sourceCode {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  body main.content {
+    container-type: inline-size;
+  }
+  body main.content table,
+  body .katex-display > .katex {
+    zoom: min(1, calc((100cqw - var(--mdm-taken, 0px)) / var(--mdm-natural, 1px)));
   }
   /* Quarto's copy button. It draws nothing as things stand, the
      self-contained export carrying no icon font for it and the button
@@ -1804,6 +1920,19 @@ body .mdm-audio .abcjs-loading-svg circle {
     break-after: avoid;
     break-inside: avoid;
     clip-path: inset(-0.5px -100vw -100vh);
+  }
+  /* A picture and its caption are one thing, on one sheet. With nothing to
+     hold them together a picture that just fitted at the foot of a sheet
+     left its caption to open the next (seen on the circle of fifths of
+     examples/music-class/, and with a picture 150 px tall at five distances
+     from the foot of a sheet: at one of the five, 2026-10-04). Not a score,
+     which is a figure too and has to break between two of its systems (the
+     slices above). A table that goes on over a sheet keeps each row whole
+     and Chrome sets its head again at the top of the next sheet, and a
+     display equation goes to the next sheet whole: both measured the same
+     day, neither needing a rule. */
+  body main.content figure:not(.mdm-block) {
+    break-inside: avoid;
   }
   /* The contents on paper (resources/mdm-toc.js puts a copy of the page's
      own into the flow), set as the typeset PDF sets its own, which is the one
