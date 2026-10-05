@@ -8,8 +8,6 @@ filters:
   - mdm
 ---
 
-### What the editor shows
-
 An `.mdm` file is Markdown that VS Code opens as a document: prose, `code`, equations in LaTeX and scores in ABC notation, each drawn where it is written.
 
 A click on the score opens its ABC: `M:3/4` is the metre, `L:1/8` the unit note length, `e` is `E` an octave up and `_e` is `e` flat.

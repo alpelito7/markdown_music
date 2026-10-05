@@ -304,3 +304,24 @@ test("the Markdown clip ends on a numbered equation and a citation its bibliogra
   assert.ok(picture > 0 && cited > picture, `the equation is not named by @${label} after the picture's paragraph`);
   assert.ok(body.indexOf("$$", picture) > cited, "the equation does not come after the prose that names it");
 });
+
+// The tour opens on the top of its document, and since the editor draws the
+// header as the page's title block that top is the block: the title, and
+// whoever wrote it. The document used to say its title twice, once in the
+// header, which the editor did not draw, and once as the heading under it,
+// which was what the take opened on; drawn, the two stood one over the other.
+// The owner's call (2026-10-05): the title stays in the YAML and the heading
+// goes, so the first thing the README shows of the editor is a header drawn.
+test("the tour's document opens on the title its header names, and says it once", () => {
+  const RIG = path.join(ROOT, "tools", "demo-clips");
+  const clip = require(path.join(RIG, "clips.js")).clips.find((c) => c.id === "tour");
+  const doc = read(RIG, clip.doc || "demo.mdm");
+  const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(doc);
+  assert.ok(m, "the tour's document has no YAML header");
+  const title = (/^title:[ \t]*"?(.*?)"?[ \t]*$/m.exec(m[1]) || [])[1];
+  assert.ok(title, "the header names no title, so the editor draws no title block");
+  const first = m[2].split("\n").find((l) => l.trim());
+  assert.ok(!/^#{1,6}\s/.test(first), `the text opens on a heading under the title block: ${first}`);
+  const again = m[2].split("\n").filter((l) => /^#{1,6}\s/.test(l) && l.replace(/^#+\s*/, "").trim() === title);
+  assert.deepEqual(again, [], "the title is written again as a heading");
+});

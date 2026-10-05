@@ -166,9 +166,11 @@ async function prose(rig) {
 }
 
 // The caret outside every block before the camera rolls, so the take opens on
-// the state it closes on. Without it the caret is at offset 0, on the heading, and
-// the first toolbar click (which calls view.focus()) shows the heading's "###"
-// for the rest of the clip.
+// the state it closes on. Without it the caret is at offset 0, on the first
+// line of the text, and the first toolbar click (which calls view.focus())
+// shows that line's source for the rest of the clip: the backticks of its
+// code now, and the "###" of the heading the document opened on until
+// 2026-10-05.
 async function settleCaret(rig) {
   const p = await prose(rig);
   await rig.warp(p.x, p.y);
@@ -297,9 +299,12 @@ const tour = {
   // 1, 3 and 5. Spread out, they read as four notes changing at once; an
   // earlier tune put three of them in one bar, which read as a bar darkening.
   edit: { target: "E", typed: "_e" },
-  // It opens on the top of the document, heading and all: framed on the score,
-  // the first frame began on a row cut halfway through a paragraph, which read
-  // as a crop (owner, 2026-09-14). The frame for the score is still measured
+  // It opens on the top of the document, title block and all: framed on the
+  // score, the first frame began on a row cut halfway through a paragraph,
+  // which read as a crop (owner, 2026-09-14). What stands at the top is the
+  // header, drawn: demo.mdm names its title there and nowhere else since the
+  // editor draws the block (owner, 2026-10-05), where it used to open on a
+  // heading of the same words. The frame for the score is still measured
   // here, where it can settle and take the cut row off the top, and beats()
   // scrolls to that offset on camera once the toolbar has been used.
   async frame(rig) {
