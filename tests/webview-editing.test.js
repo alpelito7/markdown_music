@@ -4241,6 +4241,90 @@ function secondClickRig(h) {
   };
 }
 
+// The scrollbar is not "outside the text" in that sense. Scrolling is how a
+// long table or a long header is read while its source is open, and the
+// handle is as good a way down it as the wheel. Measured before this was
+// mended (2026-10-04, with the bars drawn): a drag of the handle took the
+// carets out of an open table, its three source rows gone, and left the
+// focus on the scroller, so what was typed next went nowhere. The owner's
+// word the day after: tables, equations and scores are not to be put away
+// by scrolling, and all these pieces behave the same unless he says
+// otherwise (CLAUDE.md, "One behaviour for every drawn block"). The header's
+// source is held to the same in webview-title.test.js.
+test("the scrollbar's handle puts nothing away, and the text has the focus back when it is let go", { skip }, async () => {
+  const text =
+    ["| a | b |", "|---|---|", "| 1 | 2 |", ""].join("\n") +
+    "\n" +
+    DISMISS +
+    "\n" +
+    Array.from({ length: 50 }, (_, i) => "Paragraph " + (i + 1) + " of a document long enough to scroll.").join("\n\n") +
+    "\n";
+  const h = await open({ text: text, withFrontMatter: false, frontMatter: "", scores: 1, height: 600, bars: true });
+  const shown = () =>
+    h.page.evaluate(() => ({
+      table: document.querySelectorAll("#app .cm-line.mdm-table-line").length,
+      source: document.querySelectorAll("#app .cm-line.mdm-src-line").length,
+      fences: document.querySelectorAll("#app .cm-line.mdm-fence-line").length,
+      inline: document.querySelectorAll("#app .mdm-math-src").length,
+    }));
+  const bar = await h.page.evaluate(() => {
+    const s = window.__mdm.view.scrollDOM;
+    const box = s.getBoundingClientRect();
+    return { wide: s.offsetWidth - s.clientWidth, x: box.right - (s.offsetWidth - s.clientWidth) / 2, y: box.top + 20 };
+  });
+  assert.ok(bar.wide > 5, "no scrollbar is drawn, so nothing was under test");
+  const cases = [
+    { name: "a table", needle: "| 1 |", open: (v) => v.table > 0 },
+    { name: "an inline equation", needle: "x^2", open: (v) => v.inline > 0 },
+    { name: "a display equation", needle: "e^{i", open: (v) => v.source > 0 },
+    { name: "a code block", needle: "x = 1", open: (v) => v.fences > 0 },
+    { name: "a score", needle: "CDEF", open: (v) => v.source > 0 },
+  ];
+  for (const one of cases) {
+    await h.page.evaluate(() => {
+      window.__mdm.view.scrollDOM.scrollTop = 0;
+    });
+    const at = (await posOf(h.page, one.needle, 1)) + 1;
+    await setSelection(h.page, at);
+    await h.page.evaluate(() => window.__mdm.view.focus());
+    await sleep(250);
+    const before = await shown();
+    assert.ok(one.open(before), one.name + " never opened: " + JSON.stringify(before));
+    // A short drag of the handle: the page moves and the block stays drawn.
+    await h.page.mouse.move(bar.x, bar.y);
+    await h.page.mouse.down();
+    await h.page.mouse.move(bar.x, bar.y + 12, { steps: 3 });
+    await sleep(150);
+    assert.ok((await h.page.evaluate(() => window.__mdm.view.scrollDOM.scrollTop)) > 20, one.name + ": the handle did not scroll the page");
+    await h.page.mouse.up();
+    await sleep(250);
+    assert.equal(await h.page.evaluate(() => window.__mdm.view.state.selection.main.head), at, one.name + ": the scrollbar moved the caret");
+    assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, one.name + ": the text was left without the focus");
+    await h.page.evaluate(() => {
+      window.__mdm.view.scrollDOM.scrollTop = 0;
+    });
+    await sleep(250);
+    assert.deepEqual(await shown(), before, one.name + " was put away by the scrollbar");
+    // And what is typed next goes where the caret is.
+    await h.page.keyboard.type("Z");
+    await sleep(150);
+    assert.equal((await docText(h.page)).slice(at, at + 1), "Z", one.name + ": what was typed after the drag went nowhere");
+    await h.page.keyboard.press("Backspace");
+    await sleep(700);
+  }
+  // A press on the bar with the document nobody's leaves it nobody's.
+  await h.page.evaluate(() => window.__mdm.view.contentDOM.blur());
+  await sleep(100);
+  await h.page.mouse.move(bar.x, bar.y);
+  await h.page.mouse.down();
+  await h.page.mouse.move(bar.x, bar.y + 12, { steps: 3 });
+  await h.page.mouse.up();
+  await sleep(250);
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), false, "the scrollbar gave the text a focus it did not have");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a second click on a drawing puts its source away, as a click outside the text does", { skip }, async () => {
   const h = await open({ text: SECOND_CLICK, withFrontMatter: false, scores: 1 });
   await h.page.setViewport({ width: 1400, height: 700 });

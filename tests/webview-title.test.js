@@ -763,6 +763,34 @@ test("a click outside the text puts that source away as well, and the YAML butto
   await h.close();
 });
 
+// A header of thirty lines is read by scrolling down it, and the handle of
+// the scrollbar is a way to scroll: it is the scroller's own, outside the
+// text and no click "outside" in the sense above.
+test("the scrollbar's handle leaves the source a click opened where it is", { skip }, async () => {
+  const h = await editor(LONG_TITLED, false, { height: 500, bars: true });
+  await peek(h.page, LONG_TITLED);
+  await forget(h.page);
+  const bar = await h.page.evaluate(() => {
+    const s = window.__mdm.view.scrollDOM;
+    const box = s.getBoundingClientRect();
+    return { wide: s.offsetWidth - s.clientWidth, x: box.right - (s.offsetWidth - s.clientWidth) / 2, y: box.top + 20 };
+  });
+  assert.ok(bar.wide > 5, "no scrollbar is drawn, so nothing was under test");
+  // Its handle stands at the top; dragged down, the page scrolls.
+  await h.page.mouse.move(bar.x, bar.y);
+  await h.page.mouse.down();
+  await h.page.mouse.move(bar.x, bar.y + 120, { steps: 6 });
+  await h.page.mouse.up();
+  await sleep(200);
+  assert.ok((await h.page.evaluate(() => window.__mdm.view.scrollDOM.scrollTop)) > 100, "the handle did not scroll the page");
+  assert.deepEqual(await headerPosts(h.page), [], "the scrollbar put the header away");
+  // The margin beside it still does.
+  await clickMargin(h.page);
+  assert.deepEqual(await headerPosts(h.page), [LEAVE]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("the YAML button shows the source in place of the drawing, and what it shows stays", { skip }, async () => {
   const h = await editor(LONG_TITLED, false);
   await h.page.click(FM);

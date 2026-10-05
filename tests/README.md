@@ -7652,6 +7652,11 @@ What is decided in it, each with its test:
   release, as the drawing of every other block does, and a press dragged
   back into the header has not left it. A selection with one end in the
   header keeps it open. In the first test above.
+- **The scrollbar's handle is not "outside".** A header of thirty lines is
+  read by scrolling down it: *the scrollbar's handle leaves the source a
+  click opened where it is*. This is the one place where the header is not
+  as a table is: the handle puts a table's source away (measured, Pending
+  20), and the owner has not been asked which of the two is wanted.
 - **The YAML button shows the source in place of the drawing, and it
   stays** through every click, until the button is pressed again; the
   button is lit for as long, and dark over a source a click opened, where a
@@ -7899,6 +7904,18 @@ What is decided in it, each with its test:
   for as YAML. Found by the test of that rule on a long document, where a
   press hands the text the focus. The carets are now mapped to stay with
   the body (`keepCarets` in `replaceText`). In the same test.
+- **Scrolling puts no block away.** A press on the scrollbar's handle took
+  the carets out of every open block, as a click outside the text does, and
+  left the focus on the scroller, so that what was typed next went nowhere
+  (measured the evening before: a table's three source rows gone after a
+  drag). It does nothing to any of them now, and the text has the focus
+  back at the release where it had it. `webview-editing.test.js`, *the
+  scrollbar's handle puts nothing away, and the text has the focus back
+  when it is let go*: a table, an inline and a display equation, a code
+  block and a score, each open, dragged past, still open, its caret where
+  it was and the next keystroke landing there; and
+  `webview-title.test.js`, *the scrollbar's handle leaves the source a
+  click opened where it is*, for the header.
 - **The rule** is in `CLAUDE.md`, "One behaviour for every drawn block": a
   table, an equation, a score and the title block behave the same in every
   gesture, a difference between two of them is a defect until the owner
@@ -7931,6 +7948,12 @@ again. 19 are new:
 - The drawing under a YAML kept in view, 3 (`QW1` to `QW3`): never drawn,
   drawn with the document nobody's, the caret left at the head of the text
   by the press. All caught.
+- Scrolling and the carets, 4 (`QW4` to `QW7`): every change from outside
+  taking the carets along, the scrollbar putting blocks away, the focus not
+  given back, given to a text that did not have it. 3 caught. `QW4`
+  survived: no test put text in from outside at the caret itself, and *an
+  external update keeps a caret outside the change in place and is not
+  echoed* does now.
 
 Run on the state the round left: `test:fast` (310 of 310); every editor
 suite, one file at a time under the guards and the shared lock:
