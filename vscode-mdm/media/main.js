@@ -21,7 +21,6 @@
   let scoreFill = SETTINGS.scoreFill || "none";
   let staffLines = SETTINGS.staffLines || "gray";
   let scoreAlign = SETTINGS.scoreAlign || "center";
-  let frontMatter = SETTINGS.frontMatter || "hidden";
   let hyphenation = SETTINGS.hyphenation || "none";
   // VS Code's own editor.multiCursorModifier ("alt" or "ctrlCmd"): the click
   // that adds a caret here is the one the user already makes in text editors.
@@ -822,10 +821,31 @@
 
   // ---------- Front matter button ----------
 
-  // Whether the YAML header is part of the document in the editor. Shown, it
-  // is the first lines of the text, --- fences included, painted as a card and
-  // highlighted as YAML; hidden, the host keeps it out of the text and splices
-  // it back on every edit (transforms.js).
+  // Whether the source of the YAML header is open in the editor. Open, it is
+  // the first lines of the text, --- fences included, painted as a card and
+  // highlighted as YAML; put away, which is how a document comes up, the
+  // host keeps it out of the text and splices it back on every edit
+  // (transforms.js), and what the header prints at the head of the page is
+  // drawn in its place (TitleWidget), which is nothing for a header that
+  // prints nothing.
+  //
+  // It is opened in two ways, which the owner told apart on 2026-10-04:
+  //
+  // - A click on the drawn title opens the source over the drawing, as a
+  //   click on a table opens its rows, and it goes away as theirs do: when
+  //   the carets leave it, on a click outside the text, on a second click
+  //   on the drawing (openHeader, leaveHeader).
+  // - This button shows the source in place of the drawing, and what it
+  //   shows stays until it is pressed again (pinHeader, headerPinned): the
+  //   reader who wants the YAML and not the title has it, as the reader of
+  //   a header that draws nothing has had all along.
+  //
+  // The host holds the state and says what the text holds with every
+  // update: for a header that draws a title it is this editor's alone and
+  // kept nowhere, and for one that draws nothing it is the setting
+  // mdm.frontMatter, which the host writes on a press of this button, so
+  // that such a header stays in view for whoever wants it there
+  // (extension.js, headerOpen).
   //
   // The glyph is the header as typed: a --- fence, a line of YAML, and the
   // closing --- fence.
@@ -833,28 +853,229 @@
     '<svg viewBox="0 0 16 16"><rect x="1" y="2.8" width="3.6" height="1.4" rx=".7"/><rect x="6.2" y="2.8" width="3.6" height="1.4" rx=".7"/><rect x="11.4" y="2.8" width="3.6" height="1.4" rx=".7"/><rect x="1" y="7.3" width="14" height="1.4" rx=".7"/><rect x="1" y="11.8" width="3.6" height="1.4" rx=".7"/><rect x="6.2" y="11.8" width="3.6" height="1.4" rx=".7"/><rect x="11.4" y="11.8" width="3.6" height="1.4" rx=".7"/></svg>';
 
   let headerText = "";
+  const FM_BUTTON = '#app button[data-type="mdm-front-matter"]';
 
-  // The button reads the text and not the setting: a header typed into a
-  // document while the setting keeps headers out stays in the text (the host
-  // says so with the update that follows the edit), and the button then
-  // offers to hide it, which is what a press does.
+  // Whether the source in the text is the button's doing, or the setting's,
+  // and so there to stay: the host says so with the text (`pinned`).
+  function headerShown() {
+    return editorFrontMatter && headerPinned;
+  }
+
+  // The button is lit while it is what keeps the source in view. A source
+  // opened by a click on the title leaves it dark, since the button did not
+  // open it and a press now does something else: it keeps the source and
+  // takes the drawing away. A header typed into a document that had none
+  // stays in the text (the host says so with the update that follows the
+  // edit): the button is lit for one that draws nothing, which stays as
+  // typed, and dark for one that draws a title, which is open as a click
+  // would have left it.
   function fmTip() {
     if (headerText === "") return "No YAML header in this file";
-    return editorFrontMatter ? "Hide YAML header" : "Show YAML header";
+    return headerShown() ? "Hide YAML header" : "Show YAML header";
   }
 
   function updateFrontMatter() {
-    const btn = document.querySelector(
-      '#app button[data-type="mdm-front-matter"]'
-    );
+    const btn = document.querySelector(FM_BUTTON);
     if (!btn) return;
     btn.setAttribute("aria-label", fmTip());
-    btn.classList.toggle(
-      "mdm-btn--on",
-      editorFrontMatter && headerText !== ""
-    );
+    btn.classList.toggle("mdm-btn--on", headerShown() && headerText !== "");
     // Nothing to show for a file without a header, so the button greys out.
     btn.classList.toggle("mdm-btn--off", headerText === "");
+  }
+
+  // The host is asked for the header's source, or to put it away, and the
+  // update that answers brings the text with or without the header. The
+  // edit still held back goes first on the same wire, so the answer is made
+  // from a text that has it (the answer used to be dropped while an edit was
+  // debounced, and the press was swallowed by a keystroke made a moment
+  // earlier).
+  function askHeader(open, peek) {
+    flushEdit();
+    vscode.postMessage(peek ? { type: "header", open: open, peek: true } : { type: "header", open: open });
+  }
+
+  // The button: the source shown in place of the drawing, to stay, or put
+  // away. The header is the very top of the document, so the answer takes
+  // the editor there. The caret is left alone.
+  let headerCaret = null;
+  function pinHeader(on) {
+    if (headerText === "" && !editorFrontMatter) return;
+    headerCaret = null;
+    scrollToTop = true;
+    askHeader(!!on, false);
+  }
+
+  // A click on the drawn title: the source opened over the drawing. `key`
+  // is the key of the header the click landed on, where the caret goes once
+  // its line is in the text.
+  function openHeader(key) {
+    if (headerText === "") return;
+    headerCaret = key || "title";
+    scrollToTop = true;
+    askHeader(true, true);
+  }
+
+  // The source a click opened, put away again: the carets have left it, or
+  // a click has landed outside the text, which is what puts the source of a
+  // table away (dismissOpenBlock). One the button shows is not this
+  // function's to touch. The page is left where it is: the reader has just
+  // put a caret somewhere, and that is the place to keep.
+  //
+  // Not while a button is down: the header's lines going lift everything
+  // under them by the height of the card, and a press that finds the text
+  // moved under it by its release comes out as a selection (pointerHeld,
+  // which holds the drawing of every other block for the same reason). It
+  // is asked at the release instead (releaseHeader). `byCaret` says the
+  // carets leaving are the reason, which the release asks about again: a
+  // press dragged back into the header has not left it.
+  //
+  // Asked once: `headerLeaving` stands until the host answers.
+  let headerLeaving = false;
+  let headerLeaveHeld = null;
+  function leaveHeader(byCaret) {
+    if (!editorFrontMatter || headerPinned || headerLeaving) return;
+    if (pointerHeld) {
+      if (headerLeaveHeld !== "press") headerLeaveHeld = byCaret ? "caret" : "press";
+      return;
+    }
+    askHeader(false, true);
+    headerLeaving = true;
+  }
+  function releaseHeader() {
+    const held = headerLeaveHeld;
+    headerLeaveHeld = null;
+    if (!held || !view) return;
+    if (held === "caret" && inHeader(view.state)) return;
+    leaveHeader(held === "caret");
+  }
+
+  // Whether a caret is in the header's source, by the same reading that
+  // opens a table (touchedBy): any range of the selection that reaches it,
+  // its last line's end included.
+  function inHeader(state) {
+    const end = headerEnd(state);
+    return end >= 0 && touchedBy(state.selection.ranges, 0, end);
+  }
+
+  // Where the header's source ends in the text, the end of its closing
+  // fence, or -1 for a text that does not hold it.
+  function headerEnd(state) {
+    if (!editorFrontMatter) return -1;
+    const fm = CM.syntaxTree(state).topNode.getChild("FrontMatter");
+    return fm ? state.doc.lineAt(Math.max(fm.from, fm.to - 1)).to : -1;
+  }
+
+  // The header's lines come into the text and leave it over everything the
+  // reader is looking at, and CodeMirror does not hold the page through a
+  // change of the text: with the 31 lines of a header open and the page
+  // scrolled down to the body, a click on a line of the body put the header
+  // away and the line went 676 px up, out of the pane (measured in VS Code
+  // 1.133, 2026-10-04). So the line the reader is on is noted before the
+  // text changes (readerPlace) and put back where it stood once the new
+  // lines are laid out (holdPlace), as the line a click opened a block on
+  // is held (revealBlock). The line is the first of the body that is drawn,
+  // in the pane or near it: everything under the header moves as one, so
+  // any line of it holds the one that was clicked. Any but a blank one: the
+  // blank line under the header goes with it, and held by that line the
+  // page came out its height too far, 22 px (VS Code 1.133, the same day).
+  // After a second click on the drawn title it is the drawing that is held
+  // instead, as a table's is (putAwayDrawing): it stands 6 px nearer the
+  // first line once its source has gone from over it, and held by that line
+  // it moved by as much under the pointer (measured in the harness,
+  // 2026-10-04). Nothing is held when the header's own lines are all that
+  // is drawn, and where the top was asked for (the button, a click on the
+  // title) the top is what is left standing, after this.
+  let holdDrawing = false;
+  function readerPlace() {
+    if (holdDrawing) {
+      holdDrawing = false;
+      const block = document.querySelector("#app .mdm-title-block");
+      if (block) return { drawing: true, top: block.getBoundingClientRect().top };
+    }
+    const end = headerEnd(view.state);
+    const blocks = view.viewportLineBlocks;
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i].from <= end || blocks[i].length === 0) continue;
+      const c = view.coordsAtPos(blocks[i].from);
+      if (c) return { pos: blocks[i].from, top: c.top };
+    }
+    return null;
+  }
+  // At once, and not in CodeMirror's next measure: the change has been
+  // drawn by the time this is asked, so the line is where the browser now
+  // lays it out, and moving the page here leaves no frame with the line
+  // somewhere else.
+  function holdPlace(line, changes) {
+    let c = null;
+    if (line.drawing) {
+      const block = document.querySelector("#app .mdm-title-block");
+      c = block ? block.getBoundingClientRect() : null;
+    } else {
+      c = view.coordsAtPos(Math.min(changes.mapPos(line.pos, 1), view.state.doc.length));
+    }
+    const moved = c ? Math.round(c.top - line.top) : 0;
+    if (moved) view.scrollDOM.scrollTop += moved;
+  }
+
+  // The carets, followed from one update of the editor to the next: the
+  // source a click opened goes away when they have all left it. Only the
+  // leaving: a source with no caret in it yet is left open, which is the
+  // moment between the host's answer and the caret the click asked for.
+  let caretInHeader = false;
+  function watchHeaderCaret(state) {
+    const was = caretInHeader;
+    caretInHeader = inHeader(state);
+    if (was && !caretInHeader) leaveHeader(true);
+  }
+
+  // The caret at the end of what a key of the header says, once a click on
+  // the drawn title has opened the source (openHeader). What the key says
+  // ends on the key's own line, or on the last of the lines set in under it
+  // when its value is written there: the paragraphs of an abstract, the list
+  // of the authors, which may stand at the column of its key. At the end of
+  // the key's own line a word typed after `abstract: |` or `author:` would
+  // break the value that follows.
+  // The caret goes inside what closes that line, a quote, a bracket or a
+  // brace, since what is typed after it is no part of the value and breaks
+  // the line as YAML (seen in a real window: a word typed after the closing
+  // quote of a title came out on the page with the quotes around the rest).
+  // `author` is `authors` as well, which Quarto reads the same.
+  // The header is read off the head of the text by its length and not off
+  // the tree, which may not have reached the new lines yet.
+  // A key the lines do not show as written (`"title": ...`, with the quotes
+  // YAML allows around a key) leaves the caret at the end of the header's
+  // first line under its fence: in the source either way, since the source
+  // is open for as long as a caret is in it and no longer (watchHeaderCaret).
+  function caretAtHeaderKey(key) {
+    if (!view || !editorFrontMatter || !headerText) return;
+    const names = key === "author" ? "authors?" : key.replace(/[^A-Za-z0-9_-]/g, "");
+    const head = view.state.doc.sliceString(0, headerText.length);
+    const at = new RegExp("^" + names + "[ \\t]*:.*$", "m").exec(head);
+    let end;
+    if (at) {
+      let from = at.index;
+      let line = at[0];
+      let offset = at.index + at[0].length + 1;
+      const under = head.slice(offset).split("\n");
+      for (let i = 0; i < under.length; i++) {
+        const next = under[i];
+        if (/^(?:---|\.\.\.)[ \t]*$/.test(next)) break;
+        if (next.trim() && !/^[ \t]/.test(next) && !/^-(?:[ \t]|$)/.test(next)) break;
+        if (next.trim()) {
+          from = offset;
+          line = next;
+        }
+        offset += next.length + 1;
+      }
+      const closed = /["'\]}]([ \t]*)$/.exec(line);
+      end = from + line.length - (closed ? closed[1].length + 1 : 0);
+    } else {
+      const fence = head.indexOf("\n");
+      const first = head.indexOf("\n", fence + 1);
+      end = first === -1 ? Math.max(0, fence) : first;
+    }
+    view.focus();
+    view.dispatch({ selection: { anchor: end }, userEvent: "select.pointer" });
   }
 
   function updateFillMenu() {
@@ -901,6 +1122,9 @@
   // the host reads an edit in the mode it was written in even if the setting
   // changed in between (see transforms.js).
   let editorFrontMatter = false;
+  // And whether it is there to stay, shown by the button or by the setting,
+  // with no title block drawn under it (see "Front matter button").
+  let headerPinned = false;
 
   // The two sides hold one document and both write to it: this editor with
   // every keystroke, the host with whatever changes the file under it (the
@@ -1058,7 +1282,7 @@
     }
   }
 
-  function replaceText(incoming, version, changes) {
+  function replaceText(incoming, version, changes, keepCarets) {
     // The text of this editor is LF (the host sends it that way, see
     // transforms.js). A CR that got through would not survive the dispatch
     // either: CodeMirror splits an inserted string on /\r\n?|\n/, so the lone
@@ -1085,10 +1309,13 @@
     if (next === view.state.doc.toString()) {
       synced = next;
       unconfirmed = CM.ChangeSet.empty(next.length);
-      return;
+      return null;
     }
     const hostChanges = (changes && explicitChanges(synced, next, changes)) || textDiff(synced, next);
     synced = next;
+    // What was changed in the text on screen, for whoever follows a place
+    // of it through the change (holdPlace).
+    let applied = null;
     if (!hostChanges.empty) {
       const mapped = hostChanges.map(unconfirmed);
       unconfirmed = unconfirmed.map(hostChanges, true);
@@ -1097,14 +1324,23 @@
         try {
           view.dispatch({
             changes: mapped,
+            // The header's lines coming in over the text push a caret at
+            // the head of the body down with the body. Left to CodeMirror
+            // it stays at the head of the text, which is the header's
+            // opening fence from then on: the YAML button pressed in a
+            // document nobody had clicked in yet put the caret in the
+            // header it had just shown (measured 2026-10-05).
+            selection: keepCarets ? view.state.selection.map(mapped, 1) : undefined,
             annotations: [CM.Transaction.remote.of(true), CM.Transaction.addToHistory.of(false)],
           });
+          applied = mapped;
         } finally {
           applying = false;
         }
       }
     }
     if (!unconfirmed.empty) queueEdit();
+    return applied;
   }
 
   // abcjs sizes its SVG with width/height attributes and leaves out the
@@ -3642,6 +3878,30 @@
     },
   });
 
+  // The header the editor draws from, held the same way and for the same
+  // reason: the title block is drawn from the header the host keeps while
+  // the text does not hold it (TitleWidget), and that header changes with no
+  // change to the text, when the file is edited beside this editor or the
+  // hyphenation menu writes a language into it. What is held is the header
+  // itself behind a mark for whether its source is open, and open to stay,
+  // since neither changes any text on a file that has none, and the second
+  // changes none at all: it only takes the drawing from under the source.
+  const setHeader = CM.StateEffect.define();
+  function headerKey() {
+    return (editorFrontMatter ? (headerPinned ? "2" : "1") : "0") + headerText;
+  }
+  const headerField = StateField.define({
+    create: function () {
+      return headerKey();
+    },
+    update: function (value, tr) {
+      for (let i = 0; i < tr.effects.length; i++) {
+        if (tr.effects[i].is(setHeader)) value = tr.effects[i].value;
+      }
+      return value;
+    },
+  });
+
   // ---------- Citations, as the page prints them ----------
   //
   // A citation is drawn as what the page prints for it, "Knuth (1984)", and
@@ -5697,6 +5957,305 @@
     }
   }
 
+  // ---- The title block ----
+
+  // What a string of the header reads as on the page: Pandoc takes the
+  // title, the subtitle and a name as Markdown, so `*x*` is emphasis there
+  // and `$x$` a formula. Read on its own with the document's parser and
+  // painted as a table's cell is (cellParts, paintParts). What a cell takes
+  // off the document by position, a citation's answer and an equation's
+  // number, is kept out for the length of the read: the positions here are
+  // the string's. A string that is more than one paragraph, or a block of
+  // another kind (`# x`, `- x`), stays as written.
+  let stringParser = null;
+  function stringParts(str) {
+    const plain = [{ kind: "text", text: str }];
+    const text = function (from, to) {
+      return str.slice(from, to);
+    };
+    const cites = citesNow;
+    const equations = eqNow;
+    citesNow = NO_CITES;
+    eqNow = NO_EQUATIONS;
+    try {
+      if (!stringParser) stringParser = markdownLanguage().language.parser;
+      const para = stringParser.parse(str).topNode.firstChild;
+      if (!para || para.name !== "Paragraph" || para.nextSibling) return plain;
+      return cellParts(para, text, null, smartMarks(para, para.to, text), null);
+    } catch (e) {
+      return plain;
+    } finally {
+      citesNow = cites;
+      eqNow = equations;
+    }
+  }
+
+  // What the header puts at the head of the page (MDM_CROSSREF.titleLook),
+  // read once per header, as the look of the equations is (crossrefLook).
+  let titleHeader = null;
+  let titleNow = null;
+  function titleOf(header) {
+    if (header !== titleHeader) {
+      titleHeader = header;
+      // A header the reader cannot make sense of draws nothing: this runs
+      // inside the walk, where an error would leave the document undrawn.
+      try {
+        titleNow = header ? window.MDM_CROSSREF.titleLook(header) : null;
+      } catch (e) {
+        titleNow = null;
+      }
+    }
+    return titleNow;
+  }
+
+  // The title block, drawn where the page has it and as the page has it:
+  // what the YAML header puts at the head of the document, which Quarto sets
+  // there from its own partials (title-block.html and title-metadata.html).
+  // In the page's order: the title and the subtitle, the categories and the
+  // description, whoever wrote the document, the dates and the DOI, the
+  // abstract and the keywords. A block widget and not text: with the
+  // header's source put away it stands over the first line of the document,
+  // on no line of the text, and a click on it opens the source
+  // (handleChromeClick); with the source open it stands under the header's
+  // card, the live preview of what is being typed, as a table stands under
+  // its rows, and a click puts the source away. A header that names none of
+  // them draws nothing, as the page prints nothing for it, and the YAML
+  // button of the toolbar is what opens it.
+  //
+  // The parts are laid out as the page lays them out, element for element,
+  // so that the same rules size them (style.css, "The title block", measured
+  // on the export):
+  //
+  // - The authors stand in one of two ways (titleLook's `affiliated`). With
+  //   no affiliation in the document the names are a column of the row the
+  //   dates are in, in the fainter ink of that row. With one, each author
+  //   has a row of two columns, the name and beside it the affiliations, in
+  //   full ink, and the dates start a row of their own under them.
+  // - An author's `url` makes the name a link, an `email` puts an envelope
+  //   after it and an `orcid` the mark of ORCID, both links, and a DOI is a
+  //   link to doi.org: drawn as the links of the prose are and followed with
+  //   the same click. The two marks are drawn here, since the page takes its
+  //   envelope from an icon font and its ORCID mark from a picture inside
+  //   Quarto, and neither is the editor's to carry.
+  // - An abstract or a description written as a block is paragraphs, set
+  //   smaller than the prose; written on a line it is a run of text at the
+  //   size of the prose, which is the page's own doing and not a choice made
+  //   here (proseOf in mdm-crossref.js). The words over the abstract and the
+  //   keywords are the language's, set in capitals by the sheet.
+  // - The page names none of the columns: its sheet takes Quarto's "Author",
+  //   "Published" and "Modified" off (mdm-look.css), so two dates stand side
+  //   by side with nothing to tell them apart, here as there.
+  //
+  // Each part says which key of the header it was written as, which is where
+  // the click that opens the source puts the caret. Put away, the first part
+  // carries the number of the header's first line, as the cover over any
+  // drawn block does (BlockCoverWidget): the header's lines are not in the
+  // text to carry theirs.
+  //
+  // What the page prints and this does not is listed where the header is
+  // read (mdm-crossref.js).
+  //
+  // A copy button stands in the rail beside it, as beside a table, while the
+  // source is put away: shown with the pointer on the block and copying the
+  // header as written, fences and all, which is the block the drawing stands
+  // for. With the source open the card carries the button (the FrontMatter
+  // branch of the walk) and the drawing under it none, so there is one. A
+  // header that draws nothing has no button until its card is open, there
+  // being nothing on screen to copy (the owner, 2026-10-04).
+  const ENVELOPE_ICON =
+    '<svg class="mdm-title-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="0.5" y="2.5" width="15" height="11" rx="1.5"/><path d="M1 3.9 8 9l7-5.1M1 12.6l4.8-4.2M15 12.6l-4.8-4.2"/></svg>';
+  const ORCID_ICON =
+    '<svg class="mdm-title-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8"/><path fill-rule="evenodd" d="M4.7 3.7a.75.75 0 1 1 0 1.5.75.75 0 0 1 0-1.5zM4.15 6.1h1.1v5.8h-1.1zM6.7 6.1h2.4c2 0 3.15 1.3 3.15 2.9S11.1 11.9 9.1 11.9H6.7zm1.1.95v3.9h1.25c1.3 0 2.05-.85 2.05-1.95S10.35 7.05 9.05 7.05z"/></svg>';
+
+  // How tall the block was when it was last on screen, which is what
+  // CodeMirror counts for it while it is not: a block it has not drawn is
+  // taken for one line of text. The header's source going while the page is
+  // scrolled down to the body makes a new block at the head of a document
+  // whose head is not drawn, and the page then stopped short of the top by
+  // what the block had over a line, with the title cut off by the edge of
+  // the pane (a jump to the top stood at 135 px, in the harness,
+  // 2026-10-04). Read off the drawing before the header's lines come or go
+  // (noteTitleHeight); -1 says nobody knows, which is CodeMirror's word for
+  // it.
+  let titleHeight = -1;
+  function noteTitleHeight() {
+    const block = document.querySelector("#app .mdm-title-block");
+    if (block) titleHeight = Math.round(block.getBoundingClientRect().height);
+  }
+
+  class TitleWidget extends WidgetType {
+    get estimatedHeight() {
+      return titleHeight;
+    }
+    constructor(look, open, source) {
+      super();
+      this.look = look;
+      this.key = JSON.stringify(look);
+      this.open = !!open;
+      this.source = source || "";
+      // The click the tooltip of a link in a title names (followHint).
+      this.tip = followHint();
+    }
+    eq(other) {
+      return other.key === this.key && other.open === this.open && other.tip === this.tip && other.source === this.source;
+    }
+    toDOM() {
+      const look = this.look;
+      const wrap = document.createElement("div");
+      wrap.className = "mdm-title-block" + (this.open ? " mdm-title-block--open" : "");
+      wrap.setAttribute("data-mdm-source", this.source);
+      const inner = document.createElement("div");
+      inner.className = "mdm-title-inner";
+      const piece = function (tag, cls, key, str) {
+        const el = document.createElement(tag);
+        if (cls) el.className = cls;
+        if (key) el.setAttribute("data-mdm-key", key);
+        if (str !== null) paintParts(el, stringParts(str), true);
+        return el;
+      };
+      // A link of the block's own: the words of `str` under an address, or a
+      // mark drawn in their place.
+      const link = function (href, str, cls, icon) {
+        const el = document.createElement("span");
+        el.className = "mdm-link" + (cls ? " " + cls : "");
+        el.title = linkTip(href);
+        el.setAttribute("data-mdm-href", href);
+        if (icon) el.innerHTML = icon;
+        else paintParts(el, stringParts(str), true);
+        return el;
+      };
+      // An author as the page writes one: the name with the degrees after
+      // it, a link where the author has a `url`, then the envelope and the
+      // ORCID mark, a space before each.
+      const author = function (who) {
+        const p = document.createElement("p");
+        const name = who.degrees.length ? who.name + ", " + who.degrees.join(", ") : who.name;
+        if (who.url) p.appendChild(link(who.url, name));
+        else paintParts(p, stringParts(name), true);
+        if (who.email) {
+          p.appendChild(document.createTextNode(" "));
+          p.appendChild(link("mailto:" + who.email, null, "mdm-title-email", ENVELOPE_ICON));
+        }
+        if (who.orcid) {
+          p.appendChild(document.createTextNode(" "));
+          p.appendChild(link("https://orcid.org/" + who.orcid, null, "mdm-title-orcid", ORCID_ICON));
+        }
+        return p;
+      };
+      // A text with its word over it: paragraphs when it was written as a
+      // block, a run of text otherwise, its paragraphs parted by a line
+      // break (proseOf).
+      const prose = function (cls, key, label, value) {
+        const box = piece("div", "mdm-title-prose " + cls, key, null);
+        if (label) box.appendChild(piece("div", "mdm-title-label", null, label));
+        value.paragraphs.forEach(function (text, at) {
+          if (value.blocks) box.appendChild(piece("p", "", null, text));
+          else {
+            if (at) box.appendChild(document.createElement("br"));
+            paintParts(box, stringParts(text), true);
+          }
+        });
+        return box;
+      };
+      const cell = function (cls, key, child) {
+        const el = piece("div", cls, key, null);
+        if (child) el.appendChild(child);
+        return el;
+      };
+      const line = function (text) {
+        const p = document.createElement("p");
+        p.textContent = text;
+        return p;
+      };
+
+      if (look.title) inner.appendChild(piece("div", "mdm-title", "title", look.title));
+      if (look.subtitle) inner.appendChild(piece("p", "mdm-subtitle", "subtitle", look.subtitle));
+      if (look.categories.length) {
+        const tags = piece("div", "mdm-title-categories", "categories", null);
+        look.categories.forEach(function (name) {
+          tags.appendChild(piece("div", "mdm-title-category", null, name));
+        });
+        inner.appendChild(tags);
+      }
+      if (look.description) inner.appendChild(prose("mdm-title-description", "description", "", look.description));
+      if (look.affiliated && look.authors.length) {
+        const byline = piece("div", "mdm-title-byline", "author", null);
+        look.authors.forEach(function (who) {
+          byline.appendChild(cell("mdm-title-author", null, author(who)));
+          const places = cell("mdm-title-affiliations", null, null);
+          who.affiliations.forEach(function (place) {
+            const p = document.createElement("p");
+            if (place.url) p.appendChild(link(place.url, place.name));
+            else paintParts(p, stringParts(place.name), true);
+            places.appendChild(p);
+          });
+          byline.appendChild(places);
+        });
+        inner.appendChild(byline);
+      }
+      const names = !look.affiliated && look.authors.length;
+      if (names || look.date || look.modified || look.doi) {
+        const meta = piece("div", "mdm-title-meta", null, null);
+        if (names) {
+          const column = cell("mdm-title-authors", "author", null);
+          look.authors.forEach(function (who) {
+            column.appendChild(author(who));
+          });
+          meta.appendChild(column);
+        }
+        if (look.date) meta.appendChild(cell("mdm-title-date", "date", line(look.date)));
+        if (look.modified) meta.appendChild(cell("mdm-title-modified", "date-modified", line(look.modified)));
+        if (look.doi) {
+          const p = document.createElement("p");
+          p.appendChild(link("https://doi.org/" + look.doi, look.doi));
+          meta.appendChild(cell("mdm-title-doi", "doi", p));
+        }
+        inner.appendChild(meta);
+      }
+      if (look.abstract) inner.appendChild(prose("mdm-title-abstract", "abstract", look.abstractTitle, look.abstract));
+      if (look.keywords.length) {
+        const box = piece("div", "mdm-title-prose mdm-title-keywords", "keywords", null);
+        box.appendChild(piece("div", "mdm-title-label", null, look.keywordsTitle));
+        const p = document.createElement("p");
+        look.keywords.forEach(function (word, at) {
+          if (at) p.appendChild(document.createTextNode(", "));
+          paintParts(p, stringParts(word), true);
+        });
+        box.appendChild(p);
+        inner.appendChild(box);
+      }
+      // The part the block opens with, which is where its top is: the number
+      // of the header's first line stands against it, and the rail of the
+      // copy button level with it. The title stands under its air, the
+      // subtitle under a quarter of an em, the categories and the word over
+      // an abstract under theirs, and a row of names at the head of the
+      // block.
+      const first = inner.querySelector(
+        ".mdm-title, .mdm-subtitle, .mdm-title-categories, .mdm-title-byline p, .mdm-title-meta p, .mdm-title-prose"
+      );
+      if (!this.open && first) first.setAttribute("data-mdm-line", "1");
+      wrap.appendChild(inner);
+      if (!this.open) {
+        const chrome = document.createElement("div");
+        chrome.className = "mdm-chrome";
+        let top = "0";
+        if (first && first.classList.contains("mdm-title")) top = "18px";
+        else if (first && first.classList.contains("mdm-subtitle")) top = "4px";
+        else if (first && first.classList.contains("mdm-title-categories")) top = "11px";
+        else if (first && first.classList.contains("mdm-title-prose") && first.querySelector(".mdm-title-label")) top = "12px";
+        chrome.style.top = top;
+        chrome.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
+        wrap.appendChild(chrome);
+      }
+      return wrap;
+    }
+    // Its clicks are the editor's own (handleMouseDown, handleChromeClick);
+    // CodeMirror leaves every event alone.
+    ignoreEvent() {
+      return true;
+    }
+  }
+
   // ---- The walk ----
 
   // Line-level classes are gathered per line and emitted once: a line can be
@@ -6516,6 +7075,23 @@
         }
 
         if (name === "FrontMatter") {
+          // The card's copy button, in the rail beside the column as a code
+          // block's is (CodeChromeWidget), and shown for as long as the
+          // card is: the header's source on screen is a block that is open,
+          // whichever header it is (the owner, 2026-10-04). What it copies
+          // is the header as written, its fences with it (chromeSource).
+          // Lifted over the other rails while the main caret is in the
+          // header, by the reading every other block takes (`touched`, so
+          // not while the document is nobody's): read off the caret alone,
+          // a caret left at the head of an unfocused document marked it,
+          // and a caret moved from there marked it still, the header not
+          // being one of the blocks a caret's move redraws then.
+          decos.push(
+            Decoration.widget({
+              widget: new CodeChromeWidget(touched(n.from, n.to) && holdsMainHead(state, n.from, n.to), true),
+              side: -1,
+            }).range(n.from)
+          );
           lines.add(n.from, n.to, "mdm-fm-line");
           lines.card(n.from, n.to);
           lines.add(n.from, n.from, "mdm-fm-first");
@@ -7481,6 +8057,30 @@
       decos.push(lineNumber(n + hidden).range(line.from));
     }
 
+    // The title block, where the page sets it (TitleWidget): over the first
+    // line while the header is kept out of the text, and under the header's
+    // source while a click on it has that open. Under a source the button
+    // or the setting shows there is none, that being the header as YAML,
+    // which is what was asked for (the owner, 2026-10-04), until a caret is
+    // in it: what is typed there is then drawn under it as it is typed, as
+    // a table is drawn under its rows while they are edited, and goes again
+    // when the carets leave (the owner, 2026-10-05).
+    const fm = editorFrontMatter ? tree.topNode.getChild("FrontMatter") : null;
+    const titleAt = fm ? doc.lineAt(Math.max(fm.from, fm.to - 1)).to : 0;
+    const asYaml = headerShown() && !(fm && touched(fm.from, titleAt));
+    const titled = asYaml ? null : titleOf(fm ? doc.sliceString(fm.from, fm.to) : editorFrontMatter ? "" : headerText);
+    if (titled) {
+      if (!region || (titleAt >= region.from && titleAt <= region.to)) {
+        decos.push(
+          Decoration.widget({
+            widget: new TitleWidget(titled, !!fm, fm ? "" : headerText.replace(/\n+$/, "")),
+            block: true,
+            side: fm ? 1 : -1,
+          }).range(titleAt)
+        );
+      }
+    }
+
     // The list of works cited, where the page sets it (RefsWidget).
     if (citesNow.refs) {
       const at = refsPlace(doc, tree);
@@ -7544,6 +8144,7 @@
       }),
       tree: CM.syntaxTree(state),
       hidden: state.field(hiddenLinesField, false) || 0,
+      header: state.field(headerField, false) || "",
       lines: state.doc.lines,
       cites: (state.field(citesField, false) || NO_CITES).version,
       equations: equationIndex(state).key,
@@ -7635,6 +8236,9 @@
     // that is numbered otherwise (sectionsMoved).
     if (
       !built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines ||
+      // The header kept out of the text, or whether its source is open: the
+      // title block stands on no line of the text (TitleWidget).
+      built.header !== (state.field(headerField, false) || "") ||
       built.cites !== cites || built.equations !== equationIndex(state).key ||
       sectionsMoved(built.sections, sectionIndex(state), tr.changes)
     ) {
@@ -7771,6 +8375,7 @@
       const byContent =
         tr.docChanged ||
         tr.state.field(hiddenLinesField) !== tr.startState.field(hiddenLinesField) ||
+        tr.state.field(headerField) !== tr.startState.field(headerField) ||
         tr.state.field(citesField).version !== tr.startState.field(citesField).version ||
         CM.syntaxTree(tr.state) !== CM.syntaxTree(tr.startState) ||
         // What the equations were drawn by against what they are now: a
@@ -11198,7 +11803,10 @@
   // caret at the table's end, and not at the cell as the rest of the cell
   // does (measured, 2026-10-03).
   function drawingAt(target) {
-    return target.closest(".mdm-score, .mdm-math--block, .mdm-table, .mdm-figure") || target.closest(".mdm-math");
+    return (
+      target.closest(".mdm-score, .mdm-math--block, .mdm-table, .mdm-figure, .mdm-title-block") ||
+      target.closest(".mdm-math")
+    );
   }
 
   // That drawing when it stands for a block whose source is open: the
@@ -11209,6 +11817,10 @@
     const drawing = drawingAt(target);
     if (!drawing) return null;
     if (drawing.classList.contains("mdm-math--preview")) return drawing;
+    // The title block has no rail, and says so itself (TitleWidget).
+    if (drawing.classList.contains("mdm-title-block")) {
+      return drawing.classList.contains("mdm-title-block--open") ? drawing : null;
+    }
     const rail = drawing.querySelector(":scope > .mdm-chrome");
     return rail && rail.classList.contains("mdm-chrome--open") ? drawing : null;
   }
@@ -11248,6 +11860,24 @@
     const plain = e.detail === 1 && !(e.shiftKey || e.altKey || e.ctrlKey || e.metaKey);
     closingDrawing = plain ? openDrawing(e.target) : null;
     if (closingDrawing) e.preventDefault();
+    // A press on the title block is held whether its source is open or not
+    // (its click is answered in handleChromeClick): the block stands on no
+    // line of the text, so the press has no caret to place, and left to the
+    // browser it hands the document the focus before the header's lines are
+    // there for the caret the click is about to ask for (the harness shows
+    // that much; what a press left to the browser does to the caret in a
+    // real window is known from the other drawings, in the comment over
+    // this function).
+    // And it ends here: held and let through, the second press of a double
+    // click went on to select a word of the document from under a drawing
+    // that has none (repeatedPress), pulling the focus in from inside the
+    // update, which CodeMirror refuses with an error (seen in the harness).
+    // A link in it with the follow modifier down is followed below, as
+    // anywhere.
+    if (e.target.closest(".mdm-title-block") && !(e.target.closest(".mdm-link") && followsLink(e))) {
+      e.preventDefault();
+      return;
+    }
     // A box in a table's cell as well: its click ticks it (tickCell), and
     // the press would give the focus to the box.
     if (e.target.closest(".mdm-chrome, .mdm-table input.mdm-task")) {
@@ -11935,6 +12565,11 @@
     // current match opened.
     if (e.target.closest(".cm-content, .mdm-audio, .mdm-btn--caret, .cm-panels")) return;
     dismissOpenBlock();
+    // And the header's source, where a click on the drawn title opened it:
+    // it is not in the text to be closed by a caret moving out, so it is
+    // asked of the host (leaveHeader). Not from its own button, whose press
+    // is about that source and says what becomes of it.
+    if (!e.target.closest(FM_BUTTON)) leaveHeader(false);
   }
 
   // ---------- The search panel (Ctrl+F) ----------
@@ -12310,6 +12945,33 @@
       return;
     }
     const drawing = drawingAt(e.target);
+    if (drawing && drawing.classList.contains("mdm-title-block")) {
+      // The title block: a click opens the source of the header with the
+      // caret on the line of what was clicked, and a click on it while the
+      // source is open puts the source away, as the second click on a table
+      // does (the owner, 2026-10-03). The host does both (openHeader,
+      // leaveHeader), since the header put away is not in the text. One
+      // plain click: the second press of a double click and a click with a
+      // modifier down do nothing, there being no text under the drawing to
+      // select or to add a caret to.
+      e.preventDefault();
+      const open = closingDrawing;
+      closingDrawing = null;
+      if (e.detail > 1 || e.button !== 0 || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (open === drawing) {
+        // The drawing is what stays put as its source goes (readerPlace).
+        holdDrawing = true;
+        leaveHeader(false);
+        // Left to nobody, as a drawing put away is (putAwayDrawing).
+        leaveDocument();
+        if (view.state.field(focusField, false)) view.dispatch({ effects: setFocused.of(false) });
+        return;
+      }
+      if (drawing.classList.contains("mdm-title-block--open")) return;
+      const part = e.target.closest("[data-mdm-key]");
+      openHeader(part ? part.getAttribute("data-mdm-key") : "title");
+      return;
+    }
     if (drawing) {
       e.preventDefault();
       // Pressed while its source was open: the click puts it away, the
@@ -12464,13 +13126,30 @@
     if (math) return { source: math.getAttribute("data-mdm-source") || "", math: math };
     const table = el.closest(".mdm-table");
     if (table) return { source: table.getAttribute("data-mdm-source") || "", table: table };
+    // The drawn title stands for the header, which is not in the text while
+    // it is drawn alone: the widget carries it.
+    const title = el.closest(".mdm-title-block");
+    if (title) return { source: title.getAttribute("data-mdm-source") || "", title: title };
     const chrome = el.closest(".mdm-chrome--code");
     if (!chrome || !view) return null;
     const pos = view.posAtDOM(chrome);
     const tree = CM.syntaxTree(view.state);
     let node = tree.resolveInner(pos, 1);
-    while (node && node.name !== "FencedCode") node = node.parent;
+    while (node && node.name !== "FencedCode" && node.name !== "FrontMatter") node = node.parent;
     if (!node) return null;
+    if (node.name === "FrontMatter") {
+      // The header's card: the header as written, its fences with it, and
+      // its lines for the pulse.
+      const doc = view.state.doc;
+      const card = [];
+      for (let n = doc.lineAt(node.from).number; n <= doc.lineAt(Math.max(node.from, node.to - 1)).number; n++) {
+        const dom = view.domAtPos(doc.line(n).from).node;
+        const line = dom && (dom.nodeType === 1 ? dom : dom.parentElement);
+        const el = line && line.closest ? line.closest(".cm-line") : null;
+        if (el) card.push(el);
+      }
+      return { source: doc.sliceString(node.from, node.to).replace(/\n+$/, ""), lines: card };
+    }
     const body = fenceBody(node);
     // The DOM lines of the block, for the pulse.
     const lines = [];
@@ -12505,7 +13184,7 @@
     if (!view || !target || !target.closest) return null;
     const rail = target.closest(".mdm-chrome");
     if (rail) return rail;
-    const drawing = target.closest(".mdm-score, .mdm-math--block, .mdm-table");
+    const drawing = target.closest(".mdm-score, .mdm-math--block, .mdm-table, .mdm-title-block");
     if (drawing) return drawing.querySelector(":scope > .mdm-chrome");
     const line = target.closest(".cm-line");
     if (!line || !view.contentDOM.contains(line)) return null;
@@ -12644,6 +13323,8 @@
       pulseBlock(found.math);
     } else if (found.table) {
       pulseBlock(found.table);
+    } else if (found.title) {
+      pulseBlock(found.title);
     } else if (found.lines) {
       found.lines.forEach(pulseBlock);
     }
@@ -13198,6 +13879,7 @@
         // configured ahead of it already updated.
         focusField,
         hiddenLinesField,
+        headerField,
         citesField,
         renderField,
         hyphenationField,
@@ -13228,6 +13910,7 @@
           refreshRailPointer();
           placeOpenRails();
           placeAfterUpdate(update);
+          watchHeaderCaret(update.state);
           if (update.docChanged || update.selectionSet) {
             updateUndoButtons();
             // The outline follows the document and the caret while it is
@@ -13304,6 +13987,8 @@
       if (!pointerHeld) return;
       pointerHeld = false;
       if (heldRebuild && view) view.dispatch({ effects: pointerReleased.of(true) });
+      // And the header's source a press took the carets out of (leaveHeader).
+      releaseHeader();
     };
     window.addEventListener("mouseup", releasePointer, true);
     window.addEventListener("blur", releasePointer);
@@ -14324,7 +15009,7 @@
         tip: fmTip(),
         click: function () {
           if (headerText === "") return;
-          askSetting("frontMatter", editorFrontMatter ? "hidden" : "shown");
+          pinHeader(!headerShown());
         },
       },
       "|",
@@ -14533,24 +15218,6 @@
         multiCursorModifier = nextModifier;
         if (view) view.dispatch({ effects: gestures.reconfigure(gestureExtensions()) });
       }
-      const nextFm = next.frontMatter || "hidden";
-      if (nextFm !== frontMatter) {
-        // The update that follows this message carries the document in the
-        // mode just chosen, and it is dropped while an edit is still
-        // debounced. Send that edit now so the toggle is never swallowed by
-        // a keystroke made a moment earlier.
-        flushEdit();
-        // The button adds or removes the header at the very top of the
-        // document, and what was pressed is a button about the header, so
-        // the update right behind this message takes the editor there. Only
-        // where there is a header to move: the hyphenation menu puts a
-        // document on the hidden mode as it writes a `lang:` into a file
-        // that had none (writeLanguage in extension.js), and nothing about
-        // the text moves there, so a reader choosing a language halfway
-        // down a document stays where they were reading.
-        if (headerText !== "") scrollToTop = true;
-      }
-      frontMatter = nextFm;
       outlineOpen = next.outline === "shown";
       outlineWidth = next.outlineWidth || 250;
       matchSubstring = next.multicursorMatch === "substring";
@@ -14597,27 +15264,67 @@
     if (msg.type !== "update") return;
     const previousHeader = headerText;
     headerText = msg.frontMatter || "";
+    // What the source was open as before this update, for the header that
+    // has just become one a click opened (below).
+    const wasPeeked = editorFrontMatter && !headerPinned;
+    // And the line the reader is on, before anything of this update is
+    // drawn, for the header's lines coming into the text or leaving it with
+    // nobody asking for the top of the document (readerPlace).
+    const wasOpen = editorFrontMatter;
+    const moves = !!view && wasOpen !== !!msg.withFrontMatter;
+    if (moves) noteTitleHeight();
+    const readerAt = moves ? readerPlace() : null;
     // Adopted even when the text below turns out to be the one already in
     // the editor: for a file with no header both modes produce the same
     // text, and the flag still has to follow the setting. Before the
     // language is read, which takes the header from the text only while the
     // text carries it (documentLanguage).
     editorFrontMatter = !!msg.withFrontMatter;
-    if (view && previousHeader !== headerText) applyHyphenation();
+    headerPinned = editorFrontMatter && !!msg.pinned;
+    // Every update is an answer: whatever was asked of the host about the
+    // header has been heard by now.
+    headerLeaving = false;
+    if (view && previousHeader !== headerText) {
+      applyHyphenation();
+      // The rows of the outline carry the numbers the header asks for
+      // (sectionIndex), and no change to the text follows a header kept out
+      // of it.
+      refreshOutline();
+    }
     hiddenLines = msg.hiddenLines || 0;
     updateFrontMatter();
     // Before the text, so that one update never draws the new document under
     // the old numbering. The first update has no view yet: the field takes the
-    // count from the variable as the state is created.
-    if (view && hiddenLines !== view.state.field(hiddenLinesField, false)) {
-      view.dispatch({ effects: setHiddenLines.of(hiddenLines) });
+    // count from the variable as the state is created. The header the title
+    // block is drawn from travels the same way, in the same transaction.
+    if (view) {
+      const effects = [];
+      if (hiddenLines !== view.state.field(hiddenLinesField, false)) effects.push(setHiddenLines.of(hiddenLines));
+      if (headerKey() !== view.state.field(headerField, false)) effects.push(setHeader.of(headerKey()));
+      if (effects.length) view.dispatch({ effects: effects });
     }
     if (!view) {
       if (msg.version !== undefined) base = msg.version;
       init(msg.text);
       return;
     }
-    replaceText(msg.text, msg.version, msg.changes);
+    const applied = replaceText(msg.text, msg.version, msg.changes, !wasOpen && editorFrontMatter);
+    if (readerAt && applied) holdPlace(readerAt, applied);
+    // The caret a click on the drawn title asked for, now that the line it
+    // goes to is in the text; before the scroll, which is what is left
+    // standing (the caret's own scroll would only bring its line into view,
+    // and the header starts at the top).
+    if (headerCaret !== null) {
+      const key = headerCaret;
+      headerCaret = null;
+      caretAtHeaderKey(key);
+    } else if (editorFrontMatter && !headerPinned && !wasPeeked && !inHeader(view.state)) {
+      // A header the host has just opened as a click would have, with no
+      // click behind it: one typed into a file that had none, which is the
+      // text's from the edit that closed it. The carets may have left it by
+      // the time the host says so, and nothing would then put it away.
+      leaveHeader(true);
+    }
     if (scrollToTop) {
       scrollToTop = false;
       const s = scroller();

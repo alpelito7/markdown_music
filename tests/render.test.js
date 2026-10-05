@@ -1595,9 +1595,11 @@ test("the fill and the alignment of a score travel to the PDF", () => {
   assert.ok(texOf(dir).includes("\\definecolor{mdmscorefill}{HTML}{2A2723}"), "the dark paper is missing");
 });
 
-// The title block Quarto draws from the YAML belongs to the header: the editor
-// can keep the header off the screen, and an export from there renders a
-// document that does not open with it either.
+// The title block Quarto draws from the YAML, and the key that takes it off
+// the page, `mdm-front-matter: hidden`. The editor sent it while it could
+// hide the header and drew nothing of the block; it draws the block itself
+// since 2026-10-03 and sends nothing, so the key is a render from the
+// command line's, for a page that is not to open with the block.
 const TITLED_DOC = `---
 title: "A title"
 subtitle: "And a subtitle"
@@ -1630,6 +1632,19 @@ test("the title block comes out only when the header is on screen", () => {
   assert.ok(!html.includes("And a subtitle"), "the subtitle survived");
   assert.ok(!html.includes("somebody"), "the author survived");
   assert.ok(html.includes("Prose."), "the document itself went with the block");
+
+  // Every key Quarto's template asks about before it writes the block has
+  // to go: a header with only its categories, or only the day it was
+  // modified, used to keep the block.
+  for (const [key, value] of [["categories", "[music, harmony]"], ["date-modified", "2026-10-05"]]) {
+    fs.writeFileSync(path.join(dir, "one.mdm"), "---\n" + key + ": " + value + "\nfilters:\n  - mdm\n---\n\nProse.\n");
+    r = runMdm(["render", "one.mdm", "--to", "html"], dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(fs.readFileSync(path.join(dir, "one.html"), "utf8").includes("title-block-header"), key + " alone draws no block to hide");
+    r = runMdm(["render", "one.mdm", "--to", "html", "-M", "mdm-front-matter:hidden"], dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!fs.readFileSync(path.join(dir, "one.html"), "utf8").includes("title-block-header"), "the block of a header with only " + key + " is still there");
+  }
 
   // And the same on paper.
   r = runMdm(

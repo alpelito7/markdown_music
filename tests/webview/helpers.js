@@ -163,7 +163,10 @@ const available = puppeteer && fs.existsSync(CHROME);
 // A tall window on purpose: CodeMirror renders only the lines in view (plus
 // a margin), and the scores and code of example.mdm must all be on screen
 // for the counts the tests make. A test that wants a short pane passes
-// `height`.
+// `height`. 2600 since the editor draws the title block (2026-10-03): the
+// example opens here with its header's source open and its title drawn
+// under the card, 162px that pushed the Python block of the example under
+// the foot of the 2400 it had been ("render the score" stood at 2483).
 async function open(options) {
   const opts = options || {};
   const browser = await puppeteer.launch({
@@ -184,7 +187,7 @@ async function open(options) {
     // pane loses 15px to the vertical one and every column measurement in the
     // other files moves with it.
     ignoreDefaultArgs: opts.bars ? ["--hide-scrollbars"] : [],
-    defaultViewport: { width: 900, height: opts.height || 2400 },
+    defaultViewport: { width: 900, height: opts.height || 2600 },
   });
   OPEN_BROWSERS.add(browser);
   const page = await browser.newPage();
@@ -334,7 +337,7 @@ async function open(options) {
     await rendered(page, opts.scores);
   } else {
     const withFrontMatter = opts.withFrontMatter !== false;
-    await update(page, opts.text || EXAMPLE, withFrontMatter, opts.scores, opts.frontMatter);
+    await update(page, opts.text || EXAMPLE, withFrontMatter, opts.scores, opts.frontMatter, opts.pinned);
   }
   return {
     page,
@@ -367,15 +370,23 @@ test.after(async () => {
 // there is one: the button greys out on a file without one. Any non-empty
 // string will do for a test that is not about that, which is why it defaults
 // to the "x" every caller but that one has always sent.
-async function update(page, disk, withFrontMatter, scores, header) {
+// `pinned` says the open header is there to stay, as the YAML button and the
+// setting leave it: no title block is drawn under it. Left out, the header
+// is open as a click on its drawn title leaves it, with the title under the
+// card, which is the document most tests here were measured on (`open`
+// above). Inside VS Code that state lasts while a caret is in the header:
+// the editor asks the host to put the source away when the carets leave it,
+// and a test that plays no host sees that as one more `header` message.
+async function update(page, disk, withFrontMatter, scores, header, pinned) {
   await page.evaluate(
-    (text, fm, hidden, head) =>
+    (text, fm, hidden, head, stays) =>
       window.postMessage(
         {
           type: "update",
           text: text,
           frontMatter: head,
           withFrontMatter: fm,
+          pinned: fm && stays,
           hiddenLines: hidden,
         },
         "*"
@@ -383,7 +394,8 @@ async function update(page, disk, withFrontMatter, scores, header) {
     toEditor(disk, withFrontMatter),
     withFrontMatter,
     hiddenLines(disk, withFrontMatter),
-    header === undefined ? "x" : header
+    header === undefined ? "x" : header,
+    !!pinned
   );
   await rendered(page, scores);
 }
@@ -537,7 +549,6 @@ function settingsMessage(overrides) {
         scoreFill: "none",
         staffLines: "gray",
         scoreAlign: "center",
-        frontMatter: "shown",
         outline: "hidden",
         outlineWidth: 250,
         multicursorMatch: "word",

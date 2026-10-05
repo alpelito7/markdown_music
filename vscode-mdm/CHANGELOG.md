@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- What a document's YAML header puts at the head of the page is drawn at
+  the head of the document, as the exported page sets it and at the page's
+  sizes and places: the title and the subtitle, the categories and the
+  description, whoever wrote it, beside their affiliations when there are
+  any and with an envelope for an email and the ORCID mark, the date, the
+  day it was modified and the DOI, the abstract and the keywords. A click on
+  it opens the YAML on a card over it, with the caret at the end of what was
+  clicked, and the drawn block under the card follows what is typed; the
+  YAML goes away when the caret leaves it, on a click in the text, in the
+  margin or on the block again, as with a table. The YAML button of the
+  toolbar shows the YAML in place of the drawing, and what it shows stays
+  until the button is pressed again; while the caret is in a YAML shown
+  that way, the block is drawn under it as it is typed. The links in it (an
+  author's address, the DOI) are followed with `Ctrl+click`. A copy button
+  stands in the margin beside the drawn block while the pointer is on it,
+  and beside the YAML for as long as it is shown; it copies the header as
+  written, its `---` fences with it.
+  The date is printed in the language of the document, in the style or the
+  pattern `date-format` names (`long`, `D [de] MMMM [de] YYYY`), as the page
+  prints it. Where the editor does not have the words the page has, it
+  leaves the date as written: a language its browser carries no words for
+  (Basque, Galician, Welsh and others), a short month or weekday outside
+  English, a month in Russian, Polish or Ukrainian.
+  The editor used to show either nothing of the header or its YAML, never
+  the block, and an export from an editor that was hiding the header came
+  out without its title block: every export opens with it now.
+- `mdm.frontMatter` is what the editor shows of the YAML header, in every
+  document: `hidden`, the default, puts the YAML away and draws what it
+  prints at the head of the page, and `shown` keeps the YAML in view in
+  place of the drawing. The YAML button of the toolbar switches between the
+  two, and the choice is remembered. The setting no longer reaches the
+  export: it used to take the title off the exported page when it hid the
+  header.
+- The YAML header coming into view or going while the page is scrolled down
+  leaves the line being read where it is. It used to move by the height of
+  the header.
+- The YAML button leaves the caret where it was when it brings the header
+  into view. In a document nobody had clicked in yet, the caret ended up in
+  the header's first line.
+- On the exported page, a title written as a block of YAML (`title: >`) no
+  longer stands 32 px above its rule.
 - A PDF is the exported page printed by Chrome, Chromium or Microsoft Edge,
   whether or not the computer has TeX: the document as the editor shows it,
   in its faces and with its scores and equations as they are drawn on

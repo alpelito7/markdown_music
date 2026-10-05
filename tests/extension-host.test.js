@@ -319,6 +319,20 @@ test("setSetting drops unknown keys and disallowed values", async () => {
 
 const DOC = "---\ntitle: t\n---\n\nIntro\n\n```{.abc .play}\nX:1\nK:C\nC\n```\n";
 
+// An editor with the source of the header in view, as the setting keeps it
+// there (`mdm.frontMatter: shown`, which the YAML button writes): the first
+// lines of the text, there to stay. The setting opened every header until
+// 2026-10-03, spoke for a day only for a header that draws nothing, and is
+// the word on every header again since 2026-10-05 ("mdm.frontMatter: the
+// YAML in view", below). A click on the drawn title of a header that is put
+// away is the other way in, and what it opens is put away by the carets
+// leaving it ("The two ways a titled header is opened").
+async function bootOpen(text, settings) {
+  const h = boot(text, Object.assign({ "mdm.frontMatter": "shown" }, settings || {}));
+  await h.receive({ type: "ready" });
+  return h;
+}
+
 test("ready is answered with the text as written and the header kept aside", async () => {
   const h = boot(DOC, {});
   await h.receive({ type: "ready" });
@@ -340,22 +354,395 @@ test("the update says how many lines of the file the editor is not being sent", 
   await hidden.receive({ type: "ready" });
   assert.equal(hidden.posted[0].hiddenLines, 4);
   assert.ok(hidden.posted[0].text.startsWith("Intro\n"));
-  // Shown, the editor holds the file and there is nothing to count.
-  const shown = boot(DOC, { "mdm.frontMatter": "shown" });
-  await shown.receive({ type: "ready" });
-  assert.equal(shown.posted[0].hiddenLines, 0);
+  // Open, the editor holds the file and there is nothing to count.
+  const shown = await bootOpen(DOC);
+  assert.equal(shown.posted[shown.posted.length - 1].hiddenLines, 0);
   // A file with no header: the two modes agree and both count nothing.
   const bare = boot("Intro\n", {});
   await bare.receive({ type: "ready" });
   assert.equal(bare.posted[0].hiddenLines, 0);
 });
 
-test("with mdm.frontMatter shown, the update carries the header inline", async () => {
-  const h = boot(DOC, { "mdm.frontMatter": "shown" });
+test("the header message opens the header's source and puts it away, and the press is the setting", async () => {
+  // A document comes up with the header put away where the setting says
+  // nothing (the test above), and the answer to the message is the text in
+  // the state asked for.
+  const h = boot(DOC, {});
   await h.receive({ type: "ready" });
-  const msg = h.posted[0];
+  await h.receive({ type: "header", open: true });
+  assert.equal(h.posted.length, 2, "one update answers the message");
+  let msg = h.posted[1];
+  assert.equal(msg.type, "update");
   assert.equal(msg.withFrontMatter, true);
+  assert.equal(msg.pinned, true);
   assert.ok(msg.text.startsWith("---\ntitle: t\n---\n"));
+  assert.equal(msg.frontMatter, "---\ntitle: t\n---\n");
+  // Remembered, where every other button of the bar is, though this header
+  // draws a title: one setting for every header (the owner, 2026-10-05).
+  assert.deepEqual(vscode._state.updates, [
+    { key: "mdm.frontMatter", value: "shown", target: vscode.ConfigurationTarget.Global },
+  ]);
+  await h.receive({ type: "header", open: false });
+  msg = h.posted[2];
+  assert.equal(msg.withFrontMatter, false);
+  assert.ok(msg.text.startsWith("Intro\n"));
+  assert.equal(msg.hiddenLines, 4);
+  assert.deepEqual(vscode._state.updates.map((u) => u.value), ["shown", "hidden"]);
+  // Anything but `true` puts it away: the value comes off the wire.
+  await h.receive({ type: "header", open: true });
+  await h.receive({ type: "header", open: "yes" });
+  assert.equal(h.posted[h.posted.length - 1].withFrontMatter, false);
+  assert.deepEqual(vscode._state.updates.map((u) => u.value), ["shown", "hidden", "shown", "hidden"]);
+  // A file with no header has nothing to open and nothing to remember: the
+  // button is greyed out there, and a message that comes all the same is
+  // answered with the text as it is.
+  // Where the reader keeps headers in view it would have turned that off
+  // for every document.
+  const none = boot("Intro\n", { "mdm.frontMatter": "shown" });
+  await none.receive({ type: "ready" });
+  await none.receive({ type: "header", open: true });
+  assert.equal(last(none).withFrontMatter, false);
+  assert.deepEqual(vscode._state.updates, [], "a file with no header wrote the setting");
+});
+
+// ---------- The two ways a titled header is opened ----------
+
+// Asked for by the owner on 2026-10-04. A click on the drawn title opens the
+// source over the drawing and it goes away when the carets leave it, as a
+// table's does; the YAML button shows the source in place of the drawing and
+// it stays until the button is pressed again. The webview has the carets,
+// so it asks for both, and says which with `peek`; the host answers with
+// the text and with `pinned`, which is what the webview draws by (no title
+// under a source that is there to stay) and what tells it whether to ask
+// for the source to be put away at all.
+test("a click on the drawn title opens a source that the carets leaving it put away", async () => {
+  const h = boot(DOC, {});
+  await h.receive({ type: "ready" });
+  assert.equal(h.posted[0].pinned, false);
+  await h.receive({ type: "header", open: true, peek: true });
+  assert.equal(h.posted.length, 2, "one update answers the click");
+  assert.equal(last(h).withFrontMatter, true);
+  assert.equal(last(h).pinned, false, "a source opened by a click came up as one that stays");
+  assert.ok(last(h).text.startsWith("---\ntitle: t\n---\n"));
+  await h.receive({ type: "header", open: false, peek: true });
+  assert.equal(h.posted.length, 3);
+  assert.equal(last(h).withFrontMatter, false);
+  assert.equal(last(h).pinned, false);
+  assert.ok(last(h).text.startsWith("Intro\n"));
+  assert.deepEqual(vscode._state.updates, [], "a click on the title wrote a setting");
+  // Asked again with nothing open: answered, and nothing changes.
+  await h.receive({ type: "header", open: false, peek: true });
+  assert.equal(h.posted.length, 4, "the webview waits for an answer either way");
+  assert.equal(last(h).withFrontMatter, false);
+  // Anything but `true` is not the click's word: the value comes off the
+  // wire, and the message is then read as the button's.
+  await h.receive({ type: "header", open: true, peek: "yes" });
+  assert.equal(last(h).withFrontMatter, true);
+  assert.equal(last(h).pinned, true);
+});
+
+test("the YAML button shows a source that stays, and the carets leaving it change nothing", async () => {
+  const h = boot(DOC, { "mdm.frontMatter": "hidden" });
+  await h.receive({ type: "ready" });
+  await h.receive({ type: "header", open: true });
+  assert.equal(last(h).withFrontMatter, true);
+  assert.equal(last(h).pinned, true, "the button's source is not said to stay");
+  const from = h.posted.length;
+  await h.receive({ type: "header", open: false, peek: true });
+  assert.equal(h.posted.length, from + 1, "the webview waits for an answer either way");
+  assert.equal(last(h).withFrontMatter, true, "the carets leaving put away what the button shows");
+  assert.equal(last(h).pinned, true);
+  // A click on the title cannot reach it either: there is no title drawn
+  // under a source that stays, and a message that says otherwise is late.
+  await h.receive({ type: "header", open: true, peek: true });
+  assert.equal(last(h).pinned, true, "a late click took the button's source for its own");
+  // The button puts it away.
+  await h.receive({ type: "header", open: false });
+  assert.equal(last(h).withFrontMatter, false);
+  assert.equal(last(h).pinned, false);
+  // And pressed over a source a click had opened, it keeps that source.
+  await h.receive({ type: "header", open: true, peek: true });
+  assert.equal(last(h).pinned, false);
+  await h.receive({ type: "header", open: true });
+  assert.equal(last(h).withFrontMatter, true);
+  assert.equal(last(h).pinned, true);
+  await h.receive({ type: "header", open: false, peek: true });
+  assert.equal(last(h).withFrontMatter, true);
+  // The button's presses are the setting's, and the clicks' are not: one
+  // write for each of the three presses, and none for anything asked with
+  // `peek`.
+  assert.deepEqual(vscode._state.updates.map((u) => u.value), ["shown", "hidden", "shown"]);
+});
+
+test("a click opens nothing where there is no title to click on", async () => {
+  // A message that names a title the document no longer draws: the header
+  // was rewritten beside the editor between the click and its arrival.
+  const bare = boot("---\nlang: en\n---\n\nIntro\n", {});
+  await bare.receive({ type: "ready" });
+  await bare.receive({ type: "header", open: true, peek: true });
+  assert.equal(bare.posted.length, 2);
+  assert.equal(last(bare).withFrontMatter, false, "a header that draws nothing was opened by a click on its title");
+  assert.deepEqual(vscode._state.updates, [], "and the setting was written for it");
+  const none = boot("Intro\n", {});
+  await none.receive({ type: "ready" });
+  await none.receive({ type: "header", open: true, peek: true });
+  assert.equal(last(none).withFrontMatter, false);
+});
+
+// ---------- mdm.frontMatter: the YAML in view ----------
+
+// One setting for every header, which the YAML button writes (the owner,
+// 2026-10-05): `shown` keeps the YAML of a header in view at the head of the
+// document, there to stay, and `hidden`, the default, puts it away, where the
+// editor draws the title block in its place if the header has one. For a day
+// before that it spoke only for a header that draws nothing, and a titled
+// one was drawn whatever it said.
+const BARE = "---\nlang: en\n---\n\nIntro\n";
+const last = (h) => h.posted[h.posted.length - 1];
+const settingTouched = () =>
+  vscode._state.configurationListeners.forEach((l) =>
+    l({ affectsConfiguration: (s) => s === "mdm" || s === "mdm.frontMatter" })
+  );
+
+test("mdm.frontMatter keeps a header's YAML in view, whatever the header draws", async () => {
+  // A header that draws nothing, a title, a name on its own, an abstract
+  // with nothing over it.
+  for (const text of [BARE, DOC, "---\nauthor: A\n---\n\nIntro\n", "---\nlang: en\nabstract: Short.\n---\n\nIntro\n"]) {
+    const kept = boot(text, { "mdm.frontMatter": "shown" });
+    await kept.receive({ type: "ready" });
+    assert.equal(kept.posted[0].withFrontMatter, true, text);
+    assert.ok(kept.posted[0].text.startsWith("---\n"), text);
+    assert.equal(kept.posted[0].hiddenLines, 0);
+    assert.equal(settingsOf(kept).frontMatter, "shown");
+    // There to stay: the carets leaving it do not put it away.
+    assert.equal(kept.posted[0].pinned, true, text);
+    await kept.receive({ type: "header", open: false, peek: true });
+    assert.equal(last(kept).withFrontMatter, true, "the carets leaving put away a header the setting keeps in view");
+    // Put away by default, and for a value that is neither of the two.
+    for (const settings of [{}, { "mdm.frontMatter": "hidden" }, { "mdm.frontMatter": "always" }]) {
+      const away = boot(text, settings);
+      await away.receive({ type: "ready" });
+      assert.equal(away.posted[0].withFrontMatter, false, JSON.stringify(settings));
+      assert.equal(away.posted[0].pinned, false);
+      assert.ok(away.posted[0].text.startsWith("Intro\n"), text);
+      assert.equal(settingsOf(away).frontMatter, "hidden");
+    }
+  }
+  // A file with no header has none to keep, and says so.
+  const none = boot("Intro\n", { "mdm.frontMatter": "shown" });
+  await none.receive({ type: "ready" });
+  assert.equal(none.posted[0].withFrontMatter, false);
+  assert.equal(none.posted[0].pinned, false);
+});
+
+test("the YAML button writes the setting, and every editor follows it", async () => {
+  const h = boot(BARE, {});
+  await h.receive({ type: "ready" });
+  const other = openPanel(h.provider, "---\nlang: es\n---\n\nOtro\n", "file:///other.mdm");
+  await other.receive({ type: "ready" });
+  const titled = openPanel(h.provider, DOC, "file:///titled.mdm");
+  await titled.receive({ type: "ready" });
+  const from = h.posted.length;
+  await h.receive({ type: "header", open: true });
+  // The press is answered at once, before the setting has gone anywhere.
+  assert.deepEqual(h.posted.slice(from).map((m) => m.type), ["update"]);
+  assert.equal(h.posted[from].withFrontMatter, true);
+  assert.equal(h.posted[from].pinned, true);
+  assert.ok(h.posted[from].text.startsWith("---\nlang: en\n---\n"));
+  // And remembered, where every other button of the bar is.
+  assert.deepEqual(vscode._state.updates, [
+    { key: "mdm.frontMatter", value: "shown", target: vscode.ConfigurationTarget.Global },
+  ]);
+  // VS Code then tells every editor (the mock fires nothing by itself).
+  settingTouched();
+  assert.equal(last(other).withFrontMatter, true, "the other editor did not follow");
+  assert.equal(last(other).pinned, true, "and what the setting opened there is not said to stay");
+  assert.ok(last(other).text.startsWith("---\nlang: es\n---\n"));
+  assert.equal(last(titled).withFrontMatter, true, "a header with a title was left out of the setting");
+  assert.equal(last(titled).pinned, true);
+  assert.ok(last(titled).text.startsWith("---\ntitle: t\n---\n"));
+  assert.equal(last(h).withFrontMatter, true);
+  // The same press from the titled document puts them all away, and that is
+  // remembered too.
+  await titled.receive({ type: "header", open: false });
+  assert.equal(last(titled).withFrontMatter, false);
+  assert.deepEqual(vscode._state.updates[1], {
+    key: "mdm.frontMatter", value: "hidden", target: vscode.ConfigurationTarget.Global,
+  });
+  settingTouched();
+  assert.equal(last(other).withFrontMatter, false);
+  assert.equal(last(other).text, "Otro\n");
+  assert.equal(last(h).withFrontMatter, false);
+  assert.equal(last(h).text, "Intro\n");
+});
+
+test("a press that asks for what the setting already says writes nothing", async () => {
+  for (const text of [BARE, DOC]) {
+    const h = boot(text, { "mdm.frontMatter": "shown" });
+    await h.receive({ type: "ready" });
+    await h.receive({ type: "header", open: true });
+    assert.deepEqual(vscode._state.updates, [], text);
+  }
+  // A header that the editor typed stays open over a setting that hides
+  // them, and the press that puts it away has nothing to change either.
+  const typed = boot("Body\n", {});
+  await typed.receive({ type: "ready" });
+  await typed.receive({ type: "edit", text: "---\nlang: en\n---\n\nBody\n", withFrontMatter: false, seq: 1, base: 1 });
+  assert.equal(last(typed).withFrontMatter, true);
+  // It has no drawing to go to, so it stays as typed when the carets leave.
+  assert.equal(last(typed).pinned, true);
+  await typed.receive({ type: "header", open: false, peek: true });
+  assert.equal(last(typed).withFrontMatter, true, "a typed header that draws nothing went when the carets left it");
+  await typed.receive({ type: "header", open: false });
+  assert.equal(last(typed).withFrontMatter, false);
+  assert.deepEqual(vscode._state.updates, []);
+});
+
+test("the setting, once touched, speaks for every header, and leaves alone what a click has open", async () => {
+  // Written in settings.json by hand, or by the button of another editor.
+  for (const text of [BARE, DOC]) {
+    const h = boot(text, {});
+    await h.receive({ type: "ready" });
+    vscode._state.settings["mdm.frontMatter"] = "shown";
+    settingTouched();
+    assert.equal(last(h).type, "update");
+    assert.equal(last(h).withFrontMatter, true, text);
+    assert.equal(last(h).pinned, true, text);
+    vscode._state.settings["mdm.frontMatter"] = "hidden";
+    settingTouched();
+    assert.equal(last(h).withFrontMatter, false, text);
+  }
+  // A source a click on the drawn title has open is the carets' to put
+  // away: the setting touched to `hidden`, which is what it said, leaves it
+  // open, and touched to `shown` it makes it one that stays.
+  const clicked = boot(DOC, { "mdm.frontMatter": "hidden" });
+  await clicked.receive({ type: "ready" });
+  await clicked.receive({ type: "header", open: true, peek: true });
+  settingTouched();
+  assert.equal(last(clicked).withFrontMatter, true, "the setting closed a source a click had open");
+  assert.equal(last(clicked).pinned, false);
+  vscode._state.settings["mdm.frontMatter"] = "shown";
+  settingTouched();
+  assert.equal(last(clicked).withFrontMatter, true);
+  assert.equal(last(clicked).pinned, true, "a source a click had open was not made to stay by the setting");
+  await clicked.receive({ type: "header", open: false, peek: true });
+  assert.equal(last(clicked).withFrontMatter, true);
+  // Another setting changing is not this one touched: a typed header kept
+  // open over `hidden` stays where it is.
+  const typed = boot("Body\n", {});
+  await typed.receive({ type: "ready" });
+  await typed.receive({ type: "edit", text: "---\nlang: en\n---\n\nBody\n", withFrontMatter: false, seq: 1, base: 1 });
+  vscode._state.settings["mdm.outline"] = "shown";
+  vscode._state.configurationListeners.forEach((l) => l({ affectsConfiguration: (s) => s === "mdm" }));
+  assert.equal(last(typed).withFrontMatter, true);
+  // And this one touched puts it away, as it does any header that stays.
+  settingTouched();
+  assert.equal(last(typed).withFrontMatter, false);
+});
+
+test("a header written into a file beside the editor comes into view where headers are kept, and not otherwise", async () => {
+  for (const [setting, open] of [["shown", true], ["hidden", false]]) {
+    for (const header of ["---\nlang: en\n---\n", "---\ntitle: t\n---\n"]) {
+      const h = boot("Intro\n", { "mdm.frontMatter": setting });
+      await h.receive({ type: "ready" });
+      assert.equal(h.posted[0].withFrontMatter, false);
+      vscode._state.documents.set("file:///doc.mdm", header + "\nIntro\n");
+      vscode._state.textDocumentListeners.forEach((l) => l({ document: h.document }));
+      assert.equal(last(h).withFrontMatter, open, setting + " " + header);
+      assert.equal(last(h).pinned, open, setting + " " + header);
+      assert.equal(last(h).text.startsWith("---\n"), open, setting + " " + header);
+      // Brought out when it is written, not at every change of a document
+      // that has one: put away by the button, it stays put away through
+      // what is written next.
+      if (open) {
+        await h.receive({ type: "header", open: false });
+        vscode._state.documents.set("file:///doc.mdm", header + "\nIntro, and more\n");
+        vscode._state.textDocumentListeners.forEach((l) => l({ document: h.document }));
+        assert.equal(last(h).withFrontMatter, false, "the header came out again at the next change");
+      }
+    }
+  }
+  // A title taken out of a header a click has open, in the text editor
+  // beside this one: it is still the carets' to put away, with no patch of
+  // the file's lines sent across a change that opened or closed nothing.
+  const untitled = DOC.replace("title: t\n", "lang: en\n");
+  const change = { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 8 } }, text: "lang: en" };
+  const peeked = boot(DOC, {});
+  await peeked.receive({ type: "ready" });
+  await peeked.receive({ type: "header", open: true, peek: true });
+  vscode._state.documents.set("file:///doc.mdm", untitled);
+  vscode._state.textDocumentListeners.forEach((l) => l({ document: peeked.document, contentChanges: [change] }));
+  assert.equal(last(peeked).withFrontMatter, true);
+  assert.equal(last(peeked).pinned, false);
+  await peeked.receive({ type: "header", open: false, peek: true });
+  assert.equal(last(peeked).withFrontMatter, false);
+  // And a header taken out of the file altogether leaves none open, so the
+  // one written there next comes up as any other does: put away where a
+  // click had the first one open, and in view where headers are kept.
+  for (const [setting, back] of [["hidden", false], ["shown", true]]) {
+    const h = boot(DOC, { "mdm.frontMatter": setting });
+    await h.receive({ type: "ready" });
+    if (setting === "hidden") await h.receive({ type: "header", open: true, peek: true });
+    assert.equal(last(h).withFrontMatter, true, setting);
+    vscode._state.documents.set("file:///doc.mdm", "Intro\n");
+    vscode._state.textDocumentListeners.forEach((l) => l({ document: h.document }));
+    // Nor is it said to stay, the header that did having gone.
+    assert.equal(last(h).withFrontMatter, false, setting);
+    assert.equal(last(h).pinned, false, setting);
+    vscode._state.documents.set("file:///doc.mdm", DOC);
+    vscode._state.textDocumentListeners.forEach((l) => l({ document: h.document }));
+    assert.equal(last(h).withFrontMatter, back, setting);
+    assert.equal(last(h).pinned, back, setting);
+  }
+});
+
+test("a header typed after the open one was deleted stays on screen", async () => {
+  // The editor still writes as though its text held a header, the file has
+  // none, and the one typed next used to be lifted off the screen by the
+  // echo once a document with no header counted as having none open.
+  const h = await bootOpen(DOC);
+  await h.receive({ type: "edit", text: "Intro\n", withFrontMatter: true, seq: 1, base: 1 });
+  assert.equal(h.document.getText(), "Intro\n");
+  const typed = "---\ntitle: again\n---\n\nIntro\n";
+  const from = h.posted.length;
+  await h.receive({ type: "edit", text: typed, withFrontMatter: true, seq: 2, base: 2 });
+  assert.equal(h.document.getText(), typed);
+  const update = h.posted.slice(from).filter((m) => m.type === "update");
+  assert.equal(update.length, 1, "the editor was not told of the header it now has");
+  assert.equal(update[0].withFrontMatter, true);
+  assert.equal(update[0].text, typed);
+  assert.equal(update[0].frontMatter, "---\ntitle: again\n---\n");
+});
+
+test("a typed header that draws a title goes to its drawing when the carets leave it, where headers are put away", async () => {
+  // As a table just typed does: it is open as a click on its title would
+  // have left it. Into a file that had no header, and into one whose header
+  // a click had open and the edit before took out.
+  for (const had of [false, true]) {
+    const h = boot(had ? DOC : "Intro\n", {});
+    await h.receive({ type: "ready" });
+    if (had) await h.receive({ type: "header", open: true, peek: true });
+    await h.receive({ type: "edit", text: "Intro\n", withFrontMatter: true, seq: 1, base: 1 });
+    const typed = "---\ntitle: again\n---\n\nIntro\n";
+    await h.receive({ type: "edit", text: typed, withFrontMatter: true, seq: 2, base: 2 });
+    const update = h.posted.filter((m) => m.type === "update").pop();
+    assert.equal(update.withFrontMatter, true);
+    assert.equal(update.pinned, false, "a typed header with a title came up as one that stays");
+    await h.receive({ type: "header", open: false, peek: true });
+    assert.equal(last(h).withFrontMatter, false);
+    assert.equal(last(h).text, "Intro\n");
+    assert.equal(h.document.getText(), typed, "putting the header away changed the file");
+    assert.deepEqual(vscode._state.updates, [], "a typed header wrote the setting");
+  }
+  // Where headers are kept in view it stays, as any header does there.
+  const kept = boot("Intro\n", { "mdm.frontMatter": "shown" });
+  await kept.receive({ type: "ready" });
+  const typed = "---\ntitle: again\n---\n\nIntro\n";
+  await kept.receive({ type: "edit", text: typed, withFrontMatter: false, seq: 1, base: 1 });
+  assert.equal(last(kept).withFrontMatter, true);
+  assert.equal(last(kept).pinned, true, "a typed header was not kept in view where headers are");
+  await kept.receive({ type: "header", open: false, peek: true });
+  assert.equal(last(kept).withFrontMatter, true);
 });
 
 // ---------- edit / echo ----------
@@ -572,19 +959,20 @@ test("a header typed into a header-less file while headers are hidden stays on s
   assert.deepEqual(after.map((m) => m.type), ["applied", "update"]);
   assert.equal(after[1].text, typed, "the header stays in the editor's text");
   assert.equal(after[1].withFrontMatter, true);
+  // With a title to draw, it is open as a click on that title leaves it.
+  assert.equal(after[1].pinned, false);
   assert.equal(after[1].hiddenLines, 0);
   // An edit made on that text is read as carrying the header, not doubled.
   await h.receive({ type: "edit", text: typed + "More\n", withFrontMatter: true, seq: 2, base: 2 });
   assert.equal(h.document.getText(), typed + "More\n");
-  // The button offers to hide it, and a press does, though the stored
-  // setting does not change.
+  // The button offers to hide it, and a press does.
   const pressed = h.posted.length;
-  await h.receive({ type: "setSetting", key: "frontMatter", value: "hidden" });
+  await h.receive({ type: "header", open: false });
   const back = h.posted.slice(pressed);
-  assert.deepEqual(back.map((m) => m.type), ["settings", "update"]);
-  assert.equal(back[1].withFrontMatter, false);
-  assert.equal(back[1].text, "Body\nMore\n");
-  assert.equal(back[1].hiddenLines, 4);
+  assert.deepEqual(back.map((m) => m.type), ["update"]);
+  assert.equal(back[0].withFrontMatter, false);
+  assert.equal(back[0].text, "Body\nMore\n");
+  assert.equal(back[0].hiddenLines, 4);
 });
 
 // ---------- CRLF (the caret jump on Windows) ----------
@@ -604,9 +992,10 @@ test("a CRLF document reaches the editor in LF, header and all", async () => {
   await h.receive({ type: "ready" });
   assert.ok(!h.posted[0].text.includes("\r"));
   assert.ok(!h.posted[0].frontMatter.includes("\r"));
-  const shown = boot(CRLF_DOC, { "mdm.frontMatter": "shown" });
-  await shown.receive({ type: "ready" });
-  assert.ok(!shown.posted[0].text.includes("\r"));
+  const shown = await bootOpen(CRLF_DOC);
+  const open = shown.posted[shown.posted.length - 1];
+  assert.equal(open.withFrontMatter, true);
+  assert.ok(!open.text.includes("\r"));
 });
 
 test("an edit on a CRLF document is written back with its CRLFs", async () => {
@@ -658,13 +1047,12 @@ test("a CRLF document typed into over and over neither grows nor echoes", async 
   assert.equal(h.document.getText(), CRLF_DOC + "x\r\n".repeat(5));
 });
 
-test("an edit made in shown mode is honoured after a toggle to hidden", async () => {
+test("an edit made with the header open is honoured after the header is put away", async () => {
   // The withFrontMatter flag travels with the text: an edit written while the
-  // header was shown must not be reinterpreted under the new setting.
-  const h = boot(DOC, { "mdm.frontMatter": "shown" });
-  await h.receive({ type: "ready" });
-  const editorText = h.posted[0].text.replace("Intro", "Edited");
-  vscode._state.settings["mdm.frontMatter"] = "hidden";
+  // header was open must not be read as a text without one.
+  const h = await bootOpen(DOC);
+  const editorText = h.posted[h.posted.length - 1].text.replace("Intro", "Edited");
+  await h.receive({ type: "header", open: false });
   await h.receive({ type: "edit", text: editorText, withFrontMatter: true });
   assert.equal(h.document.getText(), DOC.replace("Intro", "Edited"));
 });
@@ -693,18 +1081,19 @@ test("changes to other documents are ignored", async () => {
   assert.equal(h.posted.length, before);
 });
 
-test("an mdm configuration change posts settings and a re-mapped update", async () => {
-  const h = boot(DOC, {});
-  await h.receive({ type: "ready" });
+test("an mdm configuration change posts settings and the document behind them", async () => {
+  const h = await bootOpen(DOC);
   const before = h.posted.length;
-  vscode._state.settings["mdm.frontMatter"] = "shown";
+  vscode._state.settings["mdm.outline"] = "shown";
   vscode._state.configurationListeners.forEach((l) =>
     l({ affectsConfiguration: (s) => s === "mdm" })
   );
   assert.equal(h.posted.length, before + 2);
   const settingsMsg = h.posted[before];
   assert.equal(settingsMsg.type, "settings");
-  assert.equal(settingsMsg.settings.frontMatter, "shown");
+  assert.equal(settingsMsg.settings.outline, "shown");
+  // The update still says what this editor is showing of the header, which
+  // no setting decides: open here, and left open.
   const update = h.posted[before + 1];
   assert.equal(update.type, "update");
   assert.equal(update.withFrontMatter, true);
@@ -985,7 +1374,7 @@ test("a change to mdm.theme sends a palette, other mdm changes do not", async ()
   await h.receive({ type: "ready" });
   h.posted.length = 0;
   vscode._state.configurationListeners.forEach((l) =>
-    l({ affectsConfiguration: (s) => s === "mdm" || s === "mdm.frontMatter" })
+    l({ affectsConfiguration: (s) => s === "mdm" || s === "mdm.outline" })
   );
   assert.equal(h.posted.filter((m) => m.type === "palette").length, 0);
   h.posted.length = 0;
@@ -4024,7 +4413,6 @@ test("the export carries the look the editor is showing", async () => {
       "mdm.scoreFill": "brass",
       "mdm.staffLines": "ink",
       "mdm.scoreAlign": "left",
-      "mdm.frontMatter": "shown",
     },
     seedTheme("#e6db74")
   );
@@ -4033,11 +4421,14 @@ test("the export carries the look the editor is showing", async () => {
   assert.equal(look["mdm-score-fill"], "brass");
   assert.equal(look["mdm-staff-lines"], "ink");
   assert.equal(look["mdm-score-align"], "left");
-  // What the editor is showing of the header travels too: the title block
-  // Quarto draws from the YAML comes out only when the YAML is on screen.
-  assert.equal(look["mdm-front-matter"], "shown");
-  const hidden = lookOf(await exportWith("html", {}, seedTheme("#e6db74")));
-  assert.equal(hidden["mdm-front-matter"], "hidden", "the default is a hidden header");
+  // Nothing travels about the header: the editor draws the title block the
+  // YAML asks for whether the header's source is open or put away, so the
+  // page opens with it, which is what the filter does when it is told
+  // nothing. `mdm-front-matter: hidden` used to travel from an editor that
+  // was hiding the header, and took the block off the page.
+  assert.ok(!("mdm-front-matter" in look), "the export still says what the editor shows of the header");
+  const plain = lookOf(await exportWith("html", {}, seedTheme("#e6db74")));
+  assert.ok(!("mdm-front-matter" in plain), "the export took the title block off the page");
   // And the face the words are in. It is named on every render, the default
   // included, because the filter's own fallback is the other one: `bin/mdm
   // render` passes no look at all and keeps the sans page it always had, so
@@ -4181,9 +4572,8 @@ test("a language from the menu goes into the header, and the editor is told", as
   assert.equal(msg.type, "update");
   assert.equal(msg.frontMatter, "---\ntitle: t\nlang: es\n---\n");
   assert.ok(msg.text.startsWith("Intro\n"), "the hidden header reached the editor's text");
-  // Shown, the same line lands, and the editor's text carries it.
-  const shown = boot(DOC, { "mdm.frontMatter": "shown" });
-  await shown.receive({ type: "ready" });
+  // Open, the same line lands, and the editor's text carries it.
+  const shown = await bootOpen(DOC);
   await shown.receive({ type: "setLanguage", lang: "es" });
   assert.equal(shown.document.getText(), written);
   assert.ok(shown.posted[shown.posted.length - 1].text.startsWith("---\ntitle: t\nlang: es\n---\n"));
@@ -4198,8 +4588,8 @@ test("a file with no header gains one, and the margin numbers move with it", asy
   assert.equal(msg.text, "Intro\n");
   assert.equal(msg.hiddenLines, 4);
   assert.equal(msg.frontMatter, "---\nlang: fr\n---\n");
-  // The document was already hiding the header, so nothing about the mode
-  // was written or said.
+  // Nothing is stored and no setting is spoken of: whether the header's
+  // source is open is this editor's own state.
   assert.deepEqual(h.posted.filter((m) => m.type === "settings"), []);
   assert.deepEqual(vscode._state.updates, []);
 });
@@ -4207,24 +4597,22 @@ test("a file with no header gains one, and the margin numbers move with it", asy
 // A reader who picks a language for a file with no header asked for word
 // division and not for three lines of YAML over the document. The header is
 // written all the same, since that is where the language of a document goes,
-// and the document is put on the hidden mode as it goes in, so the header
-// never appears on screen; the button beside the menu, greyed while the file
-// had no header, is what opens it from then on. The mode is the editor's own
-// setting and not the document's, so it goes into settings.json and every
-// open document hides its header with it.
-test("a header the menu creates comes up hidden, and the button can open it", async () => {
-  const h = boot("Intro\n", { "mdm.frontMatter": "shown" });
+// and it comes up put away, so it never appears on screen; the button beside
+// the menu, greyed while the file had no header, is what opens it from then
+// on. An editor can be holding the header open over a file that has none (a
+// header typed there and deleted again leaves it so), and that is the case
+// that would show the new one.
+test("a header the menu creates comes up put away, and the button can open it", async () => {
+  const h = boot("Intro\n", {});
   await h.receive({ type: "ready" });
-  assert.equal(h.posted[0].withFrontMatter, true, "the file had a header already");
+  const typed = "---\ntitle: typed\n---\n\nIntro\n";
+  await h.receive({ type: "edit", text: typed, withFrontMatter: false, seq: 1, base: 1 });
+  await h.receive({ type: "edit", text: "Intro\n", withFrontMatter: true, seq: 2, base: 2 });
+  assert.equal(h.document.getText(), "Intro\n");
+  const from = h.posted.length;
   await h.receive({ type: "setLanguage", lang: "en" });
   assert.equal(h.document.getText(), "---\nlang: en\n---\n\nIntro\n");
-  assert.deepEqual(
-    vscode._state.updates.map((u) => [u.key, u.value]),
-    [["mdm.frontMatter", "hidden"]],
-    "the mode was not written"
-  );
-  const settings = h.posted.filter((m) => m.type === "settings").pop();
-  assert.equal(settings.settings.frontMatter, "hidden", "the editor was not told");
+  assert.deepEqual(vscode._state.updates, [], "something was stored");
   const msg = h.posted[h.posted.length - 1];
   assert.equal(msg.type, "update");
   assert.equal(msg.text, "Intro\n");
@@ -4233,28 +4621,51 @@ test("a header the menu creates comes up hidden, and the button can open it", as
   // can be opened by it now, and the margin counts the lines it cannot see.
   assert.equal(msg.frontMatter, "---\nlang: en\n---\n");
   assert.equal(msg.hiddenLines, 4);
-  // No frame of the document is ever drawn with the header in it: the mode
-  // is written before the line is.
+  // No frame of the document is ever drawn with the header in it.
   assert.ok(
     h.posted
+      .slice(from)
       .filter((m) => m.type === "update")
       .every((m) => !m.text.includes("lang: en")),
     "the header was on screen for a moment"
   );
+  await h.receive({ type: "header", open: true });
+  assert.ok(h.posted[h.posted.length - 1].text.startsWith("---\nlang: en\n---\n"));
+});
+
+// The same where the reader keeps headers that draw nothing in view: the one
+// the menu has just made is such a header, and it still comes up put away.
+// The setting is not touched for it, where it used to be switched to
+// `hidden`, which put the header of every other open document away as well.
+test("a header the menu creates comes up put away even where such headers are kept in view", async () => {
+  const h = boot("Intro\n", { "mdm.frontMatter": "shown" });
+  await h.receive({ type: "ready" });
+  const from = h.posted.length;
+  await h.receive({ type: "setLanguage", lang: "en" });
+  assert.equal(h.document.getText(), "---\nlang: en\n---\n\nIntro\n");
+  assert.deepEqual(vscode._state.updates, [], "the setting was written");
+  const updates = h.posted.slice(from).filter((m) => m.type === "update");
+  assert.ok(updates.length >= 1);
+  assert.ok(updates.every((m) => m.withFrontMatter === false && m.text === "Intro\n"), "the header was on screen");
+  assert.equal(updates[updates.length - 1].frontMatter, "---\nlang: en\n---\n");
+  // And it stays put away through what is written next, in the editor or
+  // beside it: it is brought out when it becomes such a header, not at
+  // every change of a document that has one.
+  await h.receive({ type: "edit", text: "Intro, and more\n", withFrontMatter: false, seq: 1, base: h.document.version });
+  assert.equal(h.document.getText(), "---\nlang: en\n---\n\nIntro, and more\n");
+  vscode._state.documents.set("file:///doc.mdm", "---\nlang: en\n---\n\nIntro, and more still\n");
+  vscode._state.textDocumentListeners.forEach((l) => l({ document: h.document }));
+  assert.equal(last(h).type, "update");
+  assert.equal(last(h).withFrontMatter, false, "the header came out at the next change");
+  assert.equal(last(h).text, "Intro, and more still\n");
 });
 
 // A file that has a header is one whose header the reader has seen and may be
-// working in: the language goes into it and the mode is left alone.
+// working in: the language goes into it and it is left open.
 test("a language written into a header already showing leaves it showing", async () => {
-  const h = boot(DOC, { "mdm.frontMatter": "shown" });
-  await h.receive({ type: "ready" });
+  const h = await bootOpen(DOC);
   await h.receive({ type: "setLanguage", lang: "es" });
-  assert.deepEqual(
-    h.posted.filter((m) => m.type === "settings"),
-    [],
-    "the mode was changed under the reader"
-  );
-  assert.deepEqual(vscode._state.updates, [], "the mode was written all the same");
+  assert.deepEqual(vscode._state.updates, [], "something was stored");
   const msg = h.posted[h.posted.length - 1];
   assert.equal(msg.withFrontMatter, true);
   assert.ok(msg.text.startsWith("---\ntitle: t\nlang: es\n---\n"));
@@ -4298,10 +4709,9 @@ test("an edit in flight and a language chosen beside it both land", async () => 
   };
   const both = DOC.replace("Intro", "Edited").replace("title: t\n", "title: t\nlang: es\n");
   try {
-    const shown = boot(DOC, { "mdm.frontMatter": "shown" });
+    const shown = await bootOpen(DOC);
     slow();
-    await shown.receive({ type: "ready" });
-    const typed = shown.posted[0].text.replace("Intro", "Edited");
+    const typed = shown.posted[shown.posted.length - 1].text.replace("Intro", "Edited");
     await Promise.all([
       shown.receive({ type: "edit", text: typed, withFrontMatter: true }),
       shown.receive({ type: "setLanguage", lang: "es" }),

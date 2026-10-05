@@ -2791,18 +2791,24 @@ local function horizontal_rule()
 end
 
 -- The block Quarto draws at the top of a rendered document from the YAML: the
--- title, the subtitle, whoever wrote it and when. It belongs to the header, so
--- it comes out only when the header does. The editor can keep the YAML out of
--- the text it shows (mdm.frontMatter), and an export from an editor that is
--- hiding it renders a document that does not open with it either; what the
--- editor is showing travels as the metadata read here. A render from the
--- command line has no editor behind it and keeps what the document declares.
+-- title, the subtitle, whoever wrote it and when. `mdm-front-matter: hidden`
+-- takes it off the page, and anything else, nothing included, keeps what the
+-- document declares. The key was the editor's to send while it could hide
+-- the header and showed none of the block (the setting mdm.frontMatter):
+-- an export from an editor that was hiding it came out without it. Since
+-- 2026-10-03 the editor draws the block itself, whether the header's source
+-- is open or put away, and sends nothing, so the key is left to a render
+-- from the command line that wants a page without the block.
 -- Quarto normalises whoever wrote the document into three keys of its own
 -- before a filter sees the metadata, so taking `author` away and leaving the
 -- other two behind still draws the block, with the name under it (measured).
+-- The keys are the ones Quarto's template asks about before it writes the
+-- block (the `$if$` chain of its template.html, read on 1.9.37): two of them,
+-- the categories and the day a document was modified, were not listed here
+-- until 2026-10-04, and a document that had either kept its block.
 local TITLE_BLOCK = {
   "title", "subtitle", "author", "authors", "by-author",
-  "date", "abstract", "doi", "keywords",
+  "date", "date-modified", "categories", "abstract", "doi", "keywords",
 }
 
 -- The name the page goes by: the browser's tab, and the Title a PDF printed

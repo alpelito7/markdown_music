@@ -14,7 +14,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { toEditor, fromEditor } = require("../vscode-mdm/transforms.js");
+const { toEditor, fromEditor, frontMatter } = require("../vscode-mdm/transforms.js");
 const {
   EXAMPLE,
   open,
@@ -402,11 +402,15 @@ test("a display equation is rendered, not collapsed", { skip }, async () => {
 
 // ---------- Buttons ----------
 
+// What the webview asked the host about the header, in the order it asked:
+// the YAML button and a click on the drawn title both send `header`.
+function headerPosts(page) {
+  return page.evaluate(() => window.__posts.filter((m) => m.type === "header"));
+}
+const FM_BUTTON = '#app button[data-type="mdm-front-matter"]';
+
 test("the header button takes the editor to the top, on and off", { skip }, async () => {
-  const h = await open({
-    seed: { settings: { frontMatter: "hidden" } },
-    withFrontMatter: false,
-  });
+  const h = await open({ withFrontMatter: false });
   const scrollDown = async () => {
     await h.page.evaluate(() => {
       document.querySelector("#app .cm-scroller").scrollTop = 800;
@@ -416,26 +420,13 @@ test("the header button takes the editor to the top, on and off", { skip }, asyn
     );
     assert.ok(at > 400, "the document did not scroll: " + at);
   };
-  // What the host sends when the button is pressed: the settings it stored,
-  // and the document in the mode just chosen.
-  const press = (shown) =>
-    h.page.evaluate(
-      (msg, text, isShown) => {
-        window.postMessage(msg, "*");
-        window.postMessage(
-          {
-            type: "update",
-            text: text,
-            frontMatter: "x",
-            withFrontMatter: isShown,
-          },
-          "*"
-        );
-      },
-      settingsMessage({ frontMatter: shown ? "shown" : "hidden" }),
-      toEditor(EXAMPLE, shown),
-      shown
-    );
+  // The press, and what the host answers it with: the document with the
+  // header's source open, there to stay as the button's is (`pinned`), or
+  // put away (the `header` message in extension.js).
+  const press = async (shown) => {
+    await h.page.click(FM_BUTTON);
+    await update(h.page, EXAMPLE, shown, undefined, frontMatter(EXAMPLE), shown);
+  };
   // The header, when it is in the text, is the run of YAML lines at the top.
   const state = () =>
     h.page.evaluate(() => ({
@@ -448,8 +439,9 @@ test("the header button takes the editor to the top, on and off", { skip }, asyn
   await sleep(900);
   assert.deepEqual(await state(), { scrollTop: 0, header: true });
 
-  // And back: hiding the header takes the block off the top of the document,
-  // so it goes to the top too instead of leaving the reader halfway down.
+  // And back: putting the header away takes the block off the top of the
+  // document, so it goes to the top too instead of leaving the reader
+  // halfway down.
   await scrollDown();
   await press(false);
   await sleep(900);
@@ -457,83 +449,87 @@ test("the header button takes the editor to the top, on and off", { skip }, asyn
   await h.close();
 });
 
-// The link between that button and the export, which is the whole of what it
-// is for: the header the editor is showing decides whether the page opens with
-// the block Quarto draws from the YAML (TITLE_BLOCK in mdm.lua), and the only
-// thing that carries the decision across is mdm.frontMatter. The host end is
-// pinned in extension-host.test.js, where exportLook is read; the filter end in
-// render.test.js and html.test.js, where the block is rendered and measured.
-// This is the end nothing held: that pressing the button asks for the setting
-// at all, in the right direction, and that a document with no header of its
-// own asks for nothing.
-test("the header button asks the host to store the choice", { skip }, async () => {
-  const h = await open({
-    seed: { settings: { frontMatter: "hidden" } },
-    withFrontMatter: false,
-  });
+// What the button asks for. Whether the header's source is open is the
+// editor's own state, held by the host for this editor and stored nowhere:
+// it was the setting mdm.frontMatter until 2026-10-03, and the export read
+// it to take the title block off the page, which it no longer does (the
+// editor draws that block itself, TitleWidget). The host end is pinned in
+// extension-host.test.js. This is the end nothing else holds: that a press
+// asks at all, in the right direction, that it asks for no setting, and that
+// the lamp follows the document and not the press.
+test("the header button asks the host to open the header's source and to put it away", { skip }, async () => {
+  const h = await open({ withFrontMatter: false, frontMatter: frontMatter(EXAMPLE) });
   const fm = () =>
-    h.page.evaluate(() => {
-      const btn = document.querySelector('#app button[data-type="mdm-front-matter"]');
+    h.page.evaluate((sel) => {
+      const btn = document.querySelector(sel);
       return {
         lit: btn.classList.contains("mdm-btn--on"),
         greyed: btn.classList.contains("mdm-btn--off"),
         tip: btn.getAttribute("aria-label"),
       };
-    });
+    }, FM_BUTTON);
 
-  // Hidden is the default, and a lamp lit from the first opening would say
-  // nothing: the lamp means the reader has moved off it. The tooltip names
-  // where the click goes and not where the editor is.
+  // Put away is how a document comes up, and a lamp lit from the first
+  // opening would say nothing: the lamp means the reader has opened it. The
+  // tooltip names where the click goes and not where the editor is.
   assert.deepEqual(await fm(), {
     lit: false,
     greyed: false,
     tip: "Show YAML header",
   });
-  await h.page.click('#app button[data-type="mdm-front-matter"]');
+  // A caret in the body, to see below that the button leaves it there.
+  await setSelection(h.page, 30);
+  const under = () =>
+    h.page.evaluate(() => {
+      const state = window.__mdm.view.state;
+      return state.sliceDoc(state.selection.main.head, state.selection.main.head + 24);
+    });
+  const caretOn = await under();
+  await h.page.click(FM_BUTTON);
   await sleep(200);
-  assert.deepEqual(await setSettingPosts(h.page), [
-    { type: "setSetting", key: "frontMatter", value: "shown" },
-  ]);
-  // The webview does not move itself: the value comes back from the host, and
+  assert.deepEqual(await headerPosts(h.page), [{ type: "header", open: true }]);
+  // The webview does not move itself: the text comes back from the host, and
   // until it does the button is where it was.
   assert.equal((await fm()).lit, false, "the button moved before the host answered");
 
-  await postSettings(h.page, { frontMatter: "shown" });
-  // The host answers a setting with the settings and then the document
-  // again, in the mode now in force (sendSettings in extension.js). The
-  // lamp reads the document and not the setting, so it lights once the
-  // header is back in the text.
-  await update(h.page, EXAMPLE, true);
+  // The host answers with the document, the header in its text and there
+  // to stay (`pinned`). The lamp reads that answer, so it lights once the
+  // header is there by the button's doing (one a click on the drawn title
+  // opened leaves it dark: webview-title.test.js).
+  await update(h.page, EXAMPLE, true, undefined, frontMatter(EXAMPLE), true);
   await sleep(300);
   assert.deepEqual(await fm(), {
     lit: true,
     greyed: false,
     tip: "Hide YAML header",
   });
+  // The caret is left on the words it was on: the button opens the source
+  // and the reader chooses where to type (a click on the drawn title is the
+  // gesture that takes the caret to a line of the header).
+  assert.equal(await under(), caretOn, "the button moved the caret");
   // And back the other way, so the click is a toggle and not a one-way switch.
-  await h.page.click('#app button[data-type="mdm-front-matter"]');
+  await h.page.click(FM_BUTTON);
   await sleep(200);
-  assert.deepEqual(await setSettingPosts(h.page), [
-    { type: "setSetting", key: "frontMatter", value: "shown" },
-    { type: "setSetting", key: "frontMatter", value: "hidden" },
+  assert.deepEqual(await headerPosts(h.page), [
+    { type: "header", open: true },
+    { type: "header", open: false },
   ]);
+  // No setting is asked for: nothing about the header is stored.
+  assert.deepEqual(await setSettingPosts(h.page), []);
   assert.deepEqual(h.errors, []);
   await h.close();
 });
 
 // A file with no header has nothing to show or hide, so the button greys out
-// and a click on it asks for nothing. Storing "shown" here would leave the
-// setting saying the editor is showing a header it has not got, and the next
-// document opened would come up in a mode nobody chose.
+// and a click on it asks for nothing.
 test("a file with no YAML header greys the button out", { skip }, async () => {
   const h = await open({
     text: "Just prose, and no header at all.\n",
     scores: 0,
-    seed: { settings: { frontMatter: "hidden" } },
     withFrontMatter: false,
     frontMatter: "",
   });
-  const btn = '#app button[data-type="mdm-front-matter"]';
+  const btn = FM_BUTTON;
   assert.deepEqual(
     await h.page.evaluate((sel) => {
       const b = document.querySelector(sel);
@@ -558,6 +554,7 @@ test("a file with no YAML header greys the button out", { skip }, async () => {
   // handler itself as the thing under test.
   await h.page.evaluate((sel) => document.querySelector(sel).click(), btn);
   await sleep(200);
+  assert.deepEqual(await headerPosts(h.page), []);
   assert.deepEqual(await setSettingPosts(h.page), []);
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -565,18 +562,16 @@ test("a file with no YAML header greys the button out", { skip }, async () => {
 
 // The header button's press takes the editor to the top, because the header
 // appears or disappears at the very top of the document. The hyphenation menu
-// now changes the same mode without anything moving: choosing a language for a
-// file with no header writes one and puts the document on the hidden mode
-// (writeLanguage in extension.js), and the text on screen is the same text
-// before and after. A reader halfway down a document stays where they were.
-test("a mode change with no header to move leaves the reader where they were", { skip }, async () => {
+// writes a header into a file that had none, and it comes up put away
+// (writeLanguage in extension.js): the text on screen is the same text before
+// and after, and a reader halfway down a document stays where they were.
+test("a header written with nothing to move leaves the reader where they were", { skip }, async () => {
   const body = toEditor(EXAMPLE, false);
   const header = "---\nlang: en\n---\n";
   const h = await open({
     text: body,
     withFrontMatter: false,
     frontMatter: "",
-    seed: { settings: { frontMatter: "shown" } },
   });
   const scrollTop = () =>
     h.page.evaluate(() => window.__mdm.view.scrollDOM.scrollTop);
@@ -587,18 +582,15 @@ test("a mode change with no header to move leaves the reader where they were", {
   const before = await scrollTop();
   assert.ok(before > 100, "the document never scrolled, so nothing was under test");
 
-  // What the host sends when the menu writes the language: the mode first,
-  // then the document, which is the same text with a header behind it now.
-  await postSettings(h.page, { frontMatter: "hidden" });
-  await sleep(200);
+  // What the host sends when the menu writes the language: the document,
+  // which is the same text with a header behind it now.
   await update(h.page, header + "\n" + body, false, 3, header);
   await sleep(300);
   assert.equal(await scrollTop(), before, "choosing a language moved the page");
 
   // The button itself still goes to the top, now that there is a header to
   // appear there.
-  await postSettings(h.page, { frontMatter: "shown" });
-  await sleep(200);
+  await h.page.click(FM_BUTTON);
   await update(h.page, header + "\n" + body, true, 3, header);
   await sleep(300);
   assert.equal(await scrollTop(), 0, "the header button did not go to the header");
@@ -790,7 +782,14 @@ async function railsAt(page) {
     const column = document.querySelector("#app .cm-content").getBoundingClientRect();
     const scroller = document.querySelector("#app .cm-scroller");
     const pane = scroller.getBoundingClientRect().left + scroller.clientWidth;
-    return Array.from(document.querySelectorAll("#app .mdm-chrome")).map((rail) => {
+    // The rails of the document's blocks. The card of the YAML header, which
+    // the harness opens the example with, carries a copy button of its own
+    // since 2026-10-04, shown for as long as the card is and so by another
+    // rule than these; webview-title.test.js holds it.
+    const rails = Array.from(document.querySelectorAll("#app .mdm-chrome")).filter(
+      (rail) => !rail.closest(".cm-line.mdm-fm-line")
+    );
+    return rails.map((rail) => {
       const r = rail.getBoundingClientRect();
       const st = getComputedStyle(rail);
       const score = rail.closest(".mdm-score");
@@ -846,9 +845,12 @@ test("every block's buttons stand beside it in the margin, up while the reader i
   // meets nothing.
   const readAll = async () => {
     const out = [];
-    const n = await h.page.evaluate(() => document.querySelectorAll("#app .mdm-chrome").length);
+    // The same rails railsAt reads: the header card's is not one of them.
+    const blockRails = () =>
+      Array.from(document.querySelectorAll("#app .mdm-chrome")).filter((rail) => !rail.closest(".cm-line.mdm-fm-line"));
+    const n = await h.page.evaluate("(" + blockRails.toString() + ")().length");
     for (let i = 0; i < n; i++) {
-      await h.page.evaluate((i) => document.querySelectorAll("#app .mdm-chrome")[i].scrollIntoView({ block: "center" }), i);
+      await h.page.evaluate("(" + blockRails.toString() + ")()[" + i + '].scrollIntoView({ block: "center" })');
       await sleep(50);
       out.push((await railsAt(h.page))[i]);
     }
@@ -873,7 +875,12 @@ test("every block's buttons stand beside it in the margin, up while the reader i
       return [score.__tag, score.querySelector("svg").__tag, math.__tag, math.querySelector(".katex-display").__tag];
     });
   const tags = ["score", "engraving", "math", "katex"];
-  const marked = () => h.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-chrome")).map((r) => r.classList.contains("mdm-chrome--active")));
+  const marked = () =>
+    h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-chrome"))
+        .filter((r) => !r.closest(".cm-line.mdm-fm-line"))
+        .map((r) => r.classList.contains("mdm-chrome--active"))
+    );
   await caretInBlock(h.page, "#app .mdm-score", 0);
   assert.deepEqual(await marked(), [false, true, false, false, false], "in a score");
   assert.deepEqual(await kept(), tags, "a caret going into a score drew a drawing again");
@@ -889,7 +896,7 @@ test("every block's buttons stand beside it in the margin, up while the reader i
   await sleep(300);
   assert.deepEqual(await readAll(), expect(null, true), "back in the prose");
   const shut = await h.page.evaluate(() => {
-    const rail = document.querySelector("#app .mdm-chrome--code");
+    const rail = document.querySelector("#app .cm-line.mdm-code-line .mdm-chrome--code");
     const line = rail.closest(".cm-line");
     return line.classList.contains("mdm-code-first") && !line.classList.contains("mdm-fence-line");
   });
@@ -1067,10 +1074,15 @@ test("the rail of the block under the pointer is drawn over the rest", { skip },
   const h = await open({});
   const layers = () =>
     h.page.evaluate(() =>
-      Array.from(document.querySelectorAll("#app .mdm-chrome")).map((r) => [
-        r.closest(".mdm-score") ? "score" : r.closest(".mdm-math--block") ? "equation" : "code",
-        Number(getComputedStyle(r).zIndex),
-      ])
+      // The rails of the document's blocks; the header card's, which the
+      // harness opens the example with since the card carries a copy button
+      // (2026-10-04), is read on its own below.
+      Array.from(document.querySelectorAll("#app .mdm-chrome"))
+        .filter((r) => !r.closest(".cm-line.mdm-fm-line"))
+        .map((r) => [
+          r.closest(".mdm-score") ? "score" : r.closest(".mdm-math--block") ? "equation" : "code",
+          Number(getComputedStyle(r).zIndex),
+        ])
     );
   const top = async () => (await layers()).filter((l) => l[1] === 5).map((l) => l[0]);
   const box = (sel, i) =>
@@ -1086,6 +1098,14 @@ test("the rail of the block under the pointer is drawn over the rest", { skip },
     );
 
   assert.deepEqual((await layers()).map((l) => l[1]), [3, 3, 3, 3, 3], "a rail is lifted with nobody in the document");
+  // Nor is the header card's, though a caret rests at the head of the
+  // document, inside the header: nobody is in the document. Read off the
+  // caret alone it was lifted, and stayed lifted when the caret moved on.
+  assert.equal(
+    await h.page.evaluate(() => Number(getComputedStyle(document.querySelector("#app .cm-line.mdm-fm-line .mdm-chrome")).zIndex)),
+    3,
+    "the header card's rail is lifted with nobody in the document"
+  );
   const score = await box("#app .mdm-score");
   await h.page.mouse.move(score.left + 200, score.top + 12);
   await sleep(250);
@@ -1399,7 +1419,7 @@ test("a setting that touches no colour does not repaint the theme", { skip }, as
     return document.querySelectorAll("svg[data-marked]").length;
   });
   assert.ok(before >= 3, "no scores to watch");
-  await postSettings(h.page, { frontMatter: "shown" });
+  await postSettings(h.page, { followPlayhead: "still" });
   await sleep(400);
   const after = await h.page.evaluate(() => ({
     marked: document.querySelectorAll("svg[data-marked]").length,
@@ -6344,8 +6364,10 @@ const TOGGLES = [
   { name: "mdm-text-font", key: "textFont", asked: "sans" },
   { name: "mdm-score-fill", key: "scoreFill", asked: "paper" },
   { name: "mdm-follow", key: "followPlayhead", asked: "still" },
-  { name: "mdm-front-matter", key: "frontMatter", asked: "shown" },
 ];
+// The YAML button is not one of them: its lamp is no setting's, it reads the
+// document, lit while the header's source is open ("the header button asks
+// the host to open the header's source and to put it away", above).
 
 const lampOf = (page, name) =>
   page.evaluate(
@@ -6357,26 +6379,21 @@ const lampOf = (page, name) =>
   );
 
 test("no toggle is lit until it is asked for", { skip }, async () => {
-  // Every setting at the value the extension ships, front matter included:
-  // the helper seeds that one shown, and the default is hidden, under which
-  // the host sends the document without its header. The lamp reads the
-  // text, so the header has to be out of it here: a header the host keeps
-  // on screen over the setting lights the lamp on purpose (see
-  // webview-editing.test.js).
-  const h = await open({
-    seed: { settings: { frontMatter: "hidden" } },
-    withFrontMatter: false,
-  });
+  // Every setting at the value the extension ships, and the document as it
+  // comes up, its header put away: the YAML button's lamp reads the text, so
+  // the header has to be out of it here.
+  const h = await open({ withFrontMatter: false });
   for (const t of TOGGLES) {
     assert.equal(await lampOf(h.page, t.name), false, t.name + " is lit on its own default");
   }
+  assert.equal(await lampOf(h.page, "mdm-front-matter"), false, "the YAML button is lit on a header put away");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
 
 test("every toggle lights on the setting that was asked for", { skip }, async () => {
   for (const t of TOGGLES) {
-    const seed = { frontMatter: "hidden" };
+    const seed = {};
     seed[t.key] = t.asked;
     const h = await open({ seed: { settings: seed } });
     assert.equal(

@@ -141,6 +141,15 @@ body .quarto-title-block .quarto-title-meta {
 body .quarto-title-block .quarto-title-meta-heading {
   display: none;
 }
+/* A title written as a block of YAML (`title: >`), which is how a long one
+   is broken over lines in the source, reaches the page as a paragraph inside
+   the heading, and the paragraph's own margin stood between the words and
+   the rule under them: 32 px of air that a title written on one line does
+   not have (measured, 81 px of heading against 49). The editor draws the two
+   alike. */
+body .quarto-title-block .title > p {
+  margin: 0;
+}
 
 /* ---------- Headings, quotes, rules, links ---------- */
 

@@ -118,7 +118,10 @@ async function at(page, width) {
       range.selectNodeContents(el);
       return px(range.getBoundingClientRect().right);
     };
-    const copy = document.querySelector("#app .mdm-chrome--code .mdm-copy");
+    // The code card's own: the card of the YAML header, which the harness
+    // opens the document with, carries one too since 2026-10-04 and comes
+    // first in the document.
+    const copy = document.querySelector("#app .cm-line.mdm-code-line .mdm-chrome--code .mdm-copy");
     const scores = Array.from(document.querySelectorAll("#app code.language-abc")).map(
       (code) => {
         const svg = code.querySelector("svg");

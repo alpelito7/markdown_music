@@ -90,11 +90,11 @@
           "type": "string",
           "enum": ["hidden", "shown"],
           "enumDescriptions": [
-            "The YAML header is not shown. It stays on the file and is spliced back on every edit.",
-            "The YAML header is the first block of the document and is edited in place."
+            "The YAML header is put away, and what it prints at the head of the page (the title, the authors, the abstract) is drawn in its place. A click on that drawing opens the YAML until the caret leaves it.",
+            "The YAML header stays in view at the head of every document, as the YAML it is, and is edited in place. What it prints is drawn under it only while the caret is in it."
           ],
           "default": "hidden",
-          "description": "Whether the YAML header is part of the document in the editor. Shown, it is an ordinary block: what is typed in it goes to the file, and deleting it deletes it from the file. A header the hyphenation menu writes into a file that had none comes up hidden whatever this says, so that choosing a language never puts YAML on screen."
+          "description": "What the editor shows of a document's YAML header: its YAML, or what the header prints at the head of the page. The YAML button of the toolbar switches between the two, and the choice is remembered for every document. It changes nothing of an export, which always opens with the title block the header asks for. A header the hyphenation menu writes into a file that had none comes up put away whatever this says, so that choosing a language never puts YAML on screen."
         },
         "mdm.outline": {
           "type": "string",

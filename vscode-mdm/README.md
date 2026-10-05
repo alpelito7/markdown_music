@@ -31,7 +31,7 @@ The second row holds settings shared by every document, except the hyphenation, 
 - **Font**: Latin Modern Roman, the face of a LaTeX document, which comes with the extension, or the system's sans. Code keeps its monospace.
 - **Justify**: paragraphs justified, or ragged on the right. The lines break on the same words either way.
 - **Hyphenation**: words stay whole until a language is chosen here. It is written into the YAML header as `lang:`, in a new, hidden header if the file had none; the hyphen is only drawn, never saved.
-- **YAML**: shows or hides the header.
+- **YAML**: shows the header's YAML in place of what is drawn from it, in every document, until it is pressed again (`mdm.frontMatter`). Put away, a header with a title, an author, a date, an abstract or keywords is drawn as the page's title block, affiliations, DOI and all; a click on the block opens its YAML over it for as long as the caret is in it, as a table opens, and the copy button beside it copies the header. Shown, the block is drawn under the YAML while it is being edited.
 - **Score fill**, **staff lines** and **score alignment**: a paper, slate or brass ground under the scores, staff lines in gray or in ink, and scores centred or at the left.
 - **Follow**: while a tune plays, the page scrolls to keep the sounding system in view; turned off, it stays where you are reading.
 

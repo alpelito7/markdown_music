@@ -1151,6 +1151,17 @@ test("a play made with the score under the fold brings the page to the head", { 
   // The top of the engraving 30px above the bottom edge: the block is on the
   // pane and the staff it draws is not, which is the case a reader meets by
   // scrolling down to a score and pressing play as it comes into sight.
+  // Towards the score by CodeMirror's own map of heights first: on a pane
+  // this short the score is under the foot of what the editor draws, and a
+  // block that is not drawn has no box to measure. It stood just inside
+  // until the editor drew the document's title over the first line
+  // (2026-10-03), 84px that pushed it out (the score at 1342px, measured).
+  await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    const at = view.state.doc.toString().indexOf("```{.abc");
+    view.scrollDOM.scrollTop = Math.max(0, view.lineBlockAt(at).top - view.scrollDOM.clientHeight);
+  });
+  await new Promise((r) => setTimeout(r, 300));
   const parked = await h.page.evaluate(() => {
     const sc = window.__mdm.view.scrollDOM;
     const block = document.querySelector("#app .mdm-score");

@@ -3089,6 +3089,14 @@ test("an external update keeps a caret outside the change in place and is not ec
   assert.equal(await docText(h.page), "alphas\nbeta\ngammas\n");
   const ranges = await selectionRanges(h.page);
   assert.equal((await docText(h.page)).slice(0, ranges[0][0]), "alphas\nbe");
+  // And text put in from outside at the caret itself goes after it: the
+  // caret stays where the reader left it, before what arrived. (The one
+  // change that takes the carets along is the header's lines coming in
+  // over the head of the body: webview-title.test.js.)
+  await hostUpdate(h.page, "alphas\nbeXXta\ngammas\n");
+  await sleep(100);
+  const after = await selectionRanges(h.page);
+  assert.equal((await docText(h.page)).slice(0, after[0][0]), "alphas\nbe", "the caret went after what an outside change put in at it");
   await sleep(500);
   assert.deepEqual(await edits(h.page), []);
   assert.deepEqual(h.errors, []);
@@ -3309,34 +3317,53 @@ test("Ctrl+S sends the held edit ahead of the save", { skip }, async () => {
   await h.close();
 });
 
-test("a header the host keeps on screen over the setting lights the button and offers to hide it", { skip }, async () => {
-  const h = await open({
-    text: "Body\n",
-    scores: 0,
-    withFrontMatter: false,
-    frontMatter: "",
-    seed: { settings: { frontMatter: "hidden" } },
-  });
-  const label = () =>
+test("a header typed into a file that had none stays on screen, lights the button and offers to hide it", { skip }, async () => {
+  const label = (h) =>
     h.page.evaluate(() => {
       const b = document.querySelector('#app button[data-type="mdm-front-matter"]');
       return [b.getAttribute("aria-label"), b.classList.contains("mdm-btn--on"), b.classList.contains("mdm-btn--off")];
     });
-  assert.deepEqual(await label(), ["No YAML header in this file", false, true]);
   // The host's answer to a header typed here: the same text, carrying it.
-  await h.page.evaluate(() =>
-    window.postMessage(
-      { type: "update", text: "---\ntitle: t\n---\n\nBody\n", frontMatter: "---\ntitle: t\n---\n", withFrontMatter: true, hiddenLines: 0 },
-      "*"
-    )
-  );
-  await sleep(100);
-  assert.deepEqual(await label(), ["Hide YAML header", true, false]);
-  await h.page.click('#app button[data-type="mdm-front-matter"]');
-  const asked = (await setSettingPosts(h.page)).pop();
-  assert.deepEqual(asked, { type: "setSetting", key: "frontMatter", value: "hidden" });
-  assert.deepEqual(h.errors, []);
-  await h.close();
+  // One that draws nothing stays as typed (`pinned`), and the button is lit
+  // and offers to hide it. One that draws a title is open as a click on that
+  // title would have left it, to go when the carets leave it: the button did
+  // not open it, so it stays dark, and a press keeps the source
+  // (webview-title.test.js has the rest of that).
+  const cases = [
+    ["lang: en", true, ["Hide YAML header", true, false], { type: "header", open: false }],
+    ["title: t", false, ["Show YAML header", false, false], { type: "header", open: true }],
+  ];
+  for (const [line, pinned, lamp, asked] of cases) {
+    const h = await open({
+      text: "Body\n",
+      scores: 0,
+      withFrontMatter: false,
+      frontMatter: "",
+    });
+    assert.deepEqual(await label(h), ["No YAML header in this file", false, true]);
+    // The header as typed, the caret still in it: the host's answer brings
+    // no text the editor does not hold already.
+    await h.page.evaluate((key) => {
+      window.__mdm.view.dispatch({ changes: { from: 0, insert: "---\n" + key + "\n---\n\n" }, selection: { anchor: 6 } });
+    }, line);
+    await h.page.evaluate(
+      (key, stays) =>
+        window.postMessage(
+          { type: "update", text: "---\n" + key + "\n---\n\nBody\n", frontMatter: "---\n" + key + "\n---\n", withFrontMatter: true, pinned: stays, hiddenLines: 0 },
+          "*"
+        ),
+      line,
+      pinned
+    );
+    await sleep(100);
+    assert.deepEqual(await label(h), lamp, line);
+    await h.page.click('#app button[data-type="mdm-front-matter"]');
+    const posts = await h.page.evaluate(() => window.__posts.filter((m) => m.type === "header"));
+    assert.deepEqual(posts, [asked], line);
+    assert.deepEqual(await setSettingPosts(h.page), [], "the press asked for a setting");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
 });
 
 test("with the header hidden the text has no front matter and edits say so", { skip }, async () => {

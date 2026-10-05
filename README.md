@@ -276,10 +276,11 @@ port of the editor's own stylesheet (`vscode-mdm/media/style.css`) onto the
 HTML Quarto produces; it spends a handful of custom properties, and the
 filter writes them into the page from what it is told.
 
-What varies travels as plain metadata. The look keys and the front matter
-are what the VS Code extension passes when it exports (`exportLook` in
-`vscode-mdm/extension.js`) and a plain `bin/mdm render` does not pass at
-all; `mdm-engraver` is the document's own to write:
+What varies travels as plain metadata. The look keys are what the VS Code
+extension passes when it exports (`exportLook` in `vscode-mdm/extension.js`)
+and a plain `bin/mdm render` does not pass at all; `mdm-front-matter` is for
+a render from the command line, and `mdm-engraver` is the document's own to
+write:
 
 | Key               | Values                                                                                                                                                                                    |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -288,7 +289,7 @@ all; `mdm-engraver` is the document's own to write:
 | `mdm-score-fill`  | `none`, `paper`, `slate`, `brass`                                                                                                                                                         |
 | `mdm-score-align` | `center`, `left`                                                                                                                                                                          |
 | `mdm-engraver`    | `abcjs` (the default: the editor's engines, abcjs and KaTeX, through a headless Chrome), `abcm2ps` (the fallback for scores and LaTeX's own maths, picked outright)                       |
-| `mdm-front-matter`| `shown`, `hidden`: whether the title block is drawn from the YAML                                                                                                                         |
+| `mdm-front-matter`| `shown`, `hidden`: whether the title block is drawn from the YAML (`shown` unless told; the extension passes neither)                                                                     |
 | `mdm-syn-*`       | the ten syntax slots (`base`, `bg`, `comment`, `string`, `number`, `keyword`, `attr`, `name`, `type`, `variable`), as six hex digits **without** the `#`, which would open a YAML comment |
 
 So a render from a terminal comes out in the editor's default look with the
@@ -327,11 +328,11 @@ inline code can still break elsewhere, since the editor sets code in the
 system's monospace and the PDF in DejaVu Sans Mono.
 
 The block Quarto draws at the top from the YAML (the title, the subtitle,
-whoever wrote it and when) belongs to the header, so it comes out only when
-the header does. An export from an editor that is hiding the YAML
-(`mdm.frontMatter`) renders a document that does not open with the block
-either; a `bin/mdm render` has no editor behind it and keeps whatever the
-document declares.
+whoever wrote it and when) is on every page whose header asks for it: the
+editor draws the same block at the head of the document, whether the
+header's source is open or put away, so an export from it opens with the
+block as a `bin/mdm render` does. `-M mdm-front-matter:hidden` takes the
+block off a page rendered from the command line; the page keeps its name.
 
 One thing the render drops rather than dresses: the margin block Quarto adds
 with the document's other formats ("Other Formats", one link per format the
@@ -412,8 +413,8 @@ What it does:
   one `$` of a closing `$$` and the block is a paragraph with three dollar
   signs in it until the fourth is typed back. There is no serialization step
   between what is typed and what is saved, two things aside: the YAML header
-  while it is hidden, and the line endings, which are LF in the editor and go
-  back to the file's own on the way out.
+  while its source is put away, and the line endings, which are LF in the
+  editor and go back to the file's own on the way out.
 - **Rendering follows the carets.** A block no selection range touches is
   drawn: an equation as KaTeX, a score as its engraving, a fence as a card of
   highlighted code. A block a caret is in shows its source, with the rendered
@@ -600,8 +601,8 @@ What it does:
   named by a mark with a tooltip on the line the caret is on.
 - **Search** opens with `Ctrl+F` wherever the focus is, and `Ctrl+H`
   (`⌥⌘F` on a Mac) opens it with the replace field taking the keyboard; a
-  match inside a rendered block opens the block. A YAML header that is
-  hidden is not in the editor's text, so it is not searched.
+  match inside a rendered block opens the block. A YAML header whose source
+  is put away is not in the editor's text, so it is not searched.
 - **Two writers of one file.** A change made by the text editor beside this
   one, or by the host, is merged with what is being typed here instead of
   one overwriting the other, lands where it was made, and stays out of this
@@ -768,13 +769,47 @@ What it does:
   Headings inside quotes and list items are listed, as VS Code's own outline
   lists them and Pandoc's contents do not. The grip on its edge sets how wide
   it is (`mdm.outline`, `mdm.outlineWidth`).
-- **YAML header, shown and editable**: the YAML button on the second row,
-  after the hyphenation menu, shows and hides it (`mdm.frontMatter`, hidden
-  by default; disabled if the file has no header). Shown, it is the first lines of the text, `---` fences included,
-  on a card and highlighted as YAML. Hidden, the header and the blank lines
-  under it are kept outside the editor's text and spliced back on every save
-  (`transforms.js`), so the file is byte-identical around whatever was
-  edited.
+- **The YAML header, drawn as the page's title block**: what the header
+  puts at the head of the page is drawn at the head of the document as the
+  page sets it, part for part: the title and the subtitle, the categories
+  and the description, whoever wrote the document, each beside their
+  affiliations when there are any, with an envelope for an `email` and the
+  ORCID mark for an `orcid`, the date, the day it was modified and the DOI,
+  the abstract and the keywords under the words the document's language has
+  for them. An author's `url`, an affiliation's and the DOI are links,
+  followed with the click that follows a link in the prose. A date is
+  printed in the language of the document and in the style or the pattern
+  `date-format` names (`long`, `D [de] MMMM [de] YYYY`). A click on the
+  block opens the YAML on a card over it, `---` fences included and
+  highlighted, with the caret at the end of what was clicked, and the drawn
+  block under the card follows what is typed. The YAML goes away again as
+  the source of a table does: when the caret leaves it, on a click in the
+  text, in the margin or on the bar, and on a second click on the block.
+  The YAML button on the second row, after the hyphenation menu, shows the
+  YAML in place of the drawing instead, and what it shows stays until the
+  button is pressed again (disabled if the file has no header). The button
+  is the setting `mdm.frontMatter`, remembered and followed by every
+  document: `hidden`, the default, puts the YAML away and draws the block,
+  and `shown` keeps the YAML at the head of every document that has a
+  header, with the block drawn under it only while the caret is in it, so
+  that what is typed there is seen as the page will print it. A copy
+  button stands in the margin beside the drawn block while the pointer is
+  on it, as beside a table, and beside the YAML's card for as long as the
+  card is shown; it copies the header as written, `---` fences included.
+  A header that prints nothing (only a `lang`, say) draws nothing, and the
+  button is the way to its YAML. The setting changes nothing of an export,
+  which always opens with the block.
+  A header that is put away, with the blank line under it, is kept outside
+  the editor's text and spliced back on every save (`transforms.js`), so the
+  file is byte-identical around whatever was edited, and nothing typed or
+  deleted in the text can reach it.
+  What the page prints and the editor does not: the banner and the other
+  styles of block (`title-block-banner`, `title-block-style`), which the
+  editor draws as the default block; a list inside an abstract, drawn as it
+  is written; and a date in words in a language the editor's browser has no
+  words for (Basque, Galician, Welsh and some fifty more), a short month or
+  weekday outside English, or a month in a language that declines it by the
+  pattern (Russian, Polish, Ukrainian), which all stay as they are written.
 - **Quarto callouts decorated**: `::: {.callout-note title="..."}` is parsed
   as a block of its own; the range carries an accent bar and a tint by type
   (note/tip/warning/important/caution), and the `:::` lines are drawn small

@@ -2708,6 +2708,295 @@ test("the page opens with the block the YAML asks for, in either face", { skip }
   assert.equal(b.roman.column, 820, "the column is not the editor's");
 });
 
+// The editor draws that block too (TitleWidget in vscode-mdm/media/main.js,
+// since 2026-10-03): with the header's source put away, which is how a
+// document comes up, the title, the subtitle and the names stand over the
+// first line where the page has them. Until then the editor showed either
+// nothing of the header or its YAML, and the page opened with a block the
+// editor had no word of. The two are set side by side here, part by part and
+// in either face: where each part stands under the head of the column, how
+// tall it is, the size and the weight it is set at and the width its words
+// cover, and where the first paragraph starts under the block. The editor's
+// sheet states the page's numbers (style.css, "The title block"), which are
+// Quarto's under mdm-look.css, so this is what says a change to either sheet,
+// or to Quarto's, has moved one block and not the other.
+const TITLE_PARTS = function (root, parts, firstLine) {
+  const top = root.getBoundingClientRect().top;
+  const inkWidth = (el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return range.getBoundingClientRect().width;
+  };
+  const out = {};
+  Object.keys(parts).forEach((name) => {
+    const el = document.querySelector(parts[name]);
+    if (!el) {
+      out[name] = null;
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    out[name] = {
+      top: +(r.top - top).toFixed(1),
+      height: +r.height.toFixed(1),
+      ink: +inkWidth(el).toFixed(1),
+      size: +parseFloat(cs.fontSize).toFixed(2),
+      weight: cs.fontWeight,
+      color: cs.color,
+    };
+  });
+  out.first = +(firstLine.getBoundingClientRect().top - top).toFixed(1);
+  return out;
+};
+
+test("the editor draws the title block the page opens with, part by part, in either face", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const { frontMatter } = require("../vscode-mdm/transforms.js");
+  const example = fs.readFileSync(path.join(ROOT, "example.mdm"), "utf8");
+  const read = TITLE_PARTS.toString();
+  for (const [face, url] of [["roman", EXAMPLE_PAGE], ["sans", EXAMPLE_SANS_PAGE]]) {
+    const exported = await pageAt(url, SIDE_BY_SIDE_WIDTH, "(" + read + ")(" +
+      'document.querySelector("main.content"), ' +
+      '{ title: "#title-block-header h1.title", subtitle: "#title-block-header .subtitle", author: "#title-block-header .quarto-title-meta-contents p" }, ' +
+      'Array.from(document.querySelectorAll("main.content p")).find((e) => e.textContent.startsWith("This document is ordinary Markdown")))');
+    const h = await openEditor({
+      seed: { settings: { textFont: face } },
+      scores: 1,
+      withFrontMatter: false,
+      frontMatter: frontMatter(example),
+    });
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+    await h.page.evaluate(() => document.fonts.ready);
+    await h.page.evaluate(
+      () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    );
+    const editor = await h.page.evaluate("(" + read + ")(" +
+      'document.querySelector("#app .mdm-title-block"), ' +
+      '{ title: "#app .mdm-title", subtitle: "#app .mdm-subtitle", author: "#app .mdm-title-authors p" }, ' +
+      'Array.from(document.querySelectorAll("#app .cm-content > .cm-line")).find((e) => e.textContent.startsWith("This document is ordinary Markdown")))');
+    assert.deepEqual(h.errors, []);
+    await h.close();
+    for (const part of ["title", "subtitle", "author"]) {
+      assert.ok(exported[part], "the " + face + " page has no " + part);
+      assert.ok(editor[part], "the " + face + " editor draws no " + part);
+      for (const what of ["top", "height", "ink"]) {
+        assert.ok(
+          Math.abs(editor[part][what] - exported[part][what]) <= 0.5,
+          "the " + what + " of the " + part + " in the " + face + ": " + editor[part][what] + " in the editor, " + exported[part][what] + " on the page"
+        );
+      }
+      assert.equal(editor[part].size, exported[part].size, "the size of the " + part + " in the " + face);
+      assert.equal(editor[part].weight, exported[part].weight, "the weight of the " + part + " in the " + face);
+      assert.equal(editor[part].color, exported[part].color, "the ink of the " + part + " in the " + face);
+    }
+    assert.ok(
+      Math.abs(editor.first - exported.first) <= 0.5,
+      "the first paragraph of the " + face + " starts " + editor.first + "px under the head of the column in the editor and " + exported.first + " on the page"
+    );
+  }
+});
+
+// The rest of what the page prints at its head, which the editor has drawn
+// since 2026-10-04: the authors beside their affiliations with the envelope
+// of an email and the mark of ORCID, the two dates and the DOI, the tags and
+// the description under the title, the abstract and the keywords. One
+// document that has all of it, rendered in each face and set beside the
+// editor opened on it in the same face: where each part stands in the
+// column, how tall and how wide it is and how far its words reach, the size,
+// the weight and the ink it is set in, whether it is in capitals, and where
+// the first paragraph starts under the block. A part the page has and the
+// editor does not, or the other way about, is a failure of its own.
+const TITLE_BLOCK_DOC = [
+  "---",
+  // Written as a block, which reaches the page as a paragraph inside the
+  // heading: its margin used to put 32px between the title and its rule
+  // (mdm-look.css takes it off), and the height of the title below is what
+  // says so.
+  "title: >",
+  "  A Study of the Circle of Fifths",
+  'subtitle: "Notes for the harmony class"',
+  "author:",
+  "  - name: Ada Lovelace",
+  "    degrees: [PhD]",
+  "    email: ada@example.org",
+  "    orcid: 0000-0002-1825-0097",
+  "    url: https://example.org/ada",
+  "    affiliations:",
+  "      - name: Analytical Engine Institute",
+  "        url: https://example.org",
+  "      - Royal Society",
+  "  - name: Clara Schumann",
+  "    affiliation: Leipzig Conservatory",
+  "date: 2026-10-04",
+  "date-modified: 2026-10-05",
+  "doi: 10.1234/abcd.5678",
+  "categories: [music, harmony]",
+  'description: "A description of the document, on one line."',
+  "abstract: |",
+  "  First paragraph of the abstract with *emphasis* and a formula $a^2+b^2$, long enough to wrap over more than one line of the column so the measure can be read off it.",
+  "",
+  "  Second paragraph of the abstract.",
+  "keywords: [harmony, circle of fifths, tuning]",
+  "lang: en",
+  "filters:",
+  "  - mdm",
+  "---",
+  "",
+  "This document is ordinary Markdown. The first paragraph is long enough to wrap, so that its first line can be compared between the editor and the page.",
+  "",
+].join("\n");
+// The same parts under their two names, the page's and the editor's.
+const TITLE_BLOCK_PARTS = [
+  ["title", "#title-block-header h1.title", "#app .mdm-title"],
+  ["subtitle", "#title-block-header .subtitle", "#app .mdm-subtitle"],
+  ["tags", "#title-block-header .quarto-categories", "#app .mdm-title-categories"],
+  ["tag", "#title-block-header .quarto-category", "#app .mdm-title-category"],
+  ["description", "#title-block-header .description", "#app .mdm-title-description"],
+  ["author", "#title-block-header p.author", "#app .mdm-title-author p"],
+  ["affiliation", "#title-block-header p.affiliation", "#app .mdm-title-affiliations p"],
+  ["envelope", "#title-block-header a.quarto-title-author-email", "#app .mdm-title-email"],
+  ["ORCID mark", "#title-block-header a.quarto-title-author-orcid img", "#app .mdm-title-orcid svg"],
+  ["date", "#title-block-header p.date", "#app .mdm-title-date p"],
+  ["modified date", "#title-block-header p.date-modified", "#app .mdm-title-modified p"],
+  ["DOI", "#title-block-header p.doi", "#app .mdm-title-doi p"],
+  ["DOI link", "#title-block-header p.doi a", "#app .mdm-title-doi .mdm-link"],
+  ["word over the abstract", "#title-block-header .abstract .block-title", "#app .mdm-title-abstract .mdm-title-label"],
+  ["paragraph of the abstract", "#title-block-header .abstract > p", "#app .mdm-title-abstract > p"],
+  ["word over the keywords", "#title-block-header .keywords .block-title", "#app .mdm-title-keywords .mdm-title-label"],
+  ["keywords", "#title-block-header .keywords > p", "#app .mdm-title-keywords > p"],
+];
+const TITLE_BLOCK_READ = function (rootSel, parts, side, lines) {
+  const root = document.querySelector(rootSel);
+  const box = root.getBoundingClientRect();
+  const out = { parts: {} };
+  parts.forEach((part) => {
+    out.parts[part[0]] = Array.from(document.querySelectorAll(part[side])).map((el) => {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      // How far its words reach: from the first letter drawn to the last,
+      // off the text itself and not off the boxes around it (a title
+      // written as a block is a paragraph inside the heading on the page,
+      // and a paragraph is as wide as the column whatever it says).
+      const ink = { left: Infinity, right: -Infinity, width: 0 };
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        Array.from(range.getClientRects()).forEach((rect) => {
+          if (!rect.width) return;
+          ink.left = Math.min(ink.left, rect.left);
+          ink.right = Math.max(ink.right, rect.right);
+        });
+      }
+      if (ink.right > ink.left) ink.width = ink.right - ink.left;
+      // What fades it: its own opacity and that of everything over it.
+      let opacity = 1;
+      for (let e = el; e && e !== root; e = e.parentElement) opacity *= parseFloat(getComputedStyle(e).opacity);
+      return {
+        left: +(r.left - box.left).toFixed(1),
+        top: +(r.top - box.top).toFixed(1),
+        width: +r.width.toFixed(1),
+        height: +r.height.toFixed(1),
+        // A picture has no words to measure.
+        ink: /^(?:img|svg)$/i.test(el.tagName) ? null : +ink.width.toFixed(1),
+        size: +parseFloat(cs.fontSize).toFixed(2),
+        weight: cs.fontWeight,
+        color: cs.color,
+        opacity: +opacity.toFixed(3),
+        capitals: cs.textTransform,
+        // The words without the space between them: the page's markup has
+        // line breaks between two tags where the editor's has nothing, and
+        // how far the words reach is measured above.
+        text: el.textContent.replace(/\s+/g, ""),
+      };
+    });
+  });
+  const first = Array.from(document.querySelectorAll(lines)).find((e) => e.textContent.trim().startsWith("This document is ordinary Markdown"));
+  out.first = first ? +(first.getBoundingClientRect().top - box.top).toFixed(1) : null;
+  return out;
+};
+
+test("the editor draws every part of the title block where the page prints it, in either face", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const { frontMatter } = require("../vscode-mdm/transforms.js");
+  const read = TITLE_BLOCK_READ.toString();
+  const WIDTH = 1000;
+  for (const face of ["roman", "sans"]) {
+    const name = "title-block-" + face;
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), TITLE_BLOCK_DOC);
+    const r = spawnSync(
+      MDM,
+      ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:" + face, "-M", "mdm-text-align:justify"],
+      { cwd: DIR, encoding: "utf8" }
+    );
+    assert.equal(r.status, 0, r.stderr);
+
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: WIDTH, height: 1200 },
+    });
+    OPEN_BROWSERS.add(browser);
+    let exported;
+    try {
+      const page = await browser.newPage();
+      await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      await page.evaluate(() => document.fonts.ready);
+      exported = await page.evaluate(
+        "(" + read + ")(" + JSON.stringify("main.content") + ", " + JSON.stringify(TITLE_BLOCK_PARTS) + ", 1, " + JSON.stringify("main.content p") + ")"
+      );
+    } finally {
+      await browser.close();
+      OPEN_BROWSERS.delete(browser);
+    }
+
+    const h = await openEditor({
+      seed: { settings: { textFont: face } },
+      scores: 0,
+      withFrontMatter: false,
+      frontMatter: frontMatter(TITLE_BLOCK_DOC),
+      text: TITLE_BLOCK_DOC,
+    });
+    let editor;
+    try {
+      await h.page.setViewport({ width: WIDTH, height: 1200 });
+      await h.page.evaluate(() => document.fonts.ready);
+      await h.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      editor = await h.page.evaluate(
+        "(" + read + ")(" + JSON.stringify("#app .mdm-title-block") + ", " + JSON.stringify(TITLE_BLOCK_PARTS) + ", 2, " + JSON.stringify("#app .cm-content > .cm-line") + ")"
+      );
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+
+    for (const [part] of TITLE_BLOCK_PARTS) {
+      const there = exported.parts[part];
+      const here = editor.parts[part];
+      assert.ok(there.length > 0, "the " + face + " page has no " + part);
+      assert.equal(here.length, there.length, "the " + part + " in the " + face + ": " + here.length + " in the editor, " + there.length + " on the page");
+      there.forEach((page, i) => {
+        const where = "the " + part + " " + (i + 1) + " in the " + face + " (" + page.text.slice(0, 24) + ")";
+        for (const what of ["left", "top", "width", "height", "ink"]) {
+          if (page[what] === null) continue;
+          assert.ok(
+            Math.abs(here[i][what] - page[what]) <= 0.5,
+            "the " + what + " of " + where + ": " + here[i][what] + " in the editor, " + page[what] + " on the page"
+          );
+        }
+        for (const what of ["size", "weight", "color", "opacity", "capitals", "text"]) {
+          assert.equal(here[i][what], page[what], "the " + what + " of " + where);
+        }
+      });
+    }
+    assert.ok(
+      Math.abs(editor.first - exported.first) <= 0.5,
+      "the first paragraph of the " + face + " starts " + editor.first + "px under the head of the column in the editor and " + exported.first + " on the page"
+    );
+  }
+});
+
 // ---------- The ladder of headings, page against editor ----------
 
 // Six levels, each over a line of prose, which is the document the editor's

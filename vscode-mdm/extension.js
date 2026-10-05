@@ -14,6 +14,10 @@ const {
   splitFrontMatter,
 } = require("./transforms");
 const { syntaxPalette, listThemes } = require("./theme");
+// What a YAML header prints at the head of the page, which the webview draws
+// from the same reader: here it says whether a header prints anything at all,
+// which is whether there is a title to click on (headerOpen, below).
+const { titleLook } = require("./media/mdm-crossref.js");
 
 // The log of every export, kept out of the notifications: a toast truncates,
 // does not scroll and cannot be copied, and what an export has to say when it
@@ -100,6 +104,8 @@ const SETTINGS = {
   scoreFill: ["none", "paper", "slate", "brass"],
   staffLines: ["gray", "ink"],
   scoreAlign: ["center", "left"],
+  // Hidden first: a header is put away until it is asked for (headerOpen,
+  // in the provider).
   frontMatter: ["hidden", "shown"],
   outline: ["hidden", "shown"],
   multicursorMatch: ["word", "substring"],
@@ -497,12 +503,13 @@ function exportLook(document, text) {
       // (exportHyphenation above).
       "-M",
       "mdm-hyphenation:" + exportHyphenation(settings.hyphenation, text),
-      // Not a colour, but the same kind of thing: what the editor is showing.
-      // The title block Quarto draws from the YAML belongs to the header, so
-      // an export from an editor that is hiding the header renders a document
-      // that does not open with it either (the TITLE_BLOCK of mdm.lua).
-      "-M",
-      "mdm-front-matter:" + settings.frontMatter,
+      // Nothing about the header: the title block Quarto draws from the YAML
+      // is drawn by the editor too, whether the header's source is open or
+      // put away (TitleWidget in media/main.js), so the page opens with it
+      // as the filter leaves it when it is told nothing. `mdm-front-matter`
+      // used to travel here, `hidden` taking the block off the page while
+      // the editor showed none of it; the filter still reads the key, for a
+      // render from the command line that wants a page without the block.
     ];
     const palette = readPalette(installed).palette;
     // MDM Light, MDM Dark and MDM White are the editor's own looks and take no
@@ -4312,33 +4319,103 @@ class MdmEditorProvider {
     // not a boolean: two onDidReceiveMessage calls can overlap on their await.
     let applyingFromWebview = 0;
 
+    // Whether the source of the YAML header is open in this editor. Put
+    // away, the header and the blank line under it stay on this side and the
+    // editor's text starts below them (transforms.js): the editor draws the
+    // title block the header asks for, or nothing for a header that prints
+    // nothing, and no edit made in the text can reach the header. Open, the
+    // header is the first lines of the text, edited in place.
+    //
+    // It is opened in two ways, which is what the owner asked for over
+    // three days (2026-10-03 to 2026-10-05):
+    //
+    // - The setting mdm.frontMatter, which is the YAML button of the
+    //   toolbar: the button writes it, as every other button of the bar
+    //   writes its own, so it is remembered and every editor follows it.
+    //   `shown` keeps the source of every header in view, as the YAML it
+    //   is, with no title block drawn in its place, and what it shows stays
+    //   (`headerPinned`); `hidden`, the default, puts it away.
+    // - A click on the drawn title, where the header is put away and draws
+    //   one: the source opens over the drawing and goes away again when the
+    //   carets leave it or a click lands outside the text, as a table's
+    //   does. The webview asks for both (the `header` message with `peek`),
+    //   since it is the side that has the carets. Nothing is kept of it.
+    //
+    // For a day (2026-10-04) the setting spoke only for a header that draws
+    // nothing, and the button on a titled one was that editor's alone; the
+    // owner made it one setting for every header the day after, with which
+    // buttons keep their state by document left for later. What the setting
+    // never does again is reach the export: until 2026-10-03 a hidden
+    // header took the title off the exported page.
+    const drawsNothing = (text) => {
+      const header = frontMatter(text);
+      // A header the reader cannot make sense of is left to the editor, put
+      // away: an error here would keep the document from opening at all.
+      try {
+        return header !== "" && titleLook(toLf(header)) === null;
+      } catch (e) {
+        return false;
+      }
+    };
+    const kept = () => readSettings().frontMatter === "shown";
+    let headerOpen = frontMatter(document.getText()) !== "" && kept();
+    // Whether the open source is there to stay, the button's doing or the
+    // setting's, and not a click's on the drawn title, which the carets
+    // leaving it puts away. It says nothing of a header that is put away.
+    let headerPinned = headerOpen;
+    // Whether the document had a header before the last change, for the one
+    // change that opens a header by itself (settleHeader).
+    let hadHeader = frontMatter(document.getText()) !== "";
+    // True while the hyphenation menu writes a `lang:` into the document
+    // (writeLanguage): the header it makes comes up put away whatever the
+    // setting says.
+    let fromMenu = false;
+
+    // The header's state after a change of the document. A document left
+    // with no header has none open, so one written into it later comes up as
+    // any other. And a header written into a file that had none, in the
+    // text editor beside this one, comes into view where the reader keeps
+    // headers in view, as it would have come up there.
+    const settleHeader = () => {
+      const header = frontMatter(document.getText()) !== "";
+      if (!header) headerOpen = false;
+      else if (!hadHeader && !fromMenu && kept()) {
+        headerOpen = true;
+        headerPinned = true;
+      }
+      hadHeader = header;
+    };
+
     // `withFrontMatter` travels with the text it describes, so an edit written
-    // under the previous setting is still read as what it was (see
-    // transforms.js). `frontMatter` carries the header itself, which the
-    // webview only needs to know whether the file has one. `hiddenLines` says
+    // before the header was opened or put away is still read as what it was
+    // (see transforms.js). `frontMatter` carries the header itself, which the
+    // webview draws the title block from while the text does not hold it,
+    // and reads to know whether the file has one. `hiddenLines` says
     // how many lines of the file are not in that text, which is what the
     // numbers the editor draws in its margin count from: the host is the only
     // side that has both texts to compare.
-    // A header the editor typed into a file that had none, while the setting
-    // keeps headers out of the editor. The edit is written as it came, and
-    // the file now has a header; mapping the text back under the setting
-    // would strip it and the echo would take the typed lines off the screen
-    // (the caret went to line 1 and the margin jumped to 4). The text stays
-    // in the editor with its header, as though the setting were "shown", for
-    // this document and until the setting is touched: the button then offers
-    // to hide it, and a press does.
-    let headerFromEditor = false;
+    // A header the editor typed into a file that had none comes in as text
+    // of the document, and stays on screen as typed: the edit is written as
+    // it came, the file now has a header, and taking it out of the text
+    // would have the echo lift the typed lines off the screen (the caret
+    // went to line 1 and the margin jumped to 4). The header counts as open
+    // from that edit on, and the button offers to put it away.
+
+    // `pinned` says the open source is there to stay (headerPinned): the
+    // webview draws the title block under it only while a caret is in it,
+    // and does not ask for it to be put away when the carets leave.
 
     // `version` is the document's, which the webview hands back as the `base`
     // of every edit it sends (see "Synchronization" in media/main.js).
     const updateMsg = () => {
-      const withFrontMatter = readSettings().frontMatter === "shown" || headerFromEditor;
+      const withFrontMatter = headerOpen;
       const text = document.getText();
       return {
         type: "update",
         text: toEditor(text, withFrontMatter),
         frontMatter: toLf(frontMatter(text)),
         withFrontMatter: withFrontMatter,
+        pinned: withFrontMatter && headerPinned,
         hiddenLines: hiddenLines(text, withFrontMatter),
         version: document.version,
       };
@@ -4372,10 +4449,15 @@ class MdmEditorProvider {
       // editor changes what the citations print as much as one written in
       // the text editor beside it.
       cites.documentChanged();
+      const wasOpen = headerOpen;
+      settleHeader();
       if (applyingFromWebview === 0) {
         externalVersion = document.version;
         const msg = updateMsg();
-        const changes = editorChanges(e.contentChanges, msg.hiddenLines);
+        // Not across a change that opened the header or put it away: the
+        // ranges are the file's, and the editor's text has just gained or
+        // lost the header's lines, so the webview compares the two texts.
+        const changes = wasOpen === headerOpen ? editorChanges(e.contentChanges, msg.hiddenLines) : undefined;
         if (changes) msg.changes = changes;
         webview.postMessage(msg);
       }
@@ -4385,9 +4467,10 @@ class MdmEditorProvider {
 
     // The settings in force for this document, the division it keeps of its
     // own included, and the document again behind them: mdm.frontMatter
-    // decides what the editor text holds, so the text is re-sent in whichever
-    // mode is now in force. The other settings only repaint, and for them
-    // this update lands on identical text and the webview drops it.
+    // decides whether the text holds the header, so the
+    // text is re-sent in whichever state is now in force. The other settings
+    // only repaint, and for them the update lands on identical text and the
+    // webview drops it.
     const sendSettings = () => {
       webview.postMessage({
         type: "settings",
@@ -4397,8 +4480,19 @@ class MdmEditorProvider {
     };
 
     const configSub = vscode.workspace.onDidChangeConfiguration((e) => {
-      // The setting speaks for the header again once it is touched.
-      if (e.affectsConfiguration("mdm.frontMatter")) headerFromEditor = false;
+      // A header follows the setting from the moment it is touched,
+      // whatever this editor had done with it: brought into view to stay,
+      // or put away where it was in view to stay. A source a click on the
+      // drawn title has open is not the setting's to close, and goes when
+      // the carets leave it.
+      if (e.affectsConfiguration("mdm.frontMatter") && frontMatter(document.getText()) !== "") {
+        if (kept()) {
+          headerOpen = true;
+          headerPinned = true;
+        } else if (headerPinned) {
+          headerOpen = false;
+        }
+      }
       if (
         e.affectsConfiguration("mdm") ||
         e.affectsConfiguration("editor.multiCursorModifier")
@@ -4483,32 +4577,32 @@ class MdmEditorProvider {
     // The language the hyphenation menu chose, as `lang:` in the header
     // (withLang in transforms.js). Not counted as coming from the webview:
     // the update this change sends back is how the editor learns the header
-    // it now has, and with the header hidden it has no other way to.
+    // it now has, and with the header put away it has no other way to.
     //
     // A file that had none is given a header here, and what was asked for was
     // word division and not three lines of YAML over the document: the
-    // document is put on the hidden mode first, so the header never appears
-    // on screen, and the button beside the menu, which greys out only for a
-    // file that has no header at all, is what opens it from then on. Before
-    // the edit, so that no frame of the document is drawn with the header in
-    // it. A file that already had one is left showing what it was showing.
+    // header comes up put away, so it never appears on screen, whatever
+    // mdm.frontMatter says, and the button
+    // beside the menu, which greys out only for a file that has no header at
+    // all, is what opens it from then on (the owner, 2026-09-11). The
+    // setting is left as it is: it used to be switched to `hidden` here,
+    // which hid the header of every other open document as well. A file that
+    // already had a header is left showing what it was showing.
     const writeLanguage = async (lang) => {
       const text = document.getText();
       const newText = withLang(text, lang, eol());
       if (newText === text) return;
-      // The header about to be written is not one the reader asked to see, so
-      // the editor is put on the hidden mode before the line lands and told at
-      // once. mdm.frontMatter is the editor's own setting and not the
-      // document's, so this hides the header of every open document; the YAML
-      // button of the toolbar, which a file with no header leaves greyed, is
-      // what opens it again from here on.
-      if (frontMatter(text) === "" && readSettings().frontMatter === "shown") {
-        await writeSetting(document, "frontMatter", "hidden");
-        sendSettings();
+      // Said before the edit, so that no frame of the document is drawn with
+      // the header in it: the change lands with the header put away
+      // (settleHeader), where mdm.frontMatter would otherwise bring it out.
+      fromMenu = true;
+      try {
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), newText);
+        await vscode.workspace.applyEdit(edit);
+      } finally {
+        fromMenu = false;
       }
-      const edit = new vscode.WorkspaceEdit();
-      edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), newText);
-      await vscode.workspace.applyEdit(edit);
     };
 
     webview.onDidReceiveMessage(async (msg) => {
@@ -4518,16 +4612,50 @@ class MdmEditorProvider {
         // that no longer exists and will never answer.
         endAudioRun(document.uri.toString(), "the editor reloaded");
         webview.postMessage(updateMsg());
+      } else if (msg.type === "header") {
+        // The YAML button, or a click on the drawn title: the source of the
+        // header opened or put away. In the writing turn, behind the edit
+        // the webview posts ahead of this (it sends what it was holding
+        // first), so the text that answers is the one that edit left.
+        await inTurn(async () => {
+          const text = document.getText();
+          if (msg.peek === true) {
+            // The drawn title's own: a click on it opens the source of a
+            // header that has one, and the carets leaving that source, or
+            // a click outside the text, put it away. Neither touches a
+            // source that is there to stay, and neither is the setting's
+            // business. The answer goes out either way: the webview is
+            // waiting for one.
+            if (msg.open === true) {
+              if (!headerOpen && frontMatter(text) !== "" && !drawsNothing(text)) {
+                headerOpen = true;
+                headerPinned = false;
+              }
+            } else if (!headerPinned) {
+              headerOpen = false;
+            }
+            webview.postMessage(updateMsg());
+            return;
+          }
+          headerOpen = msg.open === true && frontMatter(text) !== "";
+          headerPinned = headerOpen;
+          webview.postMessage(updateMsg());
+          // The press is the setting: it is remembered, and reaches every
+          // other editor through onDidChangeConfiguration, whatever their
+          // headers draw (the owner, 2026-10-05). Not from a file with no
+          // header, where the button is greyed out and a message is stale.
+          if (frontMatter(text) === "") return;
+          const value = headerOpen ? "shown" : "hidden";
+          if (readSettings().frontMatter === value) return;
+          try {
+            await writeSetting(document, "frontMatter", value);
+          } catch (e) {
+            vscode.window.showErrorMessage(
+              "MDM: could not save mdm.frontMatter (" + e.message + ")"
+            );
+          }
+        });
       } else if (msg.type === "setSetting") {
-        // A press on the header button while a typed header is being kept
-        // on screen over the setting: the setting takes over again, and it
-        // is re-sent even where the stored value does not change, since no
-        // configuration event says anything then.
-        let headerHanded = false;
-        if (msg.key === "frontMatter" && headerFromEditor) {
-          headerFromEditor = false;
-          headerHanded = true;
-        }
         let own = false;
         try {
           own = await writeSetting(document, msg.key, msg.value);
@@ -4539,7 +4667,7 @@ class MdmEditorProvider {
         // A setting written to settings.json reaches this editor and every
         // other through onDidChangeConfiguration below; a division kept for
         // this document alone is this editor's to be told of.
-        if (own || headerHanded) sendSettings();
+        if (own) sendSettings();
       } else if (msg.type === "flushed") {
         // The edit it may have posted ahead of this is in the writing turn
         // already; the save goes on once that turn is over.
@@ -4571,14 +4699,24 @@ class MdmEditorProvider {
             !!msg.withFrontMatter,
             eol()
           );
-          // A header typed into a file that had none, with the setting
-          // keeping headers out: the file gains it as typed, and the text
-          // stays on screen with it (headerFromEditor).
+          // A header typed into a file that had none: the file gains it as
+          // typed, and the text stays on screen with it (headerOpen), in
+          // whichever state the edit was written. A header deleted in its
+          // open card leaves the document with none open (settleHeader), and
+          // the next one typed there was lifted off the screen by the echo.
+          // One that draws a title is open as a click on the title would
+          // have left it, so it goes to its drawing when the carets leave
+          // it, as a table just typed does; one that draws nothing stays,
+          // having no drawing to go to. Where headers are kept in view any
+          // header stays, which the change of the document says for itself
+          // as the edit below lands (settleHeader).
           const typedHeader =
-            !msg.withFrontMatter &&
             frontMatter(document.getText()) === "" &&
             frontMatter(newText) !== "";
-          if (typedHeader) headerFromEditor = true;
+          if (typedHeader) {
+            headerOpen = true;
+            headerPinned = drawsNothing(newText);
+          }
           if (newText !== document.getText()) {
             applyingFromWebview++;
             try {

@@ -206,6 +206,105 @@ D7. Front matter shown: **literal YAML lines at the top, `---` visible and
   splices them back from the file (`transforms.js`, now that and nothing
   else).
 
+  Revised with the owner on 2026-10-03. The two states stay as they are
+  above, and what moved is who chooses between them and what the hidden one
+  draws. Hidden was a setting (`mdm.frontMatter`) that every open document
+  followed, and it drew nothing, while the export read it to take the title
+  block off the page. It is now the state of one editor, held by the host
+  and stored nowhere: a document comes up with its header put away, and the
+  editor draws in its place the title block the page opens with (the title,
+  the subtitle, the names, the date), which a click opens into the YAML as a
+  click opens a table into its rows, the drawn title staying under the card.
+  A header that prints nothing draws nothing and is opened from the toolbar.
+  The owner chose that last part from six proposals
+  (`design/design-yaml-header.html`, A). Three things about it that are not
+  obvious from the code:
+
+  - The header put away stays out of the text, and is not a range of the
+    text covered by a widget as a table's source is. In the text and
+    invisible, Ctrl+A and Delete would take it out of the file without it
+    ever having been seen, and a Backspace at the head of the body would
+    delete it whole (an atomic range goes at once).
+  - So it does not close by itself when the caret leaves it, which a table
+    does: closing changes the text of the editor, and a header someone
+    wants to read while writing stays. It closes by the button and by a
+    click on the drawn title.
+  - The export says nothing about the header any more. The filter still
+    reads `mdm-front-matter` for a render from the command line.
+  - One copy button, the owner's the day after: in the rail beside the
+    drawn title under the pointer, as beside a table, and on the YAML's card
+    for as long as the card is shown. A header that draws nothing has none
+    until its card is open. It copies the header as written, fences and
+    all, where a code block's copies the code without its fence: the
+    fences are the header's own, and what a header is pasted into is
+    another document.
+
+  Revised again on 2026-10-04, on two things the owner said after seeing
+  it. The setting came back, for the one kind of header that needs it: a
+  header that draws nothing has no drawing to stand for it, and a reader may
+  want its YAML kept in view, so `mdm.frontMatter` is the word on such a
+  header (`shown` brings it up open), the YAML button writes it when it is
+  pressed in such a document, and every editor on such a header follows it.
+  A header that draws a block is still this editor's alone and comes up
+  drawn whatever the setting says, which is what was asked for it in the
+  first place by someone whose setting said `shown`. The host tells the two
+  apart with the reader the webview draws from (`titleLook`), and a header
+  the hyphenation menu has just made stays put away either way. And the
+  block draws all of what the page prints there, not the four parts it
+  started with: the affiliations, the envelope and the ORCID mark, the day
+  of modification and the DOI, the categories and the description, the
+  abstract and the keywords, for which the header is read as the tree it is
+  (`readHeader` in `mdm-crossref.js`) and a date in a pattern as dayjs
+  reads it. What that reading does not reach is written where it is done.
+
+  Revised a third time the same day, by the owner, on the header that draws
+  a block. The second point above is undone: what a click on the drawn
+  title opens now goes away when the carets leave it, on a click in the
+  text, in the dead margin or on the bar, "exactly as the tables, the
+  equations and the scores". The reader who wants the YAML to stay has the
+  button, which shows it in place of the drawing, with no block under it,
+  until it is pressed again: the same thing the setting does for a header
+  that draws nothing. So the host holds two things, whether the source is
+  in the text and whether it is there to stay (`pinned` on every update),
+  and the webview, which has the carets, asks for the first kind to be
+  opened and put away (`peek` on its `header` message). What follows from
+  the header not being a range of the text, which the first point above
+  keeps:
+
+  - Putting it away is still a change of the editor's text, made by the
+    host. It waits for the release of the button that took the caret out,
+    as every other block's drawing does, or the text would move under a
+    pointer still down and the click would come out as a selection.
+  - The history holds what was written in the header after its lines have
+    gone, with nowhere to put it: an undo wrote a word deleted in the title
+    into the first line of the body (measured). Every step of the history
+    now carries where it was made, and one whose place a change from
+    outside has deleted is taken out unapplied (`historyStep` in
+    `main.js`), which needed `invertedEffects` out of the bundle.
+  - The lines going move everything under them, and CodeMirror does not
+    hold the page through a change of the text: the line the reader is on
+    is noted before the change and put back after it (`readerPlace`), and
+    the block says how tall it is while it is not drawn, so that the top of
+    the document is where the editor thinks it is.
+  - It is entered with a click and not with the arrows: there is no line
+    of the text above the first for a caret to go up into.
+
+  Revised a fourth time on 2026-10-05, by the owner, on three of the
+  points the round before had left to him. The setting is one for every
+  header again, and the button writes it whatever the header draws:
+  `shown` keeps the YAML of every header in view in place of the drawing,
+  and which buttons keep their state by document is left for later. Under
+  a YAML kept in view the block is drawn while a caret is in the header,
+  so that a title typed there is seen as it is typed, as a table is seen
+  under its rows, and goes when the carets leave. And no block is put away
+  by scrolling: the press on the scrollbar's handle that took the carets
+  out of an open table does nothing to any of them now, which is the first
+  case of the rule he gave with it, that a table, an equation, a score and
+  the title block behave the same unless he defines an exception
+  (`CLAUDE.md`, "One behaviour for every drawn block"). What the setting
+  does not get back is the export: the page opens with its block whatever
+  the editor shows.
+
 D8. Vendor build: **`vscode-mdm/vendor-src/`** (esbuild, lockfile, `npm run
   vendor`); the bundle, KaTeX's stylesheet and fonts are committed under
   `media/vendor/cm6/`, the runtime stays plain JS.
