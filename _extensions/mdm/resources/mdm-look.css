@@ -168,6 +168,12 @@ body .title {
   font-weight: 600;
   line-height: 1.3;
   color: var(--mdm-ink);
+  /* The whole of the ink at every level. Quarto's theme draws a heading of
+     the third level and under at 0.9 of it, and the four lower levels came
+     out paler than the editor's: rgb(194, 194, 194) for rgb(212, 212, 212)
+     in MDM Dark, rgb(56, 60, 65) for rgb(36, 41, 46) in MDM Light (measured
+     2026-10-04). */
+  opacity: 1;
   margin-top: 0.6em;
   margin-bottom: 0.3em;
 }
@@ -336,6 +342,93 @@ body caption {
 body main.content th {
   font-weight: inherit;
 }
+/* And the rest of a table as the editor draws it (`#app .mdm-table` in
+   style.css, where the design is said): as wide as what it holds and standing
+   on the left margin, hairlines and nothing else, a rule under the head and a
+   fainter one between rows, no frame, the first and the last column with no
+   padding outside them.
+   The page drew Quarto's table, which is Bootstrap's `.table`: the whole
+   measure wide whatever it held, three short columns spread over 820 px
+   where the editor sets them in 216; cells padded 8.5 px all round (0.5rem);
+   the head's cells at the foot of their row; a rule over the table, under it
+   and under every row, in a grey made for Quarto's light theme (#d3d3d4,
+   #909294) and so a row of bright lines on the dark side. A row stood 45.19
+   px against the editor's 36.63, and the paragraph under a table 45.18 px
+   from its last row against 52.45 (measured 2026-10-04 on six tables in MDM
+   Dark; the owner's "tables are not drawn the same" of that day).
+   The table is its own scroll box, as the editor's is inside its widget
+   (`.mdm-table-scroll`): a block the width of the column, padded 0.3em over
+   and under, in which the rows form a table of their own width. One wider
+   than the column squeezes its cells down to their longest word, as in the
+   editor, and only then scrolls sideways in that box instead of pushing the
+   page; only sideways, for the reason the equations carry below.
+   `border-collapse` is inherited, so the rows inside keep it.
+   The widths Pandoc writes are taken off. For a table whose source has a
+   line longer than 72 characters it turns the dashes under the head into
+   percentages (`<col style="width: 34%">`), and the columns stood where the
+   dashes said and not where their words asked: the owner's table broke
+   "index and type" into two rows on the page with room to spare. The editor
+   lays a table out by what its cells hold, whatever the length of its
+   source. The declaration is in the element's own style, hence !important.
+   With these, each of the 90 cells of the six tables stands at the editor's
+   x to 0.00 px and has its width to 0.02 (a cell holding a chip of code
+   aside, 1.86 px, which is the code face and not the table), and every
+   distance from the text over a table to its head, down its rows and to the
+   text under it is the editor's to 0.01 px.
+   A cell with no alignment of its own is set left, as the editor sets it: a
+   table inside a list item took the item's justification. Pandoc writes the
+   alignment a column asks for into the cell's own style, which outranks this.
+   What is not matched: a caption (`: text` under the table). The page sets
+   it over the table, centred on the column, and the editor draws that line
+   as the text it is, colon and all, under the table. */
+body main.content table {
+  display: block;
+  width: auto;
+  margin: 0 0 1em;
+  padding: 0.3em 0;
+  border: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+body main.content table > colgroup > col {
+  width: auto !important;
+}
+body main.content table > thead {
+  border: none;
+}
+body main.content table > :is(thead, tbody, tfoot) > tr > :is(th, td) {
+  padding: 0.28em 0.85em;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+  /* A cell breaks between words and never inside one, as the editor's does:
+     a column squeezes to its longest word and the box scrolls the rest. */
+  overflow-wrap: normal;
+  word-break: normal;
+}
+body main.content table > :is(thead, tbody, tfoot) > tr > :is(th, td):first-child {
+  padding-left: 0;
+}
+body main.content table > :is(thead, tbody, tfoot) > tr > :is(th, td):last-child {
+  padding-right: 0;
+}
+body main.content table > thead > tr > th {
+  border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 34%, transparent);
+}
+body main.content table > tbody > tr:last-child > td {
+  border-bottom: none;
+}
+/* The caption over the column and not over the table's own width, where a
+   table of two short columns would break it into a row a word long. */
+body main.content table > caption {
+  display: block;
+}
+/* Quarto lets a link in a table break inside a word (`.table a {
+   word-break: break-word }`); a cell breaks between words, here as in the
+   editor. */
+body main.content table a {
+  word-break: normal;
+}
 body .mdm-hyphen::after {
   content: "\00ad";
 }
@@ -395,11 +488,18 @@ body .anchorjs-link {
    `.625rem` over and under the text, where the editor's bar runs the height
    of the quoted lines and no further; measured), so there is none over or
    under it here, and the paragraph's em after it. That keeps the editor's
-   air beside a paragraph and beside a heading alike. */
+   air beside a paragraph and beside a heading alike.
+   And none on its right: the same rule of Bootstrap pads a quotation 1.5rem
+   on that side, so its lines were set in a measure 25.5 px short of the
+   editor's (22 px on paper, where the root was smaller) and broke on other
+   words: the editor ends the first row of a quotation on "so", at the
+   column's edge, where the page sent "so" down (measured 2026-10-04; a card
+   of code inside a quotation stopped 22 px short as well). */
 body blockquote,
 body blockquote.blockquote {
   border-left: 3px solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
   padding-left: 14px;
+  padding-right: 0;
   padding-top: 0;
   padding-bottom: 0;
   margin-bottom: 1em;
@@ -523,12 +623,29 @@ body main.content input.mdm-task {
 body main.content .mdm-bullet {
   color: color-mix(in srgb, var(--mdm-ink) 70%, transparent);
 }
+/* A rule as the editor draws it (`#app .mdm-hr` in style.css): a row of its
+   own, the stroke 2 px in the middle of it with 0.6em over and under, and a
+   blank line of the body on either side. The row's air is padding, as in the
+   editor, and not the margin it was: a margin collapsed into the paragraph's
+   own over the rule and stood alone under it, so the text over a rule was
+   16 px from it and the text under it 9.6, where the editor has 25.6 on both
+   sides, and the two lines of text beside a rule were 25.6 px nearer each
+   other on the page (54.79 px from the top of one to the top of the next for
+   the editor's 80.37, measured 2026-10-04). The box is its content's, since
+   Bootstrap sizes every box by its border and the stroke would have no
+   height. The rule Pandoc sets over the notes is left as it was. */
 body hr {
-  height: 0;
-  margin: 0.6em 0;
+  box-sizing: content-box;
+  height: 2px;
+  margin: 0 0 var(--mdm-blank);
+  padding: 0.6em 0;
   border: none;
-  border-bottom: 2px solid color-mix(in srgb, var(--mdm-ink) 16%, transparent);
+  background: color-mix(in srgb, var(--mdm-ink) 16%, transparent) content-box;
   opacity: 1;
+}
+body main.content section.footnotes > hr {
+  margin: 0.6em 0;
+  padding: 0;
 }
 body img {
   max-width: 100%;
@@ -540,12 +657,56 @@ body img {
    editor's own, written here by look_css as --mdm-highlight (butter over
    the document's ground, 34% on a light side and 26% on a dark one), and
    the letters keep the page's ink rather than the black `<mark>` brings
-   with it. In the PDF the same wash is mdmhighlight, which lua-ul draws
-   \hl in (look_tex). */
+   with it, and its corners are square, as the editor's are (they were
+   rounded by 2 px here until 2026-10-04). In the PDF the same wash is
+   mdmhighlight, which lua-ul draws \hl in (look_tex). */
 body mark {
   background: var(--mdm-highlight);
   color: inherit;
-  border-radius: 2px;
+}
+
+/* ---------- Callouts ----------
+   A callout in the editor's colours (`#app .mdm-co-line` in style.css): a bar
+   of its kind's colour, 3 px, a ground of that colour at 5 %, no frame, and
+   the text in the document's ink at the size of the prose. It was Quarto's
+   box as Quarto dresses it for a light page, on every side: on the dark one
+   the title stood in rgb(185, 185, 185) on a band of rgb(201, 209, 221),
+   1.28 to 1 where the prose has 10.89, with a pale line round the box; on
+   the light one a bar of 4.67 px in Bootstrap's blue, green, yellow, red
+   and orange where the editor has its own five; and the text inside at
+   0.9rem, 0.825 of the prose on paper (measured 2026-10-04).
+   What is not the editor's is the callout's own build, which is Quarto's:
+   a row with an icon and the name of the kind ("Note"), where the editor
+   keeps the `:::` fences in view, small and faint, over and under it. */
+body main.content div.callout {
+  --mdm-co-color: #4c7bd0;
+  margin: 0 0 1em;
+  border: none;
+  border-left: 3px solid var(--mdm-co-color);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--mdm-co-color) 5%, transparent);
+  color: var(--mdm-ink);
+}
+body main.content div.callout-tip {
+  --mdm-co-color: #3e9d63;
+}
+body main.content div.callout-warning {
+  --mdm-co-color: #cf9236;
+}
+body main.content div.callout-important {
+  --mdm-co-color: #c94f4f;
+}
+body main.content div.callout-caution {
+  --mdm-co-color: #b0682f;
+}
+body main.content div.callout.callout-style-default > div.callout-header {
+  background: none;
+  color: var(--mdm-ink);
+  opacity: 1;
+  font-size: 1em;
+}
+body main.content div.callout.callout-style-default .callout-body {
+  font-size: 1em;
 }
 
 /* ---------- Notes and the reference list ----------
@@ -648,7 +809,10 @@ body main.content section.footnotes ol > li > p:first-child::before {
   content: counter(list-item);
   position: relative;
   top: -0.5em;
-  margin-right: 0.3em;
+  /* A space of the prose before the text, which is what the editor leaves
+     after the label (6.52 px; 0.3em of the label's 12 px left 3.58,
+     measured 2026-10-04). In ems of the label. */
+  margin-right: 0.544em;
   font-size: 0.75em;
   line-height: 0;
   color: var(--mdm-link);
@@ -746,11 +910,23 @@ body :not(pre) > code:not(.sourceCode),
 body :not(pre) > code.sourceCode {
   font-family: var(--mdm-mono);
   font-size: 0.88em;
+  /* The weight of what it stands in, as in the editor, where code inside
+     `**` is bold: Bootstrap sets every <code> at 400. */
+  font-weight: inherit;
   color: var(--mdm-syn-base);
   background: var(--mdm-syn-card);
   border: 1px solid var(--mdm-syn-edge);
   border-radius: 3px;
   padding: 0.05em 0.3em;
+}
+/* And in a link, the link's blue, as the editor paints everything inside
+   one (`#app .mdm-link *` in style.css): the chip's own ink above outranks
+   Bootstrap's `a > code { color: inherit }`, and code in a link was drawn in
+   the code's ink (rgb(248, 248, 242) for the editor's rgb(88, 166, 255),
+   MDM Dark, measured 2026-10-04). */
+body a > code:not(.sourceCode),
+body a > code.sourceCode {
+  color: inherit;
 }
 /* A block of code on its card, in the editor's monospace and at its size.
    Quarto wraps a highlighted block in div.sourceCode > pre.sourceCode and
@@ -762,20 +938,37 @@ body pre:not(.sourceCode):not(.mdm-src) {
   background: var(--mdm-syn-card);
   border: none;
   border-radius: 4px;
-  margin: 1em 0;
+  /* A blank line of the body over and under it, which is what the editor
+     draws there: the margin was `1em`, and the em of a card is its own
+     14.08 px, so a card stood 14 px from another and from the text under it
+     where the editor leaves 16 (measured 2026-10-04). */
+  margin: var(--mdm-blank) 0;
   font-family: var(--mdm-mono);
   font-size: 0.88em;
   line-height: 1.5;
   color: var(--mdm-syn-base);
 }
+/* The code inside is the card's text and has no box of its own: Bootstrap
+   pads every <code> (0.125rem 0.25rem), and inside a card that stood the
+   first character 3.7 px further in than the editor has it (16.3 px for
+   12.67) and made the card 3.7 px taller (a card of one line 40.24 px for
+   the editor's 36.58, measured 2026-10-04). */
 body div.sourceCode pre.sourceCode,
 body div.sourceCode code.sourceCode,
 body pre > code {
   margin: 0;
+  padding: 0;
   border: none;
   background: none;
   font: inherit;
   color: inherit;
+}
+/* A fenced block with nothing in it is a card of one row, as the editor
+   draws it (`#app .mdm-empty-card`, a row of 1.5em between the paddings):
+   with no character in it the card was its padding alone, 19 px for the
+   editor's 37 (measured 2026-10-04). */
+body pre > code:empty::after {
+  content: "\200b";
 }
 /* The box that scrolls a wide line sideways is the one that carries the
    padding, so the ground under it is the card's whole width.
@@ -806,14 +999,17 @@ body pre:not(.sourceCode):not(.mdm-src) {
    stood out of the 500 px column (measured). Only sideways, for the reason
    the editor gives: `overflow-x: auto` alone turns the other axis to auto as
    well. Hidden would then crop what KaTeX draws past the box, 3.3 px under
-   the sum, so the box carries the editor's 0.25em of room above and below.
-   That brings the text 4 px nearer the editor on each side of an equation
-   and not all the way: measured on the same equation at 1200 px, 16.5 px
-   above and 11.7 below on the page against 23.6 and 19.8 in the editor. */
+   the sum, so the box carries the room the editor gives a formula above and
+   below: the 0.25em of its own scroll box and the 0.2em of the widget the
+   formula is drawn in (`#app .mdm-math--block` in style.css), which the
+   page has no box of its own for. With the first alone the text stood 5 px
+   nearer on the page across an equation than in the editor (92.79 px from
+   the row above a formula to the row below it for 97.78, and 113.44 for
+   119.82 across a taller one, measured 2026-10-04). */
 body .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0.25em 0;
+  padding: 0.45em 0;
 }
 /* A numbered display equation (the equations pass in mdm.lua): the formula
    on the column and its number in parentheses at the right edge, on the
@@ -848,7 +1044,7 @@ body main.content .mdm-eq > .math.display {
 }
 body main.content .mdm-eq > .math.display > .katex-display {
   margin: 0;
-  padding: 0.25em 0.5em;
+  padding: 0.45em 0.5em;
 }
 body main.content .mdm-eq > .mdm-eq-number {
   grid-column: 3;
@@ -982,8 +1178,15 @@ body .code-copy-button:hover {
 .mdm-paper svg [stroke="#000000"] {
   stroke: var(--mdm-svg-ink);
 }
+/* What carries no fill of its own in the drawing takes the root's, which
+   abcjs sets to the colour of the text around it: a tune's title, for one.
+   The editor repaints that root on the dark side alone, so on a light one
+   the title is in the document's ink; here the root was painted on every
+   side, in the black of the rule above on the light ones, and a title was
+   rgb(0, 0, 0) beside chord symbols and lyrics in the ink's rgb(36, 41, 46)
+   (measured 2026-10-04). --mdm-svg-root is written on the dark side alone. */
 .mdm-paper svg {
-  fill: var(--mdm-svg-ink);
+  fill: var(--mdm-svg-root, currentColor);
 }
 .mdm-paper svg [fill="none"],
 .mdm-paper svg [fill="transparent"],
@@ -1549,7 +1752,12 @@ body .mdm-audio .abcjs-loading-svg circle {
      that has one: the pre its 0.55em of padding, the code inside it the 1.83px
      of padding it computes to, and the card around them its rounded
      corners. With the pre alone the next sheet's first line stood 5.5 pt from
-     the edge and not 7.0; with all three, 7.0 on all three sheets. What it
+     the edge and not 7.0; with all three, 7.0 on all three sheets. (Those
+     are the numbers of that day. The code has had no padding of its own
+     since 2026-10-04, when Bootstrap's was taken off it to stand its first
+     letter where the editor has it; the rule stays on it for a sheet that
+     gives it one, and the test still holds a piece's first line to where the
+     card's own start puts it.) What it
      costs is where a line goes, since the padding under a piece can send the
      sheet's last line on to the next one; the same document still came out six
      sheets. The foot of a piece is not held to the card's own foot, since what

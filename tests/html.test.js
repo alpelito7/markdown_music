@@ -2088,6 +2088,90 @@ test("on paper the sheet is the one the header names, and a narrow one keeps the
   );
 });
 
+// A callout in the editor's colours, on the page and on paper. It was
+// Quarto's box as Quarto dresses it for a light page, on every side: on the
+// dark one its title stood in rgb(185, 185, 185) on a band of rgb(201, 209,
+// 221), 1.28 to 1, with a pale line round the box; on the light one a bar in
+// Bootstrap's colours where the editor has its own five; and its text at
+// 0.9rem (2026-10-04). The five colours are read out of the editor's own
+// sheet, so the page follows it.
+test("a callout is in the editor's colours on the page, its text at the size of the prose, on either side", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, async () => {
+  const kinds = ["note", "tip", "warning", "important", "caution"];
+  const sheet = fs.readFileSync(path.join(ROOT, "vscode-mdm", "media", "style.css"), "utf8");
+  const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const editors = {};
+  for (const kind of kinds) {
+    const m = new RegExp("--mdm-co-" + kind + ":\\s*(#[0-9a-f]{6})").exec(sheet);
+    assert.ok(m, "the editor's sheet names no colour for a " + kind);
+    editors[kind] = rgb(m[1]);
+  }
+  const text =
+    "Overcallout, a line of prose.\n\n" +
+    kinds.map((kind) => "::: {.callout-" + kind + "}\nBody" + kind + " is the text of this one.\n:::").join("\n\n") +
+    "\n\nUndercallout, a line of prose.\n";
+  const PT = 0.75 * (10 / 12) * (800 / 803);
+  for (const side of ["light", "dark"]) {
+    const name = "callouts-" + side;
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:roman", "-M", "mdm-look:" + side], { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const read = await readSheetDoc(name, null, () => {
+      const ink = getComputedStyle(document.querySelector("main.content p")).color;
+      const wide = (text) => {
+        const walker = document.createTreeWalker(document.querySelector("main.content"), NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+          const at = node.data.indexOf(text);
+          if (at === -1) continue;
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + text.length);
+          return range.getBoundingClientRect().width;
+        }
+        return null;
+      };
+      return {
+        ink: ink,
+        prose: getComputedStyle(document.querySelector("main.content p")).fontSize,
+        bodyWord: wide("Bodynote"),
+        callouts: Array.from(document.querySelectorAll("main.content div.callout")).map((box) => {
+          const cs = getComputedStyle(box);
+          const header = getComputedStyle(box.querySelector(".callout-header"));
+          return {
+            bar: cs.borderLeftWidth + " " + cs.borderLeftStyle + " " + cs.borderLeftColor,
+            frame: [cs.borderTopWidth, cs.borderRightWidth, cs.borderBottomWidth].join(" "),
+            ground: cs.backgroundColor,
+            header: header.backgroundColor + " " + header.color + " " + header.opacity,
+            body: getComputedStyle(box.querySelector(".callout-body p")).fontSize + " " + getComputedStyle(box.querySelector(".callout-body p")).color,
+          };
+        }),
+      };
+    });
+    assert.equal(read.callouts.length, kinds.length, side + ": the page's callouts");
+    kinds.forEach((kind, i) => {
+      const c = read.callouts[i];
+      const [red, green, blue] = editors[kind];
+      const where = side + ", " + kind + ": " + JSON.stringify(c);
+      assert.equal(c.bar, "3px solid rgb(" + red + ", " + green + ", " + blue + ")", "the bar, " + where);
+      assert.equal(c.frame, "0px 0px 0px", "a frame round the callout, " + where);
+      const mix = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+) \/ 0\.05\)$/.exec(c.ground);
+      assert.ok(mix, "the ground is not its kind's colour at 5 %, " + where);
+      assert.deepEqual(mix.slice(1, 4).map((v) => Math.round(Number(v) * 255)), editors[kind], "the ground's colour, " + where);
+      assert.equal(c.header, "rgba(0, 0, 0, 0) " + read.ink + " 1", "the row of its title is not on the callout's own ground, in the ink, " + where);
+      assert.equal(c.body, read.prose + " " + read.ink, "its text is not the prose's, " + where);
+    });
+    // And on paper, the text at the size it has on the page.
+    const word = pdfWords(printPdf(name)).find((w) => w.text === "Bodynote");
+    assert.ok(word, side + ": the PDF has no word Bodynote");
+    assert.ok(
+      Math.abs(word.x1 - word.x0 - read.bodyWord * PT) <= 0.05,
+      side + ": a word of a callout is " + (word.x1 - word.x0).toFixed(2) + " pt wide on paper and " + (read.bodyWord * PT).toFixed(2) + " at the scale"
+    );
+  }
+});
+
 // Every sheet carries its number at its foot, as the typeset PDF prints it:
 // centred, in the face and at the size of the prose, and its baseline
 // 45.25 pt over the foot of the sheet, which is TeX's \footskip under the
@@ -3654,6 +3738,477 @@ test("a cell written as a list is set on the page as the editor draws it: its bo
     assert.ok(Math.abs(p.bulletLeft) <= 0.5 && Math.abs(e.bulletLeft) <= 0.5, "the bullet is not at the head of its cell, " + both);
     assert.ok(Math.abs(p.textLeft - e.textLeft) <= 0.5, "the bullet's words, " + both);
   }
+});
+
+// A table as the editor draws it, on the page and on paper (the Tables rules
+// of mdm-look.css, 2026-10-04). The page drew Bootstrap's `.table`: the whole
+// measure wide whatever it held, Pandoc's percentages on the columns of a
+// table with a long line in its source, cells padded half a rem all round,
+// the head at the foot of its row, and a rule over the table, under it and
+// under every row in a grey of Quarto's light theme; the owner's printed
+// tables "are not drawn the same" as his editor's. Three tables, each
+// between two lines of prose: three short columns, a column of each
+// alignment, and one whose source runs past 72 characters and whose cells
+// wrap. Every cell is read on both surfaces (where it stands in the column,
+// its box, its padding, its alignment, the rule under it) and has to agree,
+// with the air over and under each table; and in the PDF printed from the
+// page a word of each column stands where the editor has it.
+const TABLES = function (columnSel, tableSel, marks) {
+  const column = document.querySelector(columnSel);
+  const col = column.getBoundingClientRect();
+  const round = (v) => Math.round(v * 100) / 100;
+  const word = (w) => {
+    const walker = document.createTreeWalker(column, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const at = node.data.indexOf(w);
+      if (at === -1) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + w.length);
+      const r = range.getBoundingClientRect();
+      return { left: round(r.left - col.left), top: round(r.top), bottom: round(r.bottom) };
+    }
+    return null;
+  };
+  const tables = Array.from(document.querySelectorAll(tableSel)).map((table) => {
+    const rows = Array.from(table.querySelectorAll("tr"));
+    const first = rows[0].getBoundingClientRect();
+    const last = rows[rows.length - 1].getBoundingClientRect();
+    const frame = getComputedStyle(table);
+    return {
+      left: round(first.left - col.left),
+      width: round(first.width),
+      top: round(first.top),
+      bottom: round(last.bottom),
+      frame: frame.borderTopWidth + " " + frame.borderBottomWidth,
+      cells: Array.from(table.querySelectorAll("th, td")).map((cell) => {
+        const b = cell.getBoundingClientRect();
+        const cs = getComputedStyle(cell);
+        return {
+          text: cell.textContent.replace(/\s+/g, " ").trim().slice(0, 14),
+          x: round(b.left - col.left),
+          w: round(b.width),
+          h: round(b.height),
+          pad: cs.padding,
+          align: cs.textAlign,
+          valign: cs.verticalAlign,
+          rule: cs.borderBottomWidth + " " + cs.borderBottomStyle + " " + cs.borderBottomColor,
+        };
+      }),
+    };
+  });
+  const found = {};
+  marks.forEach((m) => { found[m] = word(m); });
+  return { column: round(col.width), tables: tables, words: found };
+}.toString();
+
+test("a table is set on the page and on paper as the editor draws it: its width, its columns, its rules and its air", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const text = [
+    "Overone, a line of prose over the first table.",
+    "| Interval | Ratio | Cents |\n|----------|-------|-------|\n| Octave   | 2:1   | 1200  |\n| Fifth    | 3:2   | 702   |\n| Fourth   | 4:3   | 498   |",
+    "Undone, a line of prose under the first table and over the second.",
+    "| Left | Centre | Right | None |\n|:-----|:------:|------:|------|\n| a    | b      | 1.5   | x    |\n| alpha beta | gamma delta | 22.25 | y z |",
+    "Undtwo, a line of prose under the second table and over the third.",
+    "| Term | What it means |\n|------|---------------|\n" +
+      "| Consonance | Two notes whose frequencies stand in a simple ratio sound smooth together, and the simpler the ratio the smoother the sound. |\n" +
+      "| Dissonance | Two notes whose frequencies stand in a complicated ratio beat against each other and sound rough. |",
+    "Undthree, a line of prose under the third table.",
+  ].join("\n\n") + "\n";
+  const MARKS = ["Overone", "Undone", "Undtwo", "Undthree", "Ratio", "Cents", "Octave", "Fifth", "Centre", "22.25", "Dissonance", "complicated"];
+  // One CSS px of the document on paper, and where a Letter sheet starts the
+  // column (the print rules of mdm-look.css).
+  const PT = (16 * 0.75 * (10 / 12) * (800 / 803)) / 16;
+  for (const face of ["roman", "sans"]) {
+    const name = "tables-" + face;
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:" + face], { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(
+      fs.readFileSync(path.join(DIR, name + ".html"), "utf8"),
+      /<col style="width: \d+%">/,
+      "Pandoc wrote no widths for the table with a long source line, so the rule that takes them off reads nothing"
+    );
+
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1400 },
+    });
+    OPEN_BROWSERS.add(browser);
+    const page = await browser.newPage();
+    await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    const exported = await page.evaluate((read, ...args) => eval("(" + read + ")")(...args), TABLES, "main.content", "main.content table", MARKS);
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+
+    const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: face, theme: "light" } }, height: 1400 });
+    let editor;
+    try {
+      await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1400 });
+      await h.page.evaluate(async () => {
+        await document.fonts.ready;
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      });
+      await h.page.mouse.click(2, 2);
+      await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+      editor = await h.page.evaluate((read, ...args) => eval("(" + read + ")")(...args), TABLES, "#app .cm-content", "#app .mdm-table table", MARKS);
+    } finally {
+      await h.close();
+    }
+
+    assert.equal(exported.column, 820, face + ": the page's column");
+    assert.equal(editor.column, 820, face + ": the editor's column");
+    assert.equal(exported.tables.length, 3, face + ": the page's tables");
+    assert.equal(editor.tables.length, 3, face + ": the editor's tables");
+    const overs = ["Overone", "Undone", "Undtwo"];
+    const unders = ["Undone", "Undtwo", "Undthree"];
+    exported.tables.forEach((p, t) => {
+      const e = editor.tables[t];
+      const where = face + ", table " + (t + 1);
+      assert.equal(p.frame, "0px 0px", where + ": the page draws a rule over or under the table");
+      assert.equal(e.frame, "0px 0px", where + ": the editor's table has a frame");
+      assert.ok(Math.abs(p.left) <= 0.5 && Math.abs(e.left) <= 0.5, where + ": the table is not on the left margin: page " + p.left + ", editor " + e.left);
+      assert.ok(Math.abs(p.width - e.width) <= 0.5, where + ": the page's table is " + p.width + " px wide and the editor's " + e.width);
+      assert.equal(p.cells.length, e.cells.length, where + ": the cells");
+      p.cells.forEach((pc, i) => {
+        const ec = e.cells[i];
+        const both = where + ", cell " + JSON.stringify(pc.text) + ": page " + JSON.stringify(pc) + ", editor " + JSON.stringify(ec);
+        assert.equal(pc.text, ec.text, both);
+        for (const side of ["x", "w", "h"]) {
+          assert.ok(Math.abs(pc[side] - ec[side]) <= 0.5, "the cell's " + side + ", " + both);
+        }
+        for (const prop of ["pad", "align", "valign", "rule"]) {
+          assert.equal(pc[prop], ec[prop], "the cell's " + prop + ", " + both);
+        }
+      });
+      const air = (side) => ({
+        over: side.tables[t].top - side.words[overs[t]].bottom,
+        under: side.words[unders[t]].top - side.tables[t].bottom,
+      });
+      const pa = air(exported);
+      const ea = air(editor);
+      assert.ok(
+        Math.abs(pa.over - ea.over) <= 0.5 && Math.abs(pa.under - ea.under) <= 0.5,
+        where + ": the air is " + JSON.stringify(pa) + " on the page and " + JSON.stringify(ea) + " in the editor"
+      );
+    });
+    // What the design is, said once and not only as "the same on both": a
+    // short table is as wide as what it holds, its first cell starts on the
+    // margin, the head has the stronger rule and the last row none.
+    const short = exported.tables[0];
+    assert.ok(short.width < 300, face + ": a table of three short columns is " + short.width + " px wide");
+    assert.match(short.cells[0].pad, /^\S+ \S+ \S+ 0px$/, face + ": the first cell is padded on its left: " + short.cells[0].pad);
+    assert.match(short.cells[0].rule, /^1px solid .*0\.34\)$/, face + ": the rule under the head: " + short.cells[0].rule);
+    assert.match(short.cells[3].rule, /^1px solid .*0\.1\)$/, face + ": the rule under a row: " + short.cells[3].rule);
+    assert.match(short.cells[short.cells.length - 1].rule, /^0px /, face + ": a rule under the last row: " + short.cells[short.cells.length - 1].rule);
+    assert.deepEqual(exported.tables[1].cells.slice(0, 4).map((c) => c.align), ["left", "center", "right", "left"], face + ": the alignment of the columns");
+    // The third table fills the measure and wraps its cells where the editor
+    // wraps them, which Pandoc's percentages kept it from.
+    assert.ok(exported.tables[2].width > 700, face + ": the table of long cells does not reach the measure");
+
+    // And on paper: a word of each column where the editor has it, and the
+    // rows at the editor's pitch.
+    const sheet = pdfWords(printPdf(name)).filter((w) => w.sheet === 1);
+    const left = (612 - 820 * PT) / 2;
+    const at = (text) => {
+      const w = sheet.find((x) => x.text === text);
+      assert.ok(w, face + ": the PDF has no word " + text);
+      return w;
+    };
+    for (const mark of ["Ratio", "Cents", "Centre", "22.25", "complicated"]) {
+      const expected = left + editor.words[mark].left * PT;
+      assert.ok(
+        Math.abs(at(mark).x0 - expected) <= 0.6,
+        face + ": on paper " + mark + " stands at " + at(mark).x0.toFixed(2) + " pt and the editor has it at " + expected.toFixed(2)
+      );
+    }
+    const pitch = (at("Fifth").y0 - at("Octave").y0) / PT;
+    const editorPitch = editor.words.Fifth.top - editor.words.Octave.top;
+    assert.ok(
+      Math.abs(pitch - editorPitch) <= 0.8,
+      face + ": on paper the rows are " + pitch.toFixed(2) + " px apart and in the editor " + editorPitch.toFixed(2)
+    );
+  }
+});
+
+// What the review of the printed PDF found standing or painted otherwise on
+// the page than in the editor, block by block (2026-10-04), each put right in
+// mdm-look.css and read here on both surfaces and on paper:
+// - a quotation set in a measure 25.5 px short of the editor's (Bootstrap
+//   pads `.blockquote` 1.5rem on its right), so it broke on other words;
+// - the code of a card 3.7 px further in and the card 3.7 px taller
+//   (Bootstrap pads every <code>), the card 14 px from its neighbours for the
+//   editor's 16 (a margin in the card's own em), and an empty card half the
+//   height of the editor's;
+// - 5 px less across a display equation than in the editor, and 6.4 less
+//   across a numbered one (the 0.2em of the editor's widget);
+// - a score 9.5 px further from its neighbours (a margin of 1.5rem);
+// - the two lines beside a `***` 25.6 px nearer each other (the rule's
+//   margins collapsed into its neighbours' where the editor pads a row);
+// - headings 3 to 6 at 0.9 of the ink (Quarto's theme), a tune's title in
+//   black on the light side (the root of the drawing painted on every side),
+//   code in a link in the code's ink and code in a strong run at 400
+//   (Bootstrap), and a highlight with round corners;
+// - the text of a note 3.58 px after its number for the editor's space of
+//   6.52 (the last mark: where a note's first word stands in the column).
+// The marks are words of prose that stand over and under each block, so what
+// is compared is where the block puts the text around it, whatever face the
+// code is in; and the first letter of a card's code, which is at the card's
+// padding in any face.
+const BLOCKS_DOC = [
+  "Overquote, a line of prose over the quotation.",
+  "> A single quoted paragraph that is long enough to wrap onto a second line of the column so the height of the bar can be read over two rows of text.",
+  "Underquote, a line of prose under the quotation.",
+  "```python\ndef scale(root):\n    return [root * 2 ** (n / 12) for n in range(13)]\n```",
+  "Betweencards, a line between two cards.",
+  "```\nplaincard text\n```",
+  "```\n```",
+  "Underempty, a line under the empty card.",
+  "### Thirdlevel heading",
+  "#### Fourthlevel heading",
+  "##### Fifthlevel heading",
+  "###### Sixthlevel heading",
+  "Textline with [`linkcode`](https://example.com) and **strong with `boldcode` in it** and [marked]{.mark} words, and a note.[^1]",
+  "$$\nE = mc^2\n$$",
+  "Aftereq, a line after the equation.",
+  "$$\na^2 + b^2 = c^2\n$$ {#eq-pyth}",
+  "Afternum, a line after the numbered equation.",
+  "```abc\nX:1\nT:Scoretitle\nL:1/4\nK:C\nCDEF|GABc|\n```",
+  "Afterscore, a line after the score.",
+  "***",
+  "Afterrule, a line after the rule.",
+  "[^1]: Notetext of the note.",
+].join("\n\n") + "\n";
+const BLOCKS_MARKS = ["Overquote,", "second", "height", "Underquote,", "def", "Betweencards,", "plaincard", "Underempty,", "Thirdlevel", "Aftereq,", "Afternum,", "Afterscore,", "Afterrule,", "Notetext"];
+// Where each mark stands, and what a few boxes compute to: each probe is a
+// name, a selector and a property, read on the first element that matches.
+const BLOCKS = function (columnSel, marks, probes) {
+  const column = document.querySelector(columnSel);
+  const col = column.getBoundingClientRect();
+  const round = (v) => Math.round(v * 100) / 100;
+  const words = {};
+  marks.forEach((mark) => {
+    const walker = document.createTreeWalker(column, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const at = node.data.indexOf(mark);
+      if (at === -1) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + mark.length);
+      const r = range.getClientRects()[0];
+      words[mark] = { left: round(r.left - col.left), top: round(r.top) };
+      break;
+    }
+  });
+  const styles = {};
+  probes.forEach(([name, selector, property]) => {
+    const el = column.querySelector(selector);
+    styles[name] = el ? getComputedStyle(el)[property] : null;
+  });
+  return { words: words, styles: styles, ink: getComputedStyle(column).color };
+}.toString();
+
+test("a quotation, a card of code, an equation, a score and a rule stand on the page and on paper where the editor stands them, in its inks", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const PT = 0.75 * (10 / 12) * (800 / 803);
+  for (const side of ["light", "dark"]) {
+    const name = "blocks-" + side;
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + BLOCKS_DOC);
+    const r = spawnSync(
+      MDM,
+      ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-look:" + side],
+      { cwd: DIR, encoding: "utf8" }
+    );
+    assert.equal(r.status, 0, r.stderr);
+
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 2400 },
+    });
+    OPEN_BROWSERS.add(browser);
+    const page = await browser.newPage();
+    await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForSelector(".mdm-paper svg");
+    const exported = await page.evaluate((read, ...args) => eval("(" + read + ")")(...args), BLOCKS, "main.content", BLOCKS_MARKS, [
+      ["h3", "h3", "opacity"], ["h4", "h4", "opacity"], ["h5", "h5", "opacity"], ["h6", "h6", "opacity"],
+      ["linkCode", "a > code", "color"], ["link", "a[href^='https://example.com']", "color"],
+      ["strongCode", "strong > code", "fontWeight"],
+      ["mark", "mark", "borderTopLeftRadius"],
+      ["scoreRoot", ".mdm-paper svg", "fill"],
+    ]);
+    await browser.close();
+    OPEN_BROWSERS.delete(browser);
+
+    const h = await openEditor({
+      text: BLOCKS_DOC,
+      scores: 1,
+      seed: { settings: { textFont: "roman", textAlign: "justify", hyphenation: "none", theme: side } },
+      height: 2400,
+    });
+    let editor;
+    try {
+      await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 2400 });
+      await h.page.evaluate(async () => {
+        await document.fonts.ready;
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      });
+      await h.page.mouse.click(2, 2);
+      await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+      await new Promise((res) => setTimeout(res, 400));
+      editor = await h.page.evaluate((read, ...args) => eval("(" + read + ")")(...args), BLOCKS, "#app .cm-content", BLOCKS_MARKS, [
+        ["linkCode", ".mdm-link .mdm-inline-code", "color"], ["link", ".mdm-link", "color"],
+        ["strongCode", ".mdm-inline-code[style*='bold'], strong .mdm-inline-code, .mdm-strong .mdm-inline-code", "fontWeight"],
+        ["mark", ".mdm-highlight, .mdm-marked, mark", "borderTopLeftRadius"],
+        ["scoreRoot", "code.language-abc svg", "fill"],
+      ]);
+    } finally {
+      await h.close();
+    }
+
+    for (const mark of BLOCKS_MARKS) {
+      assert.ok(exported.words[mark], side + ": the page has no word " + mark);
+      assert.ok(editor.words[mark], side + ": the editor has no word " + mark);
+      assert.ok(
+        Math.abs(exported.words[mark].left - editor.words[mark].left) <= 0.5,
+        side + ": " + mark + " stands " + exported.words[mark].left + " px into the column on the page and " + editor.words[mark].left + " in the editor"
+      );
+    }
+    // From each line of prose to the next, across the block between them.
+    const steps = [
+      ["Overquote,", "Underquote,", "a quotation of two rows"],
+      ["Underquote,", "Betweencards,", "a card of code"],
+      ["Betweencards,", "Underempty,", "a card of plain text and an empty card"],
+      ["Underempty,", "Thirdlevel", "a heading under text"],
+      ["Aftereq,", "Afternum,", "a numbered equation"],
+      ["Afternum,", "Afterscore,", "a score"],
+      ["Afterscore,", "Afterrule,", "a rule"],
+    ];
+    for (const [from, to, what] of steps) {
+      const onPage = exported.words[to].top - exported.words[from].top;
+      const inEditor = editor.words[to].top - editor.words[from].top;
+      assert.ok(
+        Math.abs(onPage - inEditor) <= 0.5,
+        side + ": across " + what + " the page has " + onPage.toFixed(2) + " px from one line of text to the next and the editor " + inEditor.toFixed(2)
+      );
+    }
+    // The row of text over the plain equation holds chips of code, whose
+    // face is not the same on the two surfaces; the equation is read from
+    // the text under it, across the numbered one, above. What a plain
+    // display leaves is read on the page itself: the editor's 0.45em over
+    // and under the formula's box.
+    assert.equal(exported.styles.h3, "1", side + ": a heading of the third level is not at the whole of the ink");
+    assert.equal(exported.styles.h4, "1", side);
+    assert.equal(exported.styles.h5, "1", side);
+    assert.equal(exported.styles.h6, "1", side);
+    assert.equal(exported.styles.linkCode, exported.styles.link, side + ": code in a link is not in the link's colour on the page");
+    assert.equal(exported.styles.strongCode, "700", side + ": code in a strong run is not bold on the page");
+    assert.equal(exported.styles.mark, "0px", side + ": a highlight has round corners on the page");
+    assert.equal(exported.styles.scoreRoot, editor.styles.scoreRoot, side + ": the root of a score's drawing, which paints its title, is another colour on the page");
+    assert.equal(exported.styles.scoreRoot, exported.ink, side + ": a tune's title is not in the document's ink");
+
+    // On paper, the same steps in the PDF printed from the page, a row's
+    // pixel either way (a baseline is drawn on a whole pixel).
+    const words = pdfWords(printPdf(name));
+    const at = (text) => {
+      const w = words.find((x) => x.text === text);
+      assert.ok(w, side + ": the PDF has no word " + text);
+      return w;
+    };
+    for (const [from, to, what] of steps) {
+      // Between two lines of prose alone: poppler boxes a word by its face
+      // and its size, and a heading's box starts elsewhere over its letters
+      // than a line of prose's does.
+      if (to === "Thirdlevel" || at(from).sheet !== at(to).sheet) continue;
+      const onPaper = (at(to).y0 - at(from).y0) / PT;
+      const inEditor = editor.words[to].top - editor.words[from].top;
+      assert.ok(
+        Math.abs(onPaper - inEditor) <= 1.2,
+        side + ": across " + what + " the paper has " + onPaper.toFixed(2) + " px from one line of text to the next and the editor " + inEditor.toFixed(2)
+      );
+    }
+    const left = (612 - 820 * PT) / 2;
+    // "height" opens the quotation's second row in the editor, after a first
+    // row that ends on "so" at the column's edge: in a measure any shorter
+    // "so" goes down and stands before it.
+    assert.ok(
+      Math.abs(at("height").x0 - (left + editor.words.height.left * PT)) <= 0.6,
+      side + ": on paper the quotation breaks elsewhere than in the editor"
+    );
+  }
+});
+
+// A display equation on the page leaves over and under its formula what the
+// editor leaves: the 0.25em of the box that scrolls it and the 0.2em of the
+// widget the editor draws it in. Read between two lines of plain prose, on
+// both surfaces and on paper, for a formula of one row, a taller one and a
+// numbered one; and a rule under a list, where the list's own margin stands
+// over it.
+test("a display equation and a rule leave on the page and on paper the air the editor leaves", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const PT = 0.75 * (10 / 12) * (800 / 803);
+  const text = [
+    "Overplain, a line of prose over a display equation.",
+    "$$\nE = mc^2\n$$",
+    "Underplain, a line of prose under it and over a taller one.",
+    "$$\n\\int_0^\\infty \\frac{x^3}{e^x - 1}\\,dx = \\frac{\\pi^4}{15}\n$$",
+    "Undertall, a line of prose under it and over a numbered one.",
+    "$$\na^2 + b^2 = c^2\n$$ {#eq-pyth}",
+    "Undernum, a line of prose under it.",
+    "***",
+    "Underrule, a line of prose under the rule.",
+    "- an item over a rule",
+    "***",
+    "Lastline, after the second rule.",
+  ].join("\n\n") + "\n";
+  const MARKS = ["Overplain,", "Underplain,", "Undertall,", "Undernum,", "Underrule,", "item", "Lastline,"];
+  const name = "equation-air";
+  fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const exported = await readSheetDoc(name, null, new Function("return (" + BLOCKS + ")('main.content', " + JSON.stringify(MARKS) + ", [])"));
+  const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" } }, height: 1600 });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1600 });
+    await h.page.evaluate(async () => {
+      await document.fonts.ready;
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    });
+    await h.page.mouse.click(2, 2);
+    await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+    editor = await h.page.evaluate((read, ...args) => eval("(" + read + ")")(...args), BLOCKS, "#app .cm-content", MARKS, []);
+  } finally {
+    await h.close();
+  }
+  const words = pdfWords(printPdf(name));
+  const at = (mark) => words.find((w) => w.text === mark);
+  const whats = ["a formula of one row", "a taller formula", "a numbered formula", "a rule under a paragraph", "a paragraph", "a rule under a list"];
+  MARKS.slice(1).forEach((to, i) => {
+    const from = MARKS[i];
+    const onPage = exported.words[to].top - exported.words[from].top;
+    const inEditor = editor.words[to].top - editor.words[from].top;
+    const onPaper = (at(to).y0 - at(from).y0) / PT;
+    assert.ok(
+      Math.abs(onPage - inEditor) <= 0.5,
+      "across " + whats[i] + " the page has " + onPage.toFixed(2) + " px from one line of text to the next and the editor " + inEditor.toFixed(2)
+    );
+    assert.ok(
+      Math.abs(onPaper - inEditor) <= 1.2,
+      "across " + whats[i] + " the paper has " + onPaper.toFixed(2) + " px from one line of text to the next and the editor " + inEditor.toFixed(2)
+    );
+  });
 });
 
 // The blocks the two dialects part on, drawn as the editor draws them once

@@ -10,6 +10,30 @@
   fonts. An export of HTML + PDF in the roman renders the page twice for it,
   once for the screen and once for the paper, and takes two to four seconds
   longer.
+- A table on the exported page, and so in a printed PDF, is the table the
+  editor draws: as wide as what it holds and on the left margin, with a rule
+  under its head, a fainter one between its rows and no frame, its columns
+  as wide as their words ask. The page used to stretch every table over the
+  whole column, rule it over, under and at every row in a grey that glared
+  on the dark side, set the head at the foot of its row, and size the
+  columns of a table with a long source line by the dashes under its head.
+- On the exported page and in a printed PDF, where the editor draws them: a
+  quotation runs to the edge of the column, where it stopped 25 px short and
+  broke on other words; a block of code starts at the edge of its card and
+  stands a blank line from its neighbours, and an empty one is a card of one
+  row; a display equation has the air the editor gives it; a score stands a
+  blank line from the text and not half a line more; and the text on either
+  side of a `***` is as far from it as in the editor, where the page set it
+  25 px nearer.
+- On the exported page and in a printed PDF, in the editor's inks: headings
+  of the third level and under are no longer paler than the rest; a tune's
+  title is in the document's ink on the light looks, where it was black;
+  code inside a link is in the link's blue and code inside bold text is
+  bold; a highlight has square corners.
+- A callout on the exported page and in a printed PDF has the editor's
+  colours: the bar of its kind, its tinted ground and no frame, with its
+  text in the document's ink at the size of the prose. On MDM Dark its
+  title could not be read.
 - What a document's YAML header puts at the head of the page is drawn at
   the head of the document, as the exported page sets it and at the page's
   sizes and places: the title and the subtitle, the categories and the

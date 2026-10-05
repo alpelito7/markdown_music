@@ -1,8 +1,12 @@
 /* The geometry of an engraved score. What it looks like (the ink, the staff
    lines, the fill behind it and the player bar under it) is in mdm-look.css,
    which carries the editor's own; nothing here paints. */
+/* A blank line of the body over and under a score, which is all the editor
+   draws there (its buttons stand in the margin, out of the flow). It was
+   1.5rem, 25.5 px on Quarto's root of 17, and a score stood 9.5 px further
+   from its neighbours than in the editor. */
 .mdm-block {
-  margin: 1.5rem 0;
+  margin: 16px 0;
 }
 .mdm-paper {
   /* abcjs sets display:inline-block inline on the box it draws into. A block
