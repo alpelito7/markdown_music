@@ -630,7 +630,36 @@ What it does:
   it with the Lua filter the extension carries, which is what lets a document
   export from wherever it lives with no clone of this repository anywhere. The
   look of the editor goes with the call (see [The output looks like the
-  editor](#the-output-looks-like-the-editor)). *Audio* is MIDI / WAV, one file
+  editor](#the-output-looks-like-the-editor)). The PDF is that page printed by
+  Chrome, Chromium or Microsoft Edge, the scores and the equations as the page
+  draws them, whether or not the machine has TeX. It is the page as it is
+  laid out for a screen, scaled as it is printed, so its lines break where
+  the editor breaks them and its rules are as thick. The roman goes into it
+  as the font it is: the page that is printed is rendered with the same four
+  faces in TrueType outlines, which a browser embeds where it writes the
+  screen's as drawings (an export of HTML + PDF in the roman therefore
+  renders twice). Nothing the editor scrolls sideways is cut off the sheet:
+  a long word and a long line of code go on in the next row, and a table or
+  a display equation too wide for the measure is drawn smaller, whole, as a
+  wide score is; a formula inside a sentence that no row can hold is still
+  cut at the sheet's edge (Pending 21 of `tests/README.md`). It numbers its
+  sheets at the
+  foot as the typeset PDF does, carries the headings as bookmarks, opens with
+  the table of contents when the header says `toc: true` and is printed on
+  the header's `papersize` (Letter when there is none; on a sheet narrower
+  than the text, the lines are set to the sheet less 3 cm). It is the
+  header's PDF: contents, their depth and numbered sections written under
+  `format: pdf:` are in it though the page has none, since the extension
+  asks Quarto what the header comes to for each format and renders the page
+  it prints with what the PDF has over it, and contents asked of the page
+  alone are not printed. Two things a
+  browser cannot do are left as they are: its notes come at the end of the
+  document and not at the foot of a page, and the entries of its contents
+  are links with no page number. With `mdm.pdfEngine` set to
+  `latex`, LaTeX typesets it instead, with TeX's line breaking and page layout
+  and whatever raw LaTeX the document holds. Where what the setting asks for
+  is not installed, the other one makes the PDF and the notice says which
+  (`mdm.showPdfFallbackNotice` turns that notice off). *Audio* is MIDI / WAV, one file
   per score: it writes every score of the document at once, beside it, which
   is what a score's own button does for the one score it stands by (below). It
   saves nothing first, because what it writes is the music on screen, and in a

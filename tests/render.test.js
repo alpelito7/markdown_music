@@ -1919,9 +1919,12 @@ test("the roman travels to the page, and only when it is asked for", () => {
     /\.mdm-fit,\s*\n\.mdm-fit svg \{\s*\n\s*font-size-adjust: none/.test(lookSheet),
     "the engraving lost its protective adjustment reset"
   );
+  // As the paper's own 2.5 cm: the sheet is scaled where it is painted, which
+  // does not reach its margin (the print rules of mdm-look.css, 2026-10-04).
+  // While the scale was a zoom the margin was written over it.
   assert.match(
     lookSheet,
-    /@page\s*\{[^}]*margin:\s*calc\(2\.5cm \* 12 \/ 10 \* 803 \/ 800\) 0;/s,
+    /@page\s*\{[^}]*margin:\s*2\.5cm 0;/s,
     "the printed sheets do not reserve their block margin"
   );
   assert.ok(
