@@ -15,6 +15,25 @@
   browser that is there and does not print is a failed export, with what it
   said in the log, and the tooltip of raw TeX in the editor says that only a
   PDF typeset with LaTeX sets it.
+- A printed PDF has what a typeset one had: the number of each sheet at its
+  foot, in the face and at the size of the prose, the document's headings
+  as bookmarks, and the table of contents of a document that asks for one
+  (`toc: true`), under the title or at the head of the document, set as the
+  typeset PDF sets its own and with every entry a link, though without the
+  number of its page, which a browser cannot write. It is printed on the
+  sheet the header names with `papersize`, at the top of the header or under
+  `format: pdf:` as LaTeX reads it, and on Letter when it names none. On a
+  sheet narrower than the text, A5 or B5, the lines are set to the sheet
+  less 3 cm, as LaTeX sets them, with the type at its size. Its notes still
+  come at the end of the document, since a browser cannot put a note at the
+  foot of the page that calls it.
+- A printed PDF follows what the header asks of the PDF. Contents, their
+  depth and numbered sections written under `format: pdf:` are in it, as
+  they are in a typeset one, where a PDF printed from the page had only
+  what the header asks of the page; and contents asked of the page alone,
+  under `format: html:`, stay in the page's margin and are not printed.
+  Exporting HTML + PDF, the page beside the document is still the one the
+  header asks for.
 - A field of a tune (`K:G`, `M:6/8`, `X:1`) or a Windows path (`C:\Music`)
   pasted over selected words is pasted as the text it is, where it made
   the words a link to it: an address is a scheme of two letters or more

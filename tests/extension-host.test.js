@@ -1067,6 +1067,43 @@ const STAND_INS = {
   epstopdf: "epstopdf",
 };
 
+// What a stand-in Quarto answers to `quarto inspect`, which an export of a
+// PDF asks before it renders anything (pdfAsks in extension.js): what a test
+// left in inspect.json, or nothing at all, which the export takes for a
+// header that asks no more of the PDF than of the page. Kept out of
+// calls.txt and args.txt, which are the renders, and in the stand-ins' own
+// folder, since the tests list the document's. Builtins only, for the PATH
+// the stand-ins run under.
+function inspectStandIn(tmp) {
+  return (
+    'if [ "$1" = inspect ]; then\n' +
+    '  echo "$@" >> "' + tmp + '/bin/inspect-calls.txt"\n' +
+    '  if [ -f "' + tmp + '/bin/inspect.json" ]; then\n' +
+    '    while IFS= read -r l || [ -n "$l" ]; do printf "%s\\n" "$l"; done < "' + tmp + '/bin/inspect.json"\n' +
+    "  fi\n" +
+    // A Quarto that fails after it has said something: what it said is not
+    // an answer.
+    '  [ -f "' + tmp + '/bin/inspect.fails" ] && exit 1\n' +
+    "  exit 0\n" +
+    "fi\n"
+  );
+}
+
+function inspectCalls(tmp) {
+  try {
+    return fs.readFileSync(path.join(tmp, "bin", "inspect-calls.txt"), "utf8").trim().split("\n");
+  } catch (e) {
+    return [];
+  }
+}
+
+// What Quarto's inspect says of a header, cut down to what the export reads.
+function inspected(tmp, html, pdf) {
+  const formats = { html: { pandoc: html, metadata: {} } };
+  if (pdf) formats.pdf = { pandoc: pdf, metadata: {} };
+  fs.writeFileSync(path.join(tmp, "bin", "inspect.json"), JSON.stringify({ quarto: { version: "1.9.37" }, formats: formats }) + "\n");
+}
+
 function fakeBin(tmp, opts) {
   const options = opts || {};
   const bin = path.join(tmp, "bin");
@@ -1075,6 +1112,7 @@ function fakeBin(tmp, opts) {
   fs.writeFileSync(
     quarto,
     "#!/bin/sh\n" +
+      inspectStandIn(tmp) +
       'echo "$@" > "' + tmp + '/args.txt"\n' +
       'pwd >> "' + tmp + '/args.txt"\n' +
       ': > "' + tmp + '/copy.qmd"\n' +
@@ -2457,6 +2495,7 @@ function fakeQuartoTexFallback(tmp, opts) {
   fs.writeFileSync(
     quarto,
     "#!/bin/sh\n" +
+      inspectStandIn(tmp) +
       'echo "$@" >> "' + tmp + '/calls.txt"\n' +
       'file=${2##*/}\n' +
       'base=${file%.qmd}\n' +
@@ -2512,6 +2551,12 @@ function fakeQuartoNames(tmp, opts) {
     "const fs = require('fs');",
     "const path = require('path');",
     "const args = process.argv.slice(2);",
+    // `quarto inspect`, as inspectStandIn answers it for the shell stand-ins.
+    "if (args[0] === 'inspect') {",
+    "  fs.appendFileSync(" + JSON.stringify(path.join(tmp, "bin", "inspect-calls.txt")) + ", args.join(' ') + '\\n');",
+    "  try { fs.writeSync(1, fs.readFileSync(" + JSON.stringify(path.join(tmp, "bin", "inspect.json")) + ", 'utf8')); } catch (e) {}",
+    "  process.exit(fs.existsSync(" + JSON.stringify(path.join(tmp, "bin", "inspect.fails")) + ") ? 1 : 0);",
+    "}",
     "fs.appendFileSync(" + JSON.stringify(path.join(tmp, "calls.txt")) + ", JSON.stringify(args) + '\\n');",
     "const at = (flag) => { const i = args.indexOf(flag); return i === -1 ? null : args[i + 1]; };",
     "const stem = path.basename(args[1], '.qmd');",
@@ -2714,6 +2759,7 @@ function fakeQuartoHtmlFails(tmp) {
   fs.writeFileSync(
     quarto,
     "#!/bin/sh\n" +
+      inspectStandIn(tmp) +
       'echo "$@" >> "' + tmp + '/calls.txt"\n' +
       'echo "ERROR: could not parse YAML" >&2\n' +
       "exit 1\n"
@@ -2885,6 +2931,189 @@ test("both formats printed in the sans are one render of the page, and the page 
   assert.equal(fs.readFileSync(path.join(tmp, "doc.html"), "utf8"), FINISHED_PAGE);
   assert.ok(fs.existsSync(path.join(tmp, "doc.pdf")));
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ---------- What the header asks of the PDF and not of the page ----------
+
+// A printed PDF is the page, and a render to HTML takes the options of
+// `format: html:` alone, so contents and numbered sections written under
+// `format: pdf:` were in the typeset PDF and not in the printed one. The
+// export asks Quarto what the header comes to for each format (`quarto
+// inspect`) and reads the difference: what the page that is printed has to be
+// rendered with (`page`, Pandoc's flags) and what only the paper leaves out
+// (`paper`, the page's contents where the PDF asks for none).
+test("what the header asks of the PDF and not of the page is read out of Quarto's inspect", () => {
+  const says = (html, pdf) => {
+    const formats = { html: { pandoc: html } };
+    if (pdf) formats.pdf = { pandoc: pdf };
+    return ext.asksFrom(JSON.stringify({ formats: formats }));
+  };
+  const none = { page: [], paper: [] };
+  assert.deepEqual(
+    says({}, { toc: true, "toc-depth": 2, "number-sections": true }),
+    { page: ["--toc", "--toc-depth=2", "--number-sections"], paper: [] }
+  );
+  assert.deepEqual(says({ toc: true }, { toc: true }), none, "the same contents on both");
+  assert.deepEqual(says({ toc: true }, { toc: true, "toc-depth": 1 }), { page: ["--toc-depth=1"], paper: [] });
+  // Three levels is what either format has when the header names none.
+  assert.deepEqual(says({ toc: true, "toc-depth": 3 }, { toc: true }), none);
+  assert.deepEqual(says({ "toc-depth": 2 }, { toc: true }), { page: ["--toc", "--toc-depth=3"], paper: [] });
+  // Contents asked of the page alone are kept off the paper, and no flag is
+  // needed for the page itself.
+  assert.deepEqual(says({ toc: true }, {}), { page: [], paper: ["-M", "mdm-print-toc:hidden"] });
+  assert.deepEqual(
+    says({ toc: true }, { "number-sections": true }),
+    { page: ["--number-sections"], paper: ["-M", "mdm-print-toc:hidden"] }
+  );
+  // Numbers the page has and the PDF does not ask for: nothing takes them off.
+  assert.deepEqual(says({ "number-sections": true }, {}), none);
+  // A header with no PDF format, and anything that is not an answer.
+  assert.deepEqual(says({ toc: true }, null), none);
+  assert.deepEqual(ext.asksFrom(""), none);
+  assert.deepEqual(ext.asksFrom("ERROR: could not parse YAML"), none);
+  assert.deepEqual(ext.asksFrom("{}"), none);
+  // A depth is a whole number of levels, or it is not passed on: the value
+  // is the document's and goes onto a command line.
+  assert.deepEqual(says({ toc: true }, { toc: true, "toc-depth": "2 --lua-filter=x.lua" }), none);
+  assert.deepEqual(says({ toc: true }, { toc: true, "toc-depth": 9 }), none);
+  // Quarto's own words before the answer do not hide it.
+  assert.deepEqual(
+    ext.asksFrom('WARN: something\n{"formats":{"html":{"pandoc":{}},"pdf":{"pandoc":{"toc":true}}}}\n'),
+    { page: ["--toc"], paper: [] }
+  );
+});
+
+// Asked alone, the PDF is printed from a page rendered just for it, and that
+// render carries what the header asks of the PDF. Asked with the page, the
+// page beside the document is the one the header asks for and the PDF is
+// printed from another, since the two are no longer one page; the export still
+// says it made both, and leaves nothing of the second page behind.
+test("a printed PDF has the contents and the numbers the header asks of the PDF, and the page kept is the page's", async () => {
+  for (const to of ["pdf", "both"]) {
+    vscode._reset();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+    const bin = fakeQuartoNames(tmp);
+    fakeChromePrint(bin);
+    inspected(tmp, {}, { toc: true, "toc-depth": 2, "number-sections": true });
+    const restorePath = usePath(bin);
+    const doc = path.join(tmp, "doc.mdm");
+    fs.writeFileSync(doc, SOURCE);
+    const h = boot("Body\n", {}, null, "file://" + doc);
+    vscode._state.workspaceFolder = tmp;
+
+    await h.receive({ type: "export", to: to });
+    await settle();
+    restorePath();
+
+    assert.deepEqual(vscode._state.warningMessages, [], to);
+    assert.deepEqual(vscode._state.errorMessages, [], to);
+    assert.equal(
+      vscode._state.infoMessages[0].message,
+      to === "pdf" ? "MDM: exported doc.pdf" : "MDM: exported doc.html and doc.pdf"
+    );
+    assert.deepEqual(inspectCalls(tmp), ["inspect " + path.join(tmp, "doc.qmd")], to + ": Quarto was not asked once, of the copy");
+    const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const asked = (call) => ["--toc", "--toc-depth=2", "--number-sections"].filter((flag) => call.indexOf(flag) !== -1);
+    const printed = calls[calls.length - 1];
+    assert.equal(calls.length, to === "pdf" ? 1 : 2, to + ": " + JSON.stringify(calls));
+    assert.match(printed[1], /\.mdm-print-\d+-\d+-\d+\.qmd$/, to + ": the PDF's page was not rendered under a private name");
+    assert.equal(printed[printed.indexOf("--to") + 1], "html");
+    assert.deepEqual(asked(printed), ["--toc", "--toc-depth=2", "--number-sections"], to + ": " + JSON.stringify(printed));
+    assert.match(chromeCalls(tmp)[0], /\.mdm-print-\d+-\d+-\d+\.html$/, to + ": the page printed is not the one rendered for the PDF");
+    if (to === "both") {
+      assert.equal(calls[0][1], path.join(tmp, "doc.qmd"));
+      assert.deepEqual(asked(calls[0]), [], "the page beside the document was rendered with what the PDF asks");
+      assert.equal(fs.readFileSync(path.join(tmp, "doc.html"), "utf8"), FINISHED_PAGE);
+    }
+    assert.match(exportLog().lines.join("\n"), /asks the PDF for what it does not ask the page \(--toc --toc-depth=2 --number-sections\)/);
+    assert.deepEqual(
+      fs.readdirSync(tmp).sort(),
+      (to === "pdf" ? ["bin", "calls.txt", "chrome-calls.txt", "chrome-page.txt", "chrome-profile.txt", "doc.mdm", "doc.pdf"]
+        : ["bin", "calls.txt", "chrome-calls.txt", "chrome-page.txt", "chrome-profile.txt", "doc.html", "doc.mdm", "doc.pdf"]),
+      to + ": something of the PDF's own page was left beside the document"
+    );
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Contents the header asks of the page and not of the PDF stay in the page's
+// margin: the page is told to keep them off its paper (mdm-print-toc, which
+// the filter reads), and since nothing of the page itself changes, both
+// formats are still one render and the page printed is the one kept. In the
+// sans, that is: a page set in the roman is printed from a render of its own
+// whatever the header asks (the test of the print's faces, above).
+test("contents the header asks of the page alone are kept off the paper, in the one render", async () => {
+  for (const to of ["pdf", "both"]) {
+    vscode._reset();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+    const bin = fakeQuartoNames(tmp);
+    fakeChromePrint(bin);
+    inspected(tmp, { toc: true }, { documentclass: "article" });
+    const restorePath = usePath(bin);
+    const doc = path.join(tmp, "doc.mdm");
+    fs.writeFileSync(doc, SOURCE);
+    const h = boot("Body\n", { "mdm.textFont": "sans" }, null, "file://" + doc);
+    vscode._state.workspaceFolder = tmp;
+
+    await h.receive({ type: "export", to: to });
+    await settle();
+    restorePath();
+
+    assert.deepEqual(vscode._state.warningMessages, [], to);
+    const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.equal(calls.length, 1, to + ": " + JSON.stringify(calls));
+    const at = calls[0].indexOf("mdm-print-toc:hidden");
+    assert.ok(at > 0 && calls[0][at - 1] === "-M", to + ": the page was not told to keep its contents off the paper: " + JSON.stringify(calls[0]));
+    assert.equal(calls[0].indexOf("--toc"), -1, to);
+    if (to === "both") {
+      assert.equal(calls[0][1], path.join(tmp, "doc.qmd"), "both formats are no longer one render");
+      assert.match(chromeCalls(tmp)[0], new RegExp(path.join(tmp, "doc.html").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
+    }
+    assert.match(exportLog().lines.join("\n"), /asks the page for contents and not the PDF/);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// A Quarto that does not answer the question, or a header that asks no more
+// of the PDF than of the page, leaves the export what it was: the PDF is the
+// page as it is.
+test("a Quarto that does not say what the header asks of the PDF changes nothing of the export", async () => {
+  for (const answer of ["fails", "nothing", "same"]) {
+    vscode._reset();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mdm-export-"));
+    const bin = fakeQuartoNames(tmp);
+    fakeChromePrint(bin);
+    // The Quarto that fails has said, before failing, that the PDF asks for
+    // contents: said by a Quarto that failed, it is not taken.
+    if (answer === "fails") {
+      fs.writeFileSync(path.join(bin, "inspect.fails"), "");
+      inspected(tmp, {}, { toc: true, "number-sections": true });
+    }
+    if (answer === "same") inspected(tmp, { toc: true, "number-sections": true }, { toc: true, "number-sections": true });
+    const restorePath = usePath(bin);
+    const doc = path.join(tmp, "doc.mdm");
+    fs.writeFileSync(doc, SOURCE);
+    // In the sans, where a "both" with nothing asked of the PDF is one render
+    // (the roman's print has a page of its own either way).
+    const h = boot("Body\n", { "mdm.textFont": "sans" }, null, "file://" + doc);
+    vscode._state.workspaceFolder = tmp;
+
+    await h.receive({ type: "export", to: "both" });
+    await settle();
+    restorePath();
+
+    assert.deepEqual(vscode._state.warningMessages, [], answer);
+    assert.deepEqual(vscode._state.errorMessages, [], answer);
+    assert.equal(vscode._state.infoMessages[0].message, "MDM: exported doc.html and doc.pdf", answer);
+    assert.equal(inspectCalls(tmp).length, 1, answer);
+    const calls = fs.readFileSync(path.join(tmp, "calls.txt"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.equal(calls.length, 1, answer + ": " + JSON.stringify(calls));
+    assert.equal(calls[0][1], path.join(tmp, "doc.qmd"), answer);
+    for (const word of ["--toc", "--number-sections", "mdm-print-toc:hidden"]) {
+      assert.equal(calls[0].indexOf(word), -1, answer + ": the render was given " + word);
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // With no browser on the computer, a PDF asked of the browser is typeset by

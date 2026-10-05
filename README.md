@@ -225,6 +225,16 @@ Pandoc's own dialect and none of the copy's corrections.
   back: the scores to `abcm2ps`, which draws with glyphs of its own and
   reads differently, and the equations to LaTeX's own setting, a numbered
   one LaTeX's `equation` with the same number as its tag.
+- **PDF, printed**: what the VS Code extension makes unless it is told
+  otherwise (`mdm.pdfEngine`). It is the HTML page above, printed by a
+  headless Chrome, Chromium or Edge that the extension runs. What makes
+  sheets of the page travels in the page: the print rules of
+  `mdm-look.css` (the sheet, its margins, the number at its foot),
+  `resources/mdm-toc.js`, which copies the contents into the flow of the
+  paper, and `resources/mdm-paper.js`, which measures a table or a display
+  equation too wide for the sheet when it is about to be printed and draws
+  it smaller. What such a PDF has and has not is under *Export from the
+  toolbar*, below.
 
 ### The output looks like the editor
 

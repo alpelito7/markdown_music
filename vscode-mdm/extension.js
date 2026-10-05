@@ -1238,6 +1238,106 @@ function pdfEngine() {
   return PDF_ENGINES.indexOf(value) !== -1 ? value : PDF_ENGINES[0];
 }
 
+// What the header asks of the PDF and does not ask of the page. A printed PDF
+// is the page, and Quarto gives a render to HTML the options of `format:
+// html:` alone: contents or numbered sections written under `format: pdf:`,
+// where example.mdm keeps its PDF options, made a typeset PDF that had them
+// and a printed one that had neither (seen 2026-10-03). So Quarto is asked
+// what the header comes to for each format (`quarto inspect`, 0.55 s on
+// example.mdm, which also reads a _quarto.yml over the document), and the
+// page that is printed is rendered with what the PDF has over it.
+//
+// `page` holds what changes the page itself: Pandoc's own flags, which a
+// render takes over what the header says of the page (`-M toc:true` loses to
+// a `toc` under `format: html:`, measured on Quarto 1.9.37). A page rendered
+// with them is no longer the page the header asks for, so an export of both
+// prints from a page of its own (printPage) and keeps the other beside the
+// document. `paper` holds what changes the paper alone: contents asked of
+// the page and not of the PDF stay in the page's margin and are kept off the
+// sheet (mdm-print-toc, read by the filter), which no flag can do, since
+// `--toc=false` stops Quarto.
+//
+// Three things are carried: the contents, their depth and the numbered
+// sections. Not carried, and said here because it is a difference: numbers
+// the page has and the PDF does not ask for stay on the paper, there being
+// no flag to take them off. A Quarto that does not answer, or answers
+// something else, changes nothing: the PDF is the page as it is.
+const NO_ASKS = Object.freeze({ page: Object.freeze([]), paper: Object.freeze([]) });
+
+function asksFrom(inspected) {
+  let formats;
+  try {
+    const text = String(inspected);
+    formats = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)).formats;
+  } catch (e) {
+    return NO_ASKS;
+  }
+  const html = formats && formats.html && formats.html.pandoc;
+  const pdf = formats && formats.pdf && formats.pdf.pandoc;
+  if (!html || !pdf) return NO_ASKS;
+  // Three levels where the header names none, which is Quarto's own default
+  // for the page and for the PDF.
+  const depth = function (format) {
+    const named = format["toc-depth"];
+    return Number.isInteger(named) && named >= 1 && named <= 6 ? named : 3;
+  };
+  const page = [];
+  const paper = [];
+  if (pdf.toc === true) {
+    if (html.toc !== true) page.push("--toc");
+    if (depth(pdf) !== depth(html)) page.push("--toc-depth=" + depth(pdf));
+  } else if (html.toc === true) {
+    paper.push("-M", "mdm-print-toc:hidden");
+  }
+  if (pdf["number-sections"] === true && html["number-sections"] !== true) {
+    page.push("--number-sections");
+  }
+  return { page: page, paper: paper };
+}
+
+// A wall clock on it, as on the print: an export must not wait for good on a
+// question whose answer it can do without.
+const INSPECT_TIMEOUT = 20000;
+
+function pdfAsks(quarto, copy, dir) {
+  channel().appendLine("  " + quarto + " inspect " + copy + "  (in " + dir + ")");
+  return new Promise(function (resolve) {
+    let out = "";
+    let child;
+    try {
+      child = cp.spawn(quarto, ["inspect", copy], {
+        cwd: dir,
+        windowsHide: true,
+        timeout: INSPECT_TIMEOUT,
+      });
+    } catch (e) {
+      resolve(NO_ASKS);
+      return;
+    }
+    child.stdout.on("data", function (d) {
+      out += d;
+    });
+    child.on("error", function () {
+      resolve(NO_ASKS);
+    });
+    child.on("close", function (code) {
+      const asks = code === 0 ? asksFrom(out) : NO_ASKS;
+      if (asks.page.length) {
+        channel().appendLine(
+          "The header asks the PDF for what it does not ask the page (" + asks.page.join(" ") +
+            "), so the PDF is printed from a page rendered for it."
+        );
+      }
+      if (asks.paper.length) {
+        channel().appendLine(
+          "The header asks the page for contents and not the PDF, so the paper carries none."
+        );
+      }
+      resolve(asks);
+    });
+  });
+}
+
 
 // Chrome refuses to start as root without this, the normal case inside a
 // container; harmless everywhere else. Mirrors chrome_sandbox_flag in
@@ -1295,10 +1395,17 @@ function printHtmlToPdf(chrome, htmlPath, pdfPath) {
       resolve(false);
       return;
     }
+    // The bookmarks: the outline of the headings, which the typeset PDF has
+    // always carried and a printed one had none of (0 entries against 12 on a
+    // document of twelve headings, measured 2026-10-02). Chrome builds it from
+    // the tagged structure of the page. A heading that opens a sheet came out
+    // with its title twice ("From code to scoresFrom code to scores"), which
+    // the clip on the headings in mdm-look.css's print rules is there for.
     const args = [
       "--headless=new",
       "--disable-gpu",
       "--no-pdf-header-footer",
+      "--generate-pdf-document-outline",
       "--virtual-time-budget=6000",
       "--user-data-dir=" + profile,
     ]
@@ -2246,6 +2353,8 @@ async function runExport(document, to) {
     }
   }
   const look = exportLook(document, text);
+  // Set once the copy is there for Quarto to read (pdfAsks).
+  let asks = NO_ASKS;
   // The command line of a render of the copy to one format, the page or a
   // typeset PDF. The PDF is named after the document: Quarto names it after
   // the stem of its LaTeX (texSafeFilename), and a document with a space, a
@@ -2494,6 +2603,10 @@ async function runExport(document, to) {
           // on 2026-09-13 with the document's folder at mode 555).
           return { code: -1, unwritable: String(e.message || e) };
         }
+        // What the header asks of the PDF and not of the page (pdfAsks),
+        // before any render: the page of a "both" is told what its paper
+        // leaves out, and the print what its page needs.
+        if (wantsPdf) asks = await pdfAsks(quarto, copy, dir);
         // Every render's log, for what the notices read out of it at the end
         // (citationWarnings, exportTrouble): a "both" warns in each.
         let log = "";
@@ -4743,6 +4856,7 @@ module.exports = {
   findChrome,
   texPage,
   PDF_ENGINES,
+  asksFrom,
   FILTER,
   READER,
   LANGUAGES,

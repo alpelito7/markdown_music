@@ -257,9 +257,21 @@ body main.content > section:first-of-type > h2:nth-child(1) {
    the text, so the margin keeps the padding and drops the blank line. A
    heading under the title block does not open the column and keeps both.
    After the rule above and of the same weight, which it has to beat on a
-   document that opens on an h2. */
-body main.content > section:first-child > :is(h1, h2, h3, h4, h5, h6):first-child {
+   document that opens on an h2.
+   The contents kept for paper (nav.mdm-print-toc, below) stand ahead of that
+   section in the page without being drawn on screen, so a section straight
+   after them opens the column all the same: without the second selector the
+   first heading of a document with `toc: true` and no title block would
+   have stood a blank line lower than the editor sets it. */
+body main.content > section:first-child > :is(h1, h2, h3, h4, h5, h6):first-child,
+body main.content > nav.mdm-print-toc:first-child + section > :is(h1, h2, h3, h4, h5, h6):first-child {
   margin-top: var(--mdm-heading-pad);
+}
+/* The page's contents a second time, in the flow, which is where a sheet
+   can have them (resources/mdm-toc.js). Paper alone draws them: on screen
+   they are in the margin, where Quarto puts them. */
+body main.content nav.mdm-print-toc {
+  display: none;
 }
 /* Two paragraphs an em apart, the gap the editor draws for the blank line
    between them. */
@@ -1359,11 +1371,38 @@ body .mdm-audio .abcjs-loading-svg circle {
      page). The page box has a background of its own, painted under the
      margin as well, and the ground is given to it: Chrome 151 resolves the
      custom property there, since the page inherits from the root, and prints
-     it out to all four edges. */
+     it out to all four edges.
+
+     The number of the sheet, centred at its foot, as the typeset PDF prints
+     it: in the face and at the size of the prose (the 16px of the text at
+     the sheet's scale, which a margin's box has to be told: a folio's digit
+     6.10 by 8.88 pt in pdftotext, as the prose's, measured 2026-10-02 and
+     again on 2026-10-04) and in the ink. TeX puts
+     it 2.5 cm over the foot of the sheet (vmargin=2.5cm with includefoot in
+     mdm.lua), which is where this page's text ends, and a margin box cannot
+     reach into the text; so the folio keeps TeX's distance from the text
+     instead, its baseline 30 pt (the article class's \footskip) under the
+     lowest baseline a sheet can have here, 4.75 pt over the foot of the text
+     (measured on a sheet full of prose). That puts its baseline 45.25 pt
+     over the foot of the sheet (read in the ink of a 2) where the typeset
+     one stands at 71.0, and no line of the page moves for it: with a folio
+     in every margin, 0 of the 2,617 words of a seven-sheet document moved,
+     and 0 of 2,627 with its header shown (2026-10-02). The 15.4 pt are
+     measured in the roman, whose ascent the top of the box starts the line
+     from. */
   @page {
     size: auto;
     margin: calc(2.5cm * 12 / 10 * 803 / 800) 0;
     background: var(--mdm-syn-page);
+    @bottom-center {
+      content: counter(page);
+      font-family: var(--mdm-text);
+      font-size: calc(16px * var(--mdm-sheet-scale));
+      line-height: 1;
+      color: var(--mdm-ink);
+      vertical-align: top;
+      padding-top: 15.4pt;
+    }
   }
   html {
     zoom: calc(10 / 12 * 800 / 803);
@@ -1378,9 +1417,22 @@ body .mdm-audio .abcjs-loading-svg circle {
   /* The measure in its own pixels. The rule this overrides is written against
      the window (`min(820px, 100vw - 100px)`, the editor's pane playing the
      viewport), and a sheet of paper has no window to give way to: left to it,
-     the column came out 664 px and the scores hung over it again. */
+     the column came out 664 px and the scores hung over it again.
+     On a sheet that cannot hold it, the measure is TeX's: the sheet less
+     3 cm, as mdm.lua clamps \mdmmeasure, the type staying at its size. Left
+     to Chrome, a column wider than an A5 sheet was shrunk whole onto it,
+     prose and all, a word 0.80 of the width it has on Letter (2026-10-02).
+     100vw is the sheet over the scale by the time the page is laid out to be
+     printed, and the 3 cm are the paper's, hence the same division. The
+     3 px are for A4: Chrome's A4 is 594.96 pt wide, and laid out for the
+     print it is 2.3 px short of holding the editor's 820 px with TeX's 3 cm
+     (the column came out 819.4 px with 2 px of room, measured 2026-10-04),
+     and a column narrowed by that much would break a line somewhere the
+     editor does not. With them A4 keeps the editor's measure at 1.49 cm a
+     side, while A5 comes out at 335.9 pt to TeX's 335.0. A media query
+     cannot tell the sheets apart. */
   body main.content {
-    width: 820px;
+    width: min(820px, calc(100vw - 3cm / var(--mdm-sheet-scale) + 3px));
     margin-inline: auto;
   }
   /* A score wider than the measure. On screen its card scrolls, which is the
@@ -1499,7 +1551,24 @@ body .mdm-audio .abcjs-loading-svg circle {
      The cost is named because there is one: where the block under the
      heading is a score taller than the sheet, the heading is moved to a fresh
      page, the score still does not fit, and the heading prints alone anyway,
-     which cost the stress fixture one page. */
+     which cost the stress fixture one page.
+     And a heading that opens a sheet is a bookmark once. Its text box rises
+     5 px above its own box (the roman at a line-height of 1.3), and when
+     that overhang reached into the sheet before, Chrome drew the heading
+     there as well, every glyph clipped away and nothing on the paper, but
+     the words went into its bookmark all the same: "From code to
+     scoresFrom code to scores" (Chrome 151 with the outline printHtmlToPdf
+     asks for, 2026-10-02; read in Skia's source, not in Chrome's own
+     revision of it). The clip stops the drawing at the top of the box and
+     leaves the sides and the foot open, for the AnchorJS link and the
+     descenders. It keeps half a pixel above the box: with none, the tips of
+     some capitals' accents (Á, É, Í, Ó, Ú) lost a row at 300 dpi on some
+     headings; with half, all of them are whole and only Ǻ loses the top of
+     its ring, and so would a stacked mark of Vietnamese. From 1.2 px the
+     doubled bookmarks were back, on 13 of the 14 headings of a sheet-opening
+     sweep, for a reason not found (0, 0.5 and 1.1 px: none). Otherwise the
+     page is the same to the word box on example.mdm and on a seven-sheet
+     document, header hidden and shown. */
   h1,
   h2,
   h3,
@@ -1508,6 +1577,65 @@ body .mdm-audio .abcjs-loading-svg circle {
   h6 {
     break-after: avoid;
     break-inside: avoid;
+    clip-path: inset(-0.5px -100vw -100vh);
+  }
+  /* The contents on paper (resources/mdm-toc.js puts a copy of the page's
+     own into the flow), set as the typeset PDF sets its own, which is the one
+     of three the owner picked on 2026-10-03, with one change of his: in the
+     ink of the text and not in the blue of a link, though every entry is
+     one. The title is a first-level heading in everything but its role. A
+     first-level entry has a heading's weight and air over it; each level
+     stands 1.5em inside the one above, the step of the page's lists, its
+     number in a box wide enough for the level under it to start below the
+     words. No leaders and no page numbers: Chrome 151 has no
+     target-counter().
+     The page's list rules are answered one by one, since they outrank a
+     plain selector: the 1.5em of indent, the bullet in the gap, and the
+     weight every link is given (`a { font-weight: 400 }` kept a bold entry
+     regular).
+     Where the contents open the column their title takes the place a
+     heading has there, its padding with no blank line over it, and the
+     heading under them gets its blank line back. */
+  body main.content nav.mdm-print-toc {
+    display: block;
+  }
+  body main.content > nav.mdm-print-toc:first-child > h1 {
+    margin-top: var(--mdm-heading-pad);
+  }
+  body main.content > nav.mdm-print-toc:first-child + section > :is(h1, h2, h3, h4, h5, h6):first-child {
+    margin-top: calc(var(--mdm-blank) + var(--mdm-heading-pad));
+  }
+  body main.content nav.mdm-print-toc ul {
+    padding-left: 0;
+    margin: 0;
+  }
+  body main.content nav.mdm-print-toc ul ul {
+    padding-left: 1.5em;
+  }
+  body main.content nav.mdm-print-toc ul > li::before {
+    content: none;
+  }
+  body main.content nav.mdm-print-toc > ul > li {
+    margin-top: 0.6em;
+  }
+  body main.content nav.mdm-print-toc a {
+    color: inherit;
+    text-decoration: none;
+  }
+  body main.content nav.mdm-print-toc > ul > li > a {
+    font-weight: 600;
+  }
+  body main.content nav.mdm-print-toc .header-section-number {
+    display: inline-block;
+    min-width: 1.5em;
+    margin-right: 0.5em;
+    color: inherit;
+  }
+  body main.content nav.mdm-print-toc ul ul .header-section-number {
+    min-width: 2.2em;
+  }
+  body main.content nav.mdm-print-toc ul ul ul .header-section-number {
+    min-width: 3em;
   }
   /* The blank sheet at the end. Quarto's page grid keeps a trailing band of
      60 px under the content and the last elements carry 38 px of margin

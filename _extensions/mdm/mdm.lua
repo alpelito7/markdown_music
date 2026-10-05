@@ -1248,6 +1248,56 @@ end
 -- and the code cards are the document's, not the scores'. The stylesheet is
 -- the port of the editor's own; the block written beside it carries the
 -- values of the look in force.
+-- The sheet the header asks for, under the name a printed page gives it. A
+-- PDF typeset with LaTeX already takes `papersize` (Pandoc's template turns
+-- `a4` into the class's `a4paper`), while the page the extension prints its
+-- PDF from had no sheet of its own: Chrome printed every document on Letter,
+-- `papersize: a4` or not (measured on Chrome 151, 2026-10-02). The page is
+-- given the size in its print rules, so a reader's Ctrl+P lands on it too.
+-- It is read where the typeset PDF reads it: `format.pdf.papersize` over a
+-- top-level `papersize`, which is how Quarto merges the two for LaTeX. The
+-- first is missing from the metadata of a render to HTML, which carries the
+-- `format.html` options alone (measured on Quarto 1.9.37), and example.mdm
+-- keeps its PDF options under `format: pdf:`, so the header of the copy is
+-- read once more here, by Pandoc's own reader and not by a pattern.
+-- The values are CSS's names for the class options LaTeX takes. The measure
+-- is the editor's 820 px on any of them: an A4 sheet printed every line of
+-- the Letter one with the same breaks (2026-10-02).
+local PAPER_SIZES = {
+  a3 = "A3", a4 = "A4", a5 = "A5", b4 = "B4", b5 = "B5",
+  letter = "letter", legal = "legal",
+  -- CSS has no name for it: 7.25 by 10.5 inches, as LaTeX's executivepaper.
+  executive = "7.25in 10.5in",
+}
+
+local function header_meta()
+  local file = quarto.doc.input_file
+  local f = file and io.open(file, "r")
+  if not f then return nil end
+  local text = f:read("a") or ""
+  f:close()
+  local fm = text:match("^%-%-%-[ \t]*\r?\n(.-\r?\n)%-%-%-[ \t]*\r?\n")
+    or text:match("^%-%-%-[ \t]*\r?\n(.-\r?\n)%.%.%.[ \t]*\r?\n")
+  if not fm then return nil end
+  local ok, doc = pcall(pandoc.read, "---\n" .. fm .. "---\n", "markdown")
+  return ok and doc.meta or nil
+end
+
+local function paper_size(meta)
+  local named = meta.papersize
+  local header = header_meta()
+  local formats = header and header.format
+  local pdf = pandoc.utils.type(formats) == "table" and formats.pdf or nil
+  if pandoc.utils.type(pdf) == "table" and pdf.papersize then named = pdf.papersize end
+  if not named then return nil end
+  local key = (pandoc.utils.stringify(named):lower():gsub("%s+", "")):gsub("paper$", "")
+  if PAPER_SIZES[key] then return PAPER_SIZES[key] end
+  quarto.log.warning("mdm: papersize " .. key .. " is not a sheet the printed page " ..
+    "knows (a3, a4, a5, b4, b5, letter, legal, executive); the browser prints " ..
+    "it on its own.")
+  return nil
+end
+
 local function ensure_look()
   if look_added then return end
   look_added = true
@@ -1277,6 +1327,23 @@ local function ensure_look()
     })
   end
   quarto.doc.include_text("in-header", look_css(look))
+  -- The sheet (paper_size), after the look's stylesheet, whose @page sets
+  -- `size: auto`: of two @page rules the later one wins, which the test that
+  -- prints an A4 and an A5 holds.
+  if look.paper then
+    quarto.doc.include_text("in-header",
+      "<style>@media print { @page { size: " .. look.paper .. "; } }</style>")
+  end
+  -- The contents once more, for paper (resources/mdm-toc.js), on a page the
+  -- writer is making contents for and on no other, and not where the header
+  -- asks them of the page and not of the PDF (look.print_toc, set in Meta).
+  if PANDOC_WRITER_OPTIONS.table_of_contents and look.print_toc ~= "hidden" then
+    quarto.doc.add_html_dependency({
+      name = "mdm-toc",
+      version = "1.0.0",
+      scripts = { "resources/mdm-toc.js" },
+    })
+  end
   if look.hyphenation == "auto" then
     quarto.doc.add_html_dependency({
       name = "mdm-hyphenation",
@@ -2826,6 +2893,14 @@ function Meta(meta)
     has_pdfcrop = command_exists("pdfcrop")
   end
   look = read_look(meta)
+  -- The sheet of a page that is printed (paper_size). A typeset PDF has its
+  -- class take it.
+  if quarto.doc.is_format("html") then look.paper = paper_size(meta) end
+  -- Whether the page's contents go on paper as well. They do, unless the
+  -- extension says the header asks them of the page alone: it has Quarto
+  -- work out what the header comes to for each format, which a filter
+  -- cannot see from inside one render (pdfAsks in vscode-mdm/extension.js).
+  look.print_toc = meta_word(meta, "mdm-print-toc", { shown = true, hidden = true }, "shown")
   local changed = false
   if meta.bibliography or meta.references then
     -- Citations linked to their entries on paper as they are on the page.

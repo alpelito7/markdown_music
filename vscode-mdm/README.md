@@ -37,7 +37,7 @@ The second row holds settings shared by every document, except the hyphenation, 
 
 ### Export
 
-**Document** writes HTML or PDF with the editor's font, justification and hyphenation, and needs [Quarto](https://quarto.org) 1.4 or later. Without TeX, Chrome, Chromium or Microsoft Edge prints the PDF from the HTML page, scores and equations included; with TeX it gets TeX's line breaking and page layout. **Audio** writes every score beside the document as MIDI or WAV and needs nothing installed. The editor itself needs none of these.
+**Document** writes HTML or PDF with the editor's font, justification and hyphenation, and needs [Quarto](https://quarto.org) 1.4 or later. The PDF is the HTML page printed by Chrome, Chromium or Microsoft Edge, scores and equations included, so it needs no TeX: its sheets are numbered, its headings are its bookmarks, a `toc: true` opens it with the table of contents, what the header says under `format: pdf:` about contents, numbered sections and `papersize` holds for it (Letter when no paper is named), though its notes come at the end of the document and its contents carry no page numbers. Set `mdm.pdfEngine` to `latex` in the Settings to have LaTeX typeset it instead, with TeX's line breaking and page layout and each note at the foot of its page; that needs TeX. **Audio** writes every score beside the document as MIDI or WAV and needs nothing installed. The editor itself needs none of these.
 
 ## Documentation and licence
 

@@ -1923,6 +1923,449 @@ test("on paper the ground reaches the four edges of every sheet", {
   }
 });
 
+// ---------- The sheet, its number and the bookmarks (2026-10-02) ----------
+//
+// The extension's PDF is this page printed (printHtmlToPdf in
+// vscode-mdm/extension.js), and what paper adds to a page is read off the
+// typeset PDF: the sheet the header names, the number at the foot of every
+// sheet, the headings as bookmarks. Each is printed here with the extension's
+// own flags, the outline included.
+function printPdf(name) {
+  const pdf = path.join(DIR, name + ".pdf");
+  fs.rmSync(pdf, { force: true });
+  const profile = fs.mkdtempSync(path.join(DIR, "profile-"));
+  const c = spawnSync(
+    CHROME,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-pdf-header-footer",
+      "--generate-pdf-document-outline",
+      "--virtual-time-budget=6000",
+      "--no-sandbox",
+      "--user-data-dir=" + profile,
+      "--print-to-pdf=" + pdf,
+      path.join(DIR, name + ".html"),
+    ],
+    { encoding: "utf8", timeout: 60000 }
+  );
+  fs.rmSync(profile, { recursive: true, force: true });
+  assert.ok(fs.existsSync(pdf), "Chrome printed nothing: " + c.stderr);
+  return pdf;
+}
+
+// Every word poppler finds in a PDF, with the sheet it is on, in points from
+// the head of the sheet.
+function pdfWords(pdf) {
+  const out = spawnSync("pdftotext", ["-bbox", pdf, "-"], { encoding: "utf8" }).stdout;
+  const words = [];
+  out.split("<page ").slice(1).forEach((sheet, i) => {
+    const boxes = /<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)<\/word>/g;
+    for (const m of sheet.matchAll(boxes)) {
+      words.push({ sheet: i + 1, x0: +m[1], y0: +m[2], x1: +m[3], y1: +m[4], text: m[5] });
+    }
+  });
+  return words;
+}
+
+function sheetSize(pdf) {
+  const info = spawnSync("pdfinfo", [pdf], { encoding: "utf8" }).stdout;
+  const m = /Page size:\s+([\d.]+) x ([\d.]+)/.exec(info);
+  return { width: +m[1], height: +m[2] };
+}
+
+// A document in the editor's own face and justification, which a render of
+// bin/mdm does not pass the way an export from the toolbar does.
+function sheetDoc(name, header, body) {
+  fs.writeFileSync(
+    path.join(DIR, name + ".mdm"),
+    [
+      "---",
+      'title: "' + name + '"',
+      "mdm-text-font: roman",
+      "mdm-text-align: justify",
+      ...header,
+      "filters:",
+      "  - mdm",
+      "---",
+      "",
+      body,
+      "",
+    ].join("\n")
+  );
+  const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout + r.stderr;
+}
+
+const HTML_ALONE = ["format:", "  html:", "    embed-resources: true"];
+
+// The sheet the header names (paper_size in mdm.lua): `papersize` under
+// `format: pdf:`, where example.mdm keeps its PDF options and where the
+// typeset PDF reads it, or at the top of the header; with neither, Letter,
+// which is LaTeX's own default; with a name the page does not know, Letter
+// and a warning. On a sheet narrower than the measure the measure is TeX's,
+// the sheet less 3 cm, with the type at its size: Chrome shrank the whole
+// column onto an A5 otherwise, a word 0.80 of its width on Letter. A4 keeps
+// the editor's measure, as Letter does (the measure in mdm-look.css's print
+// rules), so the two text blocks are one width.
+test("on paper the sheet is the one the header names, and a narrow one keeps the type at its size", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, () => {
+  const body = "A paragraph of prose long enough to run over a few rows of the measure. ".repeat(14);
+  const logs = {
+    "sheet-pdf-a4": sheetDoc("sheet-pdf-a4", HTML_ALONE.concat(["  pdf:", "    papersize: a4"]), body),
+    "sheet-top-a5": sheetDoc("sheet-top-a5", ["papersize: a5"].concat(HTML_ALONE), body),
+    "sheet-none": sheetDoc("sheet-none", HTML_ALONE, body),
+    "sheet-odd": sheetDoc("sheet-odd", ["papersize: foolscap"].concat(HTML_ALONE), body),
+  };
+  const sheets = {};
+  for (const name of Object.keys(logs)) {
+    const pdf = printPdf(name);
+    const words = pdfWords(pdf).filter((w) => w.sheet === 1 && w.y1 < 700);
+    sheets[name] = {
+      size: sheetSize(pdf),
+      left: Math.min(...words.map((w) => w.x0)),
+      right: Math.max(...words.map((w) => w.x1)),
+      word: words.find((w) => w.text === "paragraph"),
+    };
+  }
+  const near = (a, b, within) => Math.abs(a - b) <= within;
+  // One px of the document on paper: 10 TeX pt for 16 px (the scale of the
+  // print rules of mdm-look.css).
+  const PT = 0.75 * (10 / 12) * (800 / 803);
+  const is = (name, width, height) =>
+    assert.ok(
+      near(sheets[name].size.width, width, 0.1) && near(sheets[name].size.height, height, 0.1),
+      name + " was printed on " + JSON.stringify(sheets[name].size) + ", not " + width + " by " + height
+    );
+  // Chrome's A4 is 594.96 by 841.92 pt and its A5 420 by 594.96.
+  is("sheet-pdf-a4", 594.96, 841.92);
+  is("sheet-top-a5", 420, 594.96);
+  is("sheet-none", 612, 792);
+  is("sheet-odd", 612, 792);
+  assert.match(
+    logs["sheet-odd"],
+    /papersize foolscap is not a sheet the printed page knows/,
+    "a sheet the page does not know was left to the browser without a word"
+  );
+  const measure = (name) => sheets[name].right - sheets[name].left;
+  const wide = (name) => sheets[name].word.x1 - sheets[name].word.x0;
+  // The print is the page at the scale: on Letter, which is what Chrome
+  // prints on when the header names no sheet, the editor's 820 px to a
+  // twentieth of a point.
+  assert.ok(
+    near(measure("sheet-none"), 820 * PT, 0.05),
+    "Letter sets a measure of " + measure("sheet-none").toFixed(2) + " pt, and 820 px at the scale are " + (820 * PT).toFixed(2)
+  );
+  // And A4 the same measure in the document's own pixels, each sheet read by
+  // its own word: on a sheet the header names in millimetres, Chrome's pixels
+  // for the sheet and the paper's are about one apart, and the shrink, which
+  // is the one divided by the other, comes out that much large: 0.13 % on A4
+  // (a measure of 511.24 pt for Letter's 510.59) and 0.18 % on A5, measured
+  // 2026-10-04. In px of the document that cancels, and the type is held to
+  // three thousandths of its size.
+  const px = (name) => (measure(name) / wide(name)) * (wide("sheet-none") / PT);
+  assert.ok(
+    near(px("sheet-pdf-a4"), 820, 0.3),
+    "A4 sets a measure of " + px("sheet-pdf-a4").toFixed(2) + " px of the document, and Letter one of " + px("sheet-none").toFixed(2)
+  );
+  assert.ok(
+    near(wide("sheet-pdf-a4") / wide("sheet-none"), 1, 0.003),
+    "a word is " + wide("sheet-pdf-a4").toFixed(2) + " pt wide on A4 and " + wide("sheet-none").toFixed(2) + " on Letter"
+  );
+  const a5 = sheets["sheet-top-a5"];
+  assert.ok(
+    near(measure("sheet-top-a5"), 420 - 85.04, 1.5),
+    "the A5 measure is " + measure("sheet-top-a5").toFixed(2) + " pt, where the sheet less 3 cm is 334.96"
+  );
+  assert.ok(near(a5.left, 420 - a5.right, 1), "the A5 text block is not centred: " + a5.left + " to " + a5.right);
+  // The type at its size, to the three thousandths the shrink is good for on
+  // a sheet the header names (above); left to Chrome it was 0.80.
+  assert.ok(
+    near(wide("sheet-top-a5") / wide("sheet-none"), 1, 0.003),
+    "a word is " + wide("sheet-top-a5").toFixed(2) + " pt wide on A5 and " + wide("sheet-none").toFixed(2) + " on Letter"
+  );
+});
+
+// Every sheet carries its number at its foot, as the typeset PDF prints it:
+// centred, in the face and at the size of the prose, and its baseline
+// 45.25 pt over the foot of the sheet, which is TeX's \footskip under the
+// lowest baseline a sheet has here (the @page rule of mdm-look.css's print
+// rules). The face and the size are poppler's box of the digit, which is a
+// digit of the prose's own when both are the same; the height is read in the
+// raster, where the lowest ink on a sheet is the foot of its number.
+test("on paper every sheet carries its number at its foot, in the face and at the size of the prose", {
+  skip: skip || (!POPPLER && "needs pdftoppm and pdftotext"),
+}, () => {
+  const para =
+    "Row 2 of a paragraph long enough to take a few rows of the measure, written again and " +
+    "again so the page runs on to more sheets. ";
+  sheetDoc("folio", HTML_ALONE, Array.from({ length: 22 }, () => para.repeat(3)).join("\n\n"));
+  const pdf = printPdf("folio");
+  const { width, height } = sheetSize(pdf);
+  // The foot of the text: the @page margin, 2.5 cm on paper.
+  const foot = height - 70.87;
+  const words = pdfWords(pdf);
+  const count = Math.max(...words.map((w) => w.sheet));
+  assert.ok(count >= 2, "the page printed on " + count + " sheet, and the test needs two");
+  const digit = words.find((w) => w.text === "2" && w.y1 < foot);
+  for (let s = 1; s <= count; s++) {
+    const under = words.filter((w) => w.sheet === s && w.y0 > foot);
+    assert.deepEqual(under.map((w) => w.text), [String(s)], "sheet " + s + " has under its text: " + JSON.stringify(under));
+    const n = under[0];
+    assert.ok(
+      Math.abs((n.x0 + n.x1) / 2 - width / 2) < 0.5,
+      "the number of sheet " + s + " stands at " + ((n.x0 + n.x1) / 2).toFixed(2) + " pt, not in the middle"
+    );
+    assert.ok(
+      Math.abs(n.y1 - n.y0 - (digit.y1 - digit.y0)) < 0.05 && (s > 9 || Math.abs(n.x1 - n.x0 - (digit.x1 - digit.x0)) < 0.05),
+      "the number of sheet " + s + " is a box of " + (n.x1 - n.x0).toFixed(2) + " by " + (n.y1 - n.y0).toFixed(2) +
+        " pt, and a digit of the prose " + (digit.x1 - digit.x0).toFixed(2) + " by " + (digit.y1 - digit.y0).toFixed(2)
+    );
+  }
+  const prefix = path.join(DIR, "folio-sheet");
+  for (const f of fs.readdirSync(DIR)) if (f.startsWith("folio-sheet-")) fs.rmSync(path.join(DIR, f));
+  assert.equal(spawnSync("pdftoppm", ["-r", "144", pdf, prefix]).status, 0);
+  for (const file of fs.readdirSync(DIR).filter((f) => f.startsWith("folio-sheet-")).sort()) {
+    const { width: w, height: h, data } = readPpm(path.join(DIR, file));
+    let lowest = -1;
+    for (let y = h - 1; y >= 0 && lowest < 0; y--) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 3;
+        if (Math.min(data[i], data[i + 1], data[i + 2]) < 128) {
+          lowest = y;
+          break;
+        }
+      }
+    }
+    const over = ((h - 1 - lowest) * 72) / 144;
+    assert.ok(
+      Math.abs(over - 45.25) <= 0.75,
+      file + ": the number's baseline is " + over.toFixed(2) + " pt over the foot of the sheet, not 45.25"
+    );
+  }
+});
+
+// The headings are the PDF's bookmarks, each once. A heading that opened a
+// sheet came out of Chrome with its words twice in its bookmark ("Heading
+// number 5Heading number 5"), which the clip on the headings in mdm-look.css's
+// print rules is there for. Thirty sections of different lengths put several
+// headings at the head of a sheet (break-after: avoid sends one there
+// whenever the paragraph under it does not fit at the foot of the one
+// before), and the test says which, so a fixture that stopped doing so fails
+// instead of passing on nothing. poppler's pdftohtml reads the outline.
+test("on paper the PDF's bookmarks are its headings, each once, the ones that open a sheet included", {
+  skip: skip || ((!POPPLER || spawnSync("pdftohtml", ["-v"]).status !== 0) && "needs pdftotext and pdftohtml"),
+}, () => {
+  const sentence = "A sentence of prose that fills part of a row of the measure, written so the sections differ in length. ";
+  const sections = [];
+  for (let k = 1; k <= 30; k++) {
+    sections.push("## Heading number " + k);
+    for (let p = 0; p < 1 + (k % 3); p++) sections.push(sentence.repeat(2 + ((k * 7 + p * 3) % 9)));
+  }
+  sheetDoc("bookmarks", HTML_ALONE, sections.join("\n\n"));
+  const pdf = printPdf("bookmarks");
+  const xml = spawnSync("pdftohtml", ["-xml", "-i", "-stdout", "-q", pdf], { encoding: "utf8" }).stdout;
+  const items = [...xml.matchAll(/<item page="(\d+)">([^<]*)<\/item>/g)].map((m) => ({ sheet: +m[1], title: m[2] }));
+  assert.deepEqual(
+    items.map((i) => i.title),
+    ["bookmarks"].concat(Array.from({ length: 30 }, (_, k) => "Heading number " + (k + 1))),
+    "the bookmarks are not the title and the thirty headings, once each"
+  );
+  const count = Math.max(...pdfWords(pdf).map((w) => w.sheet));
+  const opening = [];
+  for (let s = 2; s <= count; s++) {
+    const text = spawnSync("pdftotext", ["-layout", "-f", String(s), "-l", String(s), pdf, "-"], { encoding: "utf8" }).stdout;
+    const first = text.split("\n").map((l) => l.trim()).find(Boolean) || "";
+    const m = /^Heading number (\d+)$/.exec(first);
+    if (m) opening.push({ k: +m[1], sheet: s });
+  }
+  assert.ok(opening.length >= 2, "only " + opening.length + " heading opens a sheet, and the test needs two");
+  for (const o of opening) {
+    assert.equal(items[o.k].sheet, o.sheet, "the bookmark of heading " + o.k + " does not lead to sheet " + o.sheet + ", which it opens");
+  }
+});
+
+// A page of the fixtures above, read in a browser of its own: laid out as a
+// screen, and read under `media` when one is named, as pageAt reads a page
+// with scores.
+async function readSheetDoc(name, media, read) {
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    args: ["--no-sandbox", "--allow-file-access-from-files"],
+    defaultViewport: { width: 1200, height: 1200 },
+  });
+  OPEN_BROWSERS.add(browser);
+  try {
+    const page = await browser.newPage();
+    await page.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+    await page.evaluate(() => document.fonts.ready);
+    if (media) await page.emulateMediaType(media);
+    return await page.evaluate(read);
+  } finally {
+    OPEN_BROWSERS.delete(browser);
+    await browser.close();
+  }
+}
+
+// The contents of a document that asks for them (`toc: true`), on paper. The
+// page keeps them in its margin and Quarto's print rules take them away, so
+// the printed PDF had none where the typeset one opens with them.
+// resources/mdm-toc.js puts a copy of the page's own into the flow, under the
+// title block or at the head of a document whose header is hidden, and
+// mdm-look.css draws it on paper alone and sets it as the typeset PDF sets
+// its own, in the ink of the text (the owner's pick, 2026-10-03): the title
+// a first-level heading that is no bookmark, the first-level entries in a
+// heading's weight, each level 1.5em inside the one above, every entry a
+// link. And the page on screen is where it was: the copy stands ahead of the
+// first section without being drawn, and the heading that opens the column
+// keeps the place it has in a document with no contents.
+test("on paper a document that asks for its contents opens with them, set as the typeset PDF sets its own", {
+  skip: skip || ((!POPPLER || spawnSync("pdftohtml", ["-v"]).status !== 0) && "needs pdftotext and pdftohtml"),
+}, async () => {
+  const body = [
+    "# The vibrating string",
+    "A string fixed at both ends is the first instrument that physics explains completely.",
+    "## Partials and their numbers",
+    "Each of those shapes is called a mode.",
+    "### Counting in cents",
+    "A cent is the 1200th part of an octave.",
+    "## Intervals as ratios",
+    "Two notes an octave apart.",
+    "# What the ear does",
+    "The ear is not a spectrum analyser.",
+    "## Beats and roughness",
+    "Two tones a few hertz apart.",
+    "# Writing it down",
+    "A score is a set of instructions.",
+  ].join("\n\n");
+  const asked = ["toc: true", "number-sections: true"].concat(HTML_ALONE);
+  sheetDoc("toc-shown", asked, body);
+  sheetDoc("toc-hidden", ["mdm-front-matter: hidden"].concat(asked), body);
+  sheetDoc("toc-none", ["mdm-front-matter: hidden", "number-sections: true"].concat(HTML_ALONE), body);
+  const entries = [
+    "1 The vibrating string",
+    "1.1 Partials and their numbers",
+    "1.1.1 Counting in cents",
+    "1.2 Intervals as ratios",
+    "2 What the ear does",
+    "2.1 Beats and roughness",
+    "3 Writing it down",
+  ];
+  for (const [name, head] of [["toc-shown", ["toc-shown"]], ["toc-hidden", []]]) {
+    const pdf = printPdf(name);
+    const lines = spawnSync("pdftotext", ["-layout", "-f", "1", "-l", "1", pdf, "-"], { encoding: "utf8" })
+      .stdout.split("\n")
+      .map((l) => l.trim().replace(/\s+/g, " "))
+      .filter(Boolean);
+    const opens = head.concat(["Table of contents"], entries, [entries[0]]);
+    assert.deepEqual(lines.slice(0, opens.length), opens, name + " does not open with its contents");
+    const xml = spawnSync("pdftohtml", ["-xml", "-i", "-stdout", "-q", pdf], { encoding: "utf8" }).stdout;
+    for (const entry of entries) {
+      const words = entry.replace(/^[\d.]+ /, "");
+      assert.ok(
+        new RegExp('<a href="[^"]*">(?:<b>)?[^<]*' + words).test(xml),
+        name + ": the entry of " + words + " is not a link in the PDF"
+      );
+    }
+    assert.deepEqual(
+      [...xml.matchAll(/<item page="\d+">([^<]*)<\/item>/g)].map((m) => m[1]),
+      head.concat(entries),
+      name + ": the bookmarks are not the headings alone"
+    );
+  }
+
+  const PAPER = () => {
+    const main = document.querySelector("main.content");
+    const nav = main.querySelector("nav.mdm-print-toc");
+    const css = (el, pseudo) => getComputedStyle(el, pseudo || null);
+    const title = nav.querySelector(":scope > h1");
+    const heading = main.querySelector("section > h1");
+    const first = nav.querySelector(":scope > ul > li > a");
+    const inner = nav.querySelector("ul ul a");
+    // The margin over a first-level heading in the middle of the document:
+    // the blank line and the heading's padding.
+    const air = css(main.querySelectorAll("section > h1")[1]).marginTop;
+    return {
+      shown: css(nav).display,
+      before: nav.previousElementSibling ? nav.previousElementSibling.id : "",
+      role: title.getAttribute("role"),
+      titleTop:
+        css(title).marginTop === air
+          ? "air"
+          : Math.abs(parseFloat(css(title).marginTop) - 0.4 * parseFloat(css(title).fontSize)) < 0.01
+            ? "padding"
+            : css(title).marginTop,
+      under: css(heading).marginTop === air,
+      titleSize: css(title).fontSize === css(heading).fontSize && css(title).fontWeight === css(heading).fontWeight,
+      ink: css(first).color === css(main.querySelector("section p")).color && css(inner).color === css(first).color,
+      number: css(nav.querySelector(".header-section-number")).color === css(first).color,
+      weights: [css(first).fontWeight, css(inner).fontWeight],
+      bullet: css(nav.querySelector("li"), "::before").content,
+      steps: [...nav.querySelectorAll("ul")].slice(0, 3).map((ul) => parseFloat(css(ul).paddingLeft) / parseFloat(css(ul).fontSize)),
+      ids: nav.querySelectorAll("[id]").length,
+    };
+  };
+  // Under the title block the title of the contents has a heading's air over
+  // it; opening the column, the padding alone, as a heading there has.
+  for (const [name, before, titleTop] of [["toc-shown", "title-block-header", "air"], ["toc-hidden", "", "padding"]]) {
+    const paper = await readSheetDoc(name, "print", PAPER);
+    assert.deepEqual(
+      paper,
+      {
+        shown: "block",
+        before: before,
+        role: "none",
+        titleTop: titleTop,
+        under: true,
+        titleSize: true,
+        ink: true,
+        number: true,
+        weights: ["600", "400"],
+        bullet: "none",
+        steps: [0, 1.5, 1.5],
+        ids: 0,
+      },
+      name + " on paper"
+    );
+  }
+  const SCREEN = () => {
+    const main = document.querySelector("main.content");
+    const nav = main.querySelector("nav.mdm-print-toc");
+    return {
+      copy: nav ? getComputedStyle(nav).display : "",
+      tops: [...main.querySelectorAll("section :is(h1, h2, h3), section p")].map(
+        (el) => Math.round((el.getBoundingClientRect().top - main.getBoundingClientRect().top) * 100) / 100
+      ),
+    };
+  };
+  const withContents = await readSheetDoc("toc-hidden", null, SCREEN);
+  const without = await readSheetDoc("toc-none", null, SCREEN);
+  assert.equal(withContents.copy, "none", "the copy of the contents is drawn on screen");
+  assert.equal(without.copy, "", "a page with no contents was given a copy of them");
+  assert.deepEqual(
+    withContents.tops,
+    without.tops,
+    "on screen the headings and paragraphs of a document with contents are not where they are without them"
+  );
+
+  // Contents the header asks of the page and not of the PDF: the extension
+  // says so to the filter (pdfAsks in extension.js, mdm-print-toc), and the
+  // page keeps them in its margin with no copy for the paper.
+  sheetDoc("toc-page", ["mdm-front-matter: hidden", "mdm-print-toc: hidden"].concat(asked), body);
+  const kept = await readSheetDoc("toc-page", null, () => ({
+    margin: !!document.querySelector("nav#TOC"),
+    copy: !!document.querySelector("nav.mdm-print-toc"),
+  }));
+  assert.deepEqual(kept, { margin: true, copy: false }, "contents asked of the page alone");
+  const first = spawnSync("pdftotext", ["-layout", "-f", "1", "-l", "1", printPdf("toc-page"), "-"], { encoding: "utf8" })
+    .stdout.split("\n")
+    .map((l) => l.trim().replace(/\s+/g, " "))
+    .find(Boolean);
+  assert.equal(first, entries[0], "the paper opens with contents the PDF was not asked for");
+});
+
 // A score is broken between two of its staff systems where the sheet runs
 // out, as the typeset PDF breaks it ("a long score is cut so a page can break
 // between two of its systems" in render.test.js). The drawing is one SVG, which

@@ -6710,6 +6710,222 @@ its slices for print (7 of 7), and in `render.test.js` LL3 and every test
 that names an engraving by its key, since the two helpers changed (9 of
 9). The rest of the suites were not run.
 
+### What paper adds to the printed PDF: its sheet, its numbers, its bookmarks, its contents (2026-10-02 and 03)
+
+The owner's call on what the PDF printed by default lacked against the
+typeset one (*The PDF printed unless LaTeX is asked for*, Pending 16):
+the sheet the header names, the page numbers and the bookmarks, and the
+table of contents after a round of designs (`design/design-print-toc.html`,
+A to C: he picked A, the typeset PDF's own contents, "but not drawn in
+blue", on 2026-10-03). What a browser cannot do is said where the code
+is: a note at the foot of the page that calls it (`float: footnote` left the
+note in its line in Chrome 151) and the page number beside an entry of a
+table of contents (`target-counter()` makes Chrome 151 drop the whole
+declaration), both probed on 2026-10-02.
+
+- **The sheet** (`paper_size` in `mdm.lua`, a `@page { size }` in the
+  page's head). `papersize` under `format: pdf:`, where example.mdm keeps
+  its PDF options and where the typeset PDF reads it over the top-level
+  one, or at the top of the header. The first is missing from the metadata
+  of a render to HTML (Quarto 1.9.37), so the header of the copy is read
+  again with Pandoc's reader. Chrome printed every document on Letter
+  before. A name the page does not know leaves the browser's own sheet and
+  a warning in the log.
+- **The measure on a narrow sheet** (the print rule of `main.content` in
+  `mdm-look.css`): the sheet less 3 cm, as TeX's `\mdmmeasure`, with the
+  type at its size; left alone, Chrome shrank an A5's whole column onto it,
+  a word 0.80 of its width on Letter. A media query cannot tell the sheets
+  apart (printing, Chrome 151 shows each of them as 740 to 750 px), so it is
+  `min(820px, (100vw - 3cm) × the inverse of the zoom + 2px)`. The 2 px keep
+  A4 at the editor's 820 px (Chrome's A4 is 594.96 pt, 0.9 px short of it
+  with TeX's 3 cm); Letter and A4 print every word where they did (2,617
+  and 2,612). A5 comes out at 335.5 pt to TeX's 335.0, B5 at 415.1 to its
+  413.9.
+- **The number of each sheet** (`@bottom-center` in the print `@page`):
+  centred, in the face and at the size of the prose (the zoom reaches a page
+  box, so its 16px are the prose's 12.2 pt, a digit's box 6.10 by 8.88 pt as
+  the prose's), its baseline 45.25 pt over the foot of the sheet, which is
+  TeX's `\footskip` of 30 pt under the lowest baseline a sheet holds here
+  (716.4 pt from the head of a Letter sheet, measured on a sheet full of
+  prose). The typeset one stands at 71.0 pt: TeX keeps its foot inside the
+  2.5 cm margin, the printed page's text runs to it, and a margin box cannot
+  reach into the text. No word moved for it (2,617 of 2,617, and 2,627 with
+  the header shown).
+- **The bookmarks** (`--generate-pdf-document-outline` in `printHtmlToPdf`,
+  and a `clip-path` on the headings in the print rules). A heading that
+  opened a sheet came out with its title twice ("From code to scoresFrom
+  code to scores"). Cause, found that day on a page cut down to one heading:
+  the heading's text box rises 5 px above its own box (the roman at a
+  line-height of 1.3); where that reaches into the sheet before, Chrome
+  draws the heading there too with every glyph clipped, and Skia writes the
+  words into the bookmark on each draw (read in Skia's source, not in the
+  revision inside Chrome 151). The clip stops the drawing at the top of the
+  box with half a pixel to spare: with none, a 300 dpi row of some
+  capitals' accents was cut on some headings; with half, every one is whole
+  and only Ǻ loses the top of its ring; from 1.2 px the doubled titles were
+  back on 13 of 14 sheet-opening headings (0, 0.5 and 1.1 px: none), for a
+  reason not found. The page is otherwise the same word box for word box.
+- **The contents** (`resources/mdm-toc.js`, loaded by `mdm.lua` where the
+  writer is making contents, and `nav.mdm-print-toc` in `mdm-look.css`).
+  The page keeps its contents in the margin and Quarto's print rules hide
+  them, so the printed PDF had none where the typeset one opens with them.
+  A copy of the page's own goes into the flow, under the title block or at
+  the head of a document whose header is hidden, drawn on paper alone and
+  set as the typeset contents are, in the ink of the text: the title a
+  first-level heading without a heading's role (so it is no bookmark, as
+  it is none in the typeset PDF), first-level entries in a heading's
+  weight, each level 1.5em inside the one above, every entry a link. It is
+  a copy and not a list of the filter's because Quarto numbers the sections
+  after the filters run (`PANDOC_WRITER_OPTIONS.number_sections` is false
+  in a filter on a document that numbers them), so the filter's would have
+  to work the numbers out again. The copy stands ahead of the first section
+  in the page, which made that section no longer the first child that *a
+  heading that opens the column* asks for: the rule takes a section
+  straight after the copy as well, and on screen every heading and
+  paragraph of a document with contents is where it is without them.
+
+One assertion and four tests:
+
+- In `extension-host.test.js`, *a PDF is printed from the page by
+  default…* reads `--generate-pdf-document-outline` in Chrome's command
+  line.
+- *on paper the sheet is the one the header names, and a narrow one keeps
+  the type at its size* (`html.test.js`): four documents rendered with
+  `bin/mdm` and printed with the extension's flags, A4 from `format: pdf:`,
+  A5 from the top of the header, Letter with none and with `foolscap` and
+  its warning; A4's measure Letter's, A5's the sheet less 3 cm and centred,
+  and a word as wide on A5 as on Letter.
+- *on paper every sheet carries its number at its foot, in the face and at
+  the size of the prose*: under the text of each sheet one word, its
+  number, centred, its box a prose digit's; and in a 144 dpi raster the
+  lowest ink of each sheet 45.25 ± 0.75 pt over its foot.
+- *on paper the PDF's bookmarks are its headings, each once, the ones that
+  open a sheet included*: thirty sections of different lengths, the outline
+  read with poppler's `pdftohtml -xml`, the title and the thirty headings
+  once each, at least two headings at the head of a sheet and their
+  bookmarks leading there (headings 5, 11, 13, 17 and more open a sheet;
+  without the clip each came out doubled).
+- *on paper a document that asks for its contents opens with them, set as
+  the typeset PDF sets its own*: three documents, with the header shown,
+  hidden, and hidden with no contents. Printed, the first sheet reads the
+  title (when shown), "Table of contents", the seven entries and then the
+  first heading; each entry is a link in the PDF (`pdftohtml -xml`) and the
+  bookmarks are the headings alone. Under print media in a browser, the
+  copy stands after the title block or first in the column, its title has
+  the role `none` and a first-level heading's size and weight, the entries
+  are in the paragraph's ink at weights 600 and 400 with no bullet and
+  steps of 0, 1.5 and 1.5 em, no id is left in it, and the air over its
+  title and over the heading under it is the one each has there. On
+  screen the copy is not drawn and the tops of every heading and paragraph
+  equal those of the document with no contents.
+
+The mutations, each an exact swap in place with its tests run and the file
+swapped back and checked by its hash in one command
+(`scratchpad/mutate-paper.js` of the session, not kept):
+
+- **PA1** the page given no sheet, **PA2** `format.pdf.papersize` not read,
+  **PA3** the warning for an unknown sheet silenced, **PA4** the measure
+  the editor's on any sheet, **PA5** the clamp without its 2 px → the sheet
+  test.
+- **FO1** no number, **FO2** the number at 14px, **FO3** the number
+  against the foot of the text → the number test.
+- **BM1** no clip on the headings, **BM2** the clip 1.2 px above the box →
+  the bookmarks test.
+- **HO1** the print asking for no outline → the host test.
+
+Eleven of eleven caught (FO1 and FO3 at the second try: their first swaps
+were not unique in the stylesheet, and the harness skipped them).
+
+The contents had a round of their own on 2026-10-03, the same way, each
+caught by the reading it was aimed at:
+
+- **TC1** the script not loaded, **TC2** the copy put over the title
+  block, **TC7** the lists' bullet left in the gap → the first sheet's
+  lines. **TC3** the title's role left a heading's → the bookmarks.
+- **TC4** the ids kept in the copy, **TC5** the entries in the link's blue,
+  **TC6** a first-level entry at 400, **TC12** a level stepped in by
+  0.5em → the reading under print media, header shown.
+- **TC10** the heading under the contents without its blank line, **TC11**
+  the title of contents that open the column with a blank line over it →
+  the same reading, header hidden.
+- **TC8** the copy drawn on screen, **TC9** the selector that lets the
+  first heading open the column behind the copy taken away → the screen
+  readings.
+
+Twelve of twelve caught. Seen once more through the extension itself, with
+the real Quarto and Chrome and the tests' mock of the API: a document with
+`toc: true` and `papersize: a4` under `format: pdf:` exported to PDF at the
+default settings came out one A4 sheet opening with its contents, its
+number at the foot and its three headings as bookmarks, from one render of
+the page and one print.
+
+The notices of *The PDF printed unless LaTeX is asked for* were seen in a
+real window on 2026-10-03: VS Code 1.133.0 on Linux, in an instance of its
+own on a KWin drawing to a framebuffer (no window on the owner's screen),
+the extension linked from this tree and driven through its DevTools port,
+the Export button and its PDF row pressed in the webview. With no Chrome on
+the PATH: a document without scores gave the warning "no Chrome or Edge was
+found, so plain.pdf was typeset with LaTeX instead of printed from the HTML
+page. Install Chrome for the printed PDF." with Open PDF, Download Chrome,
+Show log and Don't show again in one row and its three lines whole, and the
+PDF beside the document; a document with a score gave "a PDF is printed by
+Google Chrome, Chromium or Microsoft Edge, and none of them is installed on
+this computer. Install one and export again." with Download Chrome and Show
+log. With `mdm.pdfEngine` on `latex` and no TeX on the PATH (the window
+started with `VSCODE_CLI=1`, without which VS Code read the login shell's
+PATH back and found TeX): "no TeX was found, so plain.pdf was printed…" and
+"a complete TeX was not found, so tune.pdf was printed…", four buttons
+each, and both PDFs printed. The Settings page shows *Mdm: Pdf Engine* with
+its description and its two values, and *Mdm: Show Pdf Fallback Notice*
+with the text for both directions. Not seen there: a Chrome that is found
+and fails to print, and Windows or macOS.
+
+**What the header asks of the PDF** (2026-10-03, on the owner's "go on").
+A printed PDF is the page, and a render to HTML takes the options of
+`format: html:` alone, so a `toc`, a `toc-depth` or a `number-sections`
+written under `format: pdf:`, where example.mdm keeps its PDF options, made
+a typeset PDF with contents and numbers and a printed one with neither. The
+export now asks Quarto what the header comes to for each format (`quarto
+inspect` on the copy, 0.55 s, which reads a `_quarto.yml` as well) and
+`asksFrom` in `extension.js` reads the difference. What changes the page
+goes to its render as Pandoc's own flags (`--toc`, `--toc-depth=N`,
+`--number-sections`), which beat what the header says of the page, where
+`-M toc:true` loses to a `toc` under `format: html:` (both measured on
+Quarto 1.9.37); a "both" then prints from a page of its own and keeps
+beside the document the page the header asks for. Contents asked of the
+page alone are kept off the paper (`-M mdm-print-toc:hidden`, which the
+filter reads and loads no copy for), since `--toc=false` stops Quarto.
+Not carried, and written in the code: numbers the page has and the PDF
+does not ask for, a `toc-title` or a `number-depth` of the PDF's own, and
+every other option of `format: pdf:`, which is LaTeX's.
+
+Four tests in `extension-host.test.js` (the stand-in Quartos answer
+`inspect` from a file a test leaves, outside the record of the renders) and
+one case more in the contents test of `html.test.js`: *what the header asks
+of the PDF and not of the page is read out of Quarto's inspect* (twelve
+headers, a depth that is not a whole number of levels among them); *a
+printed PDF has the contents and the numbers the header asks of the PDF,
+and the page kept is the page's*; *contents the header asks of the page
+alone are kept off the paper, in the one render*; *a Quarto that does not
+say what the header asks of the PDF changes nothing of the export* (one
+that fails after answering among them); and the page told
+`mdm-print-toc: hidden` keeping its contents in the margin with no copy
+for the paper. Mutations: **HA1** to **HA4** each of the four things
+`asksFrom` writes, **HA5** any depth passed on, **HA6** a "both" printing
+the page beside the document whatever the PDF asks, **HA7** and **HA8**
+the answers not handed to the two renders, **HA9** Quarto not asked,
+**HA10** a failed Quarto's words taken, **HA11** the inspect started with
+a console window, **FA1** the filter copying the contents whatever it is
+told. Twelve of twelve caught. Seen through the extension with the real
+Quarto and Chrome: contents at two levels and numbers under `format: pdf:`
+alone came out in the PDF from one render with the three flags, and as
+"both" from two, the page kept with neither; contents under `format:
+html:` alone stayed out of the PDF in the one render.
+
+Run on this state: `test:fast` (281 of 281), the nine tests of
+`html.test.js` that print a page (9 of 9), and the host tests above. The
+rest of the Chrome suites and `render.test.js` were not run.
+
 ### The second click on a drawing puts its source away (2026-10-03)
 
 The owner (2026-10-02): a click on a drawn table, with the hand, shows its
@@ -6984,6 +7200,34 @@ has to go down to it. And item 18 of the list below, found on the way.
     double click on a document that was left as text opens it in the MDM
     editor, in a new window (VS Code does not bring the old one back when
     it is started on a file).
+16. The printed PDF is the default (*The PDF printed unless LaTeX is asked
+    for*). Its sheet, its page numbers, its bookmarks and its contents are
+    held to tests (*What paper adds to the printed PDF*), and so is what
+    the header asks of the PDF alone: its contents, their depth and its
+    numbered sections. Still open against the typeset one: sections the
+    page numbers and the PDF does not ask to be numbered keep their
+    numbers on paper, there being no flag that takes them off; a
+    `toc-title` or a `number-depth` under `format: pdf:` is not carried;
+    the entries of the contents have
+    no page number and the notes come at the end of the document, neither
+    of which Chrome can do otherwise; an internal link lands 71 to 85 pt
+    above its target,
+    which is the `@page` top margin (with none it lands 0.5 pt above); the
+    raw LaTeX the page leaves out. Measured differences that are written
+    down rather than defects of either: a table's caption has no number on
+    the page, and the table breaks across sheets with its header repeated,
+    where LaTeX numbers it and keeps it whole (on the page it spanned the
+    measure until 2026-10-04 and stands at its own width since, as LaTeX
+    sets it); the code is Liberation Mono at a pitch of 13.15 pt
+    against DejaVu Sans Mono at 16.95; the printed prose alternates pitches
+    of 16.50 and 17.25 pt; a figure keeps its place, 12% narrower, where
+    LaTeX sets it at the full measure and may float it. The typeset PDF of
+    `example.mdm` came out with an empty Title, Subject and Author (pdfinfo,
+    with the header hidden, which is the default), where the printed one
+    carries the document's title; not looked into. A Chrome that is found
+    and cannot print ends in an error that names the setting; a confined
+    snap or flatpak is the case that comes to mind, and none was tried. The
+    measurements are the report of 2026-10-02, kept outside the repository.
 18. A click on a drawn selection is taken for a click in the dead margin
     (found 2026-10-03, *The second click on a drawing puts its source
     away*). `style.css` lifts CodeMirror's selection layer above the text,
