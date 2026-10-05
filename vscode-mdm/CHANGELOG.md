@@ -45,6 +45,11 @@
 - The YAML header coming into view or going while the page is scrolled down
   leaves the line being read where it is. It used to move by the height of
   the header.
+- The scrollbar no longer puts away the source of a table, an equation, a
+  code block or a score that is open for editing. A drag of its handle took
+  the caret out of the block and left the keyboard with nothing to type
+  into; the block now stays open, and the text has the keyboard back when
+  the handle is let go.
 - The YAML button leaves the caret where it was when it brings the header
   into view. In a document nobody had clicked in yet, the caret ended up in
   the header's first line.

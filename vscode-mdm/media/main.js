@@ -12677,12 +12677,30 @@
     // press on its field or its arrows must not put away the block its
     // current match opened.
     if (e.target.closest(".cm-content, .mdm-audio, .mdm-btn--caret, .cm-panels")) return;
+    // Nor is the scroller's own bar: scrolling is how a long table or a
+    // long header is read while its source is open, and the handle is as
+    // good a way down it as the wheel, which puts nothing away. A press on
+    // the handle used to take the carets out of every open block (measured
+    // 2026-10-04: the three rows of a table's source gone after a drag);
+    // no block is put away by it now, the owner's word on 2026-10-05, for
+    // tables, equations, scores and the header alike.
+    if (onScrollbar(e)) return;
     dismissOpenBlock();
     // And the header's source, where a click on the drawn title opened it:
     // it is not in the text to be closed by a caret moving out, so it is
     // asked of the host (leaveHeader). Not from its own button, whose press
     // is about that source and says what becomes of it.
     if (!e.target.closest(FM_BUTTON)) leaveHeader(false);
+  }
+
+  // Whether a press is on a scrollbar of the document, which stands past
+  // what the scroller shows of its content (deadMargin reads the upright
+  // one the same way).
+  let scrollbarTookFocus = false;
+  function onScrollbar(e) {
+    if (!view || e.target !== view.scrollDOM) return false;
+    const box = view.scrollDOM.getBoundingClientRect();
+    return e.clientX - box.left >= view.scrollDOM.clientWidth || e.clientY - box.top >= view.scrollDOM.clientHeight;
   }
 
   // ---------- The search panel (Ctrl+F) ----------
@@ -14101,6 +14119,11 @@
         // pointerHeld); the buttons of a block's rail and the toolbar move
         // no caret by being pressed and do not.
         if (e.button === 0 && view && view.dom.contains(e.target)) pointerHeld = true;
+        // A press on the scrollbar takes the focus to the scroller, which
+        // the browser does before the handle moves, and what is typed after
+        // the drag then goes nowhere (measured in the harness with the bars
+        // drawn). The text has it back at the release, where it had it.
+        scrollbarTookFocus = e.button === 0 && !!view && view.hasFocus && onScrollbar(e);
       },
       true
     );
@@ -14113,6 +14136,10 @@
       if (heldRebuild && view) view.dispatch({ effects: pointerReleased.of(true) });
       // And the header's source a press took the carets out of (leaveHeader).
       releaseHeader();
+      if (scrollbarTookFocus && view) {
+        scrollbarTookFocus = false;
+        view.focus();
+      }
     };
     window.addEventListener("mouseup", releasePointer, true);
     window.addEventListener("blur", releasePointer);

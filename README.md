@@ -433,8 +433,9 @@ What it does:
   `Ctrl+Enter` leaves the block the caret is in (a fence, an equation, a
   list, a quote, a callout, a heading) into a fresh paragraph below it. A
   click out in the dead margin puts away what was open, and so does a second
-  click on the drawing itself, a table, an equation or a score, which
-  stays under the pointer while its source goes.
+  click on the drawing itself, a table, an equation, a score or the title
+  block, which stays under the pointer while its source goes. Scrolling
+  puts nothing away, by the wheel or by the scrollbar's handle.
 - **Multicursor**, as in VS Code's own editor: `Alt+click` adds a caret (or
   `Ctrl+click`, following the `editor.multiCursorModifier` setting),
   `Shift+Alt+drag` selects a column, `Ctrl+D` the next occurrence of the
