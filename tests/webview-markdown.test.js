@@ -2724,6 +2724,18 @@ test("an open picture shows its attributes wherever the caret stands in it, a fi
     const brass = [{ text: "{#fig-brass width=30%}", shown: true, line: "![Brass](a.svg){#fig-brass width=30%}" }];
     assert.deepEqual(await attrs(text.indexOf("Brass") + 2), brass);
     assert.deepEqual(await attrs(text.indexOf("a.svg") + 2), brass);
+    // And in the braces themselves, which are the image's own source: the
+    // image stays open around them, its address set as an open one's is.
+    // It was drawn again as soon as the caret was past the address, which
+    // put the picture where the line had been, under a click meant for the
+    // label (the owner, 2026-10-12: "I cannot edit it, the image comes
+    // back").
+    assert.deepEqual(await attrs(text.indexOf("#fig-brass") + 3), brass);
+    assert.deepEqual(await attrs(text.indexOf("width=30%") + 3), brass);
+    assert.deepEqual(
+      await h.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-link-dest")).map((e) => e.textContent)),
+      ["a.svg"]
+    );
     // A picture with no label has its width in view the same way, and so
     // has one in a sentence.
     assert.deepEqual(await attrs(text.indexOf("Sized") + 2), [
@@ -2731,11 +2743,15 @@ test("an open picture shows its attributes wherever the caret stands in it, a fi
     ]);
     const sentence = "A sentence with ![inline](a.svg){width=2em} in it and a link after.";
     assert.deepEqual(await attrs(text.indexOf("inline") + 2), [{ text: "{width=2em}", shown: true, line: sentence }]);
+    assert.deepEqual(await attrs(text.indexOf("width=2em") + 3), [{ text: "{width=2em}", shown: true, line: sentence }]);
     // The caret in the sentence and outside the picture opens neither.
     assert.deepEqual(await attrs(text.indexOf("A sentence") + 2), []);
     // The braces have to stand straight after the image to be its own: a
     // block further on in the paragraph is not opened by it.
     assert.deepEqual(await attrs(text.indexOf("far](") + 1), []);
+    // Nor do they open it: under the caret they are shown, as any are, and
+    // the picture stays drawn.
+    assert.deepEqual(await attrs(text.indexOf("{.far}") + 3), [{ text: "{.far}", shown: true, line: "Far  from (its braces){.far} here." }]);
     // A link's attributes are still the caret's to find (G014): its text
     // open, they are not drawn, and under the caret they are.
     assert.deepEqual(await attrs(text.indexOf("a link") + 2), []);
@@ -2744,6 +2760,98 @@ test("an open picture shows its attributes wherever the caret stands in it, a fi
     assert.deepEqual(h.errors, []);
   } finally {
     await h.close();
+  }
+});
+
+test("the label of a figure, of an equation and of a table is drawn alike while its source is open: the code face, one size and one ink, in a line of prose or on a card", { skip }, async () => {
+  // `{#fig-x}`, `{#eq-x}` and `{#tbl-x}` are one thing to the reader, the
+  // name a block is cited by, and one behaviour is owed to the three: each
+  // in view with its source open, small and faint, and none of it drawn
+  // with the source shut. They were three looks (the owner, 2026-10-12):
+  // the table's stood in its caption as words of the prose, at the size and
+  // in the ink of the prose, and the one on the closer of an equation, which
+  // is a line of a card, took 0.88em of the card's 0.88em, 12.39px beside
+  // the 14.08px of a picture's at a prose of 16px.
+  const text =
+    "Prose.\n\n" +
+    "![Brass](a.svg){#fig-brass}\n\n" +
+    "$$\na = b\n$$ {#eq-block}\n\n" +
+    "Inline $$c = d$$ {#eq-inline} here.\n\n" +
+    TABLE("T1") + "\n: Beside {#tbl-beside}\n\n" +
+    TABLE("T2") + ": Under {#tbl-under}\n\n" +
+    TABLE("T3") + "\n: Classes {.striped}\n\n" +
+    TABLE("T4") + "\n: Another kind {#other}\n\n" +
+    "After.\n";
+  // The braces that hold `name`, as drawn with the caret at `at`: whether
+  // they are set as a label and what is set so with them, their size, face
+  // and ink, and whether their line is a card's.
+  const braces = async function (page, name, at) {
+    await setSelection(page, at);
+    await new Promise((r) => setTimeout(r, 150));
+    return page.evaluate((name) => {
+      const walk = document.createTreeWalker(document.querySelector("#app .cm-content"), NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walk.nextNode())) {
+        if (node.textContent.indexOf(name) < 0 || node.textContent.indexOf("{") < 0) continue;
+        const el = node.parentElement;
+        const cs = getComputedStyle(el);
+        // In the source, and not in the caption drawn over a table.
+        const line = el.closest(".cm-line");
+        if (!line) continue;
+        return {
+          label: !!el.closest(".mdm-attr"),
+          text: (el.closest(".mdm-attr") || el).textContent,
+          px: Math.round(parseFloat(cs.fontSize) * 100) / 100,
+          face: cs.fontFamily,
+          ink: cs.color,
+          card: !!line && line.classList.contains("mdm-src-line"),
+          differ: window.__mdm.checkDecorations(),
+        };
+      }
+      return null;
+    }, name);
+  };
+  const cases = [
+    ["#fig-brass", text.indexOf("Brass") + 2, false],
+    ["#eq-block", text.indexOf("a = b") + 1, true],
+    ["#eq-inline", text.indexOf("c = d") + 1, false],
+    ["#tbl-beside", text.indexOf("| T1 |") + 3, false],
+    ["#tbl-beside", text.indexOf("Beside") + 2, false],
+    ["#tbl-under", text.indexOf("| T2 |") + 3, true],
+    [".striped", text.indexOf("Classes") + 2, false],
+  ];
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, height: 1600, seed: FIGURES_SEED });
+    try {
+      await postSettings(h.page, { textFont: face });
+      await new Promise((r) => setTimeout(r, 300));
+      await reading(h.page);
+      // Shut, none of them is drawn.
+      assert.equal(await h.page.evaluate(() => /\{[#.](?:fig|eq|tbl|striped)/.test(document.querySelector("#app .cm-content").innerText)), false, face);
+      const prose = await h.page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("#app .cm-content .cm-line")).fontSize));
+      const figure = await braces(h.page, cases[0][0], cases[0][1]);
+      assert.equal(figure.label, true, face);
+      assert.ok(Math.abs(figure.px - 0.88 * prose) < 0.01, face + ": a picture's label at " + figure.px + "px beside a prose of " + prose + "px");
+      assert.ok(/monospace/.test(figure.face), figure.face);
+      for (const [name, at, card] of cases) {
+        const seen = await braces(h.page, name, at);
+        assert.ok(seen, face + " " + name + ": not on screen with its source open");
+        // The braces and nothing beside them: the words of a caption are
+        // prose still.
+        assert.deepEqual(
+          { label: seen.label, text: seen.text, px: seen.px, face: seen.face, ink: seen.ink, card: seen.card, differ: seen.differ },
+          { label: true, text: "{" + name + "}", px: figure.px, face: figure.face, ink: figure.ink, card: card, differ: null },
+          face + " " + name
+        );
+      }
+      // Braces a caption ends on that name another kind of thing are words
+      // of the caption, printed with it, and are drawn as its words.
+      const other = await braces(h.page, "#other", text.indexOf("Another kind") + 2);
+      assert.deepEqual([other.label, other.px], [false, prose], face);
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
   }
 });
 

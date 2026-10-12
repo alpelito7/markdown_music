@@ -5021,12 +5021,14 @@
   const CAPTION_MARK = /^(?::(?!\p{P})|[Tt]able:)[ \t]*/u;
 
   // What a caption says once its mark is off: where its words start and
-  // end, and the label of the braces it ends on (parseTableCaption among
-  // Quarto's filters, which reads them as a heading's attributes).
+  // end, the label of the braces it ends on (parseTableCaption among
+  // Quarto's filters, which reads them as a heading's attributes), and
+  // where those braces stand when they are none of its words.
   function captionWords(state, textFrom, to) {
     const kept = state.sliceDoc(textFrom, to).replace(/\s+$/, "");
     let textTo = textFrom + kept.length;
     let label = null;
+    let stand = null;
     if (kept.charAt(kept.length - 1) === "}") {
       const open = /(?:^|\s)\{/.exec(kept);
       const at = open ? open.index + open[0].length - 1 : -1;
@@ -5036,10 +5038,11 @@
         if (!id || /^tbl-/.test(id)) {
           label = id;
           textTo = textFrom + kept.slice(0, at).replace(/\s+$/, "").length;
+          stand = [textFrom + at, textFrom + kept.length];
         }
       }
     }
-    return { textFrom: textFrom, textTo: textTo, label: label };
+    return { textFrom: textFrom, textTo: textTo, label: label, braces: stand };
   }
 
   // The block before or after another among its siblings, the marks of a
@@ -5113,6 +5116,7 @@
         textFrom: words.textFrom,
         textTo: words.textTo,
         label: words.label,
+        braces: words.braces,
         row: row,
         node: row ? node.getChild("TableCell") || node : node,
       };
@@ -7791,6 +7795,12 @@
             else hideLines(n.from, Math.max(0, doc.lineAt(captions.tableFrom).from - 1));
             return false;
           }
+          // Open, the braces it ends on are the table's label and none of
+          // the caption's words: small and faint, as a picture's are and
+          // an equation's (the owner, 2026-10-12: `{#tbl-durations}` in the
+          // style of `{#fig-circle}`).
+          const braces = captions.caption ? captions.caption.braces : null;
+          if (braces) decos.push(Decoration.mark({ class: "mdm-attr" }).range(braces[0], braces[1]));
         }
 
         // A paragraph, and the paragraph of a task item, drawn with the
@@ -8344,6 +8354,11 @@
               marksIn(c);
             }
           })(node);
+          // The braces of a caption written as the table's last line, as the
+          // ones of a caption beside the table are (the paragraph's branch).
+          if (written && written.row && written.braces) {
+            decos.push(Decoration.mark({ class: "mdm-attr" }).range(written.braces[0], written.braces[1]));
+          }
           // The > of a quote the table stands in, on every line but the first:
           // Lezer hangs them under the table, where the walk never goes, so
           // they stood on the card at the head of those lines while the first
@@ -8439,7 +8454,14 @@
           // width is the picture's, and it is part of the figure's paragraph.
           const attr = node.nextSibling && node.nextSibling.name === "Attribute" ? node.nextSibling : null;
           const width = attr ? cssLength(attributeValue(text(attr.from, attr.to), "width")) : null;
-          if (src && !touched(n.from, n.to)) {
+          // The braces straight after it are the image's own source, and a
+          // caret in them keeps it open. The picture used to be drawn again
+          // as soon as the caret left the address, so a click on
+          // `{#fig-circle}` brought the picture back in place of the line
+          // the click was on, and the label could not be edited (the owner,
+          // 2026-10-12).
+          const end = attr && attr.from === n.to ? attr.to : n.to;
+          if (src && !touched(n.from, end)) {
             const marks = node.getChildren("LinkMark");
             // The alt is the figure's caption and the picture's own text,
             // and the page prints both with their punctuation set (G015)
@@ -8479,7 +8501,7 @@
             return false;
           }
           // Open, its address is set as a link's.
-          if (touched(n.from, n.to)) linkAddress(node, text, decos);
+          if (touched(n.from, end)) linkAddress(node, text, decos);
           return true;
         }
 

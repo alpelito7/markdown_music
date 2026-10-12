@@ -9151,6 +9151,85 @@ rest of `webview-editing.test.js` and of `webview-look.test.js`, and the
 suite. Not seen in a real VS Code window.
 
 
+### One look for a label, and a caret in a picture's (2026-10-12)
+
+Three things the owner said of the labels once the lesson's tables had
+theirs, each a difference between kinds of block that are one thing to the
+reader, the name a block is cited by:
+
+- **`{#tbl-durations}` in the style of `{#fig-circle}`.** With its source
+  open a picture's braces stand small and faint in the code face
+  (`.mdm-attr`), and so does an equation's label; a table's stood in its
+  caption as words of the prose, at the prose's size and in its ink. The
+  braces a caption ends on, when they are none of its words (a `tbl-`
+  label, or classes alone), are marked the same now, in a caption beside
+  the table and in one written as the table's last line (`captionWords`
+  says where they stand). Braces that name another kind of thing
+  (`{#other}`) are words of the caption on the page and stay words here.
+- **"When I click on `{#fig-circle}` I cannot edit it, the image comes
+  back."** A picture was open while a caret was in `![...](...)` and no
+  further, and its braces come after that: with the caret in them the
+  picture was drawn again in place of its source, under the click. The
+  braces straight after an image are its own source now, and a caret in
+  them keeps it open (the `Image` branch of `buildDecorations`; braces
+  further on in the paragraph are not the image's and do not open it).
+  An equation and a table had this already, by the lines they are opened
+  by.
+- **One size.** `.mdm-attr` is 0.88em, and on a card the line is already
+  the monospace at 0.88em: the label on the closer of an equation was
+  drawn at 12.39px beside the 14.08px of a picture's in a line of prose,
+  at a prose of 16px (measured in both faces,
+  `tests/tmp/label-look/probe.test.js`). On a card's line it takes the
+  line's size now (`style.css`), and the same of a caption written as a
+  table's last line: 14.08px wherever a label is written.
+
+Nothing of this is on the page, which prints no label.
+
+Tests. In `webview-markdown.test.js`: *the label of a figure, of an
+equation and of a table is drawn alike while its source is open: the code
+face, one size and one ink, in a line of prose or on a card*, seven places
+in both faces (a picture, an equation in a block and one in a paragraph, a
+caption beside its table from the table and from the caption, a caption
+under its table with no blank line, and braces of classes alone), each
+held to the picture's and the picture's to 0.88 of the prose, with braces
+of another kind seen to be words; and *an open picture shows its
+attributes wherever the caret stands in it* now puts the caret in the
+braces too, of a figure and of a picture in a sentence, reads the address
+as an open one's, and sees that braces after a plain parenthesis open no
+picture. In `webview-editing.test.js`: *a click on the label of an open
+figure, equation or table puts the caret in the label and leaves the
+source open, and what is typed goes into it*, the three kinds by one
+gesture.
+
+Ten mutations on a copy of the tree (`tests/tmp/label-look/mutate.py`),
+all caught: **LB1** a picture open by its address alone → the picture's
+test and the click's. **LB2** any braces after the image taken for its
+own, **LB3** the address not set as an open one's with the caret in the
+braces → the picture's test. **LB4** the braces of a caption beside the
+table not marked → the labels' test and the click's, which finds no label
+to click. **LB5** those of a caption under the table not marked, **LB6**
+marked whatever the caption (twice then, beside the table), **LB7** the
+whole caption marked with its braces → the labels' test. **LB8** the
+equation's card left out of the rule, **LB9** the table's, **LB10** the
+size of a label on a card 0.88em again → the labels' test.
+
+Run on this state: `npm run test:fast`, 319 of 319;
+`webview-markdown.test.js` whole, 113 of 113; in `webview-editing.test.js`
+the tests named for a table, a caption, a reference, a figure, a drawing,
+a second click, being put away, a label, a picture, an image or an
+equation, 27 of 27; in `webview-look.test.js` those named for a caret, a
+label, an attribute, braces, a table, a caption, a figure or a card, 29
+of 29; and `webview-narrow.test.js` whole, 17 of 17. Nothing else was
+run, and none of it was seen in a real VS Code window. For two minutes
+of this round the real `main.js` threw on any document with a caption
+that ends on braces (a name written twice in `captionWords`, one
+of them a constant, which no check of the syntax sees): the changes went
+into the real file before they had been run anywhere. They go into a copy
+first.
+
+Left standing: a link's braces, a code span's and a bracketed span's
+(Pending 23).
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

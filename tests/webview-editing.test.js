@@ -2531,6 +2531,77 @@ test("Ctrl+click on a reference to a table brings the table into view, and so do
   await h.close();
 });
 
+test("a click on the label of an open figure, equation or table puts the caret in the label and leaves the source open, and what is typed goes into it", { skip }, async () => {
+  // The label is part of the source of what it names, and a caret in it
+  // keeps that source open, whatever the kind of block. A picture did not:
+  // its braces come after its address, the picture was drawn again as soon
+  // as the caret was past the address, and a click on `{#fig-circle}` put
+  // the picture where the line had been, so the label could not be reached
+  // to be edited (the owner, 2026-10-12).
+  const text =
+    "Intro.\n\n" +
+    "![A picture](a.svg){#fig-picture}\n\n" +
+    "$$\na = b\n$$ {#eq-one}\n\n" +
+    "| A | x |\n|---|---|\n| r | y |\n\n: The caption {#tbl-one}\n\n" +
+    "End.\n";
+  const h = await open({ text, scores: 0, height: 1200, seed: { docBase: "https://vsc.test/home/me/papers" } });
+  const label = (name) =>
+    h.page.evaluate((name) => {
+      const e = Array.from(document.querySelectorAll("#app .mdm-attr")).find((x) => x.textContent.indexOf(name) >= 0);
+      if (!e) return null;
+      const b = e.getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }, name);
+  const seen = () =>
+    h.page.evaluate(() => ({
+      lines: Array.from(document.querySelectorAll("#app .cm-content > .cm-line")).map((l) => l.textContent).filter((t) => t.trim()),
+      pictures: document.querySelectorAll("#app .cm-content img.mdm-image").length,
+      differ: window.__mdm.checkDecorations(),
+    }));
+  // The label, a place inside what it names, and the lines of source that
+  // are on screen while that is open.
+  const cases = [
+    ["fig-picture", text.indexOf("A picture") + 2, ["![A picture](a.svg){#fig-picture}"]],
+    ["eq-one", text.indexOf("a = b") + 1, ["$$", "a = b", "$$ {#eq-one}"]],
+    ["tbl-one", text.indexOf("| r |") + 3, ["| A | x |", "|---|---|", "| r | y |", ": The caption {#tbl-one}"]],
+  ];
+  try {
+    for (const [name, inside, source] of cases) {
+      await setSelection(h.page, inside);
+      await sleep(200);
+      const at = await label(name);
+      assert.ok(at, name + ": the label is not on screen with its source open");
+      await h.page.mouse.click(at.x, at.y);
+      await sleep(250);
+      const from = text.indexOf("{#" + name);
+      const to = from + name.length + 3;
+      const [[anchor, head]] = await selectionRanges(h.page);
+      assert.equal(anchor, head, name);
+      assert.ok(head > from && head < to, name + ": the caret is at " + head + ", outside the braces (" + from + " to " + to + ")");
+      let now = await seen();
+      for (const line of source) assert.ok(now.lines.includes(line), name + ": " + JSON.stringify(line) + " is not on screen after the click");
+      assert.equal(now.differ, null, name);
+      // The one picture of the document is drawn while its source is shut,
+      // and not in place of its source while the caret is in its braces.
+      assert.equal(now.pictures, name === "fig-picture" ? 0 : 1, name);
+      // Typed, a letter goes into the label and the source stays.
+      await h.page.keyboard.type("z");
+      await sleep(250);
+      const typed = await docText(h.page);
+      assert.equal(typed, text.slice(0, head) + "z" + text.slice(head), name);
+      now = await seen();
+      assert.equal(now.pictures, name === "fig-picture" ? 0 : 1, name + ", typed");
+      assert.equal(now.differ, null, name + ", typed");
+      await h.page.keyboard.press("Backspace");
+      await sleep(250);
+      assert.equal(await docText(h.page), text, name);
+    }
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
 test("a click on the caption over a table puts the caret in the caption's words, written after the table or before it, and a click on a cell in the cell", { skip }, async () => {
   // The caption is drawn by the table's widget and written beside the
   // table, outside it: the click finds its words by how far they are from

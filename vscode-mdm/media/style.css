@@ -1584,13 +1584,23 @@ body {
    typeset with LaTeX sets. Drawn as the source it is,
    faint and in the code face; the tooltip says what becomes of it. And an
    attribute block, `{#id .class}`, shown the same way while the caret is on
-   it (G014), or anywhere in the image or the equation it belongs to. */
+   it (G014), or anywhere in the image, the equation or the table it belongs
+   to. */
 #app .mdm-rawtex,
 #app .cm-line.mdm-rawtex-line,
 #app .mdm-attr {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.88em;
   color: color-mix(in srgb, var(--mdm-ink) 60%, transparent);
+}
+/* One size for a label wherever it is written. On a card the line is already
+   the monospace at 0.88em, and the label took 0.88em of that: the `{#eq-x}`
+   on the closer of an equation stood at 12.39px beside the 14.08px of a
+   picture's `{#fig-x}` in a line of prose (measured at a prose of 16px; the
+   owner, 2026-10-12, found the equation's too small). */
+#app .cm-line.mdm-math-line .mdm-attr,
+#app .cm-line.mdm-table-line .mdm-attr {
+  font-size: 1em;
 }
 /* A bracketed span with the classes Pandoc turns into a look, drawn as the
    page draws them: small caps by the face, a mark by a wash of the
