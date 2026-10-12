@@ -319,6 +319,36 @@ async function open(options) {
       };
     });
   }
+  // `holdFaces`: the roman's files do not arrive until the test lets them
+  // (`releaseFaces` on what this returns), which is a window whose document
+  // is on screen before its face is: the browser lays the prose out in the
+  // next family of the list meanwhile, and a canvas measures that one too.
+  // Held rather than delayed, so that what a test reads "before" is before
+  // on a slow machine as well.
+  // `holdFaces: "unannounced"` holds back the browser's word for it as well,
+  // the `loadingdone` of document.fonts, until `announceFaces`. The browser
+  // says a file is in twice, to the promise that asked for it and by that
+  // event, with a frame between the two in some runs and none in others
+  // (both seen here, on the same test), and what the editor does in that
+  // frame is the part a test has to be able to ask for: the event is kept
+  // from the page's listeners by one registered ahead of them.
+  let heldFaces = null;
+  if (opts.holdFaces) {
+    heldFaces = [];
+    await page.setRequestInterception(true);
+    page.on("request", (request) => {
+      if (heldFaces && /LatinModernRoman[^/]*\.woff2$/.test(request.url())) heldFaces.push(request);
+      else request.continue();
+    });
+    if (opts.holdFaces === "unannounced") {
+      await page.evaluateOnNewDocument(() => {
+        window.__facesUnannounced = true;
+        document.fonts.addEventListener("loadingdone", (event) => {
+          if (window.__facesUnannounced) event.stopImmediatePropagation();
+        });
+      });
+    }
+  }
   // A test that runs the real extension.js on the other end of the wire
   // passes `toHost`, which is handed every message the page posts, together
   // with the page to answer on (the harness calls window.__toHost). The host
@@ -343,6 +373,18 @@ async function open(options) {
     page,
     browser,
     errors,
+    // How many files were let through, so a test can tell it held any.
+    releaseFaces: async () => {
+      const held = heldFaces || [];
+      heldFaces = null;
+      await Promise.all(held.map((request) => request.continue()));
+      return held.length;
+    },
+    announceFaces: () =>
+      page.evaluate(() => {
+        window.__facesUnannounced = false;
+        document.fonts.dispatchEvent(new Event("loadingdone"));
+      }),
     close: async () => {
       OPEN_BROWSERS.delete(browser);
       await browser.close();

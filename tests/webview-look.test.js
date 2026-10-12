@@ -2710,6 +2710,11 @@ test("inline code sits on the code ground, not the theme's own wash", { skip }, 
 // The ink is measured off a canvas in the row's own face:
 // actualBoundingBoxAscent and Descent are the letters, fontBoundingBoxDescent
 // places the baseline inside the box the browser laid the row out in.
+//
+// That is the caret of the words. Monospace and the mark of a note have had
+// a caret of their own since 2026-10-12, and a test each further down; a
+// line of code was one of the rows here until then, 18px against the 19 of
+// its box.
 const CARETS = `---
 title: "Caret"
 ---
@@ -2725,12 +2730,17 @@ x = 1  # Ahgy in the code
 \`\`\`
 `;
 
-function caretAgainstInk(page) {
-  return page.evaluate(() => {
+// `own` is the position of a letter of the row's own face on the caret's
+// row, for a row that does not open with one (an equation first) and for a
+// caret that does not stand among such letters (in a run of code). Left out,
+// the letter is the row's first.
+function caretAgainstInk(page, own) {
+  return page.evaluate((own) => {
     const px = (n) => Math.round(n * 100) / 100;
     const caret = document.querySelector("#app .cm-cursor");
     const view = window.__mdm.view;
-    const dom = view.domAtPos(view.state.selection.main.head).node;
+    const named = own === undefined ? null : view.domAtPos(own);
+    const dom = (named || view.domAtPos(view.state.selection.main.head)).node;
     const el = dom.nodeType === 1 ? dom : dom.parentElement;
     const row = el.closest(".cm-line");
     const cs = getComputedStyle(row);
@@ -2740,18 +2750,20 @@ function caretAgainstInk(page) {
     // The same letters with the capital accented, which is the top of the
     // face's ink box and what the caret is drawn to.
     const accented = ctx.measureText("Áhgy");
-    // The row's first letter, for the box the browser gave the text.
+    // The row's first letter, for the box the browser gave the text, or the
+    // letter the test named.
     const walk = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
-    let text = null;
-    while (walk.nextNode()) {
+    let text = named && named.node.nodeType === 3 ? named.node : null;
+    const from = text ? Math.min(named.offset, text.length - 1) : 0;
+    while (!text && walk.nextNode()) {
       if (walk.currentNode.textContent.trim()) {
         text = walk.currentNode;
         break;
       }
     }
     const range = document.createRange();
-    range.setStart(text, 0);
-    range.setEnd(text, 1);
+    range.setStart(text, from);
+    range.setEnd(text, from + 1);
     const box = range.getBoundingClientRect();
     // What font-size-adjust did to the size the sheet names: a canvas asked
     // for the computed size measures Latin Modern 22 per cent small, and the
@@ -2767,13 +2779,16 @@ function caretAgainstInk(page) {
       textBox: px(box.height),
       size: px(parseFloat(cs.fontSize)),
       k: px(k),
+      // From the accent of a capital to the deepest descender, which is what
+      // the caret is as tall as.
+      ink: px((accented.actualBoundingBoxAscent + m.actualBoundingBoxDescent) * k),
       // Over the tallest letters, over the accent above them, and under the
       // deepest.
       over: px(baseline - m.actualBoundingBoxAscent * k - rect.top),
       overAccent: px(baseline - accented.actualBoundingBoxAscent * k - rect.top),
       under: px(rect.bottom - (baseline + m.actualBoundingBoxDescent * k)),
     };
-  });
+  }, own);
 }
 
 test("the caret is the ink of the row it stands in", { skip }, async () => {
@@ -2781,7 +2796,6 @@ test("the caret is the ink of the row it stands in", { skip }, async () => {
     ["a heading", "big heading"],
     ["a subheading", "A heading Ahgy"],
     ["prose", "line of prose"],
-    ["code", "Ahgy in the code"],
   ];
   for (const face of ["roman", "sans"]) {
     const h = await open({
@@ -2816,8 +2830,8 @@ test("the caret is the ink of the row it stands in", { skip }, async () => {
       assert.ok(m.over > 0.3, which + "the caret does not clear the letters, by " + m.over + " px");
       // In the roman that is far shorter than the box it was drawn in: 23.1 px
       // against 28 on a 16px row of prose, 43.2 against 54 on a `#`, 31.8
-      // against 40 on a `##`, 18 against 19 on a line of code (measured here;
-      // the eight variants and their numbers are in design-caret.html).
+      // against 40 on a `##` (measured here; the eight variants and their
+      // numbers are in design-caret.html).
       if (face === "roman") {
         assert.ok(
           m.height < m.textBox - 0.5,
@@ -2924,6 +2938,529 @@ test("a blank line takes the prose's caret, whatever line comes after it", { ski
         `${face}: the caret on the blank line before ${next} is ${height}px, and the prose's is ${prose}px`
       );
     }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// The caret is the row's whatever the row opens with, the first caret of a
+// window included. The size a row's face is drawn at was read off the row's
+// first letter, once per face, and kept. A row that opens with an equation,
+// with a run of code or with a raised word opens in another face, and the
+// first caret of a window to land on one came out 17.3, 15.7 and 17.3px in
+// the roman where the prose's is 23.1, as did every caret in the prose after
+// it until the window was reloaded (the owner's report of 2026-10-12: a
+// caret gone very short after an equation in a line had been edited). The
+// size is read off a span of the editor's own now, which holds the face and
+// nothing else (faceBox in main.js). A blank line had no letter to read at
+// all, so the first caret of a window on a blank line of code stood
+// unfitted, 19px against the 18 of a line of code (noted on 2026-09-19);
+// the two are the same 19 now that code keeps CodeMirror's caret, and the
+// blank line is here so that they stay the same.
+//
+// The equation is here twice, drawn and open. Open, the row's first letter
+// is the `$`, in the code face, and the caret in the source is not the
+// words' any more, so the caret goes into the source first and into the
+// row's words after it, where the size read off the `$` came out 15.7px.
+//
+// What the editor measures it keeps for the window, so each row here is made
+// a first: the caret is taken off the document and the fonts are said to
+// have arrived, which drops what was measured (the last test of this
+// section). Without that only the first row of each face would be a first
+// caret, and that one is the equation, the case reported.
+//
+// The ink is read against a letter of the row's own face on the caret's row
+// and not against the row's first letter, which on these rows is the very
+// thing that is not.
+const OPENERS = [
+  "$g = 2f$ opens the row, and the words Ahgy go on.",
+  "",
+  "`code` opens the row, and the words Ahgy go on.",
+  "",
+  "^raised^ opens the row, and the words Ahgy go on.",
+  "",
+  "~lowered~ opens the row, and the words Ahgy go on.",
+  "",
+  "```python",
+  "",
+  "x = 1  # Ahgy in the code",
+  "```",
+  "",
+].join("\n");
+
+test("the first caret of a window is the row's, whatever the row opens with", { skip }, async () => {
+  // [what the row opens with, where the caret goes, the row, where it goes
+  // first]
+  const rows = [
+    ["an equation, drawn", "words Ahgy", 3, 0],
+    ["an equation, open before it", "words Ahgy", 3, 0, ["g = 2f", 2]],
+    ["a run of code", "words Ahgy", 3, 1],
+    ["a raised word", "words Ahgy", 3, 2],
+    ["a lowered word", "words Ahgy", 3, 3],
+  ];
+  for (const face of ["roman", "sans"]) {
+    const h = await open({
+      text: OPENERS,
+      scores: 0,
+      seed: { settings: { textFont: face, frontMatter: "hidden" } },
+    });
+    const firstAgain = async () => {
+      await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+      // CodeMirror takes its carets down a moment after the focus goes.
+      await sleep(80);
+      await h.page.evaluate(() => document.fonts.dispatchEvent(new Event("loadingdone")));
+    };
+    for (const [what, needle, offset, nth, first] of rows) {
+      const at = await posOf(h.page, needle, offset, nth);
+      const own = await posOf(h.page, "Ahgy go on", 1, nth);
+      assert.ok(at > 0, "the fixture lost the row that opens with " + what);
+      await firstAgain();
+      if (first) {
+        await setSelection(h.page, await posOf(h.page, first[0], first[1]));
+        await sleep(250);
+      }
+      await setSelection(h.page, at);
+      await sleep(250);
+      const m = await caretAgainstInk(h.page, own);
+      const which = face + ", a row that opens with " + what + ": ";
+      assert.ok(
+        Math.abs(m.height - m.ink) <= 0.3,
+        which + "the caret is " + m.height + " px and the ink of the row's face is " + m.ink
+      );
+      assert.ok(Math.abs(m.under) <= 0.4, which + "the foot of the caret is " + m.under + " px off the descenders");
+      assert.ok(
+        Math.abs(m.overAccent) <= 0.4,
+        which + "the top of the caret is " + m.overAccent + " px off the accent"
+      );
+    }
+    // And the row with nothing on it, against the line of code under it.
+    const height = () =>
+      h.page.evaluate(() => Math.round(document.querySelector("#app .cm-cursor").getBoundingClientRect().height * 10) / 10);
+    await firstAgain();
+    await setSelection(h.page, (await posOf(h.page, "```python")) + "```python\n".length);
+    await sleep(250);
+    const blank = await height();
+    await setSelection(h.page, await posOf(h.page, "x = 1", 2));
+    await sleep(250);
+    const code = await height();
+    assert.ok(
+      Math.abs(blank - code) <= 0.2,
+      `${face}: the first caret on a blank line of code is ${blank}px, and a line of code's is ${code}px`
+    );
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// Monospace has the caret every editor gives it. The owner's rule of
+// 2026-10-12: inside anything set in monospace, a block of code, the source
+// of a table or of a score, the header's YAML, a run of code in a line, the
+// source of an equation, the address of a link, the braces after a picture,
+// the caret is the usual one for such text, as in VS Code's own editor, and
+// once it leaves it is the caret of the words again. The usual one is the
+// box of the text, which is what CodeMirror writes: 19px on the 14px of the
+// code face. The fit leaves it as written there. It had cut a line of code's
+// to its ink, 18px, and inside a line of prose had given code the prose's
+// own 23.1, on the row's baseline, for a few hours of that same day.
+//
+// What CodeMirror writes is read from where it reads it itself, the box
+// `coordsAtPos` gives for the caret's place; and that the place is
+// monospace is read as the editor reads it, an i as wide as an m.
+const MONOSPACE = [
+  "---",
+  'title: "Caret"',
+  "---",
+  "",
+  "Words Ahgy then `code here` then $f = 440$ then [a link](https://example.org/x) and ![pic](x.png){width=20} end.",
+  "",
+  "## Ahgy heading with `code there` and $g = 880$ in it",
+  "",
+  "```python",
+  "",
+  "x = 1  # Ahgy in the code",
+  "```",
+  "",
+  "| A head | B |",
+  "|---|---|",
+  "| a cell | 2 |",
+  "",
+  "```abc",
+  "X:1",
+  "K:C",
+  "CDEF|",
+  "```",
+  "",
+].join("\n");
+
+function caretAgainstItsBox(page) {
+  return page.evaluate(() => {
+    const px = (n) => Math.round(n * 100) / 100;
+    const view = window.__mdm.view;
+    const rect = document.querySelector("#app .cm-cursor").getBoundingClientRect();
+    const sel = view.state.selection.main;
+    const box = view.coordsAtPos(sel.head, sel.assoc || 1);
+    const under = document.elementFromPoint(rect.left + 1, (rect.top + rect.bottom) / 2);
+    const cs = getComputedStyle(under);
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    return {
+      height: px(rect.height),
+      box: px(box.bottom - box.top),
+      top: px(rect.top - box.top),
+      foot: px(rect.bottom - box.bottom),
+      mono: Math.abs(ctx.measureText("i").width - ctx.measureText("m").width) < 0.01,
+    };
+  });
+}
+
+test("in monospace the caret is the editor's own, and the words' again beside it", { skip }, async () => {
+  // [where, needle, offset]
+  const code = [
+    ["in a run of code", "code here", 4],
+    ["before the tick of a run of code", "`code here`", 0],
+    ["in the source of an equation", "f = 440", 3],
+    ["before the $ of an equation", "$f = 440$", 0],
+    ["in a link's address", "example.org", 4],
+    ["in a picture's braces", "width=20", 3],
+    ["in a run of code on a ##", "code there", 4],
+    ["in the source of an equation on a ##", "g = 880", 3],
+    ["in a line of code", "x = 1", 2],
+    ["on a blank line of code", "```python\n", "```python\n".length],
+    ["in a table's source", "a cell", 3],
+    ["in a score's source", "CDEF|", 2],
+    ["in the header's YAML", 'title: "Caret"', 3],
+  ];
+  // [where, needle, offset, a letter of the row's own face]
+  const words = [
+    ["among the words of the line", "Words Ahgy", 3, ["Words Ahgy", 7]],
+    ["after a run of code", "`code here`", 11, ["Words Ahgy", 7]],
+    ["after an equation", "$f = 440$", 9, ["Words Ahgy", 7]],
+    ["among the words of a ##", "Ahgy heading", 8, ["Ahgy heading", 1]],
+  ];
+  for (const face of ["roman", "sans"]) {
+    const h = await open({
+      text: MONOSPACE,
+      scores: 1,
+      seed: { settings: { textFont: face, frontMatter: "shown" } },
+    });
+    for (const [where, needle, offset] of code) {
+      const at = await posOf(h.page, needle, offset);
+      assert.ok(at >= 0, "the fixture lost " + JSON.stringify(needle));
+      await setSelection(h.page, at);
+      await sleep(220);
+      const m = await caretAgainstItsBox(h.page);
+      const which = face + ", " + where + ": ";
+      assert.ok(m.mono, which + "the fixture's text is not monospace there");
+      assert.ok(
+        Math.abs(m.top) <= 0.3 && Math.abs(m.foot) <= 0.3,
+        which + "the caret is " + m.height + " px, " + m.top + " px from the top of the text's box of " + m.box +
+          " and " + m.foot + " from its foot"
+      );
+    }
+    for (const [where, needle, offset, [ownNeedle, ownOffset]] of words) {
+      await setSelection(h.page, await posOf(h.page, needle, offset));
+      await sleep(220);
+      const m = await caretAgainstInk(h.page, await posOf(h.page, ownNeedle, ownOffset));
+      const which = face + ", " + where + ": ";
+      assert.ok(
+        Math.abs(m.height - m.ink) <= 0.3,
+        which + "the caret is " + m.height + " px and the ink of the row's face is " + m.ink
+      );
+      assert.ok(Math.abs(m.under) <= 0.4, which + "the foot of the caret is " + m.under + " px off the descenders");
+      assert.ok(
+        Math.abs(m.overAccent) <= 0.4,
+        which + "the top of the caret is " + m.overAccent + " px off the accent"
+      );
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// In the mark of a note the caret is as tall as the mark's brackets. The
+// mark, `[^n]` with a caret in it, is set at three quarters of the row's
+// size and half an em of its own over the row (6px in prose, 9 on a `##`),
+// and the caret there was the row's: 23.1px in the roman beside brackets of
+// 14.8, first gone up with the mark, its foot 6px over the descenders of the
+// words beside it, and then held down on the row. The owner saw both on
+// 2026-10-12 and wanted neither: the caret is fitted to the brackets, their
+// top and their foot, where the mark stands. It is the row's caret again
+// after the mark.
+//
+// The other small things of a line keep the row's caret on the row's
+// baseline, and are here so that they do: an aside written in the line,
+// `^[...]`, which is the words' own family at 0.88em and in a box of its own
+// (24px ending 5 under the baseline, where the roman's row has 28 and 6); a
+// raised word and a lowered one, which are written on the row while a caret
+// is in them; and the label of the note itself, which is not raised.
+const MARKS = [
+  "Words Ahgy with a note[^n] in the line and an aside^[inline note] in it.",
+  "",
+  "More Ahgy with a ^raised^ word, a ~lowered~ one and H~2~O.",
+  "",
+  "## Ahgy heading with a note[^m] in it",
+  "",
+  "[^n]: The note Ahgy.",
+  "",
+  "[^m]: The other note.",
+  "",
+].join("\n");
+
+// `pos` is a place between the `[` and the `^` of the mark.
+function caretAgainstBrackets(page, pos) {
+  return page.evaluate((pos) => {
+    const px = (n) => Math.round(n * 100) / 100;
+    const view = window.__mdm.view;
+    const rect = document.querySelector("#app .cm-cursor").getBoundingClientRect();
+    const at = view.domAtPos(pos);
+    const text = at.node;
+    const el = text.parentElement;
+    const cs = getComputedStyle(el);
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    const b = ctx.measureText("[]");
+    const range = document.createRange();
+    range.setStart(text, at.offset - 1);
+    range.setEnd(text, at.offset);
+    const box = range.getBoundingClientRect();
+    const k = box.height / (b.fontBoundingBoxAscent + b.fontBoundingBoxDescent);
+    const baseline = box.bottom - b.fontBoundingBoxDescent * k;
+    return {
+      letter: text.nodeType === 3 ? text.textContent.charAt(at.offset - 1) : null,
+      raised: -parseFloat(getComputedStyle(el.closest(".mdm-sup") || el).top) || 0,
+      height: px(rect.height),
+      brackets: px((b.actualBoundingBoxAscent + b.actualBoundingBoxDescent) * k),
+      over: px(baseline - b.actualBoundingBoxAscent * k - rect.top),
+      under: px(rect.bottom - (baseline + b.actualBoundingBoxDescent * k)),
+    };
+  }, pos);
+}
+
+test("in the mark of a note the caret is as tall as its brackets, and the row's in an aside, a raised word and a lowered one", { skip }, async () => {
+  // [the mark, the row's own letter, [where, offset into the mark]...]
+  const marks = [
+    ["[^n] in", "in prose", [["before the mark", 0], ["after its [", 1], ["in the mark", 2], ["before its ]", 3]]],
+    ["[^m] in", "on a ##", [["before the mark", 0], ["in the mark", 2]]],
+  ];
+  // [where, needle, offset, a letter of the row's own face]
+  const rows = [
+    ["after the mark of a note", "[^n] in", 4, ["Words Ahgy", 7]],
+    ["in an aside written in the line", "inline note", 4, ["Words Ahgy", 7]],
+    ["before a raised word", "^raised^", 0, ["More Ahgy", 6]],
+    ["in a raised word", "raised", 3, ["More Ahgy", 6]],
+    ["in a lowered word", "lowered", 3, ["More Ahgy", 6]],
+    ["in a lowered figure", "H~2~O", 2, ["More Ahgy", 6]],
+    ["after the mark of a note on a ##", "[^m] in", 4, ["Ahgy heading", 1]],
+    ["in the label of the note", "[^n]: The", 2, ["note Ahgy", 6]],
+  ];
+  for (const face of ["roman", "sans"]) {
+    const h = await open({
+      text: MARKS,
+      scores: 0,
+      seed: { settings: { textFont: face, frontMatter: "hidden" } },
+    });
+    for (const [mark, row, spots] of marks) {
+      const open = await posOf(h.page, mark, 1);
+      for (const [where, offset] of spots) {
+        await setSelection(h.page, open - 1 + offset);
+        await sleep(220);
+        const m = await caretAgainstBrackets(h.page, open);
+        const which = face + ", " + row + ", " + where + ": ";
+        assert.equal(m.letter, "[", which + "the fixture's mark does not open with a bracket there");
+        // Raised to begin with, or this would be a row like any other.
+        assert.ok(m.raised >= 5, which + "the mark is set " + m.raised + " px over the row");
+        assert.ok(
+          Math.abs(m.over) <= 0.4 && Math.abs(m.under) <= 0.4,
+          which + "the caret is " + m.height + " px, " + m.over + " px off the top of the brackets (" +
+            m.brackets + " px) and " + m.under + " off their foot"
+        );
+      }
+    }
+    for (const [where, needle, offset, [ownNeedle, ownOffset]] of rows) {
+      const at = await posOf(h.page, needle, offset);
+      assert.ok(at >= 0, "the fixture lost " + needle);
+      await setSelection(h.page, at);
+      await sleep(220);
+      const m = await caretAgainstInk(h.page, await posOf(h.page, ownNeedle, ownOffset));
+      const which = face + ", " + where + ": ";
+      assert.ok(
+        Math.abs(m.height - m.ink) <= 0.3,
+        which + "the caret is " + m.height + " px and the ink of the row's face is " + m.ink
+      );
+      assert.ok(Math.abs(m.under) <= 0.4, which + "the foot of the caret is " + m.under + " px off the descenders");
+      assert.ok(
+        Math.abs(m.overAccent) <= 0.4,
+        which + "the top of the caret is " + m.overAccent + " px off the accent"
+      );
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// A caret is fitted when it comes on screen, and not only when CodeMirror
+// writes it. CodeMirror shows its carets while the document has the focus
+// and at no other time, and the fit is made from the box a caret has on
+// screen: one written while the focus was elsewhere had no box, was passed
+// over, and came up as CodeMirror drew it when the focus came back with
+// nothing moving, 28px in the roman's prose where the fit makes 23.1. That
+// is the selection moved from a panel and the focus handed back (8 of 8
+// tries), and the two done in one turn (13 of 14), measured 2026-10-12; a
+// click in the text was never one of them, because the press brings the
+// focus before it moves the selection. The fit watches the class that shows
+// the carets now.
+test("a caret drawn while the focus was elsewhere is fitted when the focus comes back", { skip }, async () => {
+  const text = "A line of prose with nothing in it but words, Ahgy.\n\nAnother line of prose, Ahgy.\n";
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { textFont: face, frontMatter: "hidden" } } });
+    const away = async () => {
+      await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+      // CodeMirror takes its carets down a moment after the focus goes.
+      await sleep(120);
+    };
+    const fitted = async (which) => {
+      const m = await caretAgainstInk(h.page);
+      assert.ok(
+        Math.abs(m.height - m.ink) <= 0.3,
+        which + "the caret is " + m.height + " px and the ink of the row's face is " + m.ink
+      );
+      assert.ok(Math.abs(m.under) <= 0.4, which + "the foot of the caret is " + m.under + " px off the descenders");
+      assert.ok(Math.abs(m.overAccent) <= 0.4, which + "the top of the caret is " + m.overAccent + " px off the accent");
+    };
+    const first = await posOf(h.page, "line of prose", 3);
+    const second = await posOf(h.page, "Another line", 3);
+    for (let turn = 0; turn < 3; turn++) {
+      // The selection first, and the focus after it.
+      await away();
+      await h.page.evaluate((pos) => window.__mdm.view.dispatch({ selection: { anchor: pos } }), first + turn);
+      await sleep(150);
+      await h.page.evaluate(() => window.__mdm.view.focus());
+      await sleep(250);
+      await fitted(face + ", the selection moved and then the focus back, turn " + turn + ": ");
+      // The two in one turn, which is what `setSelection` does.
+      await away();
+      await setSelection(h.page, second + turn);
+      await sleep(250);
+      await fitted(face + ", the selection and the focus in one turn, turn " + turn + ": ");
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// The caret is drawn again when the face under it changes. CodeMirror draws
+// its carets again when the editor's box or the height of a line moves, and
+// a change of face moves neither, a row being a line-height in pixels
+// whatever is set in it: after the face button the caret kept the box of the
+// face it had been drawn in, the roman's 23.1px in the sans's row and the
+// sans's 18 among the roman's letters, until it was next moved (measured
+// 2026-10-12). remeasureText in main.js asks CodeMirror's layers for their
+// drawing again, by a method of CodeMirror's that is not in its documented
+// API (docViewUpdate), and this is the test that says a bump of the bundle
+// kept it.
+test("the caret is drawn again when the face is changed, without being moved", { skip }, async () => {
+  const text = "A line of prose with nothing in it but words, Ahgy.\n";
+  const h = await open({ text, scores: 0, seed: { settings: { textFont: "roman", frontMatter: "hidden" } } });
+  await setSelection(h.page, await posOf(h.page, "line of prose", 3));
+  await sleep(250);
+  const heights = {};
+  for (const face of ["roman", "sans", "roman", "sans"]) {
+    await postSettings(h.page, { textFont: face });
+    await sleep(400);
+    const m = await caretAgainstInk(h.page);
+    const which = "changed to the " + face + ": ";
+    assert.ok(
+      Math.abs(m.height - m.ink) <= 0.3,
+      which + "the caret is " + m.height + " px and the ink of the row's face is " + m.ink
+    );
+    assert.ok(Math.abs(m.under) <= 0.4, which + "the foot of the caret is " + m.under + " px off the descenders");
+    assert.ok(Math.abs(m.overAccent) <= 0.4, which + "the top of the caret is " + m.overAccent + " px off the accent");
+    heights[face] = m.height;
+  }
+  // The two faces do not share a caret, or the above would say nothing.
+  assert.ok(heights.roman - heights.sans > 3, "the roman's caret is " + heights.roman + " px and the sans's " + heights.sans);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A face is measured once and kept, so it has to be measured on the face
+// itself. Until its files are in, the browser lays the prose out in the next
+// family of the list and a canvas measures that one too, and a caret put in
+// the prose meanwhile was fitted with those numbers for as long as the
+// window lived: 22.4px here where the roman's is 23.1, with a stand-in that
+// happens to be close (it is whatever the machine has). What was measured
+// is dropped when a face arrives, and the carets on screen are fitted again
+// (facesArrived in main.js).
+//
+// The files are held back rather than delayed (`holdFaces`), so that what is
+// read before they arrive is read before on a slow machine too. Two windows:
+// one that opens in the roman, and one that opens in the sans and is changed
+// to the roman, which is the face button pressed for the first time.
+//
+// The browser says the files are in twice, to the promise the editor asked
+// with and by an event, and it is the event that drops what was measured. In
+// some runs a frame is painted between the two and in others none (both
+// seen on this test), and in that frame CodeMirror draws the caret again, in
+// the roman's box, and it is fitted with the stand-in's numbers: 22.4px and
+// 2.7px low, until it was moved. So the first window keeps the event back
+// until that has happened, which is the order that needs the carets on
+// screen fitted again; the second takes the two as they come.
+test("a caret drawn before the roman's files are in is the roman's once they are", { skip }, async () => {
+  const text = "A line of prose with nothing in it but words, Ahgy.\n\nAnother line of prose, Ahgy.\n";
+  const against = async (h, which) => {
+    const m = await caretAgainstInk(h.page);
+    assert.ok(
+      Math.abs(m.height - m.ink) <= 0.3,
+      which + "the caret is " + m.height + " px and the ink of the row's face is " + m.ink
+    );
+    assert.ok(Math.abs(m.under) <= 0.4, which + "the foot of the caret is " + m.under + " px off the descenders");
+    assert.ok(Math.abs(m.overAccent) <= 0.4, which + "the top of the caret is " + m.overAccent + " px off the accent");
+    return m;
+  };
+  const loading = (h) =>
+    h.page.evaluate(() => {
+      const states = [];
+      document.fonts.forEach((f) => {
+        if (f.family.replace(/"/g, "") === "Latin Modern Roman") states.push(f.status);
+      });
+      return states.length > 0 && states.every((s) => s === "loading");
+    });
+  for (const opened of ["roman", "sans"]) {
+    const late = opened === "roman";
+    const h = await open({
+      text,
+      scores: 0,
+      holdFaces: late ? "unannounced" : true,
+      seed: { settings: { textFont: opened, frontMatter: "hidden" } },
+    });
+    const which = "opened in the " + opened + ", ";
+    await setSelection(h.page, await posOf(h.page, "line of prose", 3));
+    await sleep(250);
+    if (opened === "sans") {
+      await against(h, which + "before the change: ");
+      await postSettings(h.page, { textFont: "roman" });
+      await sleep(400);
+    }
+    // The caret is on screen and the roman is not: this is the caret that
+    // used to keep the stand-in's numbers. It is the stand-in's ink for now,
+    // which the canvas of this test measures as the editor's does.
+    assert.ok(await loading(h), which + "the roman's files were not held back");
+    const before = await against(h, which + "with the files on their way: ");
+    assert.equal(await h.releaseFaces(), 4, which + "the roman's four files");
+    await h.page.waitForFunction(() => document.fonts.status === "loaded", { timeout: 10000 });
+    await sleep(400);
+    if (late) {
+      await h.announceFaces();
+      await sleep(300);
+    }
+    // Not moved, and the roman's.
+    const after = await against(h, which + "with the files in: ");
+    // The stand-in and the roman do not share a box, or this would say
+    // nothing: the letters under the caret changed size.
+    assert.notEqual(after.textBox, before.textBox, which + "the stand-in is as tall as the roman on this machine");
+    await setSelection(h.page, await posOf(h.page, "Another line", 3));
+    await sleep(250);
+    await against(h, which + "on another line: ");
     assert.deepEqual(h.errors, []);
     await h.close();
   }

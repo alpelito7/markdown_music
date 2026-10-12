@@ -12553,11 +12553,11 @@
   // variant G, which was the same box without the accents and left an Á
   // standing over the caret. What it comes to, measured in the harness:
   // 23.1px on a 16px row of the roman's prose against the 28 CodeMirror
-  // draws, 43.2 against 54 on a `#`, 31.8 against 40 on a `##`, 18 against 19
-  // on a line of code, and in the sans 18 against 17 on prose, 35 against 36
-  // on a `#`. The foot lands on the deepest ink and the top on the accent,
-  // both to within a fiftieth of a pixel, so nothing of the row's face stands
-  // outside the caret on either side.
+  // draws, 43.2 against 54 on a `#`, 31.8 against 40 on a `##`, and in the
+  // sans 18 against 17 on prose, 35 against 36 on a `#`. The foot lands on
+  // the deepest ink and the top on the accent, both to within a fiftieth of
+  // a pixel, so nothing of the row's face stands outside the caret on either
+  // side.
   //
   // The sans is the one place this is not a cut: its box and its ink very
   // nearly coincide, so covering the accent asks for a pixel more than
@@ -12567,16 +12567,31 @@
   //
   // The accents are measured on the row's own face, so a face with no Á in it
   // falls back to another for that glyph and the caret follows the fallback.
-  // Both faces the editor ships with carry them, and the monospace is the
-  // reader's own.
+  // Both faces the editor ships with carry them.
+  //
+  // That is the caret of the words, in the roman and in the sans. Two kinds
+  // of text have a caret of their own, by the owner's rule of 2026-10-12:
+  //
+  // - Monospace, wherever it stands: a block of code, the source of a table,
+  //   of a score, of the header and of an equation, a run of code in a line,
+  //   the address of a link, the braces after a picture. There the caret is
+  //   the one an editor draws for such text, the box of the text, which is
+  //   what CodeMirror wrote and is left as it is: 19px on the 14px of the
+  //   code face, where the cut to the ink had made it 18 in a block of code
+  //   and, in a line of prose, the prose's own 23.1. Out of the code it is
+  //   the caret of the words again.
+  // - The mark of a note, `[^n]`, which is set small and over the row: the
+  //   caret is as tall as its brackets and stands on them (14.8px in the
+  //   roman's prose, 12 in the sans), and not the row's, which he had seen
+  //   there twice that day, gone up with the mark and held down on the row.
   //
   // The metrics are the row's own, read at the size the row is really drawn
   // at: font-size-adjust changes the used size and not the computed one, so a
   // canvas asked for the size the sheet names measures Latin Modern 22 per
   // cent small. What says how big the face came out is the box the browser
-  // gave the row's text, which is the face's ascent and descent at that used
-  // size; `k` below is that ratio, and it is kept per face because a row with
-  // no text on it has no box to read it from.
+  // gives text set in it, which is the face's ascent and descent at that used
+  // size; `k` below is that ratio, read once per face off a span of our own
+  // (faceBox) and never off what the row happens to hold.
   //
   // The row is looked for under the caret's own box rather than taken from
   // the selection, so several carets need no bookkeeping and one CodeMirror
@@ -12589,7 +12604,18 @@
   // every kind of row measured: blank, prose, a wrapped row, `#`, `##`, code.
   const CARET_ASCENDERS = "bdfhkltÁÉ";
   const CARET_DESCENDERS = "gjpqy";
-  const caretFaces = Object.create(null);
+  // What a face is drawn by. The first four are what a canvas can be asked
+  // for; the other two it cannot be told, and font-size-adjust is the one
+  // that moves the size, which is why the size is read off a span (faceBox).
+  const CARET_FACE = [
+    "fontStyle",
+    "fontWeight",
+    "fontSize",
+    "fontFamily",
+    "fontStretch",
+    "fontSizeAdjust",
+  ];
+  let caretFaces = Object.create(null);
   // What was last written on a caret, so that a caret already cut is not cut
   // again: the foot below is taken from the box the caret stands in, which
   // after a fit is the fitted box, and a second pass would measure its own
@@ -12598,58 +12624,149 @@
   // properties are still the ones left here is a caret nothing has redrawn.
   // The height guard used to do this job on the side, by refusing to grow a
   // caret; variant C grows the sans's prose caret by a pixel and needed it
-  // said plainly instead.
+  // said plainly instead. What CodeMirror had written is kept beside it
+  // (`drawn`), because that is what a fit is made from on the one occasion
+  // it has to be made again (facesArrived).
   const caretFitted = new WeakMap();
   const caretPad = document.createElement("canvas").getContext("2d");
-  // The box the browser gave the row's own text, which is where the baseline
-  // and the used size of the face are read from.
-  function rowTextBox(row) {
-    const walk = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
-    while (walk.nextNode()) {
-      const node = walk.currentNode;
-      if (!node.textContent.trim()) continue;
-      const range = document.createRange();
-      range.setStart(node, 0);
-      range.setEnd(node, 1);
-      const box = range.getBoundingClientRect();
-      if (box.height) return box;
-    }
-    return null;
+  // The box the browser gives text set in a row's face, which is the face's
+  // ascent and descent at the size it is really drawn at. It is read off a
+  // span of our own, given the row's face and nothing else, and not off the
+  // row's first letter, where it was read until 2026-10-12: the first text
+  // of a row is not always in the row's face. A row that opens with an
+  // equation opens with KaTeX's letters (19.36px in a box of 21, where the
+  // roman's prose stands in a box of 28); one that opens with a run of code,
+  // or with the `$` of an equation that is being edited, opens in the code
+  // face (a box of 19); one that opens with a raised word, in a box of 21.
+  // The ratio read from any of them was kept for the face, so the caret came
+  // out 17.3, 15.7 and 17.3px where the prose's is 23.1, on that row and on
+  // every row of prose after it until the window was reloaded (measured; the
+  // owner's report was a caret gone very short after an equation in a line
+  // had been edited). A row with no text on it had no letter to read at all,
+  // so the first caret of a window on a blank line of code stood unfitted,
+  // 19px against the 18 of a line of code (left noted on 2026-09-19).
+  //
+  // Beside the letter stands a box of no size, which sits on the baseline:
+  // how much of the letter's box is under it is the face's descent as the
+  // browser lays it out, in whole pixels (6 of the 28 in the roman's prose,
+  // 4 of the 19 in the code face beside it), which is not what a canvas
+  // says (6.09) and is what two faces on one row differ by (drawnFace).
+  function faceBox(cs) {
+    const ruler = document.createElement("div");
+    ruler.style.cssText = "position:absolute;left:0;top:0;visibility:hidden;white-space:pre";
+    const letter = ruler.appendChild(document.createElement("span"));
+    letter.textContent = "x";
+    CARET_FACE.forEach(function (property) {
+      letter.style[property] = cs[property];
+    });
+    const mark = ruler.appendChild(document.createElement("span"));
+    mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+    view.dom.appendChild(ruler);
+    const range = document.createRange();
+    range.selectNodeContents(letter);
+    const box = range.getBoundingClientRect();
+    const baseline = mark.getBoundingClientRect().bottom;
+    ruler.remove();
+    return { height: box.height, below: box.bottom - baseline };
   }
-  function caretFace(row, text) {
-    const cs = getComputedStyle(row);
-    const key = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+  function caretFace(el) {
+    const cs = getComputedStyle(el);
+    const font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    const key = font + " / " + cs.fontStretch + " / " + cs.fontSizeAdjust;
     let face = caretFaces[key];
     if (!face) {
-      caretPad.font = key;
+      caretPad.font = font;
       const up = caretPad.measureText(CARET_ASCENDERS);
       const down = caretPad.measureText(CARET_DESCENDERS);
+      const body = up.fontBoundingBoxAscent + up.fontBoundingBoxDescent;
+      const box = faceBox(cs);
+      const brackets = caretPad.measureText("[]");
       face = caretFaces[key] = {
         asc: up.actualBoundingBoxAscent,
         desc: down.actualBoundingBoxDescent,
-        fAsc: up.fontBoundingBoxAscent,
         fDesc: up.fontBoundingBoxDescent,
-        k: 0,
+        k: body > 0 ? box.height / body : 0,
+        box: box.height,
+        below: box.below,
+        // The brackets, which are what a caret in the mark of a note is as
+        // tall as.
+        bAsc: brackets.actualBoundingBoxAscent,
+        bDesc: brackets.actualBoundingBoxDescent,
+        // Monospace by what makes it so, an i as wide as an m, and not by a
+        // name: the code face is whatever the reader's `monospace` is.
+        mono: Math.abs(caretPad.measureText("i").width - caretPad.measureText("m").width) < 0.01,
       };
-    }
-    if (!face.k && text && face.fAsc + face.fDesc > 0) {
-      face.k = text.height / (face.fAsc + face.fDesc);
     }
     return face;
   }
-  function fitCaret(caret) {
+  // The face of the box a caret was drawn in. CodeMirror draws a caret in the
+  // box of the text it stands in, and that text is not always in the row's
+  // face: a run of code, the source of an equation in a line, the address of
+  // a link and the braces after a picture are in the code face, whose box is
+  // 19px where the roman's is 28 and ends 4px under the baseline where the
+  // roman's ends 6. Read as a box of the row's face, it put the caret 2px
+  // higher there than in the words on either side in the roman and 1px lower
+  // in the sans, on a `##` as in prose, and the caret hopped as it crossed
+  // (measured 2026-10-12, in all four places and at their edges). The box
+  // says whose it is: of what stands right of the caret or, failing that,
+  // of what stands left of it, whichever has a box of its own as tall. The
+  // right first, because that is the text CodeMirror took the box from at
+  // every edge measured (before a tick and after one, before a `$`, after a
+  // link). A box that is neither's is taken for the row's, as every box
+  // used to be. What comes back is the face and the element it was read
+  // from, which says where on the row the box was set (raisedBy).
+  //
+  // The code face has had a caret of its own since the same day (fitCaret),
+  // so what is still moved onto the row's baseline by this is a box of the
+  // words' own family at another size: an aside written in the line,
+  // `^[...]`, is set at 0.88em in a box of 24px that ends 5px under the
+  // baseline, where the roman's row has 28 and 6.
+  function drawnFace(box, under, row, rowFace) {
+    const mine = function (el) {
+      if (!el || !row.contains(el)) return null;
+      const face = el === row ? rowFace : caretFace(el);
+      return face.k && Math.abs(face.box - box.height) < 0.5 ? { face: face, el: el } : null;
+    };
+    const mid = (box.top + box.bottom) / 2;
+    return (
+      mine(under) || mine(document.elementFromPoint(box.left - 1, mid)) || { face: rowFace, el: row }
+    );
+  }
+  // How far over its place on the row the text of `el` is set, which is what
+  // says a mark is one of those that have a place and a size of their own.
+  // The mark of a note is set half an em of its own size up (`.mdm-sup`: 6px
+  // in prose, 9 on a `##`). A caret in it or against it was the row's, 23.1px
+  // beside brackets of 14.8, first gone up with the mark and then, for an
+  // hour of 2026-10-12, held down on the row; the owner wanted neither, and
+  // the caret there is as tall as the brackets and stands on them
+  // (fitCaret). The sheet raises and lowers by an offset on a box left in
+  // the flow (`position: relative`, on `.mdm-sup` and `.mdm-sub`), and the
+  // browser gives the offset in pixels as `top` whichever edge the rule
+  // named (3px for the `bottom: -0.25em` of `.mdm-sub`, read off the page).
+  function raisedBy(el, row) {
+    let up = 0;
+    for (let e = el; e && e !== row; e = e.parentElement) {
+      const cs = getComputedStyle(e);
+      if (cs.position === "relative") up -= parseFloat(cs.top) || 0;
+    }
+    return up;
+  }
+  // `again` fits a caret this has already fitted, from what CodeMirror wrote.
+  function fitCaret(caret, again) {
     const done = caretFitted.get(caret);
-    if (done && done.height === caret.style.height && done.top === caret.style.top) return;
+    if (done && done.height === caret.style.height && done.top === caret.style.top) {
+      if (!again) return;
+      caret.style.height = done.drawn.height;
+      caret.style.top = done.drawn.top;
+    }
+    const drawn = { height: caret.style.height, top: caret.style.top };
     const box = caret.getBoundingClientRect();
     if (!box.height) return;
     const under = document.elementFromPoint(box.left + 1, (box.top + box.bottom) / 2);
     const row = under && under.closest ? under.closest("#app .cm-line") : null;
     if (!row) return;
-    const text = rowTextBox(row);
-    const face = caretFace(row, text);
+    const face = caretFace(row);
     if (!face.k) return;
-    const want = Math.round((face.asc + face.desc) * face.k * 10) / 10;
-    if (!want) return;
     const top = parseFloat(caret.style.top);
     if (!isFinite(top)) return;
     // The baseline the caret stands on, taken from the box the caret was
@@ -12659,11 +12776,33 @@
     // placed against the baseline of the first and jumped 28.4px up the
     // paragraph (caught by the hyphenation tests, which delete through a
     // divided word row by row).
-    const foot = box.bottom - face.fDesc * face.k;
+    const from = drawnFace(box, under, row, face);
+    // In monospace the caret is CodeMirror's, as it was written.
+    if (from.face.mono) {
+      caretFitted.set(caret, { height: caret.style.height, top: caret.style.top, drawn: drawn });
+      return;
+    }
+    // What the caret reaches over the baseline and under it, and the
+    // baseline. In a mark set off the row, the brackets of the mark's own
+    // face on the mark's own baseline. Everywhere else the ink of the row's
+    // face on the row's baseline, to which the foot of a box of another size
+    // is first moved: where a box of the row's face ends on that baseline.
+    let rise = face.asc * face.k;
+    let drop = face.desc * face.k;
+    let baseline = box.bottom - from.face.below + face.below - face.fDesc * face.k;
+    if (raisedBy(from.el, row)) {
+      const mark = from.face;
+      rise = mark.bAsc * mark.k;
+      drop = mark.bDesc * mark.k;
+      baseline = box.bottom - mark.fDesc * mark.k;
+    }
+    const want = Math.round((rise + drop) * 10) / 10;
+    if (!want) return;
     caret.style.height = want + "px";
-    caret.style.top = top + (foot + face.desc * face.k - want - box.top) + "px";
-    caretFitted.set(caret, { height: caret.style.height, top: caret.style.top });
-  }  // drawSelection writes the carets in the measure phase, which runs after an
+    caret.style.top = top + (baseline + drop - want - box.top) + "px";
+    caretFitted.set(caret, { height: caret.style.height, top: caret.style.top, drawn: drawn });
+  }
+  // drawSelection writes the carets in the measure phase, which runs after an
   // update, so the fit hangs off that write rather than off the update: a
   // MutationObserver callback is delivered before the frame is painted, so no
   // caret is ever painted at the height it was given. The layer itself is
@@ -12675,7 +12814,7 @@
   const caretWatcher = new MutationObserver(function (records) {
     if (records.length) fitCarets();
   });
-  function fitCarets() {
+  function fitCarets(again) {
     const layer = view.dom.querySelector(".cm-cursorLayer");
     if (!layer) return;
     if (layer !== caretLayer) {
@@ -12691,13 +12830,55 @@
       // moves its rectangles as it moves the carets.
       const sel = view.dom.querySelector(".cm-selectionLayer");
       if (sel) caretWatcher.observe(sel, what);
+      // And the class of the editor, which is what shows the carets:
+      // CodeMirror draws them only while the document has the focus
+      // (`cm-focused`), and a fit is made from the box a caret has on
+      // screen. A caret written while the focus was elsewhere had none, and
+      // came up as CodeMirror drew it once the focus was back with nothing
+      // moving: 28px in the roman's prose where the fit makes 23.1, in 8 of
+      // 8 tries with the selection moved first and the focus handed back
+      // after, and in 13 of 14 with both in one turn (measured 2026-10-12).
+      // A click in the text was never one of them, 14 of 14: the press
+      // brings the focus before it moves the selection.
+      caretWatcher.observe(view.dom, { attributes: true, attributeFilter: ["class"] });
     }
-    layer.querySelectorAll(".cm-cursor").forEach(fitCaret);
+    layer.querySelectorAll(".cm-cursor").forEach(function (caret) {
+      fitCaret(caret, again);
+    });
     placeCardMarks(true);
     caretWatcher.takeRecords();
   }
+  // A face is measured once and kept, so it has to be measured on the face
+  // itself. Until a file of it has arrived the browser lays the row out in
+  // the next family of the list and a canvas measures that one too: a caret
+  // put in the prose before the roman's four files were in stayed 22.4px for
+  // as long as the window lived, where 23.1 is the roman's (measured with
+  // the files held back two and a half seconds; the face that stands in is
+  // whatever the machine has, and this one's happens to be close).
+  // Whatever arrives, what was measured is dropped. The browser says a file
+  // is in twice, to the promise that asked for it and to this event, and the
+  // promise is where CodeMirror is asked for its carets again, in the box of
+  // the face that came (afterFacesArrive, remeasureText). In some runs a
+  // frame is painted between the two and in others none (both measured, on
+  // one test). With the frame, the caret has been drawn again by now and
+  // fitted with what the stand-in measured, so the carets on screen are
+  // fitted again here, from what CodeMirror wrote: without that the caret
+  // stayed 22.4px and stood 2.7px low until it was moved. Without the frame
+  // that drawing is still to come, and is fitted with what is measured from
+  // here on.
+  function facesArrived() {
+    caretFaces = Object.create(null);
+    fitCarets(true);
+  }
   function watchCarets() {
-    requestAnimationFrame(fitCarets);
+    // Not fitCarets itself: a frame hands its callback the time, which would
+    // be read as `again`.
+    requestAnimationFrame(function () {
+      fitCarets();
+    });
+    if (document.fonts && document.fonts.addEventListener) {
+      document.fonts.addEventListener("loadingdone", facesArrived);
+    }
   }
 
   // ---- A card of source scrolls inside itself ----
@@ -14901,8 +15082,23 @@
   // back from an open panel is out in the dead margin, 93px left of the line
   // and well left of its number. Asking for the measure here spends it in the
   // frame the width is written in.
+  // The text has been laid out again under what CodeMirror draws over it.
+  // requestMeasure reads the editor's box and the heights of the lines, and
+  // has the carets and the selection drawn again when one of those moved. A
+  // change of face moves neither, a row being a line-height in pixels
+  // whatever is set in it, so the caret kept the box of the face it had been
+  // drawn in until it was next moved: after the face button, the sans's
+  // 18px among the roman's letters, and after the roman's files had come in
+  // late, the box of the face that stood in for them, 4px over the letters
+  // (measured 2026-10-12).
+  // docViewUpdate is what CodeMirror calls once it has redrawn the document,
+  // and what its layers measure themselves again on. It is CodeMirror's own
+  // and not in its documented API; the tests of the caret after a change of
+  // face are what say the next bump kept it.
   function remeasureText() {
-    if (view) view.requestMeasure();
+    if (!view) return;
+    view.requestMeasure();
+    if (view.docViewUpdate) view.docViewUpdate();
   }
 
   // The panel drawn from the setting in force: the class that shows it, the
