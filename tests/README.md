@@ -8623,6 +8623,50 @@ paragraph to caption it shows no number; references to tables, listings
 and sections stay as written; and a labelled figure on paper typeset with
 LaTeX floats, centred, as before.
 
+#### A picture's attributes, in view while it is open (2026-10-12)
+
+The same day, the lesson open in the editor: "`{#fig-circle}` is
+transparent, it should always be in view as an equation's is" (the owner).
+The braces after an image were G014's, hidden until a caret came onto
+them, so with the caret in the caption or in the address the source read
+`![...](circle_of_fifths.svg)` and the label its figure is numbered by was
+not to be seen, where the label of an open equation has stood small and
+faint since 2026-09-30. An image's attributes stand now whenever its
+source is open, the caret anywhere from its `!` to the closing brace: the
+label, and the width with it or alone, since the block is one node and a
+width shown only beside a label would be a rule nobody could guess. Shut,
+nothing of them is drawn, as before. It is the `Attribute` branch of
+`buildDecorations` in `main.js`, which asks whether the image before the
+braces is touched and not only the braces. A div that is a figure needed
+nothing: its label is on its fence, which is always on screen.
+
+One test, *an open picture shows its attributes wherever the caret stands
+in it, a figure's label among them*, in `webview-markdown.test.js`: a
+figure with a label and a width, a picture with a width alone, one in a
+sentence, a link with attributes of its own and braces after a plain
+parenthesis further on in a picture's paragraph. It failed on the editor
+as it was (nothing drawn with the caret in the caption), and five
+mutations were run on a copy of the tree (`tests/tmp/fig-label/mutate.py`),
+all caught, each on the line that names it:
+
+- **AL1** the braces asked alone, as before → the caret in the caption.
+  **AL2** whatever stands before the braces opens them, a link too → the
+  caret in the link's text. **AL3** an image anywhere before them in the
+  paragraph opens them → the braces after the parenthesis. **AL4** shown
+  with no class → the caret in the caption. **AL5** never hidden → the
+  document shut.
+
+Run on this state: `npm run test:fast`, 316 of 316;
+`webview-markdown.test.js` whole, 107 of 107; and in
+`webview-editing.test.js` the tests named for a reference, a figure, an
+image, a picture, an attribute or a label, 8 of 8. Nothing else was run.
+Seen in the harness on the lesson, the caret in the caption
+(`tests/tmp/fig-label/label-open.png`), and not in a real VS Code window.
+
+Left standing, in Pending below (23): the attributes of a link, a code
+span and a bracketed span are still the caret's to find, and braces after
+a plain parenthesis are hidden where the page prints them.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -9025,3 +9069,25 @@ LaTeX floats, centred, as before.
     figure is Quarto's float, centred and where LaTeX puts it, as it was
     (the caption round of 2026-09-27 left it so); the page and the PDF
     printed from it stand it flush left and in place.
+23. Attributes, left as they were (*A picture's attributes, in view while
+    it is open*). An image shows its braces while its source is open, as
+    an equation shows its label; the braces after a link, a code span and
+    a bracketed span (`[a link](url){.external}`, `` `raw`{=html} ``,
+    `[words]{.smallcaps}`) are still hidden until a caret comes onto
+    them, the thing they belong to open or not (G014). Whether those
+    follow the image is the owner's to say: asked on 2026-10-12, not
+    answered yet. The other half of it is open the same way since that
+    evening (*One look for a label*): a caret in a picture's braces keeps
+    the picture open, and a caret in a link's braces still shuts the
+    link, its address put away while its braces are being written ("A
+    link{.external} and", measured), as one in a code span's shuts the
+    span. And
+    found on the way, not touched: the editor takes
+    braces straight after any `)` or backtick for an attribute block and
+    hides them, where Pandoc reads one only after a link, an image or a
+    code span, so `(its braces){.far}` after a plain parenthesis reads
+    "(its braces)" in the editor and "(its braces){.far}" on the page
+    (measured on Quarto's Pandoc and in the harness that day,
+    `tests/tmp/fig-label/probe.js`). It is `parseAttribute` in
+    `vscode-mdm/vendor-src/src/markdown/pandoc.js`, which asks what
+    character stands before the brace and not what node.

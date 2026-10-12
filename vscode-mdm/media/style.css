@@ -1584,7 +1584,7 @@ body {
    typeset with LaTeX sets. Drawn as the source it is,
    faint and in the code face; the tooltip says what becomes of it. And an
    attribute block, `{#id .class}`, shown the same way while the caret is on
-   it (G014). */
+   it (G014), or anywhere in the image or the equation it belongs to. */
 #app .mdm-rawtex,
 #app .cm-line.mdm-rawtex-line,
 #app .mdm-attr {

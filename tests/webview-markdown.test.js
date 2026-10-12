@@ -2691,6 +2691,62 @@ test("a header shown in the text names the figures as it is typed", { skip }, as
   }
 });
 
+test("an open picture shows its attributes wherever the caret stands in it, a figure's label among them", { skip }, async () => {
+  // The label is the figure's number on the page and none of its text, and
+  // the width is the picture's size, so shut neither is drawn; open, the
+  // block stands small and faint after the address with the caret anywhere
+  // in the image, as an equation's label does. It showed only once the caret
+  // came onto it, at the end of the line: `{#fig-circle}` was not to be
+  // seen from the caption it numbers (the owner, 2026-10-12).
+  const text =
+    "![Brass](a.svg){#fig-brass width=30%}\n\n" +
+    "![Sized](a.svg){width=40%}\n\n" +
+    "A sentence with ![inline](a.svg){width=2em} in it and [a link](https://example.com){.external} after.\n\n" +
+    "Far ![far](a.svg) from (its braces){.far} here.\n\n" +
+    "After.\n";
+  const h = await open({ text, scores: 0, height: 1400, seed: FIGURES_SEED });
+  const attrs = async function (at) {
+    await setSelection(h.page, at);
+    await new Promise((r) => setTimeout(r, 150));
+    return h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-attr")).map((e) => {
+        const b = e.getBoundingClientRect();
+        return { text: e.textContent, shown: b.width > 0 && b.height > 0, line: e.closest(".cm-line").textContent };
+      })
+    );
+  };
+  try {
+    await reading(h.page);
+    // Shut, nothing of them: the caret is in the last paragraph.
+    assert.deepEqual(await attrs(text.indexOf("After.") + 2), []);
+    assert.equal(await h.page.evaluate(() => /\{[^}]*(?:width|fig-)[^}]*\}/.test(document.querySelector("#app .cm-content").innerText)), false);
+    // The caret in the caption of a figure, and then in its address.
+    const brass = [{ text: "{#fig-brass width=30%}", shown: true, line: "![Brass](a.svg){#fig-brass width=30%}" }];
+    assert.deepEqual(await attrs(text.indexOf("Brass") + 2), brass);
+    assert.deepEqual(await attrs(text.indexOf("a.svg") + 2), brass);
+    // A picture with no label has its width in view the same way, and so
+    // has one in a sentence.
+    assert.deepEqual(await attrs(text.indexOf("Sized") + 2), [
+      { text: "{width=40%}", shown: true, line: "![Sized](a.svg){width=40%}" },
+    ]);
+    const sentence = "A sentence with ![inline](a.svg){width=2em} in it and a link after.";
+    assert.deepEqual(await attrs(text.indexOf("inline") + 2), [{ text: "{width=2em}", shown: true, line: sentence }]);
+    // The caret in the sentence and outside the picture opens neither.
+    assert.deepEqual(await attrs(text.indexOf("A sentence") + 2), []);
+    // The braces have to stand straight after the image to be its own: a
+    // block further on in the paragraph is not opened by it.
+    assert.deepEqual(await attrs(text.indexOf("far](") + 1), []);
+    // A link's attributes are still the caret's to find (G014): its text
+    // open, they are not drawn, and under the caret they are.
+    assert.deepEqual(await attrs(text.indexOf("a link") + 2), []);
+    assert.deepEqual((await attrs(text.indexOf("{.external}") + 3)).map((a) => a.text), ["{.external}"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
 // ---------- Sections by number ----------
 //
 // `number-sections: true` in the header numbers the headings of the page, and

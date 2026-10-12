@@ -8112,8 +8112,15 @@
           }
           // `{#id .class key=val}` after a link, an image, a code span or a
           // `$$` closer (G014): hidden while untouched, since the page
-          // prints none of it, and small and faint under the caret.
-          if (!touched(n.from, n.to)) hide(n.from, n.to);
+          // prints none of it, and small and faint under the caret. An
+          // image's are its own source, the label its figure is numbered
+          // by and the width it is drawn at, and stand with the image open
+          // wherever the caret is in it, as an equation's label does:
+          // `{#fig-circle}` showed only once the caret came onto it, and
+          // was not to be seen from the caption (the owner, 2026-10-12).
+          const image = node.prevSibling;
+          const from = image && image.name === "Image" && image.to === n.from ? image.from : n.from;
+          if (!touched(from, n.to)) hide(n.from, n.to);
           else decos.push(Decoration.mark({ class: "mdm-attr" }).range(n.from, n.to));
           return false;
         }
