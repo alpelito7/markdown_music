@@ -83,6 +83,18 @@
     sv: "Figur", tr: "Şekil", ua: "Рисунок", zh: "图", "zh-TW": "圖",
   };
 
+  // And what a table is called, `crossref-tbl-title` in the same files, read
+  // and held the same way: "Table 1: ..." over a table whose caption carries
+  // a label (`: The shapes {#tbl-shapes}`) and "Table 1" for `@tbl-shapes`,
+  // "Tabla 1" twice under `lang: es` (measured, 2026-10-12).
+  const TABLE_TITLES = {
+    "": "Table", bg: "Таблица", ca: "Taula", cs: "Tabulka", da: "Tabel", de: "Tabelle", "de-CH": "Tabelle",
+    el: "Πίνακας", es: "Tabla", eu: "Taula", fi: "Taulukko", fr: "Table", he: "טבלה", id: "Tabel", is: "Tafla",
+    it: "Tabella", ja: "表", ko: "표", lt: "Lentelė", nb: "Tabell", nl: "Tabel", nn: "Tabell", pl: "Tabela",
+    pt: "Tabela", "pt-BR": "Tabela", ru: "Таблица", sk: "Tabuľka", sl: "Tabela", "sr-Latn": "Tabela",
+    sv: "Tabell", tr: "Tablo", ua: "Таблиця", zh: "表", "zh-TW": "表",
+  };
+
   // The prefix of a language tag as Quarto finds it: the file of the tag
   // itself, then the one of its first part, then English. The tag is matched
   // as written, so `ES` is English and `es-MX` Spanish, and Ukrainian is
@@ -261,6 +273,12 @@
   // "Fig 1| x A caption") and a colon unless the header says. Not followed: a
   // title written with marks (`fig-title: "*Fig*"`), which the page sets in
   // italic and this reads as the text it is.
+  //
+  // A table takes its own by the same rules, with `tbl` where a figure has
+  // `fig` (`crossref: tbl-title`, `tbl-prefix`, `tbl-labels`, and
+  // `crossref-tbl-title` under `language:`), and the one `title-delim` is
+  // both kinds': "Cuadro I. Uno" over the table and "cuadro I" in the text
+  // for a header that sets the four (measured, 2026-10-12).
   function floatLook(header, kind, titles) {
     const keys = headerKeys(header);
     const crossref = isMap(keys.crossref) ? keys.crossref : {};
@@ -283,6 +301,9 @@
   }
   function figureLook(header) {
     return floatLook(header, "fig", FIGURE_TITLES);
+  }
+  function tableLook(header) {
+    return floatLook(header, "tbl", TABLE_TITLES);
   }
 
   // What a figure's caption opens with, as titlePrefix writes it: the title,
@@ -1385,10 +1406,12 @@
   return {
     PREFIXES: PREFIXES,
     FIGURE_TITLES: FIGURE_TITLES,
+    TABLE_TITLES: TABLE_TITLES,
     languagePrefix: languagePrefix,
     headerKeys: headerKeys,
     look: look,
     figureLook: figureLook,
+    tableLook: tableLook,
     caption: caption,
     subcaption: subcaption,
     sectionLook: sectionLook,

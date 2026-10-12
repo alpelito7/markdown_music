@@ -4676,20 +4676,22 @@
   // for a label no equation carries, underlined as a citation of a key the
   // bibliography has not got is. Its tooltip names the equations it leads to
   // with their numbers and the click that goes to them, as a citation's names
-  // its entry (citeTitle). A reference to a figure is the same widget, with
-  // the figure's caption as the page opens it in the tooltip (figureIndex).
+  // its entry (citeTitle). A reference to a figure or to a table is the same
+  // widget, with the caption as the page opens it in the tooltip
+  // (figureIndex, tableIndex).
   function eqRefTitle(parts, index) {
     const lines = [];
     let leads = false;
     parts.forEach(function (p) {
       if (!p.label) return;
-      const figure = p.ref === "fig" || window.MDM_CROSSREF.kindOf(p.label) === "fig";
+      const kind = p.ref || window.MDM_CROSSREF.kindOf(p.label);
+      const float = kind === "fig" ? figNow : kind === "tbl" ? tblNow : null;
       if (p.kind === "missing") {
-        lines.push("@" + p.label + ": no " + (figure ? "figure" : "equation") + " carries this label");
+        lines.push("@" + p.label + ": no " + (kind === "fig" ? "figure" : kind === "tbl" ? "table" : "equation") + " carries this label");
         return;
       }
-      const entry = (figure ? figNow : index).byLabel.get(p.label);
-      if (entry) lines.push(figure ? (entry.lead + entry.words).trim() : "(" + entry.number + ") " + entry.tex);
+      const entry = (float || index).byLabel.get(p.label);
+      if (entry) lines.push(float ? (entry.lead + entry.words).trim() : "(" + entry.number + ") " + entry.tex);
       if (p.kind === "link") leads = true;
     });
     return lines.join("\n") + (leads ? "\n" + followHint() : "");
@@ -4718,7 +4720,7 @@
         } else if (p.kind === "link") {
           const link = document.createElement("span");
           link.className = "mdm-eqref-link";
-          link.setAttribute(p.ref === "fig" ? "data-mdm-fig" : "data-mdm-eq", p.label);
+          link.setAttribute(p.ref === "fig" ? "data-mdm-fig" : p.ref === "tbl" ? "data-mdm-tbl" : "data-mdm-eq", p.label);
           link.textContent = p.text;
           el.appendChild(link);
         } else {
@@ -4767,9 +4769,10 @@
   // - A figure inside a div that is itself a figure, a table or a listing
   //   (`#fig-`, `#tbl-`, `#lst-`), however deep, is not counted: it is
   //   lettered within that div, (a), (b), and a reference to it reads
-  //   "Figure 6 (a)". Inside a table or a listing the number is that
-  //   float's, which nothing here counts, so a reference to such a figure
-  //   is left as written.
+  //   "Figure 6 (a)". Inside a table the number is the table's, counted
+  //   among the tables (tableTops); inside a listing it is that float's,
+  //   which nothing here counts, so a reference to such a figure is left
+  //   as written.
   //
   // What the editor still draws otherwise is in tests/README.md (Pending,
   // *Figures by number*): a figure that is not a paragraph of its own at
@@ -4890,7 +4893,7 @@
     const tree = CM.syntaxTree(state);
     const look = figureLook(state);
     const held = figuresByTree.get(tree);
-    if (held && held.look === look) return held;
+    if (held && held.look === look && (!held.tables || held.tables === tableTops(state))) return held;
     const X = window.MDM_CROSSREF;
     const index = {
       look: look,
@@ -4898,6 +4901,8 @@
       byImage: new Map(),
       byDiv: new Map(),
       refs: { numbers: new Map(), prefix: look.prefix },
+      // The tables a figure inside one took its number from, when one did.
+      tables: null,
       key: "",
     };
     const keys = [];
@@ -4918,7 +4923,11 @@
         if (over) {
           const n = (lettered.get(over.node.from) || 0) + 1;
           lettered.set(over.node.from, n);
-          const outer = index.byDiv.get(over.node.from);
+          let outer = index.byDiv.get(over.node.from);
+          if (/^tbl-/.test(over.label)) {
+            index.tables = tableTops(state);
+            outer = index.tables.byDiv.get(over.node.from);
+          }
           number = outer && outer.number !== null ? outer.number + " (" + X.number(n, "alpha a") + ")" : null;
           lead = X.subcaption(n, found.captioned);
         } else {
@@ -4952,6 +4961,335 @@
   // an equation is (showEquation).
   function showFigure(label) {
     const entry = figureIndex(view.state).byLabel.get(label);
+    if (!entry) return false;
+    view.dispatch({ effects: CM.EditorView.scrollIntoView(entry.from, { y: "center" }) });
+    return true;
+  }
+
+  // ---------- Tables by number, and their captions ----------
+  //
+  // A table is captioned by the paragraph written beside it that opens with
+  // a colon or with "Table:" (`: The shapes of a note {#tbl-shapes}`), and a
+  // caption that ends on a label of the kind is numbered: "Table 1: The
+  // shapes of a note" over the table and "Table 1" for `@tbl-shapes`, as
+  // Quarto prints them (measured on 1.9.37, 2026-10-12, on the probes of
+  // tests/tmp/tbl-crossref; the words are in media/mdm-crossref.js). The
+  // caption stands over its table, centred, wherever it is written, and
+  // every table stands in the middle of the column: B on
+  // design/design-table-caption.html, the owner's pick of that day. The
+  // rules, Pandoc's for what a caption is and Quarto's for its label:
+  //
+  // - The caption is the paragraph before the table and otherwise the one
+  //   after it, with a blank line between the two or with none. Of a
+  //   caption on each side the one before is taken and the other is prose,
+  //   and a caption between two tables is the first one's. It
+  //   opens with `:` (no punctuation after it), `Table:` or `table:`. Lezer
+  //   reads a line with no pipe straight under a table as one more row,
+  //   where Pandoc ends the table: such a last row is the caption.
+  // - Its label is the last identifier of the braces it ends on, where the
+  //   braces open with one (`{#tbl-x .striped}`; `{.striped #tbl-x}` names
+  //   nothing) and it starts with `tbl-`. Braces whose identifier is of
+  //   another kind are words of the caption, as the page prints them, and
+  //   braces with none are put away with the label's.
+  // - A fenced div with such a label is a table too (`::: {#tbl-x}`). With
+  //   one table in it and nothing else but a caption, the table's own or
+  //   the div's last paragraph, it is that table, numbered. Otherwise the
+  //   tables in it that carry a label are lettered, (a), (b), and read
+  //   "Table 8 (a)", and the div's number opens its last paragraph where
+  //   that is no caption of a table inside (as a figure's div).
+  // - Tables are counted in the order they are written, apart from the
+  //   figures. A table inside a figure is lettered and reads with the
+  //   figure's number after a table's word, "Table 1 (a)"; a figure inside
+  //   a table the other way round.
+  //
+  // What is not followed is in tests/README.md (Pending, *Tables by
+  // number*): `tbl-cap-location`, `tbl-cap`, a caption in a div that holds
+  // more than its table, the letters of a float that holds both kinds.
+  let tableHeader = null;
+  let tableLookNow = null;
+  function tableLook(state) {
+    const fm = editorFrontMatter && CM.syntaxTree(state).topNode.getChild("FrontMatter");
+    const header = fm ? state.doc.sliceString(fm.from, fm.to) : headerText;
+    if (header !== tableHeader || !tableLookNow) {
+      tableHeader = header;
+      tableLookNow = window.MDM_CROSSREF.tableLook(header);
+    }
+    return tableLookNow;
+  }
+
+  // Pandoc's tableCaption: a colon no punctuation follows, or "Table:".
+  const CAPTION_MARK = /^(?::(?!\p{P})|[Tt]able:)[ \t]*/u;
+
+  // What a caption says once its mark is off: where its words start and
+  // end, and the label of the braces it ends on (parseTableCaption among
+  // Quarto's filters, which reads them as a heading's attributes).
+  function captionWords(state, textFrom, to) {
+    const kept = state.sliceDoc(textFrom, to).replace(/\s+$/, "");
+    let textTo = textFrom + kept.length;
+    let label = null;
+    if (kept.charAt(kept.length - 1) === "}") {
+      const open = /(?:^|\s)\{/.exec(kept);
+      const at = open ? open.index + open[0].length - 1 : -1;
+      const braces = at < 0 ? "" : kept.slice(at);
+      if (braces && isAttribute(braces)) {
+        const id = braces.charAt(1) === "#" ? attributeId(braces) : null;
+        if (!id || /^tbl-/.test(id)) {
+          label = id;
+          textTo = textFrom + kept.slice(0, at).replace(/\s+$/, "").length;
+        }
+      }
+    }
+    return { textFrom: textFrom, textTo: textTo, label: label };
+  }
+
+  // The block before or after another among its siblings, the marks of a
+  // quote aside.
+  function blockBeside(node, dir) {
+    let n = dir < 0 ? node.prevSibling : node.nextSibling;
+    while (n && /Mark$/.test(n.name)) n = dir < 0 ? n.prevSibling : n.nextSibling;
+    return n;
+  }
+
+  // Every table that has a caption or a number, in the order of the
+  // document: where it stands, its caption (`caption`: its lines, its words
+  // and the node they are read from), its label, what a reference prints
+  // after its word (`number`) and what stands before its caption (`lead`,
+  // empty for a caption with no label). `byCaption` finds a table by the
+  // paragraph it is captioned by, `byDiv` a div that is a table, `refs` is
+  // what MDM_CROSSREF.reference takes, and `key` changes with a label, a
+  // number, the words of a numbered caption or the header's words. A table inside a figure waits for the
+  // figure's number (`pending`), which tableIndex gives it: the figures
+  // ask here for the number of a table they stand in, and the two would
+  // ask each other for ever.
+  const NO_TABLES = {
+    look: { title: "Table", prefix: "Table", labels: "arabic", delim: ":" },
+    byLabel: new Map(),
+    byTable: new Map(),
+    byCaption: new Map(),
+    byDiv: new Map(),
+    refs: { numbers: new Map(), prefix: "Table" },
+    pending: [],
+    key: "",
+  };
+  let tblNow = NO_TABLES;
+  const NO_GROUPS = [];
+  const tableTopsByTree = new WeakMap();
+  // A table and the caption written beside it, as the lines the two take:
+  // one drawing, redrawn together (wholeBlocks).
+  const tableGroups = new WeakMap();
+  const BLOCK_HOLDERS = /^(Document|Blockquote|BulletList|OrderedList|ListItem|Callout)$/;
+  function tableTops(state) {
+    const tree = CM.syntaxTree(state);
+    const look = tableLook(state);
+    const held = tableTopsByTree.get(tree);
+    if (held && held.look === look) return held;
+    const X = window.MDM_CROSSREF;
+    const doc = state.doc;
+    const index = {
+      look: look,
+      byLabel: new Map(),
+      byTable: new Map(),
+      byCaption: new Map(),
+      byDiv: new Map(),
+      refs: { numbers: new Map(), prefix: look.prefix },
+      pending: [],
+      key: "",
+    };
+    const keys = [];
+    const groups = [];
+    const taken = new Set();
+    const found = new Map();
+    const lettered = new Map();
+    let count = 0;
+    const captionAt = function (node, row) {
+      const raw = state.sliceDoc(node.from, node.to);
+      const lead = /^ {0,3}/.exec(raw)[0].length;
+      const mark = CAPTION_MARK.exec(raw.slice(lead));
+      if (!mark) return null;
+      const words = captionWords(state, node.from + lead + mark[0].length, node.to);
+      return {
+        from: node.from,
+        to: node.to,
+        textFrom: words.textFrom,
+        textTo: words.textTo,
+        label: words.label,
+        row: row,
+        node: row ? node.getChild("TableCell") || node : node,
+      };
+    };
+    // A table's own caption, found once: the tables are asked in their
+    // order, and a paragraph one of them took is no caption of the next.
+    const ownCaption = function (node) {
+      if (found.has(node.from)) return found.get(node.from);
+      let cap = null;
+      const before = blockBeside(node, -1);
+      if (before && before.name === "Paragraph" && !taken.has(before.from)) cap = captionAt(before, false);
+      if (!cap) {
+        const rows = node.getChildren("TableRow");
+        const last = rows.length ? rows[rows.length - 1] : null;
+        if (last && state.sliceDoc(last.from, last.to).indexOf("|") === -1) cap = captionAt(last, true);
+      }
+      if (!cap) {
+        const after = blockBeside(node, 1);
+        if (after && after.name === "Paragraph") cap = captionAt(after, false);
+      }
+      if (cap && !cap.row) taken.add(cap.from);
+      found.set(node.from, cap);
+      return cap;
+    };
+    const number = function (entry, over, captioned) {
+      if (over) {
+        const n = (lettered.get(over.node.from) || 0) + 1;
+        lettered.set(over.node.from, n);
+        const letter = X.number(n, "alpha a");
+        const kind = /^([a-z]+)-/.exec(over.label)[1];
+        const outer = kind === "tbl" ? index.byDiv.get(over.node.from) : null;
+        entry.parent = { at: over.node.from, kind: kind, letter: letter };
+        entry.number = outer && outer.number !== null ? outer.number + " (" + letter + ")" : null;
+        entry.lead = X.subcaption(n, captioned);
+      } else {
+        count += 1;
+        entry.number = X.number(count, look.labels);
+        entry.lead = X.caption(entry.number, look, captioned);
+      }
+    };
+    const record = function (entry) {
+      index.byLabel.set(entry.label, entry);
+      index.refs.numbers.set(entry.label, entry.number);
+      if (entry.parent && entry.parent.kind === "fig") index.pending.push(entry);
+      // Its words too: a reference shows them in its tooltip, wherever in
+      // the document it stands.
+      keys.push(entry.label + "=" + entry.number + "=" + entry.lead + "=" + entry.words);
+    };
+    const div = function (node, label) {
+      const blocks = [];
+      for (let c = node.firstChild; c; c = c.nextSibling) {
+        if (!/Mark$/.test(c.name)) blocks.push(c);
+      }
+      const tables = blocks.filter(function (b) {
+        return b.name === "Table";
+      });
+      const last = blocks.length > 1 ? blocks[blocks.length - 1] : null;
+      const para = last && last.name === "Paragraph" && !CAPTION_MARK.test(state.sliceDoc(last.from, last.to)) ? last : null;
+      let one = null;
+      let cap = null;
+      if (tables.length === 1) {
+        const own = ownCaption(tables[0]);
+        const others = blocks.filter(function (b) {
+          return b !== tables[0] && b !== para && !(own && !own.row && b.from === own.from);
+        });
+        if (!others.length && !(own && own.label) && !(own && para)) {
+          one = tables[0];
+          cap = own;
+          if (!cap && para) {
+            const words = state.sliceDoc(para.from, para.to).replace(/\s+$/, "");
+            cap = { from: para.from, to: para.to, textFrom: para.from, textTo: para.from + words.length, label: null, row: false, node: para };
+          }
+        }
+      }
+      const entry = {
+        label: label,
+        from: node.from,
+        number: null,
+        lead: "",
+        parent: null,
+        one: one ? one.from : null,
+        caption: cap,
+        captionFrom: one || !para ? null : para.from,
+        words: (one ? (cap ? state.sliceDoc(cap.textFrom, cap.textTo) : "") : para ? state.sliceDoc(para.from, para.to) : "")
+          .replace(/\s+/g, " ").trim(),
+      };
+      number(entry, floatOver(state, node), one ? !!cap && cap.textTo > cap.textFrom : !!para);
+      index.byDiv.set(node.from, entry);
+      record(entry);
+    };
+    const table = function (node) {
+      const own = ownCaption(node);
+      const holder = node.parent && node.parent.name === "Callout" ? index.byDiv.get(node.parent.from) : null;
+      const via = holder && holder.one === node.from ? holder : null;
+      const cap = via ? via.caption : own;
+      if (!cap && !via) return;
+      const entry = {
+        label: null,
+        from: node.from,
+        tableFrom: node.from,
+        tableTo: node.to,
+        caption: cap,
+        number: null,
+        lead: "",
+        parent: null,
+        words: cap ? state.sliceDoc(cap.textFrom, cap.textTo).replace(/\s+/g, " ").trim() : "",
+      };
+      if (via) {
+        entry.number = via.number;
+        entry.lead = via.lead;
+      } else if (cap.label) {
+        entry.label = cap.label;
+        number(entry, floatOver(state, node), cap.textTo > cap.textFrom);
+        record(entry);
+      }
+      // The lines of the two, which open and are put away together.
+      const beside = cap && !cap.row ? cap : null;
+      if (beside && beside !== own) taken.add(beside.from);
+      entry.groupFrom = doc.lineAt(beside ? Math.min(node.from, beside.from) : node.from).from;
+      entry.groupTo = doc.lineAt(beside ? Math.max(node.to, beside.to) : node.to).to;
+      index.byTable.set(node.from, entry);
+      if (beside) {
+        index.byCaption.set(beside.from, entry);
+        groups.push([entry.groupFrom, entry.groupTo]);
+      }
+    };
+    tree.iterate({
+      enter: function (n) {
+        if (n.name === "Table") {
+          table(n.node);
+          return false;
+        }
+        if (n.name === "Callout") {
+          const label = divLabel(state, n.node);
+          if (label && /^tbl-/.test(label)) div(n.node, label);
+          return true;
+        }
+        return BLOCK_HOLDERS.test(n.name);
+      },
+    });
+    index.key = [look.title, look.prefix, look.labels, look.delim].concat(keys).join("\u0000");
+    tableTopsByTree.set(tree, index);
+    tableGroups.set(tree, groups);
+    return index;
+  }
+
+  // The tables with every number in: a table inside a figure reads with the
+  // figure's number, which the figures count (tableTops says why it is
+  // asked for here and not there).
+  const tablesResolved = new WeakMap();
+  function tableIndex(state) {
+    const tops = tableTops(state);
+    if (!tops.pending.length) return tops;
+    const figures = figureIndex(state);
+    const held = tablesResolved.get(tops);
+    if (held && held.figures === figures) return held.index;
+    const index = Object.assign({}, tops, {
+      byLabel: new Map(tops.byLabel),
+      refs: { numbers: new Map(tops.refs.numbers), prefix: tops.refs.prefix },
+    });
+    const keys = [tops.key];
+    tops.pending.forEach(function (entry) {
+      const outer = figures.byDiv.get(entry.parent.at);
+      const number = outer && outer.number !== null ? outer.number + " (" + entry.parent.letter + ")" : null;
+      index.byLabel.set(entry.label, Object.assign({}, entry, { number: number }));
+      index.refs.numbers.set(entry.label, number);
+      keys.push(entry.label + "=" + number);
+    });
+    index.key = keys.join("\u0000");
+    tablesResolved.set(tops, { figures: figures, index: index });
+    return index;
+  }
+
+  // The table a reference leads to, brought to the middle of the pane, as a
+  // figure is (showFigure).
+  function showTable(label) {
+    const entry = tableIndex(view.state).byLabel.get(label);
     if (!entry) return false;
     view.dispatch({ effects: CM.EditorView.scrollIntoView(entry.from, { y: "center" }) });
     return true;
@@ -5794,7 +6132,7 @@
     return out;
   }
 
-  function cellParts(node, text, skip, marks, refs) {
+  function cellParts(node, text, skip, marks, refs, from, to) {
     const parts = [];
     const push = function (s) {
       if (s) parts.push({ kind: "text", text: s });
@@ -5802,8 +6140,14 @@
     const slice = function (from, to) {
       return marks ? smartSlice(text, from, to, marks) : text(from, to);
     };
-    let at = node.from;
+    // `from` and `to` take a stretch of the node alone: a table's caption is
+    // its paragraph without the colon it opens with and the label it ends
+    // on (tableIndex).
+    const end = to == null ? node.to : to;
+    let at = from == null ? node.from : from;
     for (let child = node.firstChild; child; child = child.nextSibling) {
+      if (child.to <= at) continue;
+      if (child.from >= end) break;
       push(slice(at, child.from));
       at = child.to;
       const name = child.name;
@@ -5878,10 +6222,10 @@
           title: "Footnote, written inline",
           parts: cellParts(child, text, skip, marks, refs),
         });
-      } else if (name === "Citation" && window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look, figNow.refs)) {
+      } else if (name === "Citation" && window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look, figNow.refs, tblNow.refs)) {
         // A reference to an equation or to a figure, as in the prose
         // (EqRefWidget).
-        const eqParts = window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look, figNow.refs);
+        const eqParts = window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look, figNow.refs, tblNow.refs);
         parts.push({
           kind: "eqref",
           parts: eqParts,
@@ -5925,7 +6269,7 @@
         push(slice(child.from, child.to));
       }
     }
-    push(slice(at, node.to));
+    push(slice(at, end));
     return parts;
   }
 
@@ -6120,7 +6464,7 @@
   // The rows of a pipe table and the alignment of its columns. The alignment
   // row (`| ---: | :--- |`) is the one TableDelimiter that is a child of the
   // table itself; the delimiters inside a row are the pipes between cells.
-  function tableModel(node, text, refs) {
+  function tableModel(node, text, refs, captionRow) {
     const rule = node.getChildren("TableDelimiter")[0];
     const align = (rule ? text(rule.from, rule.to) : "")
       .replace(/^\s*\|/, "")
@@ -6190,10 +6534,15 @@
     for (let row = node.firstChild; row; row = row.nextSibling) {
       if (/^Table(?:Header|Delimiter|Row)$/.test(row.name)) rows.push(text(row.from, row.to));
     }
+    // A last row with no pipe that is the table's caption is no row (it is
+    // drawn over the table, tableTops); it stays in what is copied, the
+    // table as it was typed.
     return {
       align: align,
       head: headCells,
-      body: node.getChildren("TableRow").map(fit),
+      body: node.getChildren("TableRow").filter(function (row) {
+        return row.from !== captionRow;
+      }).map(fit),
       copy: rows.join("\n"),
     };
   }
@@ -6209,10 +6558,16 @@
   // without the `> ` or the indent of a quote or a list it stands in, the
   // way a code block's copy leaves those out (tableModel, `copy`).
   class TableWidget extends WidgetType {
-    constructor(source, model, frame, active, open) {
+    constructor(source, model, frame, active, open, caption) {
       super();
       this.source = source;
       this.model = model;
+      // What stands over the table: its number, where its caption carries a
+      // label, and the caption's words (`lead`, `parts`), with where in the
+      // document the words are written, counted from the head of the table
+      // as a cell's place is (`at`). Null for a table with neither.
+      this.caption = caption || null;
+      this.captioned = caption ? [caption.lead, caption.at, caption.source, citedSignature(caption.parts)].join("\u0000") : "";
       this.cited = citedSignature(model);
       this.frame = frame || null;
       this.active = !!active;
@@ -6223,6 +6578,7 @@
     eq(other) {
       return (
         other.source === this.source &&
+        other.captioned === this.captioned &&
         other.cited === this.cited &&
         other.active === this.active &&
         other.open === this.open &&
@@ -6231,7 +6587,10 @@
       );
     }
     updateDOM(dom, view, from) {
-      if (!from || from.source !== this.source || from.cited !== this.cited || from.tip !== this.tip || frameKey(from.frame) !== frameKey(this.frame)) return false;
+      if (
+        !from || from.source !== this.source || from.captioned !== this.captioned || from.cited !== this.cited ||
+        from.tip !== this.tip || frameKey(from.frame) !== frameKey(this.frame)
+      ) return false;
       const chrome = unframed(dom).querySelector(":scope > .mdm-chrome");
       if (!chrome) return false;
       switchChrome(chrome, this);
@@ -6246,6 +6605,17 @@
       const wrap = document.createElement("div");
       wrap.className = "mdm-table";
       wrap.setAttribute("data-mdm-source", model.copy);
+      if (this.caption) {
+        // Over the table and outside its scroller: a caption is as wide as
+        // the column and stays where it is while a wide table is pushed
+        // sideways under it. A click on it goes to its words in the source.
+        const over = document.createElement("div");
+        over.className = "mdm-table-caption";
+        if (this.caption.at !== null) over.dataset.mdmAt = String(this.caption.at);
+        if (this.caption.lead) over.appendChild(document.createTextNode(this.caption.lead));
+        paintParts(over, this.caption.parts, true);
+        wrap.appendChild(over);
+      }
       const scroll = document.createElement("div");
       scroll.className = "mdm-table-scroll";
       const table = document.createElement("table");
@@ -6310,9 +6680,11 @@
     const cites = citesNow;
     const equations = eqNow;
     const figures = figNow;
+    const tables = tblNow;
     citesNow = NO_CITES;
     eqNow = NO_EQUATIONS;
     figNow = NO_FIGURES;
+    tblNow = NO_TABLES;
     try {
       if (!stringParser) stringParser = markdownLanguage().language.parser;
       const para = stringParser.parse(str).topNode.firstChild;
@@ -6324,6 +6696,7 @@
       citesNow = cites;
       eqNow = equations;
       figNow = figures;
+      tblNow = tables;
     }
   }
 
@@ -7143,6 +7516,7 @@
     citesNow = state.field(citesField, false) || NO_CITES;
     eqNow = equationIndex(state);
     figNow = figureIndex(state);
+    tblNow = tableIndex(state);
     secNow = sectionIndex(state);
     // What the host kept back, which every number counts from (hiddenLines).
     const hidden = state.field(hiddenLinesField, false) || 0;
@@ -7405,6 +7779,19 @@
         const node = n.node;
 
         if (name === "Paragraph" && hiddenTails.has(n.from)) return false;
+
+        // The caption of a table is drawn over the table, by the table's
+        // widget; its own lines, and the blank ones between the two, are
+        // put away with the table's source while no caret is in either,
+        // and stand as the prose they are while one is (tableTops).
+        if (name === "Paragraph" && tblNow.byCaption.has(n.from)) {
+          const captions = tblNow.byCaption.get(n.from);
+          if (!touched(captions.groupFrom, captions.groupTo)) {
+            if (n.from > captions.tableTo) hideLines(Math.min(doc.lineAt(captions.tableTo).to + 1, doc.length), n.to);
+            else hideLines(n.from, Math.max(0, doc.lineAt(captions.tableFrom).from - 1));
+            return false;
+          }
+        }
 
         // A paragraph, and the paragraph of a task item, drawn with the
         // punctuation the page prints (G015, above).
@@ -7697,6 +8084,14 @@
               Decoration.widget({ widget: new TextWidget(figure.lead, "mdm-figure-lead"), side: -1 }).range(figure.captionFrom)
             );
           }
+          // And a div that is a table and holds more than the one table:
+          // its number before its last paragraph, the same way (tableTops).
+          const tables = tblNow.byDiv.get(n.from);
+          if (tables && tables.captionFrom !== null) {
+            decos.push(
+              Decoration.widget({ widget: new TextWidget(tables.lead, "mdm-table-lead"), side: -1 }).range(tables.captionFrom)
+            );
+          }
           if (kind) {
             frameLevel(n.from, n.to, { kind: "callout", name: kind });
             lines.mark(n.from, n.from, "mdm-co-first");
@@ -7881,16 +8276,32 @@
         if (name === "Table") {
           const blockFrom = doc.lineAt(n.from).from;
           const blockTo = doc.lineAt(n.to).to;
-          const open = touched(blockFrom, blockTo);
+          // Its caption is part of what it is drawn from and opens with
+          // it: a caret in either shows the source of both, so the label
+          // is in view whenever the table's source is (tableTops).
+          const numbered = tblNow.byTable.get(n.from) || null;
+          const written = numbered ? numbered.caption : null;
+          const open = numbered ? touched(numbered.groupFrom, numbered.groupTo) : touched(blockFrom, blockTo);
           const active = open && holdsMainHead(state, blockFrom, blockTo);
+          const over = numbered
+            ? {
+                lead: numbered.lead,
+                parts: written
+                  ? cellParts(written.node, text, null, smartMarks(written.node, written.textTo, text), refs, written.textFrom, written.textTo)
+                  : [],
+                source: written ? text(written.textFrom, written.textTo) : "",
+                at: written ? written.textFrom - n.from : null,
+              }
+            : null;
           decos.push(
             Decoration.widget({
               widget: new TableWidget(
                 text(blockFrom, blockTo),
-                tableModel(node, text, refs),
+                tableModel(node, text, refs, written && written.row ? written.from : null),
                 frameOf(doc.lineAt(blockFrom).number),
                 active,
-                open
+                open,
+                over
               ),
               block: true,
               side: 1,
@@ -8245,7 +8656,7 @@
           // (`@fig-circle`), which Quarto resolves and not citeproc: as the
           // page prints it (MDM_CROSSREF.reference, EqRefWidget), and its
           // source under the caret.
-          const eqParts = window.MDM_CROSSREF.reference(raw, eqNow.numbers, eqNow.look, figNow.refs);
+          const eqParts = window.MDM_CROSSREF.reference(raw, eqNow.numbers, eqNow.look, figNow.refs, tblNow.refs);
           if (eqParts && !touched(n.from, n.to)) {
             decos.push(
               Decoration.replace({ widget: new EqRefWidget(eqParts, eqRefTitle(eqParts, eqNow)) }).range(n.from, n.to)
@@ -8515,6 +8926,7 @@
       cites: (state.field(citesField, false) || NO_CITES).version,
       equations: equationIndex(state).key,
       figures: figureIndex(state).key,
+      tables: tableIndex(state).key,
       sections: sectionIndex(state),
     });
     return set;
@@ -8525,10 +8937,21 @@
   // a block of its own on the closer's line).
   function wholeBlocks(doc, tree, from, to) {
     const top = tree.topNode;
+    // A table and the caption written beside it are two blocks and one
+    // drawing: a caret in either opens both (tableTops).
+    const groups = tableGroups.get(tree) || NO_GROUPS;
     let a = doc.lineAt(Math.max(0, Math.min(from, doc.length))).from;
     let b = doc.lineAt(Math.max(0, Math.min(to, doc.length))).to;
     for (let i = 0; i < 8; i++) {
       let grew = false;
+      for (let g = 0; g < groups.length; g++) {
+        const group = groups[g];
+        if (group[0] <= b && group[1] >= a && (group[0] < a || group[1] > b)) {
+          a = Math.min(a, group[0]);
+          b = Math.max(b, Math.min(group[1], doc.length));
+          grew = true;
+        }
+      }
       const first = top.childAfter(a);
       if (first && first.from < a && first.to >= a) {
         a = doc.lineAt(first.from).from;
@@ -8600,8 +9023,8 @@
     // So does a label or a number of an equation that changed, or the
     // header's say about them: every number after it and every reference
     // to one may read otherwise now (equationIndex), and the same of a
-    // figure (figureIndex). And so does a section that is numbered
-    // otherwise (sectionsMoved).
+    // figure (figureIndex) and of a table (tableIndex). And so does a
+    // section that is numbered otherwise (sectionsMoved).
     if (
       !built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines ||
       // The header kept out of the text, or whether its source is open: the
@@ -8609,6 +9032,7 @@
       built.header !== (state.field(headerField, false) || "") ||
       built.cites !== cites || built.equations !== equationIndex(state).key ||
       built.figures !== figureIndex(state).key ||
+      built.tables !== tableIndex(state).key ||
       sectionsMoved(built.sections, sectionIndex(state), tr.changes)
     ) {
       rebuilds.whole++;
@@ -8623,6 +9047,10 @@
         spans.push([fromB, toB]);
         const was = wholeBlocks(tr.startState.doc, built.tree, fromA, toA);
         if (holdsDefinition(built.tree, was[0], was[1])) definitions = true;
+        // What the blocks around the change were, where they are now: a
+        // caption taken off its table leaves a table to draw again, which
+        // only the tree before knew to be the caption's (tableGroups).
+        spans.push([tr.changes.mapPos(was[0], -1), tr.changes.mapPos(was[1], 1)]);
       });
     }
     if (tree !== built.tree) {
@@ -12120,9 +12548,10 @@
     });
     // The page gives a numbered equation its label for an identifier too
     // (`[see](#eq-mass)`): a fragment no heading carries is looked for among
-    // the equations, and then among the figures, which carry theirs too.
+    // the equations, and then among the figures and the tables, which carry
+    // theirs too.
     if (!hit) {
-      if (!showEquation(want)) showFigure(want);
+      if (!showEquation(want) && !showFigure(want)) showTable(want);
       return;
     }
     view.dispatch({ selection: { anchor: hit.pos }, scrollIntoView: true });
@@ -12268,8 +12697,10 @@
     const eqref = e.button === 0 && e.target.closest(".mdm-eqref");
     if (eqref && followsLink(e)) {
       e.preventDefault();
-      const part = e.target.closest("[data-mdm-eq], [data-mdm-fig]") || eqref.querySelector("[data-mdm-eq], [data-mdm-fig]");
+      const led = "[data-mdm-eq], [data-mdm-fig], [data-mdm-tbl]";
+      const part = e.target.closest(led) || eqref.querySelector(led);
       if (part && part.hasAttribute("data-mdm-fig")) showFigure(part.getAttribute("data-mdm-fig"));
+      else if (part && part.hasAttribute("data-mdm-tbl")) showTable(part.getAttribute("data-mdm-tbl"));
       else if (part) showEquation(part.getAttribute("data-mdm-eq"));
       return;
     }
@@ -13554,7 +13985,10 @@
       // A table says where in its source the click was: the cell it landed
       // on, as an offset from the head of the table (TableWidget).
       const cell = e.target.closest("[data-mdm-at]");
-      revealBlock(drawing, addsCaret(e), cell ? Number(cell.dataset.mdmAt) : null, e.clientY);
+      revealBlock(
+        drawing, addsCaret(e), cell ? Number(cell.dataset.mdmAt) : null, e.clientY,
+        !!cell && cell.classList.contains("mdm-table-caption")
+      );
     }
   }
 
@@ -13585,7 +14019,7 @@
   // selection here wiped every caret that was already out in the prose.
   // `held` is the height on the screen the click was at, which the caret's
   // line is put back to once the source has opened (see the measure below).
-  function revealBlock(el, adds, into, held) {
+  function revealBlock(el, adds, into, held, beside) {
     if (!view) return;
     const pos = view.posAtDOM(el);
     const tree = CM.syntaxTree(view.state);
@@ -13615,7 +14049,11 @@
       at = content ? content.from : node.from;
       // The offset a cell carries is counted from the head of the block, so
       // it holds however far the block has travelled since it was drawn.
-      if (into != null) at = Math.min(node.from + into, node.to);
+      // A table's caption is written beside the table and not in it
+      // (`beside`), before it or after: its offset is taken as it is.
+      if (into != null) {
+        at = beside ? Math.max(0, Math.min(node.from + into, view.state.doc.length)) : Math.min(node.from + into, node.to);
+      }
     }
     const sel = view.state.selection;
     view.dispatch({

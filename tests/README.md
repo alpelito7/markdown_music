@@ -8911,6 +8911,246 @@ source of a score.
 Nothing of this round is left standing: its one question was Pending 24,
 and it is settled.
 
+### Tables in the middle of the column, captioned and by number (2026-10-12)
+
+Asked whether a table could be centred, captioned and cited, the answer was
+half a yes: the page did the last two already, Quarto's way (`: The shapes
+{#tbl-shapes}` beside the table, `@tbl-shapes` in the text, "Table 1: The
+shapes" and "Table 1"), with the caption over the table and centred on the
+column and the table at the left under it; the editor drew the caption as
+the line of text it is, colon, label and all, and the reference as written;
+and nothing centred a table. Three ways of leaving it were put to the owner
+on `design/design-table-caption.html`, and he took B and one more thing:
+the table in the middle, its caption over it and centred, and every table
+in the middle for the moment, with a caption or without. (Whether figures
+follow, and whether Quarto's own `fig-align` is to be read, he left open:
+Pending 25.)
+
+The rules are Pandoc's for what a caption is and Quarto's for the label,
+read in `main.lua` of 1.9.37 (`parseTableCaption`, and the `Table` branch
+that makes a float of a caption with a `tbl-` identifier) and in Pandoc's
+`tableCaption`, and then printed by `quarto render` through the extension's
+export on the probes of `tests/tmp/tbl-crossref/rules` (r1 to r7). What was
+measured, the quirks with it:
+
+- The caption is the paragraph before the table, else the one after it,
+  with a blank line between the two or with none. Of a caption on each
+  side the one before is the table's and the other is printed as prose,
+  colon and braces. A caption between two tables is the first one's.
+- It opens with `:`, `Table:` or `table:`. `TABLE:` is prose.
+- The label is the last identifier of the braces the caption ends on, and
+  only where the braces open with an identifier: `{#tbl-x .striped}` is
+  Table 1 with striped rows, `{.striped #tbl-x}` is a striped table with a
+  caption and no number, and a reference to it reads "?@tbl-x". Braces
+  whose identifier is of another kind (`{#other}`) are printed as words of
+  the caption. Of two identifiers the second is the label.
+- A caption that is its label alone (`: {#tbl-only}`) reads "Table 4",
+  with no delimiter, as a figure with no caption does.
+- A fenced div with such a label is a table. With one table in it, its
+  caption is the table's own colon caption or its last paragraph
+  ("Table 6: Paragraph caption of the div."), and with nothing but the
+  table, "Table 7". Tables inside it that carry a label are lettered, "(a)
+  Sub one", and read "Table 8 (a)". A div with a table, its own colon
+  caption and a last paragraph prints both, the paragraph as the div's.
+- A table inside a div that is a figure is lettered too and reads with the
+  figure's number after a table's word, "Table 1 (a)"; a figure inside a
+  table the other way round, "Figure 1 (a)" (this last was left as written
+  by the figures' round of the morning, for want of the table's number).
+- The words are found as a figure's are, with `tbl` for `fig`: "Tabla 1"
+  twice under `lang: es`, and "Cuadro I. Uno" over "cuadro I" for `tbl-title:
+  Cuadro`, `tbl-prefix: cuadro`, `tbl-labels: roman` and `title-delim: "."`.
+- Tables and figures are counted apart.
+
+In the editor the words are in `vscode-mdm/media/mdm-crossref.js`
+(`tableLook`, which is `figureLook` with the kind handed in, and
+`reference`, which takes the tables beside the figures), and which
+paragraph is whose caption is `tableTops` in `main.js`, a walk of the
+blocks of the document and not a search for the label's text, since a
+caption with no label is drawn too. The caption is drawn by the table's
+own widget (`TableWidget`, `.mdm-table-caption`), over the table and
+outside its scroller, so it is as wide as the column and stays put over a
+table that is pushed sideways. Its own lines, and the blank ones between
+the two, are put away with the table's source and come back with it: the
+two are one drawing with one source, a caret in either opens both
+(`groupFrom`, `groupTo`), which is what keeps the label in view whenever
+the table's source is, the owner's word of the same day for a figure's.
+Two blocks drawn as one took three things of the partial redraw:
+`wholeBlocks` widens a change or a caret to the table and its caption
+together (`tableGroups`, by tree); a change is also redrawn over what its
+blocks were before it, so that a caption taken away leaves a table that is
+drawn again; and a caption's words are part of what tells one count from
+another (`key`), since a reference shows them in its tooltip wherever it
+stands (the figures' count takes its words the same way now, and an
+equation's, which is older, does not: Pending 25). A click on the drawn
+caption goes to its words, which are written outside the table, before it
+or after (`beside` in `revealBlock`). Lezer reads a line with no pipe
+straight under a table as one more row, where Pandoc ends the table there:
+a last row of the kind that opens as a caption is the caption, and is left
+out of the rows.
+
+A table inside a figure waits for the figure's number and a figure inside
+a table for the table's, and each count would ask the other for ever: the
+tables are counted without the figures (`tableTops`), the figures ask
+there, and `tableIndex` then gives the tables inside figures their number.
+
+On the page the table is the box that scrolls its own rows, and it is now
+as wide as they are and no wider than the column (`width: fit-content`,
+`max-width: 100%`), with its margins shared out. Quarto writes the caption
+of a labelled table outside the table, in a `figcaption` it spaces in rems,
+which are the root's and not the text's on a page printed into a PDF: the
+stylesheet sets it in the text's own terms, and with that every distance
+around a captioned table was the editor's at the first measurement
+(caption 22.9 px tall on both, 4.8 px from caption to table, 16 px over the
+caption and 20.8 under the table). A caption with no label is Pandoc's
+`<caption>`, inside the table, where it can be no wider than the rows: a
+word to a line over a table of two short columns, or, made wider, a box
+whose rows stand at its left. `mdm-after.lua` takes it out and writes it
+before the table as a block of its own (`.mdm-table-caption`), on a page
+alone, after Quarto has read the braces it may end on.
+
+On paper typeset with LaTeX nothing changed and nothing had to: a table is
+centred there and its caption stands over it, centred (the caption round
+of 2026-09-27 holds that in `render.test.js`).
+
+Tests. In `crossref.test.js`: *every language names a table as Quarto's own
+language file does*, *the header says what a table is called, by the keys
+a figure has with `tbl` for `fig`, and a table's caption opens as Quarto
+printed it* and *a reference to a table prints what Quarto printed for it,
+beside a figure and an equation*. In `webview-markdown.test.js`, on one
+document of twenty tables whose every caption and reference is what Quarto
+printed for it (`tests/tmp/tbl-crossref/fixture`): *a table is captioned by
+the paragraph beside it and numbered where that carries a label, the
+caption over it and every table in the middle of the column*, *a reference
+to a table reads as the page prints it, in the link blue, its tooltip the
+caption, beside a figure and an equation, and its source under the caret*,
+*a table and its caption open together and are put away together, the
+label in view for as long as they are open* and *a caption typed under a
+table is drawn over it, a label numbers it and the tables after it, a
+caption taken away leaves the table bare, and the header names them*, and
+on a smaller one, printed the same way (`rules/r8` beside it), *a reference
+to a table reads in a cell and in a caption as it does in the prose*. In
+`webview-editing.test.js`: *Ctrl+click on a reference to a table brings the
+table into view, and so does a link to its label, the caret staying* and *a
+click on the caption over a table puts the caret in the caption's words,
+written after the table or before it, and a click on a cell in the cell*.
+And in `html.test.js`, the page beside the editor: *a table stands in the
+middle of the column with its caption over it on the page as in the
+editor, numbered alike, and a reference to it prints what the editor prints
+and breaks its paragraph on the same words*, four tables, one of them
+under a caption with no label that is wider than it.
+
+Tests that held the editor or the page to the old way, brought up to this
+one: CT01 names a listing where it named a table (`@lst-brass`, a kind
+still drawn as written); *a reference to a figure reads as the page prints
+it* reads the figure inside a table as "Figure 1 (a)", the table as
+"Table 1" and the two together, where the three were left as written; *a
+table is set on the page and on paper as the editor draws it* held every
+table to the left margin, on both, and holds it to the middle of the
+column; and *the page lowers a subscript, raises a superscript and captions
+a figure as the editor does* looked for a table's caption inside the table,
+and reads the block before it now, and the editor's with it.
+
+Forty-nine mutations on a copy of the tree
+(`tests/tmp/tbl-crossref/mutate.py`; the owner's window loads the real one
+and another session was writing in it, so a mutation goes into the copy,
+and only while the copy is the real file), each against the named tests of
+the files it reaches. Forty-six were caught as the tests stood and three
+were not. Each of the three was a hole in the tests and none a guard too
+many, and all forty-nine are caught now.
+
+- The words, in `mdm-crossref.js`. **TX1** Spanish named "Table" → *every
+  language names a table*, *the header says what a table is called* and *a
+  reference to a table prints*. **TX2** the title read from the figure's
+  key → *the header says*. **TX3** a table looked up among the figures'
+  words → that one and *a reference to a table prints*. **TX4** the tables
+  not handed to `reference` → *a reference to a table prints* and four of
+  the editor's. **TX5** every float taken for a figure → the same, the
+  editor's two tests of a reference and *Ctrl+click on a reference to a
+  table*. **TX6** the prefix read from the title's key → the header's test
+  and the reference's, a figure's and a table's.
+- Which paragraph is a caption, in `tableTops`. **TC1** `TABLE:` taken for
+  one, **TC2** none looked for before the table, **TC3** one that a table
+  has taken, taken again by the next, **TC4** none read out of the last
+  row, **TC6** a label of another kind taken, **TC33** a caption after its
+  table not marked as taken → *a table is captioned*, *a reference to a
+  table reads as the page prints it* and *a table and its caption open
+  together*, the three of them each time. **TC5** a label read from braces
+  that open with a class → the first two. **TC7** the braces left among the
+  caption's words → the three, and *a caption typed under a table*. **TC8**
+  a div's one table not captioned by the div → the first and the third.
+  **TC9** a table inside a table not lettered, **TC10** a table inside a
+  figure left without its number → the first two. **TC11** a figure inside
+  a table not asking the tables → *a reference to a figure reads as the
+  page prints it*. **TC29** a lettered table drawn without its letter → the
+  first and the third. **TC30** a div's number left off its last
+  paragraph, **TC21** the caption left among the rows → the first.
+- The drawing and its source. **TC12** the caption's lines never put away →
+  *a table is captioned* and *a table and its caption open together*.
+  **TC14** the table opened by a caret in its own lines alone, **TC17** a
+  change or a caret not widened to the two (`tableGroups`) → *a table and
+  its caption open together* and *a click on the caption over a table*.
+  **TC15** the caption not drawn → four, the page's among them. **TC16** a
+  table taken for the same drawing whatever its caption, **TC19** the
+  tables' count not asked when a transaction comes, **TC20** the words out
+  of what tells one count from another → *a caption typed under a table*.
+  **TC27**, **TC28** a caption read to the end of its paragraph, or from
+  its head → *a table is captioned*, *a table and its caption open
+  together* and *a caption typed under a table*. **TC22** a click on the
+  caption held inside the table, **TC32** not told from a click on a cell →
+  *a click on the caption over a table*.
+- A reference. **TC23** the table not found, **TC24** a link to a label
+  not tried on the tables, **TC31** a click on the reference not sent to
+  the table → *Ctrl+click on a reference to a table*. **TC25** the link not
+  named for a table → that one and the two tests of a reference, a table's
+  and a figure's. **TC26** the tooltip not asked of the tables → those two.
+- The look. In `style.css`, **TS1** the table at the left and **TS2** the
+  caption at the left → *a table is captioned* and the page's test; **TS3**
+  the caption at the size of the prose → the page's test, which has the
+  two surfaces side by side. In `mdm-look.css`, both copies, **TP1** the
+  table at the left, **TP2** as wide as the column, **TP3** the caption at
+  the left, **TP4** its margins Quarto's, **TP5** its size and its ink the
+  prose's, and in `mdm-after.lua`, both copies, **TL1** the caption left
+  inside the table → the page's test, each of them.
+- **TC13** the blank lines between a caption and its table left in the
+  text when the caption's line is put away → survived, 5 of 5 green. The
+  page's test fails on it and had not been run against it; the editor's
+  own had no way to see it, `sourceLines` reading the lines that carry
+  words. It is a second blank line beside the table, 16px (measured,
+  `probe-tc13.test.js`). *A table is captioned* counts the blank lines
+  that stand two in a row now, which is none, and the mutation is caught
+  by both.
+- **TC18** a change not drawn again over what its blocks were before it →
+  survived, 5 of 5 green: the caption the test took away carried a label,
+  so the count moved and everything was drawn again. *A caption typed
+  under a table* takes away a caption with no label now, and takes the
+  colon off one, where this line alone knows the table has to be drawn
+  again.
+- **TC34** the reference of a cell read without the tables → survived, 5
+  of 5 green: no test wrote a reference to a table inside a table. The new
+  test does, in a cell ("see Table 2 and 2", "Table 1?@tbl-zz") and in a
+  caption ("Table 1: The first, which cites Table 2 and Equation 1"), as
+  Quarto printed the three.
+
+The real `main.js` was written by another session between the two passes;
+the three were run on a copy brought up to it.
+
+Run on this state: `npm run test:fast`, 319 of 319;
+`webview-markdown.test.js` whole, 112 of 112; in `webview-editing.test.js`
+the two tests above and the one of a second click on a drawing, 3 of 3;
+and in `html.test.js` the table's test and the two older ones brought up
+to it, 3 of 3. Run earlier in the round, on the table code as it is and
+before the three tests were widened: `webview-narrow.test.js` whole, 17 of
+17; `webview-scale.test.js` whole, 8 of 8; in `webview-look.test.js` the
+tests named for a table, a caption or a figure, 10 of 10; in
+`webview-editing.test.js` those named for a table, a caption, a
+reference, a figure, a drawing, a second click or being put away, 14 of
+14; `html.test.js` whole, 68 of 70, the two being the older tests above,
+which were then brought up; and in `render.test.js` the tests named for a
+table or a caption, 3 of 3. Not run: the rest of `render.test.js`, the
+rest of `webview-editing.test.js` and of `webview-look.test.js`, and the
+suite. Not seen in a real VS Code window.
+
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -9349,3 +9589,38 @@ and it is settled.
     should, the owner wanted neither that nor the row's caret held down on
     the row: the caret there is as tall as the mark's brackets and stands
     on them, and a test holds it.
+25. Tables by number, left standing (*Tables in the middle of the column,
+    captioned and by number*). A div that is a table and holds more than
+    its one table, two tables with a caption each or a table with its own
+    caption and a last paragraph, has its number before that last
+    paragraph, where it is written and as the prose it is; the page sets
+    that caption over the tables, centred. Not followed in the editor:
+    `tbl-cap-location` (the page sets the caption under the table for
+    `bottom`, the editor over it whatever the header says), a caption
+    given in an attribute (`tbl-cap="..."`, `tbl-subcap`), and
+    `tbl-colwidths`. A div that holds a figure and a table letters them in
+    one run on the page, (a), (b), and each kind apart here. Braces at the
+    end of a caption whose identifier is of another kind are printed as
+    written here, classes and all, where the page prints the identifier
+    alone (`{#other .striped}` reads "{#other}"). A line with no pipe
+    straight under a table that is no caption ("some text") is one more
+    row in the editor and a paragraph after the table on the page: Lezer
+    reads GFM, where a table goes on to the first blank line, and Pandoc
+    asks a row for a pipe (older than this round; a caption written there
+    is the one case read as Pandoc reads it). `Term`, a blank line and
+    `: definition` is a list of definitions on the page and two lines of
+    text in the editor (older too; with a table straight after, both read
+    the colon's line as the table's caption). In a callout the middle of
+    a table stands 2 px apart on the two surfaces, the callout's own box.
+    The tooltip of a reference to an equation shows the formula as it was
+    when the reference was last drawn: a figure's and a table's words are
+    part of what redraws the document, an equation's source is not (so
+    since 2026-09-30). And two things the owner left open on 2026-10-12:
+    every table is centred "for the moment"; and the figures stand at the
+    left, with their captions, on a page that does not follow Quarto's
+    own `fig-align` (`left`, `center`, `right`, in the header for every
+    figure or on one: Quarto writes its class on the figure and
+    `mdm-look.css` sets every picture at the left all the same; measured
+    that day), which the editor does not read either. Quarto has no such
+    option for a table on a page or on paper: its `tbl-align` is read for
+    Word and OpenDocument alone.

@@ -349,6 +349,137 @@ test("a reference to a figure prints what Quarto printed for it, beside an equat
   assert.equal(X.reference("[@eq-x; @fig-a]", equations, X.look("")), null);
 });
 
+// ---------- Tables by number ----------
+//
+// A table whose caption carries a label (`: The shapes {#tbl-shapes}`) is
+// numbered as a figure is, by Quarto on the page and by the same rules here
+// (the owner, 2026-10-12: tables centred, captioned and cited). Every
+// expectation is what `quarto render` printed on 1.9.37 that day through the
+// extension's export, read out of the page's `figcaption` and its
+// `a.quarto-xref` on the probes of tests/tmp/tbl-crossref/rules.
+
+test("every language names a table as Quarto's own language file does", (t) => {
+  const dir = quartoLanguages();
+  if (!dir) {
+    t.skip("no Quarto on the PATH");
+    return;
+  }
+  const files = fs.readdirSync(dir).filter((f) => /^_language(?:-.+)?\.yml$/.test(f));
+  assert.ok(files.length > 30, "Quarto's language files were not found in " + dir);
+  const seen = new Set();
+  for (const file of files) {
+    const tag = file.replace(/^_language-?/, "").replace(/\.yml$/, "");
+    seen.add(tag);
+    const lines = fs.readFileSync(path.join(dir, file), "utf8").split(/\r?\n/);
+    // No file has a word of its own for a reference to a table either.
+    assert.ok(!lines.some((l) => /^crossref-tbl-prefix:/.test(l)), file + " has a crossref-tbl-prefix");
+    const line = lines.find((l) => /^crossref-tbl-title:/.test(l));
+    if (!line) {
+      assert.ok(!Object.prototype.hasOwnProperty.call(X.TABLE_TITLES, tag), tag + " has no title in Quarto");
+      continue;
+    }
+    const value = /^crossref-tbl-title:\s*"([^"]*)"/.exec(line) || /^crossref-tbl-title:\s*(\S+)/.exec(line);
+    assert.equal(X.TABLE_TITLES[tag], value[1], "the title of " + (tag || "English"));
+  }
+  for (const tag of Object.keys(X.TABLE_TITLES)) assert.ok(seen.has(tag), tag + " is not one of Quarto's languages");
+});
+
+test("the header says what a table is called, by the keys a figure has with `tbl` for `fig`, and a table's caption opens as Quarto printed it", () => {
+  assert.deepEqual(X.tableLook(""), { title: "Table", prefix: "Table", labels: "arabic", delim: ":" });
+  assert.deepEqual(X.tableLook("lang: es\n"), { title: "Tabla", prefix: "Tabla", labels: "arabic", delim: ":" });
+  assert.equal(X.tableLook("lang: de-AT\n").title, "Tabelle");
+  assert.equal(X.tableLook("lang: fr-CA\n").title, "Table");
+  // A figure's keys are not a table's, nor a table's a figure's.
+  assert.equal(X.tableLook("crossref:\n  fig-title: \"Lámina\"\n  fig-labels: roman\n").title, "Table");
+  assert.equal(X.tableLook("crossref:\n  fig-title: \"Lámina\"\n  fig-labels: roman\n").labels, "arabic");
+  assert.equal(X.figureLook("crossref:\n  tbl-title: \"Cuadro\"\n  tbl-labels: roman\n").title, "Figure");
+  assert.equal(X.figureLook("crossref:\n  tbl-title: \"Cuadro\"\n  tbl-labels: roman\n").labels, "arabic");
+  // As a figure's, the title renames the captions alone and the language's
+  // names both.
+  assert.deepEqual(X.tableLook("crossref:\n  tbl-title: \"Cuadro\"\n"), { title: "Cuadro", prefix: "Table", labels: "arabic", delim: ":" });
+  const tabla = X.tableLook("language:\n  crossref-tbl-title: \"Cuadro\"\n");
+  assert.equal(tabla.title, "Cuadro");
+  assert.equal(tabla.prefix, "Cuadro");
+  // The probe's header: "Cuadro I. Uno" over the table, "cuadro I" in the
+  // text.
+  const own = "lang: es\ncrossref:\n  tbl-title: Cuadro\n  tbl-prefix: cuadro\n  tbl-labels: roman\n  title-delim: \".\"\n";
+  assert.deepEqual(X.tableLook(own), { title: "Cuadro", prefix: "cuadro", labels: "roman", delim: "." });
+  const opens = (header, n, captioned) => {
+    const look = X.tableLook(header);
+    return X.caption(X.number(n, look.labels), look, captioned);
+  };
+  assert.equal(opens("", 1, true), "Table 1: ");
+  assert.equal(opens("lang: es\n", 2, true), "Tabla 2: ");
+  assert.equal(opens(own, 2, true), "Cuadro II. ");
+  // A table whose caption is its label alone, `: {#tbl-only}`, and a div
+  // with no caption: the number and no delimiter.
+  assert.equal(opens("", 4, false), "Table 4");
+});
+
+test("a reference to a table prints what Quarto printed for it, beside a figure and an equation", () => {
+  // The numbers the probes' tables took: `tbl-suba` is the first table
+  // inside the eighth, a div of two; `tbl-infig` is a table inside the
+  // first figure, and reads with the figure's number after a table's word;
+  // `fig-intbl` a figure inside the first table, the other way round; no
+  // table carries `tbl-five` (written under `TABLE:`, which is no caption),
+  // `tbl-sixa` (a second caption, after a table that had one before it) or
+  // `tbl-first` (the first of two identifiers). Bold is **.
+  const equations = new Map([["eq-a", "1"]]);
+  const tables = new Map([
+    ["tbl-one", "1"], ["tbl-b", "2"], ["tbl-panel", "8"], ["tbl-suba", "8 (a)"], ["tbl-infig", "1 (a)"], ["tbl-lost", null],
+  ]);
+  const figures = new Map([["fig-a", "1"], ["fig-intbl", "1 (a)"]]);
+  const printed = (raw, header) => {
+    const parts = X.reference(
+      raw, equations, X.look(header || ""),
+      { numbers: figures, prefix: X.figureLook(header || "").prefix },
+      { numbers: tables, prefix: X.tableLook(header || "").prefix }
+    );
+    return parts && parts.map((p) => (p.kind === "missing" ? "**" + p.text + "**" : p.text)).join("");
+  };
+  const rows = [
+    ["@tbl-one", "Table 1"],
+    ["[@tbl-one]", "Table 1"],
+    ["-@tbl-one", "1"],
+    ["@Tbl-b", "Table 2"],
+    ["[Tab. @tbl-one]", "Tab. 1"],
+    ["[@tbl-one; @tbl-b]", "Table 1, Table 2"],
+    ["@tbl-panel", "Table 8"],
+    ["@tbl-suba", "Table 8 (a)"],
+    ["@tbl-infig", "Table 1 (a)"],
+    ["@fig-intbl", "Figure 1 (a)"],
+    ["@tbl-five", "**?@tbl-five**"],
+    ["[@tbl-one; @tbl-sixa]", "Table 1**?@tbl-sixa**"],
+    ["[@tbl-b; @fig-a; @eq-a]", "Table 2, Figure 1, Equation 1"],
+    ["[@tbl-one, p. 3]", "Table 1"],
+    ["[@tbl-one; @knuth84]", "Table 1"],
+    // Not the editor's to print: a table it could not number, a listing, a
+    // section.
+    ["@tbl-lost", null],
+    ["[@tbl-one; @lst-x]", null],
+    ["[@tbl-one; @sec-x]", null],
+    ["@plain", null],
+  ];
+  for (const [raw, expected] of rows) assert.equal(printed(raw), expected, raw);
+  // The header's words: the probe in Spanish, and the one that names them.
+  assert.equal(printed("[@tbl-b; @fig-a; @eq-a]", "lang: es\n"), "Tabla 2, Figura 1, Ecuación 1");
+  const own = "lang: es\ncrossref:\n  tbl-title: Cuadro\n  tbl-prefix: cuadro\n";
+  assert.equal(printed("@tbl-one", own), "cuadro 1");
+  assert.equal(printed("@Tbl-b", own), "Cuadro 2");
+  assert.equal(printed("[véase @tbl-one, p. 3]", own), "véase 1");
+  // A piece that names a table says so, for the click that goes to it.
+  const float = (map, word) => ({ numbers: map, prefix: word });
+  assert.deepEqual(X.reference("[@tbl-one; @fig-a]", equations, X.look(""), float(figures, "Figure"), float(tables, "Table")), [
+    { kind: "link", text: "Table 1", label: "tbl-one", ref: "tbl" },
+    { kind: "text", text: ", " },
+    { kind: "link", text: "Figure 1", label: "fig-a", ref: "fig" },
+  ]);
+  // A caller that numbers no tables leaves a table's reference alone, alone
+  // or beside a figure.
+  assert.equal(X.reference("@tbl-one", equations, X.look(""), float(figures, "Figure")), null);
+  assert.equal(X.reference("[@fig-a; @tbl-one]", equations, X.look(""), float(figures, "Figure")), null);
+});
+
 // ---------- Sections by number ----------
 //
 // `number-sections: true` and the keys beside it, as Quarto 1.9.37 printed

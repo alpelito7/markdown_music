@@ -2089,9 +2089,25 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
 }
+/* Every table in the middle of the column (the owner, 2026-10-12, with B on
+   design/design-table-caption.html: until then a table stood at the left).
+   One wider than the column has no margin to share out and starts at the
+   left, where its box scrolls it from. */
 #app .mdm-table table {
   border-collapse: collapse;
   border-spacing: 0;
+  margin: 0 auto;
+}
+/* The caption of a table, over it and centred on the column, in the size
+   and the ink of a figure's (.mdm-figcaption): `: The shapes {#tbl-shapes}`
+   written beside the table, drawn here by the table's widget with its
+   number before it where it carries a label ("Table 1: The shapes"). It is
+   outside the scroller, so it stays put over a table pushed sideways. */
+#app .mdm-table-caption {
+  text-align: center;
+  font-size: 0.956em;
+  line-height: 1.5;
+  color: var(--mdm-ink);
 }
 #app .mdm-table th,
 #app .mdm-table td {

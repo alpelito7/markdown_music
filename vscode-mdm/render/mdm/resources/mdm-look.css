@@ -343,7 +343,8 @@ body main.content .quarto-figure > figure.quarto-float > div[aria-describedby] {
    so the caption came out of the print at 0.825 of the text (13.2px,
    measured in the PDF and in the page under print media, 2026-09-28). */
 body figcaption,
-body caption {
+body caption,
+body .mdm-table-caption {
   color: var(--mdm-ink);
   font-size: 0.956em;
 }
@@ -396,8 +397,12 @@ body main.content th {
    as the text it is, colon and all, under the table. */
 body main.content table {
   display: block;
-  width: auto;
-  margin: 0 0 1em;
+  /* In the middle of the column, as the editor stands every table since
+     2026-10-12 (`#app .mdm-table table`): the box is as wide as its rows
+     and no wider than the column, where it scrolls them. */
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 1em;
   padding: 0.3em 0;
   border: none;
   overflow-x: auto;
@@ -431,8 +436,25 @@ body main.content table > thead > tr > th {
 body main.content table > tbody > tr:last-child > td {
   border-bottom: none;
 }
-/* The caption over the column and not over the table's own width, where a
-   table of two short columns would break it into a row a word long. */
+/* The caption of a table, over it and centred on the column, as the editor
+   draws it (`#app .mdm-table-caption`): Quarto's for a table whose caption
+   carries a label, a `figcaption` before the table's box, and the block
+   mdm-after.lua makes of a caption with none, which Pandoc writes inside
+   the table, where it could be no wider than the rows. Quarto spaces the
+   first in rems, which are the root's and not the text's on a page printed
+   into a PDF (the caption's own size above has the measurement). A table
+   inside a div that is a table or a figure has the same caption, lettered,
+   which Quarto set at the left inside a figure. */
+body main.content figure.quarto-float-tbl > figcaption,
+body main.content figure.quarto-subfloat-tbl > figcaption,
+body main.content .mdm-table-caption {
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  line-height: 1.5;
+}
+/* The caption left inside a table, should one get there: over the column
+   and not over the table's own width. */
 body main.content table > caption {
   display: block;
 }

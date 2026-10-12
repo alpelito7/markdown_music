@@ -4320,7 +4320,13 @@ test("a table is set on the page and on paper as the editor draws it: its width,
       const where = face + ", table " + (t + 1);
       assert.equal(p.frame, "0px 0px", where + ": the page draws a rule over or under the table");
       assert.equal(e.frame, "0px 0px", where + ": the editor's table has a frame");
-      assert.ok(Math.abs(p.left) <= 0.5 && Math.abs(e.left) <= 0.5, where + ": the table is not on the left margin: page " + p.left + ", editor " + e.left);
+      // In the middle of the column on both, the owner's centred tables of
+      // 2026-10-12: a table stood on the left margin until then, and this
+      // line held it there.
+      for (const [name, side, column] of [["the page", p, exported.column], ["the editor", e, editor.column]]) {
+        const off = Math.round((side.left + side.width / 2 - column / 2) * 100) / 100;
+        assert.ok(Math.abs(off) <= 0.5, where + ": the table stands " + off + " px off the middle of the column on " + name);
+      }
       assert.ok(Math.abs(p.width - e.width) <= 0.5, where + ": the page's table is " + p.width + " px wide and the editor's " + e.width);
       assert.equal(p.cells.length, e.cells.length, where + ": the cells");
       p.cells.forEach((pc, i) => {
@@ -4346,8 +4352,9 @@ test("a table is set on the page and on paper as the editor draws it: its width,
       );
     });
     // What the design is, said once and not only as "the same on both": a
-    // short table is as wide as what it holds, its first cell starts on the
-    // margin, the head has the stronger rule and the last row none.
+    // short table is as wide as what it holds and stands in the middle of
+    // the column (above), its first cell has no padding on its left, the
+    // head has the stronger rule and the last row none.
     const short = exported.tables[0];
     assert.ok(short.width < 300, face + ": a table of three short columns is " + short.width + " px wide");
     assert.match(short.cells[0].pad, /^\S+ \S+ \S+ 0px$/, face + ": the first cell is padded on its left: " + short.cells[0].pad);
@@ -4891,7 +4898,9 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
             sup: "sup",
             img: "figure img",
             caption: "figure figcaption",
-            tableCaption: "table caption",
+            // A caption with no label is taken out of its table and
+            // written before it (mdm-after.lua, 2026-10-12).
+            tableCaption: ".mdm-table-caption",
           }),
         inlineMeasures.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
       );
@@ -4925,6 +4934,7 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
             sup: "sup.mdm-sup",
             img: ".mdm-figure img",
             caption: ".mdm-figcaption",
+            tableCaption: ".mdm-table-caption",
           }),
         inlineMeasures.toString().replace(/^[^{]*\{/, "").replace(/\}\s*$/, "")
       );
@@ -4951,7 +4961,8 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
     );
   }
   // The caption in the ink of the prose, on either side and on both
-  // surfaces, and a table's caption on the page with it: B on
+  // surfaces, and a table's caption with it, which the editor draws too
+  // since 2026-10-12: B on
   // design/design-caption-colour.html, the owner's pick of 2026-09-27. It
   // was Quarto's grey, rgb(90, 101, 112) on every side and 2.71:1 on the
   // dark page, and only the light side was held.
@@ -4967,6 +4978,7 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
     assert.equal(page.proseColor, ink, "the page's prose on the " + side + " side");
     assert.equal(page.captionColor, ink, "the page's caption on the " + side + " side");
     assert.equal(page.tableCaptionColor, ink, "the page's table caption on the " + side + " side");
+    assert.equal(own.tableCaptionColor, ink, "the editor's table caption on the " + side + " side");
   }
 });
 
@@ -5932,6 +5944,221 @@ test("a numbered figure opens its caption on the page as the editor opens it and
   assert.ok(pageText && editorText, "the paragraph of references was not found");
   assert.equal(editorText.text, pageText.text, "the editor prints other words than the page");
   assert.ok(editorText.ends.length >= 3, "the paragraph is not long enough to test: " + JSON.stringify(editorText.ends));
+  assert.deepEqual(editorText.ends, pageText.ends);
+});
+
+// ---------- Tables by number, page against editor ----------
+
+// A table is captioned by the paragraph beside it that opens with a colon
+// and numbered where that ends on a label, on the page by Quarto and in the
+// editor by the same rules (Tables by number in webview-markdown.test.js),
+// and the owner's pick of 2026-10-12, B on design/design-table-caption.html,
+// is the same on both: every table in the middle of the column, its caption
+// over it and centred on the column, in a figure's size and ink. The page
+// had the caption over the table already and the table at the left; and a
+// caption with no label stood inside the table, where it can be no wider
+// than the rows (mdm-after.lua takes it out, and the stylesheet sets the two
+// kinds alike). The third table here is that case: a caption wider than its
+// two short columns.
+const TABLES_DOC = `Before the tables, a line of prose to measure from.
+
+| Note | Name | Duration |
+|---|---|---|
+| a | whole note | 4 beats |
+| b | half note | 2 beats |
+
+: A numbered caption over the table, long enough to run over to a second row of the column of the page, so that the word it breaks on can be read on both surfaces alike and held there. {#tbl-shapes}
+
+Between the first two, a line of prose to measure from.
+
+: Written before its table {#tbl-before}
+
+| A | B |
+|---|---|
+| x | y |
+
+Between the next two, a line of prose to measure from.
+
+| L | R |
+|---|---|
+| 1 | 2 |
+
+: A caption with no label, wider than the table it stands over
+
+Before the bare one, a line of prose to measure from.
+
+| No | caption |
+|---|---|
+| m | n |
+
+The relation between the tables: @tbl-shapes is the first of them and -@tbl-shapes its number alone, [Tab. @tbl-before] is written before its table, and [@tbl-shapes; @tbl-before] and [@tbl-shapes; @tbl-zz] name them again beside a label that nothing carries, in a paragraph long enough to run over several rows of the column.
+`;
+
+// Every table of a surface: what its caption says and the words its rows
+// end on, how far the middle of the table stands from the middle of the
+// column and how wide it is, where the caption's box stands and how its
+// text is set in it, the air over the table (over its caption where it has
+// one), between the caption and the table and under the table, and the
+// caption's size and ink. `sel` names the table, the blocks of prose and
+// what is no prose, and how to find a table's rows and its caption.
+const TABLE_BOXES = function (arg) {
+  const sel = arg.sel;
+  const round = (x) => Math.round(x * 10) / 10;
+  const blocks = Array.from(document.querySelectorAll(sel.block)).filter((b) => b.textContent.trim() && !b.closest(sel.inside));
+  const column = blocks[0].getBoundingClientRect();
+  const middle = column.left + column.width / 2;
+  return Array.from(document.querySelectorAll(sel.table)).map((table) => {
+    const rows = eval("(" + sel.rows + ")")(table);
+    const caption = eval("(" + sel.caption + ")")(table);
+    const box = caption ? caption.getBoundingClientRect() : null;
+    const top = box ? box.top : rows.top;
+    const above = blocks.filter((b) => b.getBoundingClientRect().bottom <= top + 1).pop();
+    const below = blocks.find((b) => b.getBoundingClientRect().top >= rows.bottom - 1);
+    const read = caption ? Object.values(eval("(" + arg.ends + ")")([caption]))[0] : null;
+    return {
+      caption: read ? read.text : null,
+      ends: read ? read.ends : null,
+      off: round(rows.left + rows.width / 2 - middle),
+      width: round(rows.width),
+      captionOff: box ? round(box.left + box.width / 2 - middle) : null,
+      captionWidth: box ? round(box.width) : null,
+      align: caption ? getComputedStyle(caption).textAlign : null,
+      above: above ? round(top - above.getBoundingClientRect().bottom) : null,
+      gap: box ? round(rows.top - box.bottom) : null,
+      below: below ? round(below.getBoundingClientRect().top - rows.bottom) : null,
+      size: caption ? getComputedStyle(caption).fontSize : null,
+      ink: caption ? getComputedStyle(caption).color : null,
+    };
+  });
+}.toString();
+
+test("a table stands in the middle of the column with its caption over it on the page as in the editor, numbered alike, and a reference to it prints what the editor prints and breaks its paragraph on the same words", { skip }, async () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
+  fs.writeFileSync(path.join(DIR, "tables.mdm"), "---\ntitle: Tables\nfilters:\n  - mdm\n---\n\n" + TABLES_DOC);
+  const r = spawnSync(MDM, ["render", "tables.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // The one label nothing carries, and nothing else, is warned of.
+  const warned = (r.stderr + r.stdout).replace(/\x1b\[[0-9;]*m/g, "").match(/Unable to resolve crossref @\S+/g) || [];
+  assert.deepEqual(Array.from(new Set(warned)), ["Unable to resolve crossref @tbl-zz"]);
+  const page = await readCiting(
+    "file://" + path.join(DIR, "tables.html"),
+    (arg) => {
+      const ps = Array.from(document.querySelectorAll("main.content p"));
+      return {
+        boxes: eval("(" + arg.boxes + ")")({
+          ends: arg.ends,
+          sel: {
+            table: "main.content table",
+            block: "main.content p",
+            inside: "table, figure, .mdm-table-caption",
+            rows: ((t) => {
+              const head = (t.querySelector("thead") || t.querySelector("tbody")).getBoundingClientRect();
+              return { left: head.left, width: head.width, top: head.top, bottom: t.querySelector("tbody").getBoundingClientRect().bottom };
+            }).toString(),
+            caption: ((t) => {
+              const float = t.closest("figure");
+              if (float && float.querySelector(":scope > figcaption")) return float.querySelector(":scope > figcaption");
+              const before = t.previousElementSibling;
+              return before && before.classList.contains("mdm-table-caption") ? before : null;
+            }).toString(),
+          },
+        }),
+        // No caption is left inside a table, where it could be no wider
+        // than the rows.
+        inside: document.querySelectorAll("main.content table > caption").length,
+        refs: Array.from(document.querySelectorAll("main.content a.quarto-xref")).map((a) => a.textContent + " " + a.getAttribute("href")),
+        missing: Array.from(document.querySelectorAll("main.content p strong")).map((x) => x.textContent),
+        labels: /\{#tbl-/.test(document.querySelector("main.content").textContent),
+        lines: eval("(" + arg.ends + ")")(ps.filter((p) => p.textContent.startsWith("The relation"))),
+      };
+    },
+    { boxes: TABLE_BOXES, ends: LINE_ENDS }
+  );
+  assert.equal(page.inside, 0, "a caption is still written inside its table");
+  assert.deepEqual(page.refs, [
+    "Table 1 #tbl-shapes",
+    "1 #tbl-shapes",
+    "Tab. 2 #tbl-before",
+    "Table 1 #tbl-shapes",
+    "Table 2 #tbl-before",
+    "Table 1 #tbl-shapes",
+  ]);
+  assert.deepEqual(page.missing, ["?@tbl-zz"]);
+  assert.equal(page.labels, false, "a label is printed on the page");
+
+  const { open: openEditor } = require("./webview/helpers.js");
+  const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" };
+  const h = await openEditor({ text: TABLES_DOC, seed: { settings }, scores: 0, height: 1400 });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1400 });
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await h.page.mouse.click(2, 2);
+    await h.page.evaluate(() => document.fonts.ready);
+    await new Promise((res) => setTimeout(res, 500));
+    editor = await h.page.evaluate(
+      (arg) => ({
+        boxes: eval("(" + arg.boxes + ")")({
+          ends: arg.ends,
+          sel: {
+            table: "#app .mdm-table",
+            block: "#app .cm-content > .cm-line",
+            inside: ".mdm-table",
+            rows: ((w) => w.querySelector("table").getBoundingClientRect()).toString(),
+            caption: ((w) => w.querySelector(".mdm-table-caption")).toString(),
+          },
+        }),
+        refs: Array.from(document.querySelectorAll("#app .mdm-eqref")).map((e) => e.textContent),
+        lines: eval("(" + arg.ends + ")")(Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => l.textContent.startsWith("The relation"))),
+      }),
+      { boxes: TABLE_BOXES, ends: LINE_ENDS }
+    );
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  // The same four tables on both: the numbered one, whose caption runs over
+  // a row, the one captioned before it, the one whose caption has no label
+  // and is wider than it, and the bare one.
+  assert.deepEqual(editor.boxes.map((b) => b.caption), page.boxes.map((b) => b.caption));
+  // (LINE_ENDS reads a caption with its spaces made one kind.)
+  assert.deepEqual(editor.boxes.map((b) => b.caption && b.caption.slice(0, 26)), [
+    "Table 1: A numbered captio", "Table 2: Written before it", "A caption with no label, w", null,
+  ]);
+  assert.ok(page.boxes[0].ends.length >= 1, "the numbered caption does not run over a row on the page: " + JSON.stringify(page.boxes[0]));
+  assert.ok(page.boxes[2].captionWidth > 3 * page.boxes[2].width, "the third caption is no wider than its table: " + JSON.stringify(page.boxes[2]));
+  for (let i = 0; i < page.boxes.length; i++) {
+    const [own, printed] = [editor.boxes[i], page.boxes[i]];
+    for (const [name, box] of [["the page", printed], ["the editor", own]]) {
+      // In the middle of the column, the table and what stands over it.
+      assert.ok(Math.abs(box.off) <= 0.5, "table " + i + " stands " + box.off + " px off the middle of the column on " + name);
+      if (box.caption === null) continue;
+      assert.ok(Math.abs(box.captionOff) <= 0.5, "the caption of table " + i + " stands " + box.captionOff + " px off the middle on " + name);
+      assert.equal(box.align, "center", "the caption of table " + i + " on " + name);
+      assert.ok(box.gap >= 0, "the caption of table " + i + " is not over it on " + name + ": " + box.gap);
+    }
+    assert.deepEqual(own.ends, printed.ends, "the caption of table " + i + " breaks elsewhere in the editor");
+    for (const key of ["width", "captionWidth", "above", "gap", "below"]) {
+      if (printed[key] === null && own[key] === null) continue;
+      assert.ok(Math.abs(own[key] - printed[key]) <= 1, key + " of table " + i + " is " + printed[key] + " on the page and " + own[key] + " in the editor");
+    }
+    assert.equal(own.size, printed.size, "the size of the caption of table " + i);
+    assert.equal(own.ink, printed.ink, "the ink of the caption of table " + i);
+  }
+  // A caption is as wide as the column, whatever the table under it, and a
+  // table with one keeps under it the air of a table with none.
+  for (const [name, boxes] of [["the page", page.boxes], ["the editor", editor.boxes]]) {
+    assert.ok(Math.abs(boxes[2].captionWidth - boxes[0].captionWidth) <= 0.5, "the captions are not one width on " + name);
+    assert.ok(Math.abs(boxes[0].below - boxes[3].below) <= 0.5, "below is " + boxes[3].below + " without a caption and " + boxes[0].below + " with one on " + name);
+  }
+  // And the references: the same words, on the same rows.
+  assert.deepEqual(editor.refs, ["Table 1", "1", "Tab. 2", "Table 1, Table 2", "Table 1?@tbl-zz"]);
+  const pageText = Object.values(page.lines)[0];
+  const editorText = Object.values(editor.lines)[0];
+  assert.ok(pageText && editorText, "the paragraph of references was not found");
+  assert.equal(editorText.text, pageText.text, "the editor prints other words than the page");
+  assert.ok(editorText.ends.length >= 2, "the paragraph is not long enough to test: " + JSON.stringify(editorText.ends));
   assert.deepEqual(editorText.ends, pageText.ends);
 });
 

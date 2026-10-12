@@ -2747,6 +2747,457 @@ test("an open picture shows its attributes wherever the caret stands in it, a fi
   }
 });
 
+// ---------- Tables by number ----------
+//
+// A table is captioned by the paragraph beside it that opens with a colon,
+// and numbered where that caption ends on a label: "Table 1: ..." over the
+// table and "Table 1" for `@tbl-x`, as the page prints them, where Quarto
+// does both (the owner, 2026-10-12: tables centred, captioned and cited,
+// with the caption over the table, B on design/design-table-caption.html).
+// The words are held against Quarto in crossref.test.js; what is held here
+// is which paragraph the editor takes for a table's caption, what it draws
+// of it and where, and that the count follows the document. Every caption
+// and every reference below is what `quarto render` printed for this
+// document on 1.9.37 that day, through the extension's export
+// (tests/tmp/tbl-crossref/fixture), and html.test.js sets the two surfaces
+// side by side on one like it.
+const TABLE = (name) => "| " + name + " | x |\n|---|---|\n| r | y |\n";
+const TABLES =
+  "Opening.\n\n" +
+  TABLE("T1") + "\n: The first, *after* its table {#tbl-one}\n\n" +
+  "Between.\n\n" +
+  ": The second, before {#tbl-two}\n\n" + TABLE("T2") + "\n" +
+  "Table: The third {#tbl-three}\n\n" + TABLE("T3") + "\n: A second caption {#tbl-lost}\n\n" +
+  "Prose.\n\n" +
+  TABLE("T4") + "\n: Between two {#tbl-four}\n\n" + TABLE("T5") + "\n" +
+  "Prose.\n\n" +
+  TABLE("T6") + ": No blank line {#tbl-six}\n\n" +
+  TABLE("T7") + "\n: No label\n\n" +
+  TABLE("T8") + "\n: Another kind {#other}\n\n" +
+  TABLE("T9") + "\n: Classes only {.striped}\n\n" +
+  TABLE("T10") + "\n: {#tbl-only}\n\n" +
+  TABLE("T11") + "\nTABLE: Not a caption {#tbl-upper}\n\n" +
+  "> " + TABLE("T12").replace(/\n(?=.)/g, "\n> ") + ">\n> : In a quote {#tbl-quote}\n\n" +
+  "::: {#tbl-div}\n" + TABLE("T13") + "\nThe div's paragraph.\n:::\n\n" +
+  "::: {#tbl-bare}\n" + TABLE("T14") + ":::\n\n" +
+  "::: {#tbl-panel}\n" + TABLE("T15") + "\n: Sub one {#tbl-suba}\n\n" + TABLE("T16") + "\n: Sub two {#tbl-subb}\n\nPanel caption.\n:::\n\n" +
+  "::: {#fig-holder}\n" + TABLE("T17") + "\n: In a figure {#tbl-infig}\n\nFigure caption.\n:::\n\n" +
+  TABLE("T18") + "\nLast.\n\n" +
+  ": Straight over it, no blank line {#tbl-over}\n" + TABLE("T19") + "\n" +
+  TABLE("T20") + "\n: Class first {.striped #tbl-late}\n\n" +
+  "$$\na = b\n$$ {#eq-x}\n\n" +
+  "Refs: @tbl-one; -@tbl-one; [Tab. @tbl-two]; @Tbl-three; [@tbl-four; @tbl-six]; [@tbl-one; @tbl-zz]; @tbl-only; @tbl-quote; " +
+  "@tbl-div; @tbl-bare; @tbl-panel; @tbl-suba; @tbl-subb; @tbl-infig; @fig-holder; [@tbl-one; @eq-x]; @tbl-over.\n\n" +
+  "Nothing carries: @tbl-lost; @tbl-upper; @tbl-five; @tbl-late.\n";
+
+// Every drawn table by the first cell of its head, with the caption drawn
+// over it (null for a table with none), how many rows its body has, and
+// how far its middle and its caption's stand from the middle of the block
+// they are drawn in.
+function tablesNow(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-table")).map((w) => {
+      const box = w.getBoundingClientRect();
+      const table = w.querySelector("table").getBoundingClientRect();
+      const cap = w.querySelector(".mdm-table-caption");
+      const words = cap ? document.createRange() : null;
+      if (words) words.selectNodeContents(cap);
+      const ink = words ? words.getBoundingClientRect() : null;
+      const middle = box.left + box.width / 2;
+      return {
+        head: w.querySelector("th").textContent,
+        caption: cap ? cap.textContent : null,
+        rows: w.querySelectorAll("tbody tr").length,
+        off: Math.round((table.left + table.width / 2 - middle) * 10) / 10,
+        captionOff: ink ? Math.round((ink.left + ink.width / 2 - middle) * 10) / 10 : null,
+        over: cap ? cap.getBoundingClientRect().bottom <= table.top + 0.5 : null,
+      };
+    })
+  );
+}
+// A reference to a table is the widget an equation's is (eqRefs), with the
+// table it leads to named on its link.
+function tblRefs(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-eqref")).map((e) => ({
+      text: e.textContent,
+      tables: Array.from(e.querySelectorAll(".mdm-eqref-link[data-mdm-tbl]")).map((l) => l.getAttribute("data-mdm-tbl")),
+      figures: Array.from(e.querySelectorAll(".mdm-eqref-link[data-mdm-fig]")).map((l) => l.getAttribute("data-mdm-fig")),
+      equations: Array.from(e.querySelectorAll(".mdm-eqref-link[data-mdm-eq]")).map((l) => l.getAttribute("data-mdm-eq")),
+      missing: Array.from(e.querySelectorAll(".mdm-eqref-missing")).map((l) => l.textContent),
+      title: e.title,
+    }))
+  );
+}
+// The lines of source on screen, the blank ones aside.
+function sourceLines(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .cm-content > .cm-line")).map((l) => l.textContent).filter((t) => t.trim())
+  );
+}
+
+test("a table is captioned by the paragraph beside it and numbered where that carries a label, the caption over it and every table in the middle of the column", { skip }, async () => {
+  const h = await open({ text: TABLES, scores: 0, height: 5200 });
+  try {
+    await reading(h.page);
+    const drawn = await tablesNow(h.page);
+    // Table by table, as the page: a caption after its table, one before,
+    // one that opens with "Table:", and a second caption, after a table
+    // that had one before it, which is prose. A caption between two tables
+    // is the first one's. One with no blank line over it, which the parser
+    // hands over as a last row of the table. One with no label has no
+    // number, one whose label is of another kind keeps its braces, one with
+    // classes alone loses them, and a label alone is the number alone.
+    // "TABLE:" is no caption. Then in a quote; a div that is a table, by
+    // its last paragraph and with none; two tables in such a div, lettered;
+    // and one in a figure. Last, a caption straight over its table with no
+    // blank line between, and one whose braces open with a class, which
+    // name nothing: the label has to come first in them.
+    assert.deepEqual(drawn.map((t) => [t.head, t.caption]), [
+      ["T1", "Table\u00a01: The first, after its table"],
+      ["T2", "Table\u00a02: The second, before"],
+      ["T3", "Table\u00a03: The third"],
+      ["T4", "Table\u00a04: Between two"],
+      ["T5", null],
+      ["T6", "Table\u00a05: No blank line"],
+      ["T7", "No label"],
+      ["T8", "Another kind {#other}"],
+      ["T9", "Classes only"],
+      ["T10", "Table\u00a06"],
+      ["T11", null],
+      ["T12", "Table\u00a07: In a quote"],
+      ["T13", "Table\u00a08: The div\u2019s paragraph."],
+      ["T14", "Table\u00a09"],
+      ["T15", "(a) Sub one"],
+      ["T16", "(b) Sub two"],
+      ["T17", "(a) In a figure"],
+      ["T18", null],
+      ["T19", "Table\u00a011: Straight over it, no blank line"],
+      ["T20", "Class first"],
+    ]);
+    // The caption written under a table with no blank line is no row of it.
+    assert.deepEqual(drawn.map((t) => t.rows), new Array(20).fill(1));
+    // Over its table, and both in the middle of the block they are drawn
+    // in, which is the column or what a quote leaves of it.
+    for (const t of drawn) {
+      assert.ok(Math.abs(t.off) <= 0.5, t.head + " stands " + t.off + "px off the middle");
+      if (t.caption === null) continue;
+      assert.equal(t.over, true, t.head + ": the caption is not over the table");
+      assert.ok(Math.abs(t.captionOff) <= 0.5, t.head + ": the caption stands " + t.captionOff + "px off the middle");
+    }
+    // The emphasis of a caption is still read after its number.
+    assert.equal(
+      await h.page.evaluate(() => document.querySelector("#app .mdm-table-caption").innerHTML),
+      "Table&nbsp;1: The first, <em>after</em> its table"
+    );
+    // A div that holds more than its one table opens its last paragraph
+    // with its number, as a figure's div does.
+    const leads = await h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-table-lead, #app .mdm-figure-lead")).map((e) => e.className + "|" + e.closest(".cm-line").textContent)
+    );
+    assert.deepEqual(leads, ["mdm-table-lead|Table\u00a010: Panel caption.", "mdm-figure-lead|Figure\u00a01: Figure caption."]);
+    // Nothing of a caption that was taken is left in the text: what stands
+    // there is the prose, the two paragraphs that are no captions, and the
+    // fences of the divs.
+    assert.deepEqual(await sourceLines(h.page), [
+      "Opening.",
+      "Between.",
+      ": A second caption {#tbl-lost}",
+      "Prose.",
+      "Prose.",
+      "TABLE: Not a caption {#tbl-upper}",
+      "::: {#tbl-div}",
+      ":::",
+      "::: {#tbl-bare}",
+      ":::",
+      "::: {#tbl-panel}",
+      "Table\u00a010: Panel caption.",
+      ":::",
+      "::: {#fig-holder}",
+      "Figure\u00a01: Figure caption.",
+      ":::",
+      "Last.",
+      "Refs: Table\u00a01; 1; Tab.\u00a02; Table\u00a03; Table\u00a04, Table\u00a05; Table\u00a01?@tbl-zz; Table\u00a06; Table\u00a07; Table\u00a08; Table\u00a09; Table\u00a010; Table\u00a010 (a); Table\u00a010 (b); Table\u00a01 (a); Figure\u00a01; Table\u00a01, Equation\u00a01; Table\u00a011.",
+      "Nothing carries: ?@tbl-lost; ?@tbl-upper; ?@tbl-five; ?@tbl-late.",
+    ]);
+    // The blank lines between a caption and its table went with the caption:
+    // a captioned table stands one blank line from the prose around it, as
+    // a bare one does. Left in, they were a second blank line there, 16px
+    // more over a table captioned from above and under one captioned from
+    // below (measured, tests/tmp/tbl-crossref/probe-tc13.test.js).
+    const doubled = await h.page.evaluate(() => {
+      const kids = Array.from(document.querySelector("#app .cm-content").children).filter((k) => k.getBoundingClientRect().height > 0);
+      const blank = (k) => !!k && k.classList.contains("mdm-blank");
+      return kids.map((k, i) => (blank(k) && blank(kids[i - 1]) ? "two blank lines after " + JSON.stringify(((kids[i - 2] || k).textContent || "").slice(0, 24)) : null)).filter(Boolean);
+    });
+    assert.deepEqual(doubled, []);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a reference to a table reads as the page prints it, in the link blue, its tooltip the caption, beside a figure and an equation, and its source under the caret", { skip }, async () => {
+  const h = await open({ text: TABLES, scores: 0, height: 5200 });
+  try {
+    await reading(h.page);
+    const refs = await tblRefs(h.page);
+    assert.deepEqual(refs.map((r) => r.text), [
+      "Table\u00a01",
+      "1",
+      "Tab.\u00a02",
+      "Table\u00a03",
+      "Table\u00a04, Table\u00a05",
+      "Table\u00a01?@tbl-zz",
+      "Table\u00a06",
+      "Table\u00a07",
+      "Table\u00a08",
+      "Table\u00a09",
+      "Table\u00a010",
+      "Table\u00a010 (a)",
+      "Table\u00a010 (b)",
+      "Table\u00a01 (a)",
+      "Figure\u00a01",
+      "Table\u00a01, Equation\u00a01",
+      "Table\u00a011",
+      "?@tbl-lost",
+      "?@tbl-upper",
+      "?@tbl-five",
+      "?@tbl-late",
+    ]);
+    assert.deepEqual(refs[4].tables, ["tbl-four", "tbl-six"]);
+    assert.deepEqual(refs[5].missing, ["?@tbl-zz"]);
+    // A table inside a figure reads with the figure's number.
+    assert.deepEqual([refs[13].tables, refs[14].figures], [["tbl-infig"], ["fig-holder"]]);
+    assert.deepEqual([refs[15].tables, refs[15].equations], [["tbl-one"], ["eq-x"]]);
+    // The caption as the page opens it, the number alone for a label alone
+    // and for a div with no caption, the letter for a table inside a table.
+    assert.equal(refs[0].title, "Table\u00a01: The first, *after* its table\nCtrl+click to open");
+    assert.equal(refs[6].title, "Table\u00a06\nCtrl+click to open");
+    assert.equal(refs[8].title, "Table\u00a08: The div's paragraph.\nCtrl+click to open");
+    assert.equal(refs[9].title, "Table\u00a09\nCtrl+click to open");
+    assert.equal(refs[10].title, "Table\u00a010: Panel caption.\nCtrl+click to open");
+    assert.equal(refs[11].title, "(a) Sub one\nCtrl+click to open");
+    assert.equal(refs[15].title, "Table\u00a01: The first, *after* its table\n(1) a = b\nCtrl+click to open");
+    assert.equal(refs[5].title, "Table\u00a01: The first, *after* its table\n@tbl-zz: no table carries this label\nCtrl+click to open");
+    assert.equal(refs[17].title, "@tbl-lost: no table carries this label");
+    // Nothing of them is left as written.
+    assert.equal(await h.page.evaluate(() => document.querySelectorAll("#app .mdm-cite").length), 0);
+    // The link blue on what the page links, and the missing label in bold.
+    const look = await h.page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--mdm-link)";
+      document.querySelector("#app").appendChild(probe);
+      const blue = getComputedStyle(probe).color;
+      probe.remove();
+      const ref = document.querySelectorAll("#app .mdm-eqref")[5];
+      return {
+        blue: blue,
+        link: getComputedStyle(ref.querySelector(".mdm-eqref-link")).color,
+        missingWeight: getComputedStyle(ref.querySelector(".mdm-eqref-missing")).fontWeight,
+      };
+    });
+    assert.equal(look.link, look.blue);
+    assert.ok(Number(look.missingWeight) >= 600, look.missingWeight);
+    // Under the caret, the source.
+    await setSelection(h.page, TABLES.indexOf("@tbl-one; -@tbl-one") + 3);
+    const open1 = await tblRefs(h.page);
+    assert.equal(open1.length, 20);
+    assert.equal(open1[0].text, "1");
+    assert.deepEqual(await h.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-cite")).map((e) => e.textContent)), ["@tbl-one"]);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a reference to a table reads in a cell and in a caption as it does in the prose", { skip }, async () => {
+  // A cell and a caption are drawn by the table's widget and not by the
+  // prose, with a reading of their own for what stands in them, and that
+  // one has to know the tables as it knows the equations and the figures.
+  // What is expected is what `quarto render` printed for this document on
+  // 1.9.37 through the extension's export (tests/tmp/tbl-crossref/rules/r8,
+  // 2026-10-12).
+  const text =
+    "Opening.\n\n" +
+    "| Work | Where |\n|------|-------|\n| Cell | see @tbl-two and -@tbl-two |\n\n" +
+    ": The first, which cites @tbl-two and @eq-x {#tbl-one}\n\n" +
+    "| A | B |\n|---|---|\n| c | [@tbl-one; @tbl-zz] |\n\n" +
+    ": The second {#tbl-two}\n\n" +
+    "$$\na = b\n$$ {#eq-x}\n";
+  const h = await open({ text, scores: 0, height: 1400 });
+  try {
+    await reading(h.page);
+    const seen = await h.page.evaluate(() => ({
+      cells: Array.from(document.querySelectorAll("#app .mdm-table td")).map((c) => c.textContent),
+      captions: Array.from(document.querySelectorAll("#app .mdm-table-caption")).map((c) => c.textContent),
+      links: Array.from(document.querySelectorAll("#app .mdm-table .mdm-eqref-link")).map(
+        (l) => l.getAttribute("data-mdm-tbl") || l.getAttribute("data-mdm-eq")
+      ),
+      missing: Array.from(document.querySelectorAll("#app .mdm-table .mdm-eqref-missing")).map((l) => l.textContent),
+      titles: Array.from(document.querySelectorAll("#app .mdm-table td .mdm-eqref")).map((e) => e.title),
+    }));
+    assert.deepEqual(seen.cells, ["Cell", "see Table\u00a02 and 2", "c", "Table\u00a01?@tbl-zz"]);
+    assert.deepEqual(seen.captions, [
+      "Table\u00a01: The first, which cites Table\u00a02 and Equation\u00a01",
+      "Table\u00a02: The second",
+    ]);
+    // Each a link to the table it names, the caption's before the cells'
+    // since the caption is drawn over the table.
+    assert.deepEqual(seen.links, ["tbl-two", "eq-x", "tbl-two", "tbl-two", "tbl-one"]);
+    assert.deepEqual(seen.missing, ["?@tbl-zz"]);
+    assert.equal(seen.titles[0], "Table\u00a02: The second\nCtrl+click to open");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a table and its caption open together and are put away together, the label in view for as long as they are open", { skip }, async () => {
+  const h = await open({ text: TABLES, scores: 0, height: 5200 });
+  // What is on screen with the caret at a place: the lines of the table's
+  // source, the lines of source that are no table's, and the captions drawn.
+  const at = async function (pos) {
+    await setSelection(h.page, pos);
+    await new Promise((r) => setTimeout(r, 150));
+    const seen = await h.page.evaluate(() => ({
+      card: Array.from(document.querySelectorAll("#app .cm-line.mdm-table-line")).map((l) => l.textContent),
+      differ: window.__mdm.checkDecorations(),
+    }));
+    seen.lines = await sourceLines(h.page);
+    seen.drawn = (await tablesNow(h.page)).map((t) => t.caption);
+    return seen;
+  };
+  try {
+    await reading(h.page);
+    const shut = await sourceLines(h.page);
+    // The caret in the words of a caption written after its table: the
+    // caption stands as the line it is, label and all, the table's source is
+    // open over it, and the drawing keeps its caption. (The stars of its
+    // emphasis are the caret's to open, as in any line of prose.)
+    const after = ": The first, after its table {#tbl-one}";
+    let seen = await at(TABLES.indexOf("The first") + 3);
+    assert.deepEqual(seen.card, ["| T1 | x |", "|---|---|", "| r | y |"]);
+    assert.ok(seen.lines.includes(after), "the caption's line is not on screen");
+    assert.equal(seen.drawn[0], "Table\u00a01: The first, after its table");
+    assert.equal(seen.differ, null);
+    // And in a cell of the table: the caption's line with it, so the label
+    // is in view whenever the table's source is.
+    seen = await at(TABLES.indexOf("| T1 |") + 3);
+    assert.deepEqual(seen.card, ["| T1 | x |", "|---|---|", "| r | y |"]);
+    assert.ok(seen.lines.includes(after), "the caption's line is not on screen with the table open");
+    assert.equal(seen.differ, null);
+    // In the blank line between the two, the same.
+    seen = await at(TABLES.indexOf("\n\n: The first") + 1);
+    assert.equal(seen.card.length, 3);
+    assert.ok(seen.lines.includes(after));
+    assert.equal(seen.differ, null);
+    // A caption written before its table, from the table.
+    seen = await at(TABLES.indexOf("| T2 |") + 3);
+    assert.deepEqual(seen.card, ["| T2 | x |", "|---|---|", "| r | y |"]);
+    assert.ok(seen.lines.includes(": The second, before {#tbl-two}"));
+    assert.ok(!seen.lines.includes(after), "the first table's caption stayed open");
+    assert.equal(seen.drawn[1], "Table\u00a02: The second, before");
+    assert.equal(seen.differ, null);
+    // One written with no blank line is a line of the table's own source.
+    seen = await at(TABLES.indexOf("| T6 |") + 3);
+    assert.deepEqual(seen.card, ["| T6 | x |", "|---|---|", "| r | y |", ": No blank line {#tbl-six}"]);
+    assert.equal(seen.drawn[5], "Table\u00a05: No blank line");
+    assert.equal(seen.differ, null);
+    // The paragraph a div is captioned by, from the div's one table, and
+    // the table from the paragraph.
+    seen = await at(TABLES.indexOf("| T13 |") + 3);
+    assert.ok(seen.lines.includes("The div\u2019s paragraph."), "the div's paragraph is not on screen with its table open");
+    seen = await at(TABLES.indexOf("The div's paragraph.") + 3);
+    assert.deepEqual(seen.card, ["| T13 | x |", "|---|---|", "| r | y |"]);
+    assert.equal(seen.drawn[12], "Table\u00a08: The div\u2019s paragraph.");
+    assert.equal(seen.differ, null);
+    // A paragraph that is no caption opens no table.
+    seen = await at(TABLES.indexOf("A second caption") + 3);
+    assert.deepEqual(seen.card, []);
+    // The caret back in the prose: everything as it was.
+    seen = await at(TABLES.indexOf("Opening.") + 2);
+    assert.deepEqual(seen.card, []);
+    assert.deepEqual(seen.lines, shut);
+    assert.equal(seen.differ, null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a caption typed under a table is drawn over it, a label numbers it and the tables after it, a caption taken away leaves the table bare, and the header names them", { skip }, async () => {
+  const text = "Intro.\n\n" + TABLE("A") + "\nProse.\n\n" + TABLE("B") + "\n: Second {#tbl-b}\n\nSee @tbl-b and @tbl-a.\n";
+  const h = await open({ text, scores: 0, height: 1600 });
+  const change = async function (spec) {
+    await h.page.evaluate((s) => {
+      const doc = window.__mdm.view.state.doc.toString();
+      const from = s.after ? doc.indexOf(s.after) + s.after.length : doc.indexOf(s.cut);
+      window.__mdm.view.dispatch({ changes: { from: from, to: s.cut ? from + s.cut.length : from, insert: s.insert || "" } });
+    }, spec);
+    await new Promise((r) => setTimeout(r, 150));
+    return {
+      captions: (await tablesNow(h.page)).map((t) => t.caption),
+      refs: (await tblRefs(h.page)).map((r) => r.text),
+      differ: await h.page.evaluate(() => window.__mdm.checkDecorations()),
+    };
+  };
+  try {
+    await reading(h.page);
+    assert.deepEqual((await tablesNow(h.page)).map((t) => t.caption), [null, "Table\u00a01: Second"]);
+    assert.deepEqual((await tblRefs(h.page)).map((r) => r.text), ["Table\u00a01", "?@tbl-a"]);
+    // A caption with no label typed under the first table: drawn over it,
+    // and no number moves.
+    let now = await change({ after: "| A | x |\n|---|---|\n| r | y |\n", insert: "\n: First\n" });
+    assert.deepEqual(now, { captions: ["First", "Table\u00a01: Second"], refs: ["Table\u00a01", "?@tbl-a"], differ: null });
+    // Taken away again, where no number moves either: the table is bare.
+    // Nothing in the text that is left says the table had a caption, so it
+    // is the text before the change that names the table to draw again.
+    const bare = { captions: [null, "Table\u00a01: Second"], refs: ["Table\u00a01", "?@tbl-a"], differ: null };
+    now = await change({ cut: "\n: First\n" });
+    assert.deepEqual(now, bare);
+    // And one whose colon is taken off is the prose it reads as, and a
+    // caption again with the colon back.
+    await change({ after: "| A | x |\n|---|---|\n| r | y |\n", insert: "\n: First\n" });
+    now = await change({ cut: ": First", insert: "First" });
+    assert.deepEqual(now, bare);
+    assert.ok((await sourceLines(h.page)).includes("First"), "the paragraph that was a caption is not on screen");
+    now = await change({ cut: "\nFirst\n", insert: "\n: First\n" });
+    assert.deepEqual(now, { captions: ["First", "Table\u00a01: Second"], refs: ["Table\u00a01", "?@tbl-a"], differ: null });
+    // Its label: it is the first table now, and the one after it and both
+    // references follow, though nothing near them changed.
+    now = await change({ after: ": First", insert: " {#tbl-a}" });
+    assert.deepEqual(now, { captions: ["Table\u00a01: First", "Table\u00a02: Second"], refs: ["Table\u00a02", "Table\u00a01"], differ: null });
+    // A word typed into the caption is drawn over the table as it is typed.
+    now = await change({ after: ": First", insert: " of all" });
+    assert.equal(now.captions[0], "Table\u00a01: First of all");
+    assert.equal(now.differ, null);
+    // The caption taken away, its line and all: the table is bare again
+    // and the numbers are the ones they were.
+    now = await change({ cut: "\n: First of all {#tbl-a}\n" });
+    assert.deepEqual(now, { captions: [null, "Table\u00a01: Second"], refs: ["Table\u00a01", "?@tbl-a"], differ: null });
+    // A header the host keeps out of the text: the language's word, then
+    // the header's own, on the caption and on the reference apart.
+    const body = await h.page.evaluate(() => window.__mdm.view.state.doc.toString());
+    const spanish = "---\nlang: es\n---\n";
+    await update(h.page, spanish + "\n" + body, false, 0, spanish);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal((await tablesNow(h.page))[1].caption, "Tabla\u00a01: Second");
+    assert.equal((await tblRefs(h.page))[0].text, "Tabla\u00a01");
+    const own = "---\nlang: es\ncrossref:\n  tbl-title: Cuadro\n  tbl-labels: roman\n  title-delim: \".\"\n---\n";
+    await update(h.page, own + "\n" + body, false, 0, own);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal((await tablesNow(h.page))[1].caption, "Cuadro\u00a0I. Second");
+    assert.equal((await tblRefs(h.page))[0].text, "Tabla\u00a0I");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
 // ---------- Sections by number ----------
 //
 // `number-sections: true` in the header numbers the headings of the page, and

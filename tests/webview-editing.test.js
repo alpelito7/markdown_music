@@ -2480,6 +2480,114 @@ test("Ctrl+click on a reference to a figure brings the figure into view, and so 
   await h.close();
 });
 
+test("Ctrl+click on a reference to a table brings the table into view, and so does a link to its label, the caret staying", { skip }, async () => {
+  // As for a figure (the test above): a table whose caption carries the
+  // label and a div that is a table, each by its own reference and by a
+  // link to its label (showTable).
+  const table = (name) => "| " + name + " | x |\n|---|---|\n| r | y |\n";
+  const filler = Array.from({ length: 200 }, (_, i) => "Paragraph " + i + " between the table and the reference.").join("\n\n");
+  const text =
+    table("A") + "\n: The shapes {#tbl-shapes}\n\n::: {#tbl-pair}\n" + table("B") + "\n" + table("C") + "\nThe pair.\n:::\n\n" + filler +
+    "\n\nSee @tbl-shapes and [the shapes](#tbl-shapes), @tbl-pair and [the pair](#tbl-pair).\n";
+  const h = await open({ text, scores: 0, height: 600 });
+  const inView = (selector) =>
+    h.page.evaluate((selector) => {
+      const el = document.querySelector("#app " + selector);
+      if (!el) return false;
+      const b = el.getBoundingClientRect();
+      return b.top >= 0 && b.bottom <= window.innerHeight;
+    }, selector);
+  const cases = [
+    [".mdm-eqref-link[data-mdm-tbl='tbl-shapes']", ".mdm-table-caption"],
+    [".mdm-link", ".mdm-table-caption"],
+    [".mdm-eqref-link[data-mdm-tbl='tbl-pair']", ".mdm-table-lead"],
+    [".mdm-link ~ .mdm-link", ".mdm-table-lead"],
+  ];
+  for (const [target, lands] of cases) {
+    const caret = text.length - 2;
+    await setSelection(h.page, caret);
+    await h.page.evaluate(() => {
+      const s = window.__mdm.view.scrollDOM;
+      s.scrollTop = s.scrollHeight;
+    });
+    await sleep(100);
+    assert.equal(await inView(lands), false, "the table was in view before the click on " + target);
+    const at = await h.page.evaluate((sel) => {
+      const el = document.querySelector("#app " + sel);
+      if (!el) return null;
+      el.scrollIntoView({ block: "center" });
+      const b = el.getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }, target);
+    assert.ok(at, "nothing drawn for " + target);
+    await h.page.keyboard.down("Control");
+    await h.page.mouse.click(at.x, at.y);
+    await h.page.keyboard.up("Control");
+    await sleep(300);
+    assert.equal(await inView(lands), true, target + " did not bring the table into view");
+    assert.deepEqual(await selectionRanges(h.page), [[caret, caret]], target);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("a click on the caption over a table puts the caret in the caption's words, written after the table or before it, and a click on a cell in the cell", { skip }, async () => {
+  // The caption is drawn by the table's widget and written beside the
+  // table, outside it: the click finds its words by how far they are from
+  // the head of the table, on either side (TableWidget, revealBlock). With
+  // the source open, a second click on the drawing puts both away.
+  const table = (name) => "| " + name + " | x |\n|---|---|\n| r" + name + " | y |\n";
+  const text = "Intro.\n\n" + table("A") + "\n: After caption {#tbl-a}\n\nProse.\n\n: Before caption {#tbl-b}\n\n" + table("B") + "\nEnd.\n";
+  const h = await open({ text, scores: 0, height: 900 });
+  const centre = (selector, index) =>
+    h.page.evaluate(
+      (selector, index) => {
+        const b = document.querySelectorAll("#app " + selector)[index].getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      },
+      selector,
+      index
+    );
+  const open2 = () =>
+    h.page.evaluate(() => ({
+      card: document.querySelectorAll("#app .cm-line.mdm-table-line").length,
+      captions: Array.from(document.querySelectorAll("#app .cm-content > .cm-line")).map((l) => l.textContent).filter((t) => /^: /.test(t)),
+    }));
+  try {
+    await setSelection(h.page, 2);
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await sleep(150);
+    assert.deepEqual(await open2(), { card: 0, captions: [] });
+    // The caption written after its table.
+    let at = await centre(".mdm-table-caption", 0);
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(250);
+    assert.deepEqual(await selectionRanges(h.page), [[text.indexOf("After caption"), text.indexOf("After caption")]]);
+    assert.deepEqual(await open2(), { card: 3, captions: [": After caption {#tbl-a}"] });
+    // The one written before its table: the first is put away as the caret
+    // leaves it.
+    at = await centre(".mdm-table-caption", 1);
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(250);
+    assert.deepEqual(await selectionRanges(h.page), [[text.indexOf("Before caption"), text.indexOf("Before caption")]]);
+    assert.deepEqual(await open2(), { card: 3, captions: [": Before caption {#tbl-b}"] });
+    // A second click on the drawing puts its source away, caption and all.
+    at = await centre(".mdm-table-caption", 1);
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(250);
+    assert.deepEqual(await open2(), { card: 0, captions: [] });
+    // A cell, as before: the caret at the cell's words, in the table.
+    at = await centre(".mdm-table tbody td", 0);
+    await h.page.mouse.click(at.x, at.y);
+    await sleep(250);
+    assert.deepEqual(await selectionRanges(h.page), [[text.indexOf("rA"), text.indexOf("rA")]]);
+    assert.deepEqual(await open2(), { card: 3, captions: [": After caption {#tbl-a}"] });
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
 test("a paste that carries no text leaves the selection as it was (G082)", { skip }, async () => {
   const h = await open({ text: "Insert placeholder here\n", scores: 0 });
   await setSelection(h.page, [{ anchor: 7, head: 18 }]);

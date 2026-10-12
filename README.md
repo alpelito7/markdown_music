@@ -195,6 +195,28 @@ picture in its line with no caption, and a div with no paragraph to caption
 it shows no number. References to listings and sections (`@lst-x`,
 `@sec-x`) are drawn as written.
 
+A table is captioned by the paragraph written beside it that opens with a
+colon, under the table or over it (`: The shapes of a note`, or `Table: The
+shapes of a note`), and the caption is drawn over the table, centred on the
+column, in the editor, on the page and on paper alike. Where the caption
+ends on a label (`: The shapes of a note {#tbl-shapes}`) the table is
+numbered, "Table 1: The shapes of a note", and `@tbl-shapes` reads
+"Table 1", with every form a figure's reference has and beside a figure or
+an equation (`[@tbl-shapes; @fig-circle]`). The caption's own line is put
+away with the table's source and comes back with it: a caret in either
+shows both, so the label is in view whenever the table is open, small and
+faint as a figure's and an equation's are, and a click on the drawn caption
+goes to its words. Every table stands in the middle of
+the column, with a caption or without. As with the figures it is Quarto
+that numbers on the page and the editor follows its count: a fenced div
+with the label is a table too (`::: {#tbl-pair}`), the tables inside one
+are lettered, "(a)", and read "Table 2 (a)", and the words are the
+language's ("Tabla" under `lang: es`) or the header's (`crossref:
+tbl-title`, `tbl-prefix`, `tbl-labels`). Not followed in the editor:
+`tbl-cap-location`, which the page obeys, and the caption of a div that
+holds several tables, which the page sets over them and the editor leaves
+where it is written.
+
 The sections of a document whose header says `number-sections: true` are
 numbered, 1, 1.1, 1.2, before the text of each heading and in its ink, in
 the editor and on the page alike, and in the rows of the editor's outline.

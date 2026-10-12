@@ -115,6 +115,30 @@ local function title_sections(doc)
   })
 end
 
+-- ---------- The caption of a table that carries no label ----------
+--
+-- A table whose caption ends on a label (`: The shapes {#tbl-shapes}`) is a
+-- float of Quarto's, and its caption is written outside the table, over it,
+-- as wide as the column. One with no label keeps Pandoc's `<caption>` inside
+-- the `<table>`, and the table is the box that holds its own rows at their
+-- own width in the middle of the column (mdm-look.css, the owner's centred
+-- tables of 2026-10-12): a caption in there is as wide as the table and no
+-- wider, a word to a line over a table of two short columns, or it widens
+-- the box and leaves the rows at its left. So the caption comes out of the
+-- table here and stands before it as a block of its own, which the
+-- stylesheet sets as it sets the other, and the editor draws the two alike
+-- (TableWidget in vscode-mdm/media/main.js). Only on a page: LaTeX sets its
+-- own captions. It runs after Quarto has read the braces a caption may end
+-- on (`{.striped}`), which is why it is here and not in mdm.lua.
+local function table_caption(el)
+  if not FORMAT:match("html") then return nil end
+  if #el.caption.long == 0 then return nil end
+  local caption = pandoc.Div(el.caption.long, pandoc.Attr("", { "mdm-table-caption" }))
+  el.caption.long = pandoc.Blocks({})
+  return { caption, el }
+end
+
 return {
   { Pandoc = title_sections },
+  { Table = table_caption },
 }
