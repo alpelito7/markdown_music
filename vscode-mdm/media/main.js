@@ -4676,18 +4676,20 @@
   // for a label no equation carries, underlined as a citation of a key the
   // bibliography has not got is. Its tooltip names the equations it leads to
   // with their numbers and the click that goes to them, as a citation's names
-  // its entry (citeTitle).
+  // its entry (citeTitle). A reference to a figure is the same widget, with
+  // the figure's caption as the page opens it in the tooltip (figureIndex).
   function eqRefTitle(parts, index) {
     const lines = [];
     let leads = false;
     parts.forEach(function (p) {
       if (!p.label) return;
+      const figure = p.ref === "fig" || window.MDM_CROSSREF.kindOf(p.label) === "fig";
       if (p.kind === "missing") {
-        lines.push("@" + p.label + ": no equation carries this label");
+        lines.push("@" + p.label + ": no " + (figure ? "figure" : "equation") + " carries this label");
         return;
       }
-      const entry = index.byLabel.get(p.label);
-      if (entry) lines.push("(" + entry.number + ") " + entry.tex);
+      const entry = (figure ? figNow : index).byLabel.get(p.label);
+      if (entry) lines.push(figure ? (entry.lead + entry.words).trim() : "(" + entry.number + ") " + entry.tex);
       if (p.kind === "link") leads = true;
     });
     return lines.join("\n") + (leads ? "\n" + followHint() : "");
@@ -4716,7 +4718,7 @@
         } else if (p.kind === "link") {
           const link = document.createElement("span");
           link.className = "mdm-eqref-link";
-          link.setAttribute("data-mdm-eq", p.label);
+          link.setAttribute(p.ref === "fig" ? "data-mdm-fig" : "data-mdm-eq", p.label);
           link.textContent = p.text;
           el.appendChild(link);
         } else {
@@ -4739,6 +4741,219 @@
     const entry = equationIndex(view.state).byLabel.get(label);
     if (!entry) return false;
     view.dispatch({ effects: CM.EditorView.scrollIntoView(entry.mathFrom, { y: "center" }) });
+    return true;
+  }
+
+  // ---------- Figures by number ----------
+  //
+  // A figure with a label (`![The circle](circle.svg){#fig-circle}`) is
+  // numbered: its caption opens with "Figure 1: " and `@fig-circle` reads
+  // "Figure 1". On the page Quarto does both, with no help from the filter,
+  // and the editor follows its rules as `quarto render` printed them on
+  // 1.9.37 (2026-10-12); the words, by language and by header, and the forms
+  // of a reference are in media/mdm-crossref.js. What is a figure there:
+  //
+  // - An image alone in its paragraph with its attributes straight after it
+  //   and `#fig-...` among them, wherever the paragraph stands (a quote, an
+  //   item of a list, a callout, a plain div), and the same when the image
+  //   is all a link holds. An image in a sentence or in a table's cell is
+  //   none, and a reference to its label reads "?@fig-x".
+  // - A fenced div with such a label, whatever it holds, which is how a
+  //   score is made a figure. Its caption is its last paragraph, where it
+  //   holds something over that paragraph.
+  // - They are counted together in the order they are written. A label
+  //   given twice names the later figure, as in Quarto's index, and each
+  //   keeps its number.
+  // - A figure inside a div that is itself a figure, a table or a listing
+  //   (`#fig-`, `#tbl-`, `#lst-`), however deep, is not counted: it is
+  //   lettered within that div, (a), (b), and a reference to it reads
+  //   "Figure 6 (a)". Inside a table or a listing the number is that
+  //   float's, which nothing here counts, so a reference to such a figure
+  //   is left as written.
+  //
+  // What the editor still draws otherwise is in tests/README.md (Pending,
+  // *Figures by number*): a figure that is not a paragraph of its own at
+  // the head of a line, and a div with no paragraph for a caption, are
+  // counted and referred to and have no numbered caption here.
+  let figureHeader = null;
+  let figureLookNow = null;
+  function figureLook(state) {
+    const fm = editorFrontMatter && CM.syntaxTree(state).topNode.getChild("FrontMatter");
+    const header = fm ? state.doc.sliceString(fm.from, fm.to) : headerText;
+    if (header !== figureHeader || !figureLookNow) {
+      figureHeader = header;
+      figureLookNow = window.MDM_CROSSREF.figureLook(header);
+    }
+    return figureLookNow;
+  }
+
+  // The label a fenced div carries on its opening fence, or null.
+  function divLabel(state, div) {
+    const fence = div.getChild("CalloutMark");
+    const open = fence && /^:{3,}[ \t]*(\{.*\})/.exec(state.sliceDoc(fence.from, fence.to));
+    return open ? attributeId(open[1]) : null;
+  }
+
+  // The div a block is a figure of, when it stands in one that is a float.
+  const FLOAT_LABEL = /^(?:fig|tbl|lst)-/;
+  function floatOver(state, block) {
+    for (let up = block.parent; up; up = up.parent) {
+      if (up.name !== "Callout") continue;
+      const label = divLabel(state, up);
+      if (label && FLOAT_LABEL.test(label)) return { node: up, label: label };
+    }
+    return null;
+  }
+
+  // The paragraph an image is the figure of: the one it stands alone in,
+  // with its attributes when it has them, or as all that a link alone in
+  // the paragraph holds. Null for an image that shares its paragraph.
+  function figureParagraph(state, image) {
+    const next = image.nextSibling;
+    const attr = next && next.name === "Attribute" && next.from === image.to ? next : null;
+    let whole = image;
+    let end = attr ? attr.to : image.to;
+    const link = image.parent;
+    if (link && link.name === "Link") {
+      if (state.sliceDoc(link.from, image.from) !== "[" || state.sliceDoc(end, end + 1) !== "]") return null;
+      whole = link;
+      end = link.to;
+    }
+    const para = whole.parent;
+    if (!para || para.name !== "Paragraph") return null;
+    return isBlank(state.sliceDoc(para.from, whole.from)) && isBlank(state.sliceDoc(end, para.to)) ? para : null;
+  }
+
+  // The figure that carries the `#fig-` written at `at`, or null: the block
+  // a reference goes to, its label, whether it has a caption and the
+  // caption's words (for the tooltip of a reference), and for a div where
+  // its caption starts.
+  function figureAt(state, tree, at) {
+    let node = tree.resolveInner(at, 1);
+    while (node && node.name !== "Attribute" && node.name !== "CalloutMark") node = node.parent;
+    if (!node) return null;
+    if (node.name === "CalloutMark") {
+      const div = node.parent;
+      const fence = div && div.name === "Callout" ? div.getChild("CalloutMark") : null;
+      const label = fence && fence.from === node.from ? divLabel(state, div) : null;
+      if (!label || !/^fig-/.test(label)) return null;
+      // Its blocks, without the marks of the fences and of a quote around.
+      let first = div.firstChild;
+      while (first && /Mark$/.test(first.name)) first = first.nextSibling;
+      let last = div.lastChild;
+      while (last && /Mark$/.test(last.name)) last = last.prevSibling;
+      const picture = last && last.name === "Paragraph" && last.firstChild &&
+        (last.firstChild.name === "Image" ? last.firstChild : last.firstChild.name === "Link" ? last.firstChild.getChild("Image") : null);
+      const caption = last && last.name === "Paragraph" && last.from !== first.from &&
+        !(picture && figureParagraph(state, picture)) ? last : null;
+      return {
+        label: label,
+        block: div,
+        key: div.from,
+        captioned: !!caption,
+        captionFrom: caption ? caption.from : null,
+        words: caption ? state.sliceDoc(caption.from, caption.to) : "",
+      };
+    }
+    // The image these attributes may be the figure's: whether they stand
+    // straight after it is figureParagraph's to say, which takes an image
+    // with a space before its braces for one that shares its paragraph.
+    const image = node.prevSibling;
+    if (!image || image.name !== "Image") return null;
+    const label = attributeId(state.sliceDoc(node.from, node.to));
+    if (!label || !/^fig-/.test(label)) return null;
+    const para = figureParagraph(state, image);
+    if (!para) return null;
+    const marks = image.getChildren("LinkMark");
+    const words = marks.length > 1 ? state.sliceDoc(marks[0].to, marks[1].from) : "";
+    return { label: label, block: para, key: image.from, captioned: !isBlank(words), captionFrom: null, words: words };
+  }
+
+  // Every labelled figure of the document in its order, numbered: where it
+  // stands, its label, what a reference prints after its word (`number`, or
+  // null where the editor cannot say) and what its caption opens with
+  // (`lead`). A label is looked for by its text, which is rare, as an
+  // equation's is. `refs` is what MDM_CROSSREF.reference takes; `key`
+  // changes with a label, a number or the header's words and with nothing
+  // else, which is what redraws the whole document (rebuilt).
+  const NO_FIGURES = {
+    look: { title: "Figure", prefix: "Figure", labels: "arabic", delim: ":" },
+    byLabel: new Map(),
+    byImage: new Map(),
+    byDiv: new Map(),
+    refs: { numbers: new Map(), prefix: "Figure" },
+    key: "",
+  };
+  let figNow = NO_FIGURES;
+  const figuresByTree = new WeakMap();
+  function figureIndex(state) {
+    const tree = CM.syntaxTree(state);
+    const look = figureLook(state);
+    const held = figuresByTree.get(tree);
+    if (held && held.look === look) return held;
+    const X = window.MDM_CROSSREF;
+    const index = {
+      look: look,
+      byLabel: new Map(),
+      byImage: new Map(),
+      byDiv: new Map(),
+      refs: { numbers: new Map(), prefix: look.prefix },
+      key: "",
+    };
+    const keys = [];
+    const seen = new Set();
+    const lettered = new Map();
+    let count = 0;
+    let pos = 0;
+    const lines = state.doc.iterLines();
+    for (let step = lines.next(); !step.done; step = lines.next()) {
+      const lineText = lines.value;
+      for (let at = lineText.indexOf("#fig-"); at !== -1; at = lineText.indexOf("#fig-", at + 5)) {
+        const found = figureAt(state, tree, pos + at);
+        if (!found || seen.has(found.key)) continue;
+        seen.add(found.key);
+        const over = floatOver(state, found.block);
+        let number;
+        let lead;
+        if (over) {
+          const n = (lettered.get(over.node.from) || 0) + 1;
+          lettered.set(over.node.from, n);
+          const outer = index.byDiv.get(over.node.from);
+          number = outer && outer.number !== null ? outer.number + " (" + X.number(n, "alpha a") + ")" : null;
+          lead = X.subcaption(n, found.captioned);
+        } else {
+          count += 1;
+          number = X.number(count, look.labels);
+          lead = X.caption(number, look, found.captioned);
+        }
+        const entry = {
+          label: found.label,
+          from: found.block.from,
+          number: number,
+          lead: lead,
+          captionFrom: found.captionFrom,
+          words: found.words.replace(/\s+/g, " ").trim(),
+        };
+        index.byLabel.set(entry.label, entry);
+        (found.block.name === "Callout" ? index.byDiv : index.byImage).set(found.key, entry);
+        index.refs.numbers.set(entry.label, entry.number);
+        // Its words too: a reference shows them in its tooltip, wherever
+        // in the document it stands.
+        keys.push(entry.label + "=" + entry.number + "=" + entry.lead + "=" + entry.words);
+      }
+      pos += lineText.length + 1;
+    }
+    index.key = [look.title, look.prefix, look.labels, look.delim].concat(keys).join("\u0000");
+    figuresByTree.set(tree, index);
+    return index;
+  }
+
+  // The figure a reference leads to, brought to the middle of the pane, as
+  // an equation is (showEquation).
+  function showFigure(label) {
+    const entry = figureIndex(view.state).byLabel.get(label);
+    if (!entry) return false;
+    view.dispatch({ effects: CM.EditorView.scrollIntoView(entry.from, { y: "center" }) });
     return true;
   }
 
@@ -5358,10 +5573,13 @@
     // © 1741</figcaption>` for `![A *fine* photo &copy; 1741](…)`); `key` is
     // the alt as written, which is what tells two figures apart, since two
     // different sources can draw the same words.
-    constructor(src, caption, key, frame, width) {
+    constructor(src, caption, key, frame, width, lead) {
       super();
       this.src = src;
       this.caption = caption;
+      // What the caption of a numbered figure opens with, "Figure 1: "
+      // (figureIndex), or null for a figure with no label.
+      this.lead = lead || null;
       this.cited = citedSignature(caption);
       this.key = key;
       this.frame = frame || null;
@@ -5375,6 +5593,7 @@
       return (
         other.src === this.src &&
         other.key === this.key &&
+        other.lead === this.lead &&
         other.cited === this.cited &&
         other.width === this.width &&
         other.tip === this.tip &&
@@ -5400,6 +5619,7 @@
       fig.appendChild(img);
       const caption = document.createElement("div");
       caption.className = "mdm-figcaption";
+      if (this.lead) caption.appendChild(document.createTextNode(this.lead));
       paintParts(caption, this.caption, true);
       fig.appendChild(caption);
       return framed(fig, this.frame);
@@ -5658,9 +5878,10 @@
           title: "Footnote, written inline",
           parts: cellParts(child, text, skip, marks, refs),
         });
-      } else if (name === "Citation" && window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look)) {
-        // A reference to an equation, as in the prose (EqRefWidget).
-        const eqParts = window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look);
+      } else if (name === "Citation" && window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look, figNow.refs)) {
+        // A reference to an equation or to a figure, as in the prose
+        // (EqRefWidget).
+        const eqParts = window.MDM_CROSSREF.reference(text(child.from, child.to), eqNow.numbers, eqNow.look, figNow.refs);
         parts.push({
           kind: "eqref",
           parts: eqParts,
@@ -6088,8 +6309,10 @@
     };
     const cites = citesNow;
     const equations = eqNow;
+    const figures = figNow;
     citesNow = NO_CITES;
     eqNow = NO_EQUATIONS;
+    figNow = NO_FIGURES;
     try {
       if (!stringParser) stringParser = markdownLanguage().language.parser;
       const para = stringParser.parse(str).topNode.firstChild;
@@ -6100,6 +6323,7 @@
     } finally {
       citesNow = cites;
       eqNow = equations;
+      figNow = figures;
     }
   }
 
@@ -6594,6 +6818,13 @@
         return item.slice(1);
       });
   }
+  // The identifier, `#id`; of two, Pandoc keeps the one written last.
+  function attributeId(s) {
+    const ids = attributeItems(s).filter(function (item) {
+      return item.charAt(0) === "#";
+    });
+    return ids.length ? ids[ids.length - 1].slice(1) : null;
+  }
   function attributeValue(s, key) {
     const items = attributeItems(s);
     for (let i = 0; i < items.length; i++) {
@@ -6911,6 +7142,7 @@
     const ranges = activeRanges(state);
     citesNow = state.field(citesField, false) || NO_CITES;
     eqNow = equationIndex(state);
+    figNow = figureIndex(state);
     secNow = sectionIndex(state);
     // What the host kept back, which every number counts from (hiddenLines).
     const hidden = state.field(hiddenLinesField, false) || 0;
@@ -7455,6 +7687,16 @@
           // (`::: {.column}`, `::: {#refs}`), which the page prints bare:
           // no bar and no tint for those, the fences alone put away (G051).
           const kind = marks.length ? CM.calloutKind(text(marks[0].from, marks[0].to)) : null;
+          // A div that is a figure (`::: {#fig-tune}`): the paragraph it is
+          // captioned by opens with its number, as on the page. It is no
+          // part of the source, so it stands while the paragraph is open
+          // too, as a section's number does (figureIndex).
+          const figure = figNow.byDiv.get(n.from);
+          if (figure && figure.captionFrom !== null) {
+            decos.push(
+              Decoration.widget({ widget: new TextWidget(figure.lead, "mdm-figure-lead"), side: -1 }).range(figure.captionFrom)
+            );
+          }
           if (kind) {
             frameLevel(n.from, n.to, { kind: "callout", name: kind });
             lines.mark(n.from, n.from, "mdm-co-first");
@@ -7811,7 +8053,10 @@
               const blockTo = doc.lineAt(para.to).to;
               decos.push(
                 Decoration.widget({
-                  widget: new FigureWidget(src, caption, key, frameOf(doc.lineAt(blockFrom).number), width),
+                  widget: new FigureWidget(
+                    src, caption, key, frameOf(doc.lineAt(blockFrom).number), width,
+                    figNow.byImage.has(n.from) ? figNow.byImage.get(n.from).lead : null
+                  ),
                   block: true,
                   side: 1,
                 }).range(blockTo)
@@ -7984,15 +8229,16 @@
           // A citation (PX04): as the page prints it once the host has
           // answered (citesField, CiteWidget), and its source under the
           // caret. Before an answer, where none can come (no bibliography,
-          // no Quarto), and for a Quarto cross-reference, which Quarto
-          // resolves and the editor does not (the figure's number is the
+          // no Quarto), and for a Quarto cross-reference of a kind the
+          // editor does not number (a table, a section: the number is the
           // page's), it is drawn as written, in the link colour, with what it
           // is in the tooltip.
           const raw = text(n.from, n.to);
-          // A reference to an equation (`@eq-mass`), which Quarto resolves
-          // and not citeproc: as the page prints it (MDM_CROSSREF.reference,
-          // EqRefWidget), and its source under the caret.
-          const eqParts = window.MDM_CROSSREF.reference(raw, eqNow.numbers, eqNow.look);
+          // A reference to an equation (`@eq-mass`) or to a figure
+          // (`@fig-circle`), which Quarto resolves and not citeproc: as the
+          // page prints it (MDM_CROSSREF.reference, EqRefWidget), and its
+          // source under the caret.
+          const eqParts = window.MDM_CROSSREF.reference(raw, eqNow.numbers, eqNow.look, figNow.refs);
           if (eqParts && !touched(n.from, n.to)) {
             decos.push(
               Decoration.replace({ widget: new EqRefWidget(eqParts, eqRefTitle(eqParts, eqNow)) }).range(n.from, n.to)
@@ -8261,6 +8507,7 @@
       lines: state.doc.lines,
       cites: (state.field(citesField, false) || NO_CITES).version,
       equations: equationIndex(state).key,
+      figures: figureIndex(state).key,
       sections: sectionIndex(state),
     });
     return set;
@@ -8345,14 +8592,16 @@
     const cites = (state.field(citesField, false) || NO_CITES).version;
     // So does a label or a number of an equation that changed, or the
     // header's say about them: every number after it and every reference
-    // to one may read otherwise now (equationIndex). And so does a section
-    // that is numbered otherwise (sectionsMoved).
+    // to one may read otherwise now (equationIndex), and the same of a
+    // figure (figureIndex). And so does a section that is numbered
+    // otherwise (sectionsMoved).
     if (
       !built || tr.reconfigured || built.hidden !== hidden || built.lines !== doc.lines ||
       // The header kept out of the text, or whether its source is open: the
       // title block stands on no line of the text (TitleWidget).
       built.header !== (state.field(headerField, false) || "") ||
       built.cites !== cites || built.equations !== equationIndex(state).key ||
+      built.figures !== figureIndex(state).key ||
       sectionsMoved(built.sections, sectionIndex(state), tr.changes)
     ) {
       rebuilds.whole++;
@@ -11864,9 +12113,9 @@
     });
     // The page gives a numbered equation its label for an identifier too
     // (`[see](#eq-mass)`): a fragment no heading carries is looked for among
-    // the equations.
+    // the equations, and then among the figures, which carry theirs too.
     if (!hit) {
-      showEquation(want);
+      if (!showEquation(want)) showFigure(want);
       return;
     }
     view.dispatch({ selection: { anchor: hit.pos }, scrollIntoView: true });
@@ -12012,8 +12261,9 @@
     const eqref = e.button === 0 && e.target.closest(".mdm-eqref");
     if (eqref && followsLink(e)) {
       e.preventDefault();
-      const part = e.target.closest("[data-mdm-eq]") || eqref.querySelector("[data-mdm-eq]");
-      if (part) showEquation(part.getAttribute("data-mdm-eq"));
+      const part = e.target.closest("[data-mdm-eq], [data-mdm-fig]") || eqref.querySelector("[data-mdm-eq], [data-mdm-fig]");
+      if (part && part.hasAttribute("data-mdm-fig")) showFigure(part.getAttribute("data-mdm-fig"));
+      else if (part) showEquation(part.getAttribute("data-mdm-eq"));
       return;
     }
     // Ctrl+click on a citation goes to its entry in the list, as the page's

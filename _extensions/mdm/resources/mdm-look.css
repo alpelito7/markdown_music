@@ -317,6 +317,19 @@ body main.content p,
 body main.content li {
   text-align: var(--mdm-text-align);
 }
+/* A figure with a label (`![...](a.png){#fig-a}`) is a float to Quarto, its
+   picture in a div of its own where the unlabelled one's is in a paragraph,
+   so the rule above does not reach it and Quarto's centring did
+   (`.quarto-figure-center > figure > div`): a 256px picture stood 282px in
+   from the left of the 820px column, over a caption set flush left, where
+   the editor draws every figure flush left and the page the one without a
+   label (measured 2026-10-12, when the editor began to number them). Named
+   from `body main.content` it outranks Quarto's class and two elements,
+   whichever way the figure asks to be aligned, as the paragraph rule does
+   for a figure with no label. */
+body main.content .quarto-figure > figure.quarto-float > div[aria-describedby] {
+  text-align: left;
+}
 /* A caption, under a figure or at a table, in the ink of the prose, as the
    editor draws it (`#app .mdm-figcaption`) and the PDF sets it (look_tex in
    mdm.lua): B on design/design-caption-colour.html, the owner's pick of

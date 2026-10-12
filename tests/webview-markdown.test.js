@@ -530,7 +530,9 @@ const CASES = [
     rows: [
       [1, "mdm-h mdm-h2", "Attributed"],
       [2, "mdm-blank", ""],
-      [3, "mdm-figure", "⟦img:Sized brass⟧Sized brass"],
+      // The picture's identifier is a figure's, so its caption opens with
+      // its number, as the page's does (Figures by number, 2026-10-12).
+      [3, "mdm-figure", "⟦img:Sized brass⟧Figure\u00a01: Sized brass"],
       [4, "mdm-blank", ""],
       [5, "", "This is small caps and highlighted and underlined and raw."],
       [6, "mdm-blank", ""],
@@ -552,11 +554,14 @@ const CASES = [
     id: "CT01",
     // Named by what it cites and not by its brackets: the bare `@knuth1984`
     // was called a "Reference" and `[@fig-x]` a "Citation" (isCrossref in
-    // main.js, the kinds Quarto numbers; 2026-09-29).
+    // main.js, the kinds Quarto numbers; 2026-09-29). The cross-reference is
+    // a listing's, a kind the editor does not number: a figure's and a
+    // table's are drawn as the page prints them since 2026-10-12 (Figures
+    // by number and Tables by number, below).
     name: "a citation and a cross-reference are drawn as written, in the link colour, with what they are in the tooltip (PX04)",
-    text: "As shown by [@knuth1984, p. 33], by @knuth1984 and in @fig-brass, mail me@example.org.\n",
+    text: "As shown by [@knuth1984, p. 33], by @knuth1984 and in @lst-brass, mail me@example.org.\n",
     rows: [
-      [1, "", "As shown by [@knuth1984, p. 33], by @knuth1984 and in @fig-brass, mail me@example.org."],
+      [1, "", "As shown by [@knuth1984, p. 33], by @knuth1984 and in @lst-brass, mail me@example.org."],
       [2, "mdm-blank", ""],
     ],
     dom: (page) =>
@@ -568,7 +573,7 @@ const CASES = [
     domExpected: [
       "[@knuth1984, p. 33]|Citation [@knuth1984, p. 33]",
       "@knuth1984|Citation @knuth1984",
-      "@fig-brass|Cross-reference @fig-brass",
+      "@lst-brass|Cross-reference @lst-brass",
     ],
   },
   {
@@ -2341,14 +2346,345 @@ test("a citation that names a cross-reference is Quarto's, and Pandoc is not ask
   // Quarto takes the whole of `[@knuth1984; @eq-mass]` and drops the key of
   // the bibliography unprinted, keeping the comma that came before the
   // equation (", Equation 1", measured), so citeproc, which runs after it,
-  // never counts it; neither is it in what the editor asks about.
+  // never counts it; neither is it in what the editor asks about. The same
+  // of `[@shannon1948; @fig-x]`, whose label no figure carries: "?@fig-x",
+  // with no comma before it.
   const text = "$$\nE = mc^2\n$$ {#eq-mass}\n\nSee [@knuth1984; @eq-mass], [@shannon1948; @fig-x] and @knuth1984.\n";
   const h = await open({ text, scores: 0, height: 900 });
   try {
     const asked = await citesAsked(h.page);
     assert.equal(asked.body, "[@knuth1984]{#mdmcite-0}\n");
     await reading(h.page);
-    assert.deepEqual((await eqRefs(h.page)).map((r) => r.text), [", Equation\u00a01"]);
+    assert.deepEqual((await eqRefs(h.page)).map((r) => r.text), [", Equation\u00a01", "?@fig-x"]);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+// ---------- Figures by number ----------
+//
+// A figure with a label is numbered and `@fig-x` reads "Figure 1", as the
+// page prints them, where Quarto does both with no help from the filter
+// (the owner, 2026-10-12: the lesson's text was to cite its figure as it
+// cites its equation, and the editor drew `@fig-circle` as written). The
+// words are held against Quarto in crossref.test.js; what is held here is
+// which images and which divs the editor takes for figures, what it draws
+// with the count, and that the count follows the document. The numbers
+// below are the ones `quarto render` printed for this document on 1.9.37
+// that day, through the extension's export, and html.test.js sets the two
+// surfaces side by side on one like it.
+const FIGURES =
+  "![Caption A *with* emphasis](a.svg){#fig-a}\n\n" +
+  "![Unlabelled](a.svg)\n\n" +
+  "![](a.svg){#fig-empty}\n\n" +
+  "Text with an inline ![inline cap](a.svg){#fig-inline} image.\n\n" +
+  "- ![In a list](a.svg){#fig-list}\n\n" +
+  "> ![In a quote](a.svg){#fig-quote}\n\n" +
+  "::: {#fig-div}\n![inner alt](a.svg)\n\nDiv caption here.\n:::\n\n" +
+  "::: {#fig-subs}\n![Sub one](a.svg){#fig-sub1}\n\n![Sub two](a.svg){#fig-sub2}\n\nSubs caption.\n:::\n\n" +
+  "::: {#fig-nocap}\n![only an image](a.svg)\n:::\n\n" +
+  "::: {#tbl-x}\n![In a table](a.svg){#fig-intbl}\n\nTable caption.\n:::\n\n" +
+  ":::: {#fig-nested}\n::: {.inner}\n![Deep](a.svg){#fig-deep}\n:::\n\nNested caption.\n::::\n\n" +
+  "::: {.column}\n![In a plain div](a.svg){#fig-col}\n:::\n\n" +
+  "![Plain anchor](a.svg){#plain}\n\n" +
+  "[![Linked](a.svg){#fig-link}](https://example.com)\n\n" +
+  "![Upper](a.svg){.x #fig-B}\n\n" +
+  "| a |\n|---|\n| ![In a cell](a.svg){#fig-cell} |\n\n" +
+  "![Dup](a.svg){#fig-a}\n\n" +
+  "![Space](a.svg) {#fig-space}\n\n" +
+  "![Two ids](a.svg){#fig-one #fig-two}\n\n" +
+  "![Last](a.svg){#fig-last}\n\n" +
+  "$$\na = b\n$$ {#eq-x}\n\n" +
+  "Refs: @fig-a; -@fig-a; [Fig. @fig-empty]; @Fig-list; [@fig-quote; @fig-div]; [@fig-a; @fig-zz]; [see @fig-subs, p. 3]; " +
+  "@fig-sub1; @fig-sub2; @fig-deep; [@fig-last; @eq-x]; @fig-B; @fig-col; @fig-link; @fig-nocap; @fig-nested; @fig-two.\n\n" +
+  "As written: @fig-intbl; @tbl-x; [@fig-a; @tbl-x]. Nothing carries: @fig-inline; @fig-cell; @fig-space; @fig-b; @fig-one.\n";
+
+// The folder the document is in, which a picture named beside it hangs
+// from: with none the editor draws no picture and so no figure.
+const FIGURES_SEED = { docBase: "https://vsc.test/home/me/papers" };
+
+// The captions the editor draws under its pictures, and the numbers it
+// puts before the paragraph a div is captioned by, each with that
+// paragraph's text.
+function figuresNow(page) {
+  return page.evaluate(() => ({
+    captions: Array.from(document.querySelectorAll("#app .mdm-figcaption")).map((e) => e.textContent),
+    leads: Array.from(document.querySelectorAll("#app .mdm-figure-lead")).map((e) => e.closest(".cm-line").textContent),
+  }));
+}
+// A reference to a figure is the widget an equation's is (eqRefs), with the
+// figure it leads to named on its link.
+function figRefs(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-eqref")).map((e) => ({
+      text: e.textContent,
+      figures: Array.from(e.querySelectorAll(".mdm-eqref-link[data-mdm-fig]")).map((l) => l.getAttribute("data-mdm-fig")),
+      tables: Array.from(e.querySelectorAll(".mdm-eqref-link[data-mdm-tbl]")).map((l) => l.getAttribute("data-mdm-tbl")),
+      equations: Array.from(e.querySelectorAll(".mdm-eqref-link[data-mdm-eq]")).map((l) => l.getAttribute("data-mdm-eq")),
+      missing: Array.from(e.querySelectorAll(".mdm-eqref-missing")).map((l) => l.textContent),
+      title: e.title,
+    }))
+  );
+}
+
+test("a labelled figure is numbered in the order of the document, its caption opening as the page's does, and nothing of its label is drawn", { skip }, async () => {
+  const h = await open({ text: FIGURES, scores: 0, height: 3600, seed: FIGURES_SEED });
+  try {
+    await reading(h.page);
+    const drawn = await figuresNow(h.page);
+    // One figure with a label and a caption, one with a label and none, and
+    // the picture with no label or with a plain anchor left as it was. A
+    // label given twice: each keeps its number, 1 and 12. A figure inside a
+    // figure, or inside a table, has its letter and no number. The third,
+    // the fourth and the tenth (in a list, in a quote, in a link) are
+    // counted and are pictures in their line here, with no caption.
+    assert.deepEqual(drawn.captions, [
+      "Figure\u00a01: Caption A with emphasis",
+      "Unlabelled",
+      "Figure\u00a02",
+      "inner alt",
+      "(a) Sub one",
+      "(b) Sub two",
+      "only an image",
+      "(a) In a table",
+      "(a) Deep",
+      "Figure\u00a09: In a plain div",
+      "Plain anchor",
+      "Figure\u00a011: Upper",
+      "Figure\u00a012: Dup",
+      "Figure\u00a013: Two ids",
+      "Figure\u00a014: Last",
+    ]);
+    // A div that is a figure opens the paragraph it is captioned by with
+    // its number; the one with no such paragraph, the seventh, shows none.
+    assert.deepEqual(drawn.leads, [
+      "Figure\u00a05: Div caption here.",
+      "Figure\u00a06: Subs caption.",
+      "Figure\u00a08: Nested caption.",
+    ]);
+    // The emphasis of a caption is still read after its number.
+    assert.equal(
+      await h.page.evaluate(() => document.querySelector("#app .mdm-figcaption").innerHTML),
+      "Figure&nbsp;1: Caption A <em>with</em> emphasis"
+    );
+    // Nothing of a label that made a figure is on screen. The one written
+    // after a space is no attribute of its picture and is printed, as on
+    // the page.
+    const shown = await h.page.evaluate(() => document.querySelector("#app .cm-content").innerText);
+    assert.deepEqual(shown.match(/\{[^}]*#fig-[^}]*\}/g), ["{#fig-div}", "{#fig-subs}", "{#fig-nocap}", "{#fig-nested}", "{#fig-space}"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a reference to a figure reads as the page prints it, in the link blue, its tooltip the caption, and its source under the caret", { skip }, async () => {
+  const h = await open({ text: FIGURES, scores: 0, height: 3600, seed: FIGURES_SEED });
+  try {
+    await reading(h.page);
+    const refs = await figRefs(h.page);
+    assert.deepEqual(refs.map((r) => r.text), [
+      "Figure\u00a012",
+      "12",
+      "Fig.\u00a02",
+      "Figure\u00a03",
+      "Figure\u00a04, Figure\u00a05",
+      "Figure\u00a012?@fig-zz",
+      "see\u00a06",
+      "Figure\u00a06 (a)",
+      "Figure\u00a06 (b)",
+      "Figure\u00a08 (a)",
+      "Figure\u00a014, Equation\u00a01",
+      "Figure\u00a011",
+      "Figure\u00a09",
+      "Figure\u00a010",
+      "Figure\u00a07",
+      "Figure\u00a08",
+      "Figure\u00a013",
+      "Figure\u00a01 (a)",
+      "Table\u00a01",
+      "Figure\u00a012, Table\u00a01",
+      "?@fig-inline",
+      "?@fig-cell",
+      "?@fig-space",
+      "?@fig-b",
+      "?@fig-one",
+    ]);
+    assert.deepEqual(refs[4].figures, ["fig-quote", "fig-div"]);
+    assert.deepEqual([refs[10].figures, refs[10].equations], [["fig-last"], ["eq-x"]]);
+    assert.deepEqual(refs[5].missing, ["?@fig-zz"]);
+    // The caption as the page opens it, for the figure the label names now
+    // (the later of the two `fig-a`), and the equation beside it as before.
+    assert.equal(refs[0].title, "Figure\u00a012: Dup\nCtrl+click to open");
+    assert.equal(refs[2].title, "Figure\u00a02\nCtrl+click to open");
+    assert.equal(refs[7].title, "(a) Sub one\nCtrl+click to open");
+    assert.equal(refs[10].title, "Figure\u00a014: Last\n(1) a = b\nCtrl+click to open");
+    assert.equal(refs[5].title, "Figure\u00a012: Dup\n@fig-zz: no figure carries this label\nCtrl+click to open");
+    assert.equal(refs[20].title, "@fig-inline: no figure carries this label");
+    // A figure inside a div that is a table reads with the table's number
+    // after a figure's word, and the table and a figure beside it as the
+    // page prints them: the tables are counted since 2026-10-12 (Tables by
+    // number, below), and nothing of the three is left as written.
+    assert.deepEqual(refs[17].figures, ["fig-intbl"]);
+    assert.deepEqual([refs[19].figures, refs[19].tables], [["fig-a"], ["tbl-x"]]);
+    assert.equal(refs[18].title, "Table\u00a01: Table caption.\nCtrl+click to open");
+    assert.equal(await h.page.evaluate(() => document.querySelectorAll("#app .mdm-cite").length), 0);
+    // The link blue on what the page links, and the missing label in bold.
+    const look = await h.page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--mdm-link)";
+      document.querySelector("#app").appendChild(probe);
+      const blue = getComputedStyle(probe).color;
+      probe.remove();
+      const ref = document.querySelectorAll("#app .mdm-eqref")[5];
+      return {
+        blue: blue,
+        link: getComputedStyle(ref.querySelector(".mdm-eqref-link")).color,
+        missingWeight: getComputedStyle(ref.querySelector(".mdm-eqref-missing")).fontWeight,
+      };
+    });
+    assert.equal(look.link, look.blue);
+    assert.ok(Number(look.missingWeight) >= 600, look.missingWeight);
+    // Under the caret, the source.
+    await setSelection(h.page, FIGURES.indexOf("@fig-a; -@fig-a") + 3);
+    const open1 = await figRefs(h.page);
+    assert.equal(open1.length, 24);
+    assert.equal(open1[0].text, "12");
+    const source = await h.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-cite")).map((e) => e.textContent));
+    assert.equal(source[0], "@fig-a");
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a div that is a figure is captioned by its last paragraph and by nothing else, and a reference in a cell or in a caption reads as in the prose", { skip }, async () => {
+  // As the page printed each: a paragraph alone in its div is what the div
+  // holds and no caption ("Figure 1" under it), and neither is a list, a
+  // block of code or a picture that ends one; and the cell reads "see
+  // Figure 2 and 1", the caption "Figure 6: A caption that cites Figure 2".
+  const text =
+    "::: {#fig-alone}\nOnly a paragraph.\n:::\n\n" +
+    "::: {#fig-two}\nFirst paragraph.\n\nSecond paragraph.\n:::\n\n" +
+    "::: {#fig-list}\n- an item\n\n- another\n:::\n\n" +
+    "::: {#fig-code}\nSome text.\n\n```\ncode last\n```\n:::\n\n" +
+    "::: {#fig-pic}\nSome text first.\n\n![A picture last](a.svg)\n:::\n\n" +
+    "| Work | Picture |\n|------|---------|\n| Cell | see @fig-two and -@fig-alone |\n\n" +
+    "![A caption that cites @fig-two](a.svg){#fig-cap}\n\n" +
+    "![Another identifier last](a.svg){#fig-not #other}\n\n" +
+    "Refs: @fig-alone; @fig-two; @fig-list; @fig-code; @fig-pic; @fig-not.\n";
+  const h = await open({ text, scores: 0, height: 1400, seed: FIGURES_SEED });
+  try {
+    await reading(h.page);
+    const drawn = await figuresNow(h.page);
+    assert.deepEqual(drawn.leads, ["Figure\u00a02: Second paragraph."]);
+    // The last picture carries `fig-not` and then `other`, and Pandoc keeps
+    // the identifier written last: it is no figure, and has no number.
+    assert.deepEqual(drawn.captions, [
+      "A picture last", "Figure\u00a06: A caption that cites Figure\u00a02", "Another identifier last",
+    ]);
+    const refs = await figRefs(h.page);
+    assert.deepEqual(refs.map((r) => r.text), [
+      "Figure\u00a02", "1", "Figure\u00a02", "Figure\u00a01", "Figure\u00a02", "Figure\u00a03", "Figure\u00a04", "Figure\u00a05",
+      "?@fig-not",
+    ]);
+    // In the cell and in the caption they are the widget of the prose, with
+    // the figure they lead to and its caption in the tooltip.
+    const inside = await h.page.evaluate(() => ({
+      cell: Array.from(document.querySelectorAll("#app .mdm-table .mdm-eqref-link")).map((l) => l.getAttribute("data-mdm-fig")),
+      caption: Array.from(document.querySelectorAll("#app .mdm-figcaption .mdm-eqref")).map((e) => e.title),
+    }));
+    // A div with no caption says so where its reference tells of it: the
+    // number alone, as the page prints under it, and not the picture it
+    // ends on taken for a caption.
+    assert.equal(refs[7].title, "Figure\u00a05\nCtrl+click to open");
+    assert.equal(refs[3].title, "Figure\u00a01\nCtrl+click to open");
+    assert.deepEqual(inside.cell, ["fig-two", "fig-alone"]);
+    assert.deepEqual(inside.caption, ["Figure\u00a02: Second paragraph.\nCtrl+click to open"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a figure added renumbers the figures after it and every reference to them, as does the header's language and its words, hidden or shown", { skip }, async () => {
+  const h = await open({ text: FIGURES, scores: 0, height: 3600, seed: FIGURES_SEED });
+  try {
+    await reading(h.page);
+    // A labelled figure put in at the head of the document, far above the
+    // references: every number moves, and the references with them, though
+    // nothing near them changed.
+    await h.page.evaluate(() => window.__mdm.view.dispatch({ changes: { from: 0, insert: "![First](a.svg){#fig-first}\n\n" } }));
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual((await figuresNow(h.page)).captions.slice(0, 2), ["Figure\u00a01: First", "Figure\u00a02: Caption A with emphasis"]);
+    assert.deepEqual((await figuresNow(h.page)).leads[0], "Figure\u00a06: Div caption here.");
+    assert.deepEqual((await figRefs(h.page)).map((r) => r.text).slice(0, 3), ["Figure\u00a013", "13", "Fig.\u00a03"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // Its label taken off again: the old numbers come back.
+    await h.page.evaluate(() => {
+      const text = window.__mdm.view.state.doc.toString();
+      const at = text.indexOf("{#fig-first}");
+      window.__mdm.view.dispatch({ changes: { from: at, to: at + "{#fig-first}".length } });
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual((await figuresNow(h.page)).captions.slice(0, 2), ["First", "Figure\u00a01: Caption A with emphasis"]);
+    assert.deepEqual((await figRefs(h.page)).map((r) => r.text).slice(0, 3), ["Figure\u00a012", "12", "Fig.\u00a02"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // A header the host keeps out of the text, naming the language, the
+    // numbering and the delimiter: the text does not change, and the
+    // captions and the references follow it.
+    const text = await h.page.evaluate(() => window.__mdm.view.state.doc.toString());
+    const header = "---\nlang: es\ncrossref:\n  fig-labels: roman i\n  title-delim: \".\"\n---\n";
+    await update(h.page, header + "\n" + text, false, 0, header);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal((await figuresNow(h.page)).captions[1], "Figura\u00a0i. Caption A with emphasis");
+    assert.equal((await figuresNow(h.page)).leads[0], "Figura\u00a0v. Div caption here.");
+    assert.deepEqual((await figRefs(h.page)).map((r) => r.text).slice(0, 2), ["Figura\u00a0xii", "xii"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // The caption's word changed in that header and nothing else, which no
+    // reference shows (`fig-title` renames the captions alone): the
+    // captions are drawn again all the same.
+    const titled = header.replace("crossref:\n", "crossref:\n  fig-title: \"Lámina\"\n");
+    await update(h.page, titled + "\n" + text, false, 0, titled);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal((await figuresNow(h.page)).captions[1], "Lámina\u00a0i. Caption A with emphasis");
+    assert.equal((await figRefs(h.page))[0].text, "Figura\u00a0xii");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // That word changed again and nothing else: the header has the lines it
+    // had, the text is the text it was and no equation reads otherwise, so
+    // nothing but the figures' own count says the document is to be drawn
+    // again.
+    const renamed = titled.replace("Lámina", "Estampa");
+    await update(h.page, renamed + "\n" + text, false, 0, renamed);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal((await figuresNow(h.page)).captions[1], "Estampa\u00a0i. Caption A with emphasis");
+    assert.equal((await figuresNow(h.page)).leads[0], "Estampa\u00a0v. Div caption here.");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a header shown in the text names the figures as it is typed", { skip }, async () => {
+  const header = "---\ntitle: T\n---\n\n";
+  const text = header + "![A caption](a.svg){#fig-a}\n\nSee @fig-a.\n";
+  const h = await open({ text, scores: 0, height: 900, withFrontMatter: true, seed: FIGURES_SEED });
+  try {
+    await reading(h.page);
+    assert.equal((await figuresNow(h.page)).captions[0], "Figure\u00a01: A caption");
+    await h.page.evaluate(() => {
+      const text = window.__mdm.view.state.doc.toString();
+      const at = text.indexOf("title: T\n") + "title: T\n".length;
+      window.__mdm.view.dispatch({ changes: { from: at, insert: "lang: de\n" } });
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal((await figuresNow(h.page)).captions[0], "Abbildung\u00a01: A caption");
+    assert.equal((await figRefs(h.page))[0].text, "Abbildung\u00a01");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
     assert.deepEqual(h.errors, []);
   } finally {
     await h.close();

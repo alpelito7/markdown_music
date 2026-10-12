@@ -10,7 +10,12 @@
 // equations in its syntax tree and hands this their text. The numbers of
 // the sections (`number-sections`) are counted here too, by Quarto's rules
 // again (Sections by number, below), and so is what the header puts at the
-// head of the page (The title block, at the end).
+// head of the page (The title block, at the end). A figure with a label
+// (`![A caption](a.png){#fig-a}`) is numbered as well, by Quarto itself on
+// the page and by the same rules here: what its caption opens with and what
+// a reference to it reads (figureLook, caption, reference). And so is a
+// table whose caption ends on a label (`: The shapes {#tbl-shapes}`), by the
+// same rules with a table's words (tableLook).
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
@@ -62,6 +67,20 @@
     ua: "Рівняння",
     zh: "式",
     "zh-TW": "方程式",
+  };
+
+  // What a figure is called, by the language of the document:
+  // `crossref-fig-title` in each of Quarto's language files, which is the
+  // word a caption opens with and, since none of the files has a
+  // `crossref-fig-prefix`, the word of a reference too (measured: `lang: es`
+  // prints "Figura 1: ..." and "Figura 1"). Found as the equations' prefix is
+  // (languageWord), and held against an installed Quarto by the same test.
+  const FIGURE_TITLES = {
+    "": "Figure", bg: "Фигура", ca: "Figura", cs: "Obrázek", da: "Figur", de: "Abbildung", "de-CH": "Abbildung",
+    el: "Σχήμα", es: "Figura", eu: "Irudia", fi: "Kuva", fr: "Figure", he: "תרשים", id: "Gambar", is: "Mynd",
+    it: "Figura", ja: "図", ko: "그림", lt: "Paveikslas", nb: "Figur", nl: "Figuur", nn: "Figur", pl: "Rysunek",
+    pt: "Figura", "pt-BR": "Figura", ru: "Рисунок", sk: "Obrázok", sl: "Slika", "sr-Latn": "Figura",
+    sv: "Figur", tr: "Şekil", ua: "Рисунок", zh: "图", "zh-TW": "圖",
   };
 
   // The prefix of a language tag as Quarto finds it: the file of the tag
@@ -227,6 +246,62 @@
     };
   }
 
+  // What the figures and their references take from the header (titlePrefix
+  // and refPrefix among Quarto's filters, every rule here printed by `quarto
+  // render` on 1.9.37, 2026-10-12). `title` is the word a caption opens with
+  // and `prefix` the word of a reference, and Quarto finds the two apart.
+  // The title is `crossref: fig-title`, else the `crossref-fig-title` under
+  // `language:`, else the language's. The prefix is `crossref: fig-prefix`,
+  // else the `crossref-fig-prefix` under `language:`, else the title the
+  // LANGUAGE gives, under `language:` or in its file: a `fig-title` under
+  // `crossref:` renames every caption and leaves the references at
+  // "Figure". `labels` is how the figures are counted (`fig-labels`, else
+  // `labels`, else arabic), and `delim` what stands between the number and
+  // the caption, `title-delim` without the spaces around it (" | x " prints
+  // "Fig 1| x A caption") and a colon unless the header says. Not followed: a
+  // title written with marks (`fig-title: "*Fig*"`), which the page sets in
+  // italic and this reads as the text it is.
+  function floatLook(header, kind, titles) {
+    const keys = headerKeys(header);
+    const crossref = isMap(keys.crossref) ? keys.crossref : {};
+    const language = isMap(keys.language) ? keys.language : {};
+    const written = function (map, key) {
+      return typeof map[key] === "string" ? map[key] : null;
+    };
+    let ofLanguage = written(language, "crossref-" + kind + "-title");
+    if (ofLanguage === null) ofLanguage = languageWord(titles, typeof keys.lang === "string" ? keys.lang : "");
+    let title = written(crossref, kind + "-title");
+    if (title === null) title = ofLanguage;
+    let prefix = written(crossref, kind + "-prefix");
+    if (prefix === null) prefix = written(language, "crossref-" + kind + "-prefix");
+    if (prefix === null) prefix = ofLanguage;
+    let labels = written(crossref, kind + "-labels");
+    if (labels === null) labels = written(crossref, "labels");
+    if (labels === null) labels = "arabic";
+    const delim = written(crossref, "title-delim");
+    return { title: title, prefix: prefix, labels: labels, delim: delim === null ? ":" : delim.trim() };
+  }
+  function figureLook(header) {
+    return floatLook(header, "fig", FIGURE_TITLES);
+  }
+
+  // What a figure's caption opens with, as titlePrefix writes it: the title,
+  // a no-break space, the number, and then the delimiter and a space where
+  // a caption follows. A figure with no caption has "Figure 2" for one. The
+  // no-break space is there whatever the title, so a header that empties the
+  // title prints " 1: A caption" (measured).
+  function caption(shown, lookOf, captioned) {
+    return lookOf.title + "\u00a0" + shown + (captioned ? lookOf.delim + " " : "");
+  }
+
+  // A figure inside a figure (`![A](a.png){#fig-a}` in a `::: {#fig-both}`)
+  // is lettered and not numbered, (a), (b), and its caption opens with the
+  // letter in parentheses (prependSubrefNumber, with `alpha a`, Quarto's
+  // default for `subref-labels`, which is not read).
+  function subcaption(n, captioned) {
+    return "(" + number(n, "alpha a") + ")" + (captioned ? " " : "");
+  }
+
   // ---------- Numbers ----------
 
   function roman(n) {
@@ -326,33 +401,50 @@
     return out;
   }
 
-  // What the page prints for a citation that names an equation, as
-  // resolveRefs does it, or null when the citation is not the editor's to
-  // print: none of its keys is an equation's, or it also names a figure, a
-  // table or another kind the editor does not number. `equations` maps a
-  // label to its number. Every key of an equation gives one piece, after a
-  // comma and a space unless it is the first citation of the brackets (a
-  // key of the bibliography counts for that and prints nothing: Quarto drops
-  // it); a piece is the prefix written in the brackets or else the
-  // document's, upper-cased when the key is, then a no-break space and the
-  // number, and it is the number alone for `-@eq-x`. A label no equation
-  // carries is "?@eq-x", in bold on the page, with no comma before it.
-  function reference(raw, equations, lookOf) {
+  // What the page prints for a citation that names an equation, a figure or
+  // a table, as resolveRefs does it, or null when the citation is not the
+  // editor's to print: none of its keys is one of those, or it also names a
+  // listing, a section or another kind the editor does not number.
+  // `equations` maps a label to its number, and `figures` and `tables`,
+  // where the caller numbers them, hold the same map for each kind
+  // (`numbers`, a figure inside a figure under what the page prints for it,
+  // "6 (a)", and one the editor cannot number under null, which leaves the
+  // citation as written) beside the word of a reference to one (`prefix`). Every key gives one piece, after a comma
+  // and a space unless it is the first citation of the brackets (a key of
+  // the bibliography counts for that and prints nothing: Quarto drops it); a
+  // piece is the prefix written in the brackets or else the document's,
+  // upper-cased when the key is, then a no-break space and the number, and
+  // it is the number alone for `-@eq-x`. A label nothing carries is
+  // "?@eq-x", in bold on the page, with no comma before it. A piece that
+  // names a figure or a table says so (`ref: "fig"`, `ref: "tbl"`), for the
+  // click that goes to it.
+  function reference(raw, equations, lookOf, figures, tables) {
     const list = citations(raw);
     const kinds = list.map(function (c) {
       return kindOf(c.key);
     });
-    if (kinds.indexOf("eq") === -1) return null;
+    const floats = { fig: figures || null, tbl: tables || null };
+    const numbered = function (k) {
+      return k === "eq" || !!floats[k];
+    };
+    if (!kinds.some(numbered)) return null;
     if (kinds.some(function (k) {
-      return k && k !== "eq";
+      return k && !numbered(k);
     })) return null;
     const out = [];
+    let unknown = false;
     list.forEach(function (c, i) {
-      if (kinds[i] !== "eq") return;
+      const kind = kinds[i];
+      if (!kind) return;
       const label = c.key.charAt(0).toLowerCase() + c.key.slice(1);
-      const found = equations.get(label);
+      const float = floats[kind] || null;
+      const found = float ? float.numbers.get(label) : equations.get(label);
       if (found === undefined) {
         out.push({ kind: "missing", text: "?@" + label, label: label });
+        return;
+      }
+      if (found === null) {
+        unknown = true;
         return;
       }
       if (i > 0) out.push({ kind: "text", text: ", " });
@@ -360,7 +452,7 @@
       if (c.prefix) {
         text = c.prefix + " ";
       } else if (!c.suppress) {
-        let prefix = lookOf.prefix;
+        let prefix = float ? float.prefix : lookOf.prefix;
         if (/^[A-Z]/.test(c.key) && prefix) {
           const chars = Array.from(prefix);
           chars[0] = chars[0].toUpperCase();
@@ -368,9 +460,11 @@
         }
         if (prefix) text = prefix + " ";
       }
-      out.push({ kind: lookOf.hyperlink ? "link" : "text", text: text + found, label: label });
+      const piece = { kind: lookOf.hyperlink ? "link" : "text", text: text + found, label: label };
+      if (float) piece.ref = kind;
+      out.push(piece);
     });
-    return out;
+    return unknown ? null : out;
   }
 
   // ---------- Sections by number ----------
@@ -1290,9 +1384,13 @@
 
   return {
     PREFIXES: PREFIXES,
+    FIGURE_TITLES: FIGURE_TITLES,
     languagePrefix: languagePrefix,
     headerKeys: headerKeys,
     look: look,
+    figureLook: figureLook,
+    caption: caption,
+    subcaption: subcaption,
     sectionLook: sectionLook,
     sectionNumbers: sectionNumbers,
     DATE_LOCALES: DATE_LOCALES,

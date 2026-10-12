@@ -5,6 +5,8 @@
 // against the language files of the Quarto on this computer. The export
 // prints them by the same rules in mdm.lua (render.test.js, html.test.js),
 // and the editor draws what this module says (webview-markdown.test.js).
+// The figures and the references to them are further down, and they are
+// Quarto's alone on the page.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -163,6 +165,188 @@ test("a reference prints what Quarto printed for it, quirks and all", () => {
   assert.equal(X.reference("@Eq-a", equations, own)[0].text, "Eq. 1");
   const spanish = X.look("lang: es\n");
   assert.equal(X.reference("[@eq-a; @eq-b]", equations, spanish).map((p) => p.text).join(""), "Ecuación 1, Ecuación 2");
+});
+
+// ---------- Figures by number ----------
+//
+// A figure with a label (`![A caption](a.svg){#fig-a}`) and the references
+// to it, as Quarto 1.9.37 printed them on 2026-10-12 through the extension's
+// own export (the filter of MDM in the header, which leaves a figure to
+// Quarto): every row below was read off the page of a probe document, the
+// caption out of its `figcaption` and a reference out of its
+// `a.quarto-xref`. The editor says which images and which divs are figures
+// (webview-markdown.test.js), and the page is held against the editor in
+// html.test.js.
+
+test("every language names a figure as Quarto's own language file does", (t) => {
+  const dir = quartoLanguages();
+  if (!dir) {
+    t.skip("no Quarto on the PATH");
+    return;
+  }
+  const files = fs.readdirSync(dir).filter((f) => /^_language(?:-.+)?\.yml$/.test(f));
+  assert.ok(files.length > 30, "Quarto's language files were not found in " + dir);
+  const seen = new Set();
+  for (const file of files) {
+    const tag = file.replace(/^_language-?/, "").replace(/\.yml$/, "");
+    seen.add(tag);
+    const lines = fs.readFileSync(path.join(dir, file), "utf8").split(/\r?\n/);
+    // No file has a word of its own for a reference, which is why a
+    // reference takes the caption's (figureLook).
+    assert.ok(!lines.some((l) => /^crossref-fig-prefix:/.test(l)), file + " has a crossref-fig-prefix");
+    const line = lines.find((l) => /^crossref-fig-title:/.test(l));
+    if (!line) {
+      // A file with no title of its own falls to its base language.
+      assert.ok(!Object.prototype.hasOwnProperty.call(X.FIGURE_TITLES, tag), tag + " has no title in Quarto");
+      continue;
+    }
+    const value = /^crossref-fig-title:\s*"([^"]*)"/.exec(line) || /^crossref-fig-title:\s*(\S+)/.exec(line);
+    assert.equal(X.FIGURE_TITLES[tag], value[1], "the title of " + (tag || "English"));
+  }
+  for (const tag of Object.keys(X.FIGURE_TITLES)) assert.ok(seen.has(tag), tag + " is not one of Quarto's languages");
+});
+
+test("the header says what a figure is called in its caption and in a reference, which Quarto finds apart", () => {
+  assert.deepEqual(X.figureLook(""), { title: "Figure", prefix: "Figure", labels: "arabic", delim: ":" });
+  // The language names both: "Figura 1: A caption" and "Figura 1" under
+  // `lang: es`, 图 under `lang: zh`, and a tag Quarto has no file for is
+  // English, `ES` among them.
+  assert.deepEqual(X.figureLook("lang: es\n"), { title: "Figura", prefix: "Figura", labels: "arabic", delim: ":" });
+  assert.equal(X.figureLook("lang: zh\n").prefix, "图");
+  assert.equal(X.figureLook("lang: fr-CA\n").title, "Figure");
+  assert.equal(X.figureLook("lang: de-AT\n").title, "Abbildung");
+  assert.equal(X.figureLook("lang: ES\n").title, "Figure");
+  // `crossref: fig-title` renames the captions and no reference: "Lámina 1:
+  // A caption" over "Figure 1" (measured, and not what a reader expects).
+  assert.deepEqual(
+    X.figureLook("crossref:\n  fig-title: \"Lámina\"\n"),
+    { title: "Lámina", prefix: "Figure", labels: "arabic", delim: ":" }
+  );
+  // The title under `language:` is the language's, so it renames both.
+  const imagen = X.figureLook("language:\n  crossref-fig-title: \"Imagen\"\n");
+  assert.deepEqual([imagen.title, imagen.prefix], ["Imagen", "Imagen"]);
+  // A prefix of its own, under `language:` or under `crossref:`, the second
+  // over the first.
+  const both = X.figureLook("language:\n  crossref-fig-title: \"Imagen\"\n  crossref-fig-prefix: \"imagen\"\n");
+  assert.deepEqual([both.title, both.prefix], ["Imagen", "imagen"]);
+  assert.equal(X.figureLook("lang: ES\nlanguage:\n  crossref-fig-prefix: \"fig.\"\n").prefix, "fig.");
+  const own = X.figureLook("lang: es\ncrossref:\n  fig-prefix: \"fig.\"\n  title-delim: \" —\"\n");
+  assert.deepEqual(own, { title: "Figura", prefix: "fig.", labels: "arabic", delim: "—" });
+  assert.equal(X.figureLook("language:\n  crossref-fig-prefix: a\ncrossref: {fig-prefix: b}\n").prefix, "b");
+  // Emptied, each of them.
+  const none = X.figureLook("crossref:\n  fig-title: \"\"\n  fig-prefix: \"\"\n");
+  assert.deepEqual([none.title, none.prefix], ["", ""]);
+  // Counted in the figures' own style, else in the document's.
+  assert.equal(X.figureLook("crossref:\n  fig-labels: roman\n").labels, "roman");
+  assert.equal(X.figureLook("crossref:\n  labels: alpha a\n").labels, "alpha a");
+  assert.equal(X.figureLook("crossref:\n  labels: alpha a\n  fig-labels: alpha A\n").labels, "alpha A");
+  assert.equal(X.figureLook("crossref:\n  eq-labels: roman\n").labels, "arabic");
+  // The delimiter without the spaces around it, and none at all.
+  assert.equal(X.figureLook("crossref:\n  title-delim: \". \"\n").delim, ".");
+  assert.equal(X.figureLook("crossref:\n  title-delim: \" | x \"\n").delim, "| x");
+  assert.equal(X.figureLook("crossref:\n  title-delim: \"\"\n").delim, "");
+});
+
+test("a figure's caption opens as Quarto printed it, and a figure inside a figure with its letter", () => {
+  const opens = (header, n, captioned) => {
+    const look = X.figureLook(header);
+    return X.caption(X.number(n, look.labels), look, captioned);
+  };
+  // Each is the head of a `figcaption` of the page, before "Caption A".
+  assert.equal(opens("", 1, true), "Figure 1: ");
+  assert.equal(opens("lang: es\n", 13, true), "Figura 13: ");
+  assert.equal(opens("crossref:\n  fig-title: \"Fig.\"\n  title-delim: \".\"\n  fig-labels: roman\n", 13, true), "Fig. XIII. ");
+  assert.equal(opens("crossref:\n  labels: alpha a\n", 2, true), "Figure b: ");
+  assert.equal(opens("lang: es\ncrossref:\n  title-delim: \" —\"\n", 1, true), "Figura 1— ");
+  assert.equal(opens("crossref:\n  title-delim: \" | x \"\n", 1, true), "Figure 1| x ");
+  assert.equal(opens("crossref:\n  title-delim: \"\"\n", 1, true), "Figure 1 ");
+  // The no-break space stands whatever the title: " 1: Caption A".
+  assert.equal(opens("crossref:\n  fig-title: \"\"\n", 1, true), " 1: ");
+  // A figure with no caption has its number for one, and no delimiter.
+  assert.equal(opens("", 2, false), "Figure 2");
+  assert.equal(opens("crossref:\n  fig-title: \"Fig.\"\n  title-delim: \".\"\n  fig-labels: roman\n", 2, false), "Fig. II");
+  assert.equal(opens("crossref:\n  fig-title: \"\"\n", 2, false), " 2");
+  // Inside a figure: "(a) Sub one", "(b) Sub two", whatever the header
+  // counts the figures in.
+  assert.equal(X.subcaption(1, true), "(a) ");
+  assert.equal(X.subcaption(2, true), "(b) ");
+  assert.equal(X.subcaption(3, false), "(c)");
+});
+
+test("a reference to a figure prints what Quarto printed for it, beside an equation too", () => {
+  // The numbers the probe's figures took: `fig-a` is written twice and the
+  // later one, the thirteenth, is the one a reference finds; `fig-sub1` is
+  // the first figure inside the sixth; `fig-intbl` stands in a table, whose
+  // number the editor does not count; and no figure carries `fig-inline`
+  // (an image in a sentence), `fig-cell` (one in a table's cell) or
+  // `fig-b` (the label is `fig-B`). Bold is **.
+  const equations = new Map([["eq-x", "1"]]);
+  const numbers = new Map([
+    ["fig-a", "13"], ["fig-w", "10"], ["fig-empty", "2"], ["fig-div", "5"], ["fig-subs", "6"],
+    ["fig-sub1", "6 (a)"], ["fig-B", "9"], ["fig-intbl", null],
+  ]);
+  const printed = (raw, header) => {
+    const figures = { numbers: numbers, prefix: X.figureLook(header || "").prefix };
+    const parts = X.reference(raw, equations, X.look(header || ""), figures);
+    return parts && parts.map((p) => (p.kind === "missing" ? "**" + p.text + "**" : p.text)).join("");
+  };
+  const rows = [
+    ["@fig-a", "Figure 13"],
+    ["[@fig-a]", "Figure 13"],
+    ["-@fig-a", "13"],
+    ["@Fig-a", "Figure 13"],
+    ["[see @fig-a]", "see 13"],
+    ["[Fig. @fig-a]", "Fig. 13"],
+    ["[@fig-a; @fig-w]", "Figure 13, Figure 10"],
+    ["[-@fig-a; -@fig-w]", "13, 10"],
+    ["[@fig-a; @eq-x]", "Figure 13, Equation 1"],
+    ["[@eq-x; @fig-a]", "Equation 1, Figure 13"],
+    ["@fig-missing", "**?@fig-missing**"],
+    ["[@fig-a; @fig-missing]", "Figure 13**?@fig-missing**"],
+    ["[@fig-missing; @fig-a]", "**?@fig-missing**, Figure 13"],
+    ["@fig-div", "Figure 5"],
+    ["@fig-subs", "Figure 6"],
+    ["@fig-sub1", "Figure 6 (a)"],
+    ["-@fig-sub1", "6 (a)"],
+    ["@fig-empty", "Figure 2"],
+    ["@fig-inline", "**?@fig-inline**"],
+    ["@fig-cell", "**?@fig-cell**"],
+    ["[@fig-a, p. 3]", "Figure 13"],
+    ["@fig-a [p. 3]", "Figure 13"],
+    ["@fig-B", "Figure 9"],
+    ["@fig-b", "**?@fig-b**"],
+    ["[@fig-a; @knuth84]", "Figure 13"],
+    // Not the editor's to print: a figure whose number is a table's, a
+    // table, and a key of the bibliography.
+    ["@fig-intbl", null],
+    ["[@fig-a; @fig-intbl]", null],
+    ["[@fig-a; @tbl-x]", null],
+    ["@tbl-x", null],
+    ["@plain", null],
+  ];
+  for (const [raw, expected] of rows) assert.equal(printed(raw), expected, raw);
+  // The header's words, upper-cased by the key, and none where it empties
+  // them.
+  assert.equal(printed("@fig-a", "lang: es\n"), "Figura 13");
+  assert.equal(printed("[@fig-a; @eq-x]", "lang: es\n"), "Figura 13, Ecuación 1");
+  assert.equal(printed("@fig-a", "crossref:\n  fig-prefix: \"fig.\"\n"), "fig. 13");
+  assert.equal(printed("@Fig-a", "crossref:\n  fig-prefix: \"fig.\"\n"), "Fig. 13");
+  assert.equal(printed("@Fig-a", "language:\n  crossref-fig-prefix: \"imagen\"\n"), "Imagen 13");
+  assert.equal(printed("@fig-a", "crossref:\n  fig-title: \"Lámina\"\n"), "Figure 13");
+  assert.equal(printed("@fig-a", "crossref:\n  fig-prefix: \"\"\n"), "13");
+  // A piece that names a figure says so, for the click that goes to it, and
+  // an equation's does not; linked, or ink when the header says so.
+  const figures = { numbers: numbers, prefix: "Figure" };
+  assert.deepEqual(X.reference("[@fig-a; @eq-x]", equations, X.look(""), figures), [
+    { kind: "link", text: "Figure 13", label: "fig-a", ref: "fig" },
+    { kind: "text", text: ", " },
+    { kind: "link", text: "Equation 1", label: "eq-x" },
+  ]);
+  const plain = X.look("crossref:\n  ref-hyperlink: false\n");
+  assert.deepEqual(X.reference("@fig-a", equations, plain, figures).map((p) => p.kind), ["text"]);
+  // A caller that numbers no figures leaves a figure's reference alone.
+  assert.equal(X.reference("@fig-a", equations, X.look("")), null);
+  assert.equal(X.reference("[@eq-x; @fig-a]", equations, X.look("")), null);
 });
 
 // ---------- Sections by number ----------

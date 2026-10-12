@@ -2429,6 +2429,57 @@ test("Ctrl+click on a reference to an equation brings the equation into view, an
   await h.close();
 });
 
+test("Ctrl+click on a reference to a figure brings the figure into view, and so does a link to its label, the caret staying", { skip }, async () => {
+  // As for an equation (the test above): the figure far above the
+  // reference, out of the pane, and the caret left where it was, since a
+  // caret in a figure opens its source (showFigure). A picture and a div
+  // that is a figure, each by its own reference and by a link to its label.
+  const filler = Array.from({ length: 200 }, (_, i) => "Paragraph " + i + " between the figure and the reference.").join("\n\n");
+  const text =
+    "![A picture](a.svg){#fig-picture}\n\n::: {#fig-tune}\nA tune would stand here.\n\nIts caption.\n:::\n\n" + filler +
+    "\n\nSee @fig-picture and [the picture](#fig-picture), @fig-tune and [the tune](#fig-tune).\n";
+  const h = await open({ text, scores: 0, height: 600, seed: { docBase: "https://vsc.test/home/me/papers" } });
+  const inView = (selector) =>
+    h.page.evaluate((selector) => {
+      const el = document.querySelector("#app " + selector);
+      if (!el) return false;
+      const b = el.getBoundingClientRect();
+      return b.top >= 0 && b.bottom <= window.innerHeight;
+    }, selector);
+  const cases = [
+    [".mdm-eqref-link[data-mdm-fig='fig-picture']", ".mdm-figcaption"],
+    [".mdm-link", ".mdm-figcaption"],
+    [".mdm-eqref-link[data-mdm-fig='fig-tune']", ".mdm-figure-lead"],
+    [".mdm-link ~ .mdm-link", ".mdm-figure-lead"],
+  ];
+  for (const [target, lands] of cases) {
+    const caret = text.length - 2;
+    await setSelection(h.page, caret);
+    await h.page.evaluate(() => {
+      const s = window.__mdm.view.scrollDOM;
+      s.scrollTop = s.scrollHeight;
+    });
+    await sleep(100);
+    assert.equal(await inView(lands), false, "the figure was in view before the click on " + target);
+    const at = await h.page.evaluate((sel) => {
+      const el = document.querySelector("#app " + sel);
+      if (!el) return null;
+      el.scrollIntoView({ block: "center" });
+      const b = el.getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }, target);
+    assert.ok(at, "nothing drawn for " + target);
+    await h.page.keyboard.down("Control");
+    await h.page.mouse.click(at.x, at.y);
+    await h.page.keyboard.up("Control");
+    await sleep(300);
+    assert.equal(await inView(lands), true, target + " did not bring the figure into view");
+    assert.deepEqual(await selectionRanges(h.page), [[caret, caret]], target);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a paste that carries no text leaves the selection as it was (G082)", { skip }, async () => {
   const h = await open({ text: "Insert placeholder here\n", scores: 0 });
   await setSelection(h.page, [{ anchor: 7, head: 18 }]);

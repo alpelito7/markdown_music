@@ -5737,6 +5737,204 @@ test("a numbered equation is set as the editor draws it, and a reference to it p
   assert.deepEqual(editorText.ends, pageText.ends);
 });
 
+// ---------- Figures by number, page against editor ----------
+
+// A figure with a label is numbered by Quarto on the page, with no help from
+// the filter, and the editor numbers it by the same rules written a second
+// time (media/mdm-crossref.js, figureIndex in main.js; the owner, 2026-10-12:
+// the lesson was to cite its figure as it cites its equation, and the editor
+// drew `@fig-circle` as written over a caption with no number). So the two
+// are set side by side on one document: what each caption opens with, where
+// a numbered caption breaks, where the picture and its caption stand, and
+// the paragraph that refers to them, word for word and row for row.
+//
+// The picture of a labelled figure stood centred on the page, 282px in from
+// the left of the 820px column for the 256px icon, over a caption set flush
+// left, where the editor draws every figure flush left and the page the one
+// with no label: Quarto makes a float of it, its picture in a div where the
+// other's is in a paragraph, and its centring reached the div (measured
+// that day; the rule beside the paragraphs' in mdm-look.css). The figure in
+// the list is there for the count: it is the third on both, and the editor
+// draws it as a picture in its line, with no caption.
+const FIGURES_DOC = `Before the figure, a line of prose to measure from.
+
+![A plain caption under the picture.](icon.png)
+
+Between the two, a line of prose to measure from.
+
+![A numbered caption under the picture, long enough to run over to a second row of the column of the page, so that the word it breaks on can be read on both surfaces alike and held there.](icon.png){#fig-icon}
+
+After the figure, a line of prose to measure from.
+
+![](icon.png){#fig-bare}
+
+After the bare one, a line of prose to measure from.
+
+- ![In a list](icon.png){#fig-list}
+
+::: {#fig-div}
+What a div holds, a line of prose.
+
+The caption of the div.
+:::
+
+The relation between the pictures: @fig-icon is the first of them and -@fig-bare the second, [Fig. @fig-list] stands in a list and @Fig-div is a div, which [@fig-icon; @fig-bare] and [@fig-icon; @fig-zz] name again beside [see @fig-div, p. 3], long enough a paragraph to break more than twice in the column of the page, since a row that ends on another word on one of the two surfaces is how a reference drawn wider or narrower than the page prints it shows up.
+`;
+
+// Every figure of a surface that is a picture over a caption: what the
+// caption says and the words its rows end on, how far the picture stands in
+// from the left of the column and how wide it is, the air over the picture,
+// between it and its caption and under the caption, and the caption's size
+// and ink. `sel` names the figure, its caption, the blocks of prose and the
+// column, and where a figure is not to be read (`skip`).
+const FIGURE_BOXES = function (arg) {
+  const sel = arg.sel;
+  const round = (x) => Math.round(x * 10) / 10;
+  const column = document.querySelector(sel.column).getBoundingClientRect();
+  const blocks = Array.from(document.querySelectorAll(sel.block)).filter((b) => b.textContent.trim() && !b.closest(sel.figure));
+  return Array.from(document.querySelectorAll(sel.figure))
+    .filter((fig) => fig.querySelector("img") && fig.querySelector(sel.caption) && !(sel.skip && fig.closest(sel.skip)))
+    .map((fig) => {
+      const img = fig.querySelector("img").getBoundingClientRect();
+      const caption = fig.querySelector(sel.caption);
+      const box = caption.getBoundingClientRect();
+      const above = blocks.filter((b) => b.getBoundingClientRect().bottom <= img.top + 1).pop();
+      const below = blocks.find((b) => b.getBoundingClientRect().top >= box.bottom - 1);
+      const read = Object.values(eval("(" + arg.ends + ")")([caption]))[0];
+      return {
+        caption: read.text,
+        ends: read.ends,
+        left: round(img.left - column.left),
+        width: round(img.width),
+        above: above ? round(img.top - above.getBoundingClientRect().bottom) : null,
+        gap: round(box.top - img.bottom),
+        below: below ? round(below.getBoundingClientRect().top - box.bottom) : null,
+        size: getComputedStyle(caption).fontSize,
+        ink: getComputedStyle(caption).color,
+      };
+    });
+}.toString();
+
+test("a numbered figure opens its caption on the page as the editor opens it and stands where the editor stands it, and a reference to it prints what the editor prints and breaks its paragraph on the same words", { skip }, async () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "vscode-mdm", "media", "icon.png"), path.join(DIR, "icon.png"));
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
+  fs.writeFileSync(path.join(DIR, "figures.mdm"), "---\ntitle: Figures\nfilters:\n  - mdm\n---\n\n" + FIGURES_DOC);
+  const r = spawnSync(MDM, ["render", "figures.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // The one label nothing carries, and nothing else, is warned of.
+  const warned = (r.stderr + r.stdout).replace(/\x1b\[[0-9;]*m/g, "").match(/Unable to resolve crossref @\S+/g) || [];
+  assert.deepEqual(Array.from(new Set(warned)), ["Unable to resolve crossref @fig-zz"]);
+  const page = await readCiting(
+    "file://" + path.join(DIR, "figures.html"),
+    (arg) => {
+      // The no-break space after "Figure" is kept, which \s would take.
+      const flat = (el) => el.textContent.replace(/[ \t\r\n]+/g, " ").trim();
+      const ps = Array.from(document.querySelectorAll("main.content p"));
+      return {
+        boxes: eval("(" + arg.boxes + ")")({
+          ends: arg.ends,
+          // The figure in the list is a picture in its line to the editor.
+          sel: { figure: "main.content figure", caption: ":scope > figcaption", block: "main.content p", column: "main.content", skip: "li" },
+        }),
+        // What every float is captioned by, a div's among them.
+        numbered: Array.from(document.querySelectorAll("main.content figcaption.quarto-float-caption")).map(flat),
+        refs: Array.from(document.querySelectorAll("main.content a.quarto-xref")).map((a) => a.textContent + " " + a.getAttribute("href")),
+        missing: Array.from(document.querySelectorAll("main.content p strong")).map((x) => x.textContent),
+        labels: /\{#fig-/.test(document.querySelector("main.content").textContent),
+        lines: eval("(" + arg.ends + ")")(ps.filter((p) => p.textContent.startsWith("The relation"))),
+      };
+    },
+    { boxes: FIGURE_BOXES, ends: LINE_ENDS }
+  );
+  assert.deepEqual(page.numbered, [
+    "Figure 1: A numbered caption under the picture, long enough to run over to a second row of the column of the page, so that the word it breaks on can be read on both surfaces alike and held there.",
+    "Figure 2",
+    "Figure 3: In a list",
+    "Figure 4: The caption of the div.",
+  ]);
+  assert.deepEqual(page.refs, [
+    "Figure 1 #fig-icon",
+    "2 #fig-bare",
+    "Fig. 3 #fig-list",
+    "Figure 4 #fig-div",
+    "Figure 1 #fig-icon",
+    "Figure 2 #fig-bare",
+    "Figure 1 #fig-icon",
+    "see 4 #fig-div",
+  ]);
+  assert.deepEqual(page.missing, ["?@fig-zz"]);
+  assert.equal(page.labels, false, "a label is printed on the page");
+
+  const { open: openEditor } = require("./webview/helpers.js");
+  const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" };
+  const h = await openEditor({ text: FIGURES_DOC, seed: { settings, docBase: "file://" + DIR + "/" }, scores: 0, height: 1200 });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await h.page.mouse.click(2, 2);
+    await h.page.waitForFunction(() => {
+      const imgs = Array.from(document.querySelectorAll("#app .mdm-figure img"));
+      return imgs.length >= 3 && imgs.every((img) => img.complete && img.naturalWidth > 0);
+    });
+    await h.page.evaluate(() => document.fonts.ready);
+    await new Promise((res) => setTimeout(res, 500));
+    editor = await h.page.evaluate(
+      (arg) => ({
+        boxes: eval("(" + arg.boxes + ")")({
+          ends: arg.ends,
+          sel: { figure: "#app .mdm-figure", caption: ".mdm-figcaption", block: "#app .cm-line", column: "#app .cm-content" },
+        }),
+        leads: Array.from(document.querySelectorAll("#app .mdm-figure-lead")).map((e) => e.closest(".cm-line").textContent.replace(/[ \t\r\n]+/g, " ").trim()),
+        refs: Array.from(document.querySelectorAll("#app .mdm-eqref")).map((e) => e.textContent),
+        lines: eval("(" + arg.ends + ")")(Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => l.textContent.startsWith("The relation"))),
+      }),
+      { boxes: FIGURE_BOXES, ends: LINE_ENDS }
+    );
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  // The same three pictures over a caption on both: the one with no label,
+  // the numbered one and the one with a number and no caption. Each opens
+  // with the same words and breaks on the same ones, and stands flush left
+  // with the same air around it.
+  assert.deepEqual(editor.boxes.map((b) => b.caption), page.boxes.map((b) => b.caption));
+  // (LINE_ENDS reads a caption with its spaces made one kind.)
+  assert.deepEqual(editor.boxes.map((b) => b.caption.slice(0, 20)), ["A plain caption unde", "Figure 1: A numbered", "Figure 2"]);
+  assert.ok(page.boxes[1].ends.length >= 1, "the numbered caption does not run over a row on the page: " + JSON.stringify(page.boxes[1]));
+  for (let i = 0; i < page.boxes.length; i++) {
+    const [own, printed] = [editor.boxes[i], page.boxes[i]];
+    assert.deepEqual(own.ends, printed.ends, "the caption of figure " + i + " breaks elsewhere in the editor");
+    assert.equal(printed.left, 0, "the picture of figure " + i + " stands " + printed.left + " px in from the left of the page's column");
+    assert.equal(own.left, 0, "the picture of figure " + i + " stands " + own.left + " px in from the left of the editor's column");
+    for (const key of ["width", "above", "gap", "below"]) {
+      assert.ok(Math.abs(own[key] - printed[key]) <= 1, key + " of figure " + i + " is " + printed[key] + " on the page and " + own[key] + " in the editor");
+    }
+    assert.equal(own.size, printed.size, "the size of the caption of figure " + i);
+    assert.equal(own.ink, printed.ink, "the ink of the caption of figure " + i);
+  }
+  // A labelled figure keeps the air of one with no label, on each surface.
+  for (const [name, boxes] of [["the page", page.boxes], ["the editor", editor.boxes]]) {
+    for (const key of ["above", "gap", "below"]) {
+      assert.ok(Math.abs(boxes[1][key] - boxes[0][key]) <= 0.5, key + " is " + boxes[0][key] + " without a label and " + boxes[1][key] + " with one on " + name);
+    }
+  }
+  // The div's caption opens with its number where the page's does.
+  assert.deepEqual(editor.leads, [page.numbered[3]]);
+  // And the references: the same words, on the same rows.
+  assert.deepEqual(editor.refs, [
+    "Figure 1", "2", "Fig. 3", "Figure 4", "Figure 1, Figure 2", "Figure 1?@fig-zz", "see 4",
+  ]);
+  const pageText = Object.values(page.lines)[0];
+  const editorText = Object.values(editor.lines)[0];
+  assert.ok(pageText && editorText, "the paragraph of references was not found");
+  assert.equal(editorText.text, pageText.text, "the editor prints other words than the page");
+  assert.ok(editorText.ends.length >= 3, "the paragraph is not long enough to test: " + JSON.stringify(editorText.ends));
+  assert.deepEqual(editorText.ends, pageText.ends);
+});
+
 // ---------- Sections by number, page against editor ----------
 
 // `number-sections: true` numbers the headings of the page, and the editor

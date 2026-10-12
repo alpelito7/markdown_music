@@ -174,6 +174,27 @@ page printed the label as text and every reference as "?@eq-mass".
 `crossref: chapters`, which numbers the equations of a book by chapter, is
 not followed.
 
+A figure with a label (`![The circle](circle.svg){#fig-circle}`) is numbered
+too: its caption opens with "Figure 1: " and `@fig-circle` reads "Figure 1",
+in the editor as on the page, with every form an equation's reference has
+and beside one (`[@fig-circle; @eq-mass]`). The label, and whatever else
+stands in the braces after the image, shows while the image is open and
+only then, as an equation's does, and the image stays open while the caret
+is in them. Here it is Quarto that numbers
+on the page and on paper, and the editor follows its count: an image alone
+in its paragraph, wherever the paragraph stands, and a fenced div that
+carries the label, which is how a score is made a figure, captioned by its
+last paragraph (`::: {#fig-tune}`, the score, its caption, `:::`). A figure
+inside such a div is lettered, "(a)", and read as "Figure 2 (a)". The words
+are the language's ("Figura" under `lang: es`) or the header's, where
+`crossref: fig-title` renames the captions and `fig-prefix` the references,
+as Quarto has it. The picture of a numbered figure stands flush left on the
+page as every figure does in the editor; Quarto centred it. Still drawn
+otherwise in the editor: a figure in a list, in a quote or in a link is a
+picture in its line with no caption, and a div with no paragraph to caption
+it shows no number. References to listings and sections (`@lst-x`,
+`@sec-x`) are drawn as written.
+
 The sections of a document whose header says `number-sections: true` are
 numbered, 1, 1.1, 1.2, before the text of each heading and in its ink, in
 the editor and on the page alike, and in the rows of the editor's outline.
