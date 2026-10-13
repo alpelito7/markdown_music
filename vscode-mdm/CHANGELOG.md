@@ -1,7 +1,65 @@
 # Changelog
 
-## 0.7.2
+## 0.7.3
 
+- A figure with a label, `{#fig-circle}` in braces straight after its image,
+  is numbered in the editor as it is on the page: its caption opens with
+  "Figure 1: " and `@fig-circle` reads "Figure 1" and leads to the figure
+  (`Ctrl+click` in the editor), with every form an equation's reference has
+  and beside one (`[@fig-circle; @eq-mass]`). The page numbered them
+  already, Quarto's way, and the editor drew the caption with no number and
+  the reference as written. The count is Quarto's: an image alone in its
+  paragraph, and a fenced div that carries the label, which is how a score
+  is made a figure, captioned by its last paragraph (`::: {#fig-tune}`, the
+  score, its caption, `:::`). A figure inside such a div is lettered, "(a)",
+  and read "Figure 2 (a)". The words are the language's ("Figura" under
+  `lang: es`) or the header's, where `crossref: fig-title` renames the
+  captions and `fig-prefix` the references. On the exported page the picture
+  of a numbered figure stands flush left, as every figure does in the
+  editor, where Quarto centred it. Still drawn otherwise in the editor: a
+  figure in a list, in a quote or in a link is a picture in its line with no
+  caption, and a div with no paragraph to caption it shows no number.
+- A table is captioned by the paragraph beside it that opens with a colon,
+  under the table or over it (`: The shapes of a note`, or `Table: The
+  shapes of a note`), and the caption is drawn over the table, centred on
+  the column, in the editor as on the page. Where the caption ends on a
+  label (`: The shapes of a note {#tbl-shapes}`) the table is numbered,
+  "Table 1: The shapes of a note", and `@tbl-shapes` reads "Table 1" and
+  leads to it, beside a figure or an equation too. The editor drew the
+  caption as the line of text it is and the reference as written. The
+  caption's own line is put away with the table's source and comes back with
+  it, a caret in either showing both, and a click on the drawn caption goes
+  to its words. A fenced div with the label is a table too (`:::
+  {#tbl-pair}`), the tables inside one are lettered, and the words are the
+  language's ("Tabla" under `lang: es`) or the header's (`crossref:
+  tbl-title`, `tbl-prefix`, `tbl-labels`). Not followed in the editor:
+  `tbl-cap-location`, which the page obeys, and the caption of a div that
+  holds several tables.
+- Every table stands in the middle of the column, with a caption or without,
+  in the editor and on the exported page, and so in a printed PDF. It stood
+  at the left.
+- The label of a figure, of an equation and of a table is drawn alike while
+  its source is open: small and faint, in the code face, at one size. The
+  braces after a picture showed only once the caret came onto them and now
+  stand wherever the caret is in the picture, its label and its width alike;
+  a table's label stood in its caption as words of the prose; and the label
+  on the closing line of an equation was smaller than a picture's.
+- A caret in the braces after a picture keeps the picture's source open. A
+  click on `{#fig-circle}` brought the picture back in place of its line,
+  and the label could not be edited.
+- The caret is the height of its row where it used to come out short. On a
+  row that opens with an equation, with a run of code or with a raised word,
+  the first caret of a window was 17.3 px tall in the roman, or 15.7, where
+  the prose's is 23.1, and so was every caret in the prose after it until
+  the window was reloaded. Set right with it: a caret moved while the editor
+  did not have the focus was not fitted when the focus came back, and after
+  the face button, or when the roman's files arrived late, the caret kept
+  the box of the face before.
+- In monospace the caret is the one an editor draws for such text, as tall
+  as the box of the text: in a block of code, in the source of a table, a
+  score, an equation and the header, in a run of code, in a link's address
+  and in a picture's braces. In the mark of a note, `[^n]`, it is as tall as
+  the brackets.
 - In a printed PDF the roman is embedded as the font it is. Chrome wrote
   Latin Modern into a PDF as drawings, one for each letter, and a viewer
   filled them thinner than it sets text: the prose read weaker than in the
@@ -11,12 +69,13 @@
   once for the screen and once for the paper, and takes two to four seconds
   longer.
 - A table on the exported page, and so in a printed PDF, is the table the
-  editor draws: as wide as what it holds and on the left margin, with a rule
-  under its head, a fainter one between its rows and no frame, its columns
-  as wide as their words ask. The page used to stretch every table over the
-  whole column, rule it over, under and at every row in a grey that glared
-  on the dark side, set the head at the foot of its row, and size the
-  columns of a table with a long source line by the dashes under its head.
+  editor draws: as wide as what it holds and in the middle of the column,
+  with a rule under its head, a fainter one between its rows and no frame,
+  its columns as wide as their words ask. The page used to stretch every
+  table over the whole column, rule it over, under and at every row in a
+  grey that glared on the dark side, set the head at the foot of its row,
+  and size the columns of a table with a long source line by the dashes
+  under its head.
 - A printed PDF breaks every line where the editor breaks it. The sheet was
   the page laid out a second time at a smaller size, where a line that
   fitted by a hair on screen did not on paper, about one row in four
@@ -52,6 +111,21 @@
   colours: the bar of its kind, its tinted ground and no frame, with its
   text in the document's ink at the size of the prose. On MDM Dark its
   title could not be read.
+- `Ctrl+Z` after the YAML header had been put away no longer writes into the
+  text what was undone in the header. A word deleted in the title, the
+  header hidden, and the undo put that word at the head of the first line of
+  the document. The editor now drops an undo whose text it no longer holds,
+  and the file's own undo, which `Ctrl+Z` also runs in VS Code, is what
+  takes the header back, the title following it. The Undo button of the
+  toolbar does nothing on such a step.
+- The scrollbar no longer puts away the source of a table, an equation, a
+  code block or a score that is open for editing. A drag of its handle took
+  the caret out of the block and left the keyboard with nothing to type
+  into; the block now stays open, and the text has the keyboard back when
+  the handle is let go.
+
+## 0.7.2
+
 - What a document's YAML header puts at the head of the page is drawn at
   the head of the document, as the exported page sets it and at the page's
   sizes and places: the title and the subtitle, the categories and the
@@ -85,21 +159,9 @@
   two, and the choice is remembered. The setting no longer reaches the
   export: it used to take the title off the exported page when it hid the
   header.
-- `Ctrl+Z` after the YAML header had been put away no longer writes into the
-  text what was undone in the header. A word deleted in the title, the
-  header hidden, and the undo put that word at the head of the first line of
-  the document. The editor now drops an undo whose text it no longer holds,
-  and the file's own undo, which `Ctrl+Z` also runs in VS Code, is what
-  takes the header back, the title following it. The Undo button of the
-  toolbar does nothing on such a step.
 - The YAML header coming into view or going while the page is scrolled down
   leaves the line being read where it is. It used to move by the height of
   the header.
-- The scrollbar no longer puts away the source of a table, an equation, a
-  code block or a score that is open for editing. A drag of its handle took
-  the caret out of the block and left the keyboard with nothing to type
-  into; the block now stays open, and the text has the keyboard back when
-  the handle is let go.
 - The YAML button leaves the caret where it was when it brings the header
   into view. In a document nobody had clicked in yet, the caret ended up in
   the header's first line.
