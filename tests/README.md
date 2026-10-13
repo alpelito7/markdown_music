@@ -9230,6 +9230,30 @@ first.
 Left standing: a link's braces, a code span's and a bracketed span's
 (Pending 23).
 
+### The README's clips on the editor of 0.7.3 (2026-10-13)
+
+The two clips of the README were taken again for 0.7.3. The Markdown clip
+writes a table, and a table stands in the middle of the column since
+*Tables in the middle of the column, captioned and by number*, where the
+take of 0.7.2 had it at the left (seen in the frames of the new take). The
+tour was taken with it, on the same editor; what could show in it is the
+caret in the source of its score, the editor's own in monospace since *A
+caret gone short*, and the two takes were not compared frame against
+frame. The picture of a score block was drawn again and came out byte for
+byte the picture of 0.7.2.
+
+Both were recorded in the window off the owner's screen that 0.7.2's were
+(`tests/tmp/release-0.7.2/rig`, not kept), with `clips.js` as it was: the
+tour 42.2 s and the Markdown clip 97.9 s, the seam of each at 0.000 %,
+where 0.7.2's ran 40.4 s and 87.8 s. The Markdown clip was taken twice and
+ran 98.2 s the first time. Other work was running on the machine through
+both takes (a load average of 4 to 7, the Chromes of a test run among it),
+so whether the ten seconds are the load's or the editor's, which counts
+the figures and the tables at every change now, was not told apart.
+
+Run on this state: `packaging.test.js`, 15 of 15, and `npm run test:fast`,
+319 of 319.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
