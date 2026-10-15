@@ -2465,6 +2465,145 @@ test("Ctrl+click follows a link, Alt+click when Ctrl adds a caret, and a plain c
   await h.close();
 });
 
+// Followed when the click is let go and not when it is pressed, as VS
+// Code's own editor follows a link on mouseup. From the press, VS Code's "Do
+// you want Code to open the external website?" came up before the window had
+// taken the release, and the window kept the pointer grabbed: the pointer
+// stayed the hand and the dialog's Open took no click (VS Code 1.133 on X11,
+// 2026-10-14). The click of the release is the follow's and opens no
+// drawing: on a link in a table's cell it opened the table's source. Every
+// drawing a link can be followed out of is named here (a table's cell, a
+// figure's caption; the title block's in webview-title.test.js, the list of
+// references in webview-markdown.test.js; an equation and a score draw no
+// link), and so are a link to a heading and a reference to an equation,
+// which are followed inside the document.
+test("a link is followed when the click is let go and not when it is pressed, and its click opens no drawing", { skip }, async () => {
+  const filler = Array.from({ length: 80 }, (_, i) => "Paragraph " + i + " between the heading and the links.").join("\n\n");
+  const text =
+    "# Scales\n\n$$\nE = mc^2\n$$ {#eq-one}\n\n" + filler +
+    "\n\nProse with [a prose link](https://p.org), [the heading](#scales) and @eq-one.\n\n" +
+    "| A | B |\n|---|---|\n| [cell link](https://t.org) | - [ ] other cell |\n\n" +
+    "![A caption with [caption link](https://f.org)](pic.png)\n\nEnd of the text.\n";
+  const h = await open({ text, scores: 0, height: 700 });
+  await sleep(200);
+  const posts = () => h.page.evaluate(() => window.__posts.filter((m) => m.type === "openLink").map((m) => m.href));
+  const scrollTop = () => h.page.evaluate(() => window.__mdm.view.scrollDOM.scrollTop);
+  const caret = text.length - 3;
+  // The thing to press in view, with the caret back at the end of the text.
+  const reach = async (sel, needle) => {
+    await setSelection(h.page, caret);
+    const at = await h.page.evaluate((sel, needle) => {
+      const el = Array.from(document.querySelectorAll("#app " + sel)).find((e) => e.textContent.includes(needle));
+      if (!el) return null;
+      el.scrollIntoView({ block: "center" });
+      const b = el.getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }, sel, needle);
+    assert.ok(at, "nothing drawn for " + needle);
+    await sleep(100);
+    return at;
+  };
+  const cases = [
+    [".mdm-link", "a prose link", "https://p.org"],
+    [".mdm-link", "cell link", "https://t.org"],
+    [".mdm-link", "caption link", "https://f.org"],
+    [".mdm-link", "the heading", null],
+    [".mdm-eqref", "1", null],
+  ];
+  for (const [sel, needle, href] of cases) {
+    const at = await reach(sel, needle);
+    const sent = (await posts()).length;
+    const top = await scrollTop();
+    await h.page.keyboard.down("Control");
+    await h.page.mouse.move(at.x, at.y);
+    await h.page.mouse.down();
+    await sleep(200);
+    assert.equal((await posts()).length, sent, needle + ": followed on the press");
+    assert.deepEqual(await selectionRanges(h.page), [[caret, caret]], needle + ": the press moved the caret");
+    assert.equal(await scrollTop(), top, needle + ": the press moved the page");
+    await h.page.mouse.up();
+    await h.page.keyboard.up("Control");
+    await sleep(300);
+    if (href) {
+      assert.deepEqual((await posts()).slice(sent), [href], needle + ": not followed on the release");
+      // The drawing it is in stays drawn: no caret went into its source.
+      assert.deepEqual(await selectionRanges(h.page), [[caret, caret]], needle + ": the click opened what the link is in");
+    } else if (needle === "the heading") {
+      assert.deepEqual(await selectionRanges(h.page), [[2, 2]], "the link to the heading was not followed on the release");
+    } else {
+      assert.notEqual(await scrollTop(), top, "the reference was not followed on the release");
+      assert.deepEqual(await selectionRanges(h.page), [[caret, caret]]);
+    }
+  }
+  // A press dragged off what it went down on follows nothing, and its click
+  // opens nothing either: off the link onto the other cell of its table,
+  // and off the prose's link onto the words beside it.
+  for (const [needle, to] of [["cell link", "other cell"], ["a prose link", "Prose with"]]) {
+    const at = await reach(".mdm-link", needle);
+    const off = await h.page.evaluate((to) => {
+      const range = document.createRange();
+      const walk = document.createTreeWalker(document.querySelector("#app .cm-content"), NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const i = n.textContent.indexOf(to);
+        if (i === -1) continue;
+        range.setStart(n, i);
+        range.setEnd(n, i + 3);
+        const b = range.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      }
+      return null;
+    }, to);
+    assert.ok(off, "no words " + to);
+    const sent = (await posts()).length;
+    await h.page.keyboard.down("Control");
+    await h.page.mouse.move(at.x, at.y);
+    await h.page.mouse.down();
+    await h.page.mouse.move(off.x, off.y, { steps: 4 });
+    await h.page.mouse.up();
+    await h.page.keyboard.up("Control");
+    await sleep(300);
+    assert.equal((await posts()).length, sent, needle + ": followed though dragged off");
+    assert.deepEqual(await selectionRanges(h.page), [[caret, caret]], needle + ": the press dragged off opened something");
+  }
+  // Dragged out of the text, into the margin beside it, the press has a
+  // click that never reaches the text, and the next click in the text is
+  // its own: the box in the table's other cell, which its click ticks
+  // (handleChromeClick), is ticked.
+  let at = await reach(".mdm-link", "cell link");
+  const margin = await h.page.evaluate((y) => {
+    const x = document.querySelector("#app .cm-content").getBoundingClientRect().left - 8;
+    const under = document.elementFromPoint(x, y);
+    return under && !under.closest(".cm-content") ? { x, y } : null;
+  }, at.y);
+  assert.ok(margin, "no margin beside the text");
+  await h.page.keyboard.down("Control");
+  await h.page.mouse.move(at.x, at.y);
+  await h.page.mouse.down();
+  await h.page.mouse.move(margin.x, margin.y, { steps: 4 });
+  await h.page.mouse.up();
+  await h.page.keyboard.up("Control");
+  await sleep(700);
+  at = await reach(".mdm-table input.mdm-task", "");
+  await h.page.mouse.click(at.x, at.y);
+  await sleep(300);
+  assert.ok((await docText(h.page)).includes("| - [x] other cell |"), "the click after a press dragged out of the text was taken for the press's");
+  // A press to follow whose release never came (the button let go over
+  // another frame of the window) is forgotten by the next press: a plain
+  // click on the link then edits it and follows nothing.
+  at = await reach(".mdm-link", "a prose link");
+  const sent = (await posts()).length;
+  await h.page.evaluate(() => {
+    const link = Array.from(document.querySelectorAll("#app .mdm-link")).find((e) => e.textContent.includes("a prose link"));
+    link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true, button: 0, detail: 1 }));
+  });
+  await sleep(700);
+  await h.page.mouse.click(at.x, at.y);
+  await sleep(300);
+  assert.equal((await posts()).length, sent, "a plain click followed the link a press before it went down on");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
 test("a link to a heading goes to the heading the page gives that identifier", { skip }, async () => {
   // Each heading with the identifier Quarto 1.9.37 wrote for it
   // (2026-09-29): its attributes are not its text, a repeat takes `-1` and

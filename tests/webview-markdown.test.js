@@ -1911,7 +1911,14 @@ test("a citation names its entries and Ctrl+click goes to them in the list, and 
         return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
       }, index);
       await h.page.keyboard.down("Control");
-      await h.page.mouse.click(at.x, at.y);
+      // Gone to on the release and not on the press (webview-editing.test.js,
+      // "a link is followed when the click is let go").
+      const still = await scrolled();
+      await h.page.mouse.move(at.x, at.y);
+      await h.page.mouse.down();
+      await new Promise((r) => setTimeout(r, 150));
+      assert.equal(await scrolled(), still, "a citation was gone to on the press");
+      await h.page.mouse.up();
       await h.page.keyboard.up("Control");
       await new Promise((r) => setTimeout(r, 300));
     };
@@ -1970,7 +1977,14 @@ test("a citation names its entries and Ctrl+click goes to them in the list, and 
         return { x: r.left + 4, y: r.top + r.height / 2 };
       }, selector);
       if (ctrl) await h.page.keyboard.down("Control");
-      await h.page.mouse.click(b.x, b.y);
+      // Followed and opened on the release, not on the press
+      // (webview-editing.test.js, "a link is followed when the click is let go").
+      const sent = (await posted()).length;
+      await h.page.mouse.move(b.x, b.y);
+      await h.page.mouse.down();
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal((await posted()).length, sent, selector + ": answered on the press");
+      await h.page.mouse.up();
       if (ctrl) await h.page.keyboard.up("Control");
       await new Promise((r) => setTimeout(r, 100));
     };

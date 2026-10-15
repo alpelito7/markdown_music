@@ -1953,7 +1953,20 @@ test("a link of the block is followed with the click that follows a link, and op
     await h.page.keyboard.up("Control");
     await sleep(150);
   };
-  await follow(".mdm-title-doi .mdm-link");
+  // Followed on the release and not on the press, as the prose's links are
+  // (webview-editing.test.js, "a link is followed when the click is let go").
+  const doi = await h.page.evaluate(() => {
+    const b = document.querySelector("#app .mdm-title-doi .mdm-link").getBoundingClientRect();
+    return [b.left + b.width / 2, b.top + b.height / 2];
+  });
+  await h.page.keyboard.down("Control");
+  await h.page.mouse.move(doi[0], doi[1]);
+  await h.page.mouse.down();
+  await sleep(150);
+  assert.deepEqual(await followed(), [], "the block's link was followed on the press");
+  await h.page.mouse.up();
+  await h.page.keyboard.up("Control");
+  await sleep(150);
   await follow(".mdm-title-email");
   await follow(".mdm-title-orcid");
   await follow(".mdm-title-author .mdm-link");

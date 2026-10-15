@@ -12754,6 +12754,30 @@
   // The drawing the last press found open (handleMouseDown), for its click.
   let closingDrawing = null;
 
+  // What the last press went down on to follow or to open, and how: a link,
+  // a reference, a citation, an entry of the list (handleMouseDown). Done
+  // when that press is let go over the same thing (handleMouseUp), and the
+  // click that comes with the release is then answered by nothing else
+  // (followClick).
+  //
+  // On the release and not on the press, as VS Code's own editor follows a
+  // link on mouseup. An address on the web opens behind VS Code's "Do you
+  // want Code to open the external website?", and raised from the press,
+  // that dialog came up before the window had taken the release: the window
+  // kept the pointer grabbed, so the pointer stayed the hand over the dialog
+  // and its buttons took no click, Open included, until a click back in the
+  // window let the grab go (VS Code 1.133 on X11, measured 2026-10-14 with
+  // real events in an off-screen X server: a grab asked for by another
+  // client was refused with AlreadyGrabbed, and Escape still reached the
+  // dialog). And the click after a Ctrl+click on a link in a table's cell
+  // went on to open the table's source, where the title block alone had
+  // been kept from opening.
+  let pressedFollow = null;
+  let followClick = false;
+  function followOnRelease(el, run) {
+    pressedFollow = { el: el, run: run };
+  }
+
   // Mousedown on the chrome of a block (copy, player toggle), on a list
   // marker, and on a link with the follow modifier. Caught on the content
   // DOM in the capture phase: CodeMirror ignores events inside the widgets
@@ -12763,7 +12787,8 @@
   // box flips the text it stands for, the bullet and the number put the
   // caret at the item's text (G066), and Ctrl+click on a link follows it: a
   // heading of this document by the caret, anything else through the host
-  // (G083). A plain click on a link edits it, as in VS Code's own editor.
+  // (G083), once the press is let go (pressedFollow). A plain click on a
+  // link edits it, as in VS Code's own editor.
   //
   // A plain press on the drawing of a block whose source is open is noted:
   // its click puts the source away (handleChromeClick). Whether the block
@@ -12785,6 +12810,7 @@
     if (!e.target.closest) return;
     const plain = e.detail === 1 && !(e.shiftKey || e.altKey || e.ctrlKey || e.metaKey);
     closingDrawing = plain ? openDrawing(e.target) : null;
+    pressedFollow = null;
     if (closingDrawing) e.preventDefault();
     // A press on the title block is held whether its source is open or not
     // (its click is answered in handleChromeClick): the block stands on no
@@ -12816,8 +12842,10 @@
       e.preventDefault();
       const href = hrefOf(link);
       if (!href) return;
-      if (href.charAt(0) === "#") jumpToHeading(href.slice(1));
-      else vscode.postMessage({ type: "openLink", href: href });
+      followOnRelease(link, function () {
+        if (href.charAt(0) === "#") jumpToHeading(href.slice(1));
+        else vscode.postMessage({ type: "openLink", href: href });
+      });
       return;
     }
     // Ctrl+click on a reference to an equation goes to the equation, as the
@@ -12827,9 +12855,11 @@
       e.preventDefault();
       const led = "[data-mdm-eq], [data-mdm-fig], [data-mdm-tbl]";
       const part = e.target.closest(led) || eqref.querySelector(led);
-      if (part && part.hasAttribute("data-mdm-fig")) showFigure(part.getAttribute("data-mdm-fig"));
-      else if (part && part.hasAttribute("data-mdm-tbl")) showTable(part.getAttribute("data-mdm-tbl"));
-      else if (part) showEquation(part.getAttribute("data-mdm-eq"));
+      followOnRelease(eqref, function () {
+        if (part && part.hasAttribute("data-mdm-fig")) showFigure(part.getAttribute("data-mdm-fig"));
+        else if (part && part.hasAttribute("data-mdm-tbl")) showTable(part.getAttribute("data-mdm-tbl"));
+        else if (part) showEquation(part.getAttribute("data-mdm-eq"));
+      });
       return;
     }
     // Ctrl+click on a citation goes to its entry in the list, as the page's
@@ -12838,7 +12868,11 @@
     if (cited && followsLink(e)) {
       e.preventDefault();
       const part = e.target.closest("[data-mdm-ref]") || cited.querySelector("[data-mdm-ref]");
-      if (part) showEntry(part.getAttribute("data-mdm-ref"));
+      if (part) {
+        followOnRelease(cited, function () {
+          showEntry(part.getAttribute("data-mdm-ref"));
+        });
+      }
       return;
     }
     // An entry of the list is not text of the document: a click on it opens
@@ -12852,12 +12886,18 @@
       e.preventDefault();
       if (followsLink(e)) {
         const out = e.target.closest(".mdm-cite-link[data-mdm-href]");
-        if (out) vscode.postMessage({ type: "openLink", href: out.getAttribute("data-mdm-href") });
+        if (out) {
+          followOnRelease(out, function () {
+            vscode.postMessage({ type: "openLink", href: out.getAttribute("data-mdm-href") });
+          });
+        }
         return;
       }
       if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
       if (entry.classList.contains("mdm-refs-entry--source")) {
-        vscode.postMessage({ type: "openEntry", key: entry.getAttribute("data-mdm-ref") });
+        followOnRelease(entry, function () {
+          vscode.postMessage({ type: "openEntry", key: entry.getAttribute("data-mdm-ref") });
+        });
       }
       return;
     }
@@ -14002,10 +14042,34 @@
     });
   }
 
+  // The release of a press that went down to follow something
+  // (pressedFollow): followed when it is let go over what it went down on,
+  // and dropped when the pointer has left it, as VS Code's editor drops a
+  // link dragged off. The click the browser sends with the release, in the
+  // same task, is the press's either way: a drawing under it would open its
+  // source (handleChromeClick).
+  function handleMouseUp(e) {
+    const pressed = pressedFollow;
+    pressedFollow = null;
+    if (!pressed || e.button !== 0) return;
+    followClick = true;
+    setTimeout(function () {
+      followClick = false;
+    }, 0);
+    if (pressed.el.contains(e.target)) pressed.run();
+  }
+
   // The copy button and the player toggle live in widget chrome, which
   // CodeMirror leaves alone (ignoreEvent); their clicks are answered here.
   function handleChromeClick(e) {
     if (!e.target.closest) return;
+    // The click of a press that followed a link or opened an entry
+    // (handleMouseUp): done with, and no drawing under it is opened.
+    if (followClick) {
+      followClick = false;
+      e.preventDefault();
+      return;
+    }
     const row = e.target.closest(".mdm-audio-export .mdm-menu__item");
     if (row) {
       e.preventDefault();
@@ -15238,6 +15302,8 @@
       setTimeout(syncFocus, 0);
     });
     view.contentDOM.addEventListener("mousedown", handleMouseDown, true);
+    // On the window: the release comes wherever the pointer is by then.
+    window.addEventListener("mouseup", handleMouseUp, true);
     view.scrollDOM.addEventListener("mousemove", followKeys);
     window.addEventListener("keydown", followKeys, true);
     window.addEventListener("keyup", followKeys, true);

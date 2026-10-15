@@ -9428,6 +9428,94 @@ window.
 
 One difference found on the way, in Pending below (27).
 
+### A link followed when the click is let go (2026-10-14)
+
+The owner: after a Ctrl+click on a link the pointer stays a hand, and VS
+Code's "Do you want Code to open the external website?" takes no click on
+Open. Seen in a real VS Code 1.133 on X11, off the owner's screen
+(`tests/tmp/link-open/rig/`: an X server of its own on :86, the pointer and
+the keys driven through XTEST, and in place of a browser a script that
+writes down what it is asked to open). The dialog is a window of its own,
+GTK's. After a real Ctrl+click on a link, a grab of the pointer asked for
+by another client of that X server was refused with AlreadyGrabbed, the
+click on Open did nothing and Escape still closed the dialog; the grab
+outlived the dialog, until a click back in VS Code's window let it go. A
+quick click (the button up some 30 ms after it went down) did it as a slow
+one did. With the same dialog raised from a press made in the page, which
+the X server never saw, Open opened the address; and so it did after a real
+plain click on the link followed by such a press, and with a real Ctrl held
+around one. What kept the pointer was a real press that a dialog answered:
+the editor followed a link on the press, and the dialog came up before the
+window had taken the release. Why the window then keeps the grab was not
+read in Electron's code; the likeliest reading, not checked, is that a
+window disabled under a modal dialog drops the release that would have let
+it go.
+
+VS Code's own editor follows a link on mouseup, and so does this one now.
+The press notes what it went down on and how to follow it (`pressedFollow`
+in `main.js`), the release follows it when it is let go over the same
+thing and drops it when the pointer has left, and the click that comes
+with the release is answered by nothing else. The same for all that a
+press followed or opened: a link to a heading, a reference to an equation,
+a figure or a table, a citation, an entry of the list of references and a
+DOI inside one. A plain press on a list's marker or a task's box still
+acts on the press, as CodeMirror places a caret.
+
+Found on the way and gone with it: the click after a Ctrl+click on a link
+in a table's cell went on to open the table's source, where the title
+block alone had been kept from opening (a probe on the code before the
+change: the link followed and the caret from 0 into the table). In the
+real window, with this tree's extension: the pointer free with the dialog
+up, Open opening the address, the dialog waiting for the button to come
+up, and a link in a table's cell followed with the table left drawn and
+the caret where it was.
+
+The click comes in the same task as the release, which is what lets the
+release mark it (`followClick`, cleared by a timer of 0): a press dragged
+into the margin beside the text has its click on the scroller, which the
+text never hears, and the mark must not outlive it.
+
+Tests: *a link is followed when the click is let go and not when it is
+pressed, and its click opens no drawing* (`webview-editing.test.js`: a
+link in the prose, in a table's cell and in a figure's caption, a link to
+a heading and a reference to an equation, each with nothing done on the
+press; a press dragged off a link, onto the words beside it and onto the
+other cell of its table; a press dragged into the margin, after which a
+click on a box in a cell ticks it; and a press whose release never came,
+forgotten by the next). The title block's link and the list of references
+are held by the tests that already clicked them, which now press and let
+go by hand and look in between (`webview-title.test.js`, *a link of the
+block is followed with the click that follows a link*;
+`webview-markdown.test.js`, *a citation names its entries*). An equation
+and a score draw no link.
+
+Ten mutations, each put into a copy of the tree (`tests/tmp/link-open/tree`)
+and caught, the file put back and compared by its hash after every one
+(`tests/tmp/link-open/mutate.py`):
+
+- **LF1** the click of a follow not swallowed → the cell's link opens its
+  table. **LF2** a press dragged off followed all the same. **LF3** the
+  mark outliving its own click (no timer) → the box in the cell not
+  ticked; the first version of the test clicked the table itself, which
+  opens on the press, and let this one through. **LF4** a press not
+  forgetting the follow of the one before → a plain click followed the
+  link. **LF5** a reference to an equation gone to on the press. **LF10**
+  no listener for the release → nothing followed. All in
+  `webview-editing.test.js`.
+- **LF6** a citation gone to, **LF7** an entry opened and **LF8** a DOI of
+  the list followed on the press → `webview-markdown.test.js`.
+- **LF9** a link followed on the press → `webview-editing.test.js` and
+  `webview-title.test.js`.
+
+Run on this state: `npm run test:fast` (319 of 319), and of the four files
+of the webview the tests that name a click, a link, a press, a drawing, an
+entry, a citation or a follow: 37 of 37 in `webview-editing.test.js`, 12
+of 12 in `webview-title.test.js`, 23 of 23 in `webview-markdown.test.js`
+and 18 of 18 in `webview-look.test.js`. The whole suite was not run.
+Not looked at on Windows or macOS, where whether a press answered by the
+dialog ever kept the pointer is not known; following on the release is
+what VS Code's own editor does on every system.
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
