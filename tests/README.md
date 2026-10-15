@@ -7,6 +7,13 @@ frameworks.
 
 ## How to run
 
+While working, and to report a change done, run `npm run test:fast` and
+the tests the change reaches, picked by name with `--test-name-pattern`
+inside the files that cover what was touched. The whole suite (`npm test`)
+and `test:quick` are for cutting a version, or for when the owner asks for
+them, and for nothing else: they are 22 and 9 minutes of his machine
+(`CLAUDE.md`, *Run what the change reaches, not the suite*).
+
 ```sh
 cd tests
 npm install          # first time only (puppeteer-core, for the webview suite)
