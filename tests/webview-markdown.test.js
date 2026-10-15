@@ -2006,6 +2006,87 @@ test("a citation names its entries and Ctrl+click goes to them in the list, and 
   }
 });
 
+// The host played for whatever it is asked: each citation drawn as its own
+// source said in parentheses, so that a citation that was edited wears the
+// answer to what it says now and to nothing else.
+function citesFor(asked) {
+  const html = [];
+  const re = /\[(.*?)\]\{#mdmcite-(\d+)\}/g;
+  let m;
+  while ((m = re.exec(asked.body))) {
+    html.push('<p><span id="mdmcite-' + m[2] + '"><span class="citation">(drawn ' + m[1].replace(/[\[\]@]/g, "") + ")</span></span></p>");
+  }
+  return { seq: asked.seq, state: "ok", html: html.join("\n"), missing: [] };
+}
+
+test("a citation whose text comes back to what the host was asked about is drawn again and the host not asked twice: typed into and put back, written over with itself, and answered while a letter more stood in it", { skip }, async () => {
+  // An edited citation stayed as written until the editor was shut and
+  // opened again (the owner, 2026-10-13, `[@piston1998, pp. 526, 529]` in
+  // the lesson). An answer was read once, at the moment it landed, or
+  // dropped, and a body the host had been asked about was not asked about
+  // again: so a citation that lost its answer while the body stayed, or
+  // came back to, the one last asked about had nothing left to be drawn
+  // from. Three roads to it, one editor.
+  const text = "As @knuth1984 says, and [@shannon1948, p. 380] too.\n\nMore prose, [@rameau1722].\n";
+  const h = await open({ text: text, scores: 0, height: 900 });
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const asks = () => h.page.evaluate(() => window.__posts.filter((m) => m.type === "cites").length);
+    // The caret inside the brackets, after the page number.
+    const inside = async () => {
+      await setSelection(h.page, (await h.page.evaluate(() => window.__mdm.view.state.doc.toString().indexOf("p. 380"))) + 6);
+      await wait(100);
+    };
+    // The caret out of every citation, at the head of the text: one in a
+    // citation is in its source, whatever the host has said of it.
+    const drawn = async () => {
+      await setSelection(h.page, 0);
+      return citedNow(h.page);
+    };
+    await answerCites(h.page, citesFor(await citesAsked(h.page)));
+    assert.deepEqual(await drawn(), { cited: ["(drawn knuth1984)", "(drawn shannon1948, p. 380)", "(drawn rameau1722)"], raw: [] });
+
+    // A letter typed into it and taken back before the request goes out
+    // (400 ms after the last key): the body is the one already asked about.
+    await inside();
+    await h.page.keyboard.type("9");
+    await h.page.keyboard.press("Backspace");
+    await wait(900);
+    assert.deepEqual(await drawn(), { cited: ["(drawn knuth1984)", "(drawn shannon1948, p. 380)", "(drawn rameau1722)"], raw: [] }, "typed into and put back");
+    assert.equal(await asks(), 1, "the host was asked again about a body it had answered");
+
+    // Its text written over with the same text, as a paste over itself is.
+    await h.page.evaluate(() => {
+      const view = window.__mdm.view;
+      const doc = view.state.doc.toString();
+      const from = doc.indexOf("[@shannon");
+      const to = doc.indexOf("]", from) + 1;
+      view.dispatch({ changes: { from: from, to: to, insert: doc.slice(from, to) } });
+    });
+    await wait(900);
+    assert.deepEqual(await drawn(), { cited: ["(drawn knuth1984)", "(drawn shannon1948, p. 380)", "(drawn rameau1722)"], raw: [] }, "written over with itself");
+    assert.equal(await asks(), 1);
+
+    // A page number changed and asked about; the answer lands while one
+    // letter more stands in the citation, and the letter is then taken
+    // back: the answer was dropped as another text's, and its body never
+    // asked about again.
+    await inside();
+    await h.page.keyboard.type("1");
+    const second = await citesAsked(h.page, 2);
+    await h.page.keyboard.type("x");
+    await answerCites(h.page, citesFor(second));
+    await wait(100);
+    await h.page.keyboard.press("Backspace");
+    await wait(900);
+    assert.deepEqual(await drawn(), { cited: ["(drawn knuth1984)", "(drawn shannon1948, p. 3801)", "(drawn rameau1722)"], raw: [] }, "answered while a letter more stood in it");
+    assert.equal(await asks(), 2);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
 // ---------- Equations by number ----------
 //
 // A display equation with a label straight after its closing `$$` is

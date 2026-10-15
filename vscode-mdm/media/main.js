@@ -4031,9 +4031,12 @@
   // edits made since and let go of when the citation's own text changes: one
   // being typed is drawn as written until the answer for its new text comes
   // back. `version` moves only when an answer lands, which is what makes the
-  // rendering draw every citation again (rebuilt, remember).
+  // rendering draw every citation again (rebuilt, remember). `read` is how
+  // many citations the answer had something for and `asked` the request it
+  // answered, which is how a field that has let go of one is told from one
+  // that still holds its whole answer (citesStand).
   const setCites = CM.StateEffect.define();
-  const NO_CITES = { version: 0, items: new Map(), refs: null };
+  const NO_CITES = { version: 0, items: new Map(), refs: null, read: 0, asked: 0 };
   let citesVersion = 0;
   const citesField = StateField.define({
     create: function () {
@@ -4052,7 +4055,7 @@
           items.set(a, { to: b, src: item.src, html: item.html, missing: item.missing });
         }
       });
-      return { version: value.version, items: items, refs: value.refs };
+      return { version: value.version, items: items, refs: value.refs, read: value.read, asked: value.asked };
     },
   });
 
@@ -4329,20 +4332,43 @@
       }
     }
     citesVersion += 1;
-    return { version: citesVersion, items: items, refs: refs };
+    return { version: citesVersion, items: items, refs: refs, read: items.size, asked: 0 };
   }
 
   // The request, some time after the last keystroke: the body only changes
   // when a citation or a note does, and the host answers a body it has
   // answered already out of what it kept (citationService). An answer is
-  // taken only for the body it was asked about, read against the citations
-  // as they stand then: whatever was typed since has sent a body of its own.
+  // read against the citations as they stand when the document says the
+  // body it was asked about: whatever was typed since has sent a body of
+  // its own.
+  //
+  // An answer is the answer to its body, and not to the moment it landed
+  // in, so it is kept (`answer`) and read again when the document says
+  // that body and the field no longer holds the whole of it. Until
+  // 2026-10-13 it was read once or dropped, and a body already asked about
+  // was never asked about again, which left a citation as written until
+  // the editor was shut and opened: one typed into and put back before the
+  // request went out (its answer let go of by the field, and the body the
+  // one last asked about), one whose text was written over with the same
+  // text, and one whose answer landed while a letter more stood in the
+  // document, which was then taken back (the owner's report: an edited
+  // citation drawn as `[@piston1998, pp. 526, 529]`).
   let citeSeq = 0;
-  let citeAsked = null; // { seq, body }
+  let citeAsked = null; // { seq, body, answer }
   let citeTimer = null;
   function askCitesSoon() {
     clearTimeout(citeTimer);
     citeTimer = setTimeout(askCites, 400);
+  }
+  // Whether the field holds all that the last answer gave it.
+  function citesStand() {
+    const held = view.state.field(citesField, false);
+    return !!held && held.asked === citeAsked.seq && held.items.size === held.read;
+  }
+  function putCites(msg, built) {
+    const read = readCites(msg, built);
+    read.asked = citeAsked.seq;
+    view.dispatch({ effects: setCites.of(read) });
   }
   function askCites() {
     if (!view) return;
@@ -4354,16 +4380,20 @@
       }
       return;
     }
-    if (citeAsked && citeAsked.body === built.body) return;
+    if (citeAsked && citeAsked.body === built.body) {
+      if (citeAsked.answer && !citesStand()) putCites(citeAsked.answer, built);
+      return;
+    }
     citeSeq += 1;
-    citeAsked = { seq: citeSeq, body: built.body };
+    citeAsked = { seq: citeSeq, body: built.body, answer: null };
     vscode.postMessage({ type: "cites", seq: citeSeq, body: built.body });
   }
   function takeCites(msg) {
     if (!view || !citeAsked || msg.seq !== citeAsked.seq) return;
+    citeAsked.answer = msg;
     const built = citationBody(view.state);
     if (built.body !== citeAsked.body) return;
-    view.dispatch({ effects: setCites.of(readCites(msg, built)) });
+    putCites(msg, built);
   }
 
   // A citation as the page prints it, in place of its source.
