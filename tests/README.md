@@ -9383,6 +9383,51 @@ The whole suite was not run. Not seen in a real VS Code window.
 
 Left standing, in Pending below (26).
 
+### An equation's reference reads as a figure's and a table's (2026-10-13)
+
+For part of that day a reference to an equation printed its number in
+parentheses, "Equation (1)", where Quarto prints "Equation 1". The owner
+had said it could, and on seeing that it was the default that had moved
+he had it taken back the same day: "Figure 1", "Equation 1" and
+"Table 1" read alike, the word and the bare number, as Quarto prints
+the three. The code, its comments, the README and the tests are as they
+were before the round, by the round's own swaps run backwards
+(`tests/tmp/eq-parens/revert.py`, which runs them forwards again as well
+and writes nothing unless that gives back the file it started from).
+
+The parentheses are the writer's, around the form that prints the number
+alone: `Equation (-@eq-mass)` reads "Equation (1)", the number a link
+and the word and the parentheses prose, in the editor and on the page
+alike, and `Equation&nbsp;(-@eq-mass)` holds the word to its number on
+both (a scratch document of the forms, captured on the two surfaces:
+`tests/tmp/eq-parens/work/parens/`). Inside the brackets it does not
+work, `[Equation (-@eq-mass)]` reading "Equation ( 1" on both: what is
+written before the key is the word, and what comes after it is dropped.
+Quarto has no key that puts the parentheses there for a whole document:
+its `resolveRefs` writes the word, a no-break space and the number, and
+parentheses only round the letter of a part of a figure (read in the
+`main.lua` of 1.9.37).
+
+What holds the decision: the round's change, run on the tests as they
+stood and stand again, failed fifteen of them
+(`tests/tmp/eq-parens/work/reach-1/summary.log`), three of
+`crossref.test.js`, eight of `webview-markdown.test.js`, one of
+`html.test.js` and three of `render.test.js`. One row of the first has
+the three kinds in a single reference, `[@tbl-b; @fig-a; @eq-a]`,
+"Table 2, Figure 1, Equation 1".
+
+Run on the restored state: `npm run test:fast` (319 of 319) on the tree;
+and on a copy of it, the same files byte for byte, `crossref.test.js`
+with `extension-host.test.js`, the whole of `webview-markdown.test.js`,
+the tests of `webview-editing.test.js` that name a reference, the tests
+of `html.test.js` on a numbered equation, a numbered figure, a table and
+a paragraph that cites, and of `render.test.js` the three on a numbered
+equation on paper and the two that read a `.tex`: 360 of 360 (233, 114,
+3, 5 and 5). The whole suite was not run. Not seen in a real VS Code
+window.
+
+One difference found on the way, in Pending below (27).
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now
@@ -9890,3 +9935,10 @@ Left standing, in Pending below (26).
     cell, which was not looked into. There is no entry in the CHANGELOG:
     0.7.3 was cut and pushed without this, and the version that carries
     it is the owner's to say.
+27. A backslash before a space, found on the way (*An equation's
+    reference reads as a figure's and a table's*). `Equation\ (-@eq-x)`
+    is Pandoc's no-break space and the page prints one; the editor draws
+    the backslash and an ordinary space, CommonMark having no such
+    escape (seen in `tests/tmp/eq-parens/work/parens/`). `&nbsp;` is
+    read alike by both. Not touched: which reading the editor follows
+    is the owner's to say.
