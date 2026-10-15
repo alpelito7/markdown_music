@@ -14378,6 +14378,61 @@
     });
   }
 
+  // ---- The drawing under an open source is none of the selection ----
+  //
+  // A block whose source is open stands twice, as its source and as the
+  // drawing under it (the preview beside it, for an equation in a line),
+  // and only the source is text: a selection that goes over the block takes
+  // the source and nothing of the drawing. CodeMirror paints a selection of
+  // several lines as one band from its first row to its last, whatever
+  // stands between, so the drawing was tinted with the lines around it and
+  // read as taken (the owner, 2026-10-13: the rendering under the source
+  // with no mark on it, so that what is being copied is what is seen
+  // marked). The band is CodeMirror's own and is drawn on a layer over the
+  // text (style.css, .cm-selectionLayer), so the drawings are cut out of
+  // the layer: a clip path over everything, less the box of each open
+  // drawing, read after every redraw as the rails are placed.
+  const OPEN_DRAWINGS =
+    ".mdm-math--preview, .mdm-title-block--open, " +
+    ".mdm-score:has(> .mdm-chrome--open), .mdm-math--block:has(> .mdm-chrome--open), .mdm-table:has(> .mdm-chrome--open)";
+  let drawingsCleared = "";
+  function clearOpenDrawings() {
+    if (!view) return;
+    view.requestMeasure({
+      key: "mdm-open-drawings",
+      read: function () {
+        const layer = view.scrollDOM.querySelector(".cm-selectionLayer");
+        if (!layer) return null;
+        const ranged = view.state.selection.ranges.some(function (r) {
+          return !r.empty;
+        });
+        let path = "";
+        if (ranged) {
+          const base = layer.getBoundingClientRect();
+          const sx = view.scaleX || 1;
+          const sy = view.scaleY || 1;
+          view.contentDOM.querySelectorAll(OPEN_DRAWINGS).forEach(function (el) {
+            const box = el.getBoundingClientRect();
+            if (!box.width || !box.height) return;
+            const x = Math.floor((box.left - base.left) / sx);
+            const y = Math.floor((box.top - base.top) / sy);
+            const w = Math.ceil(box.width / sx) + 1;
+            const h = Math.ceil(box.height / sy) + 1;
+            path += " M" + x + " " + y + " h" + w + " v" + h + " h" + -w + " Z";
+          });
+        }
+        // Everything, as one rectangle far wider than any document, and each
+        // drawing a hole in it by the even-odd rule.
+        return { layer: layer, clip: path ? 'path(evenodd, "M-100000 -100000 h10000000 v10000000 h-10000000 Z' + path + '")' : "" };
+      },
+      write: function (found) {
+        if (!found || found.clip === drawingsCleared) return;
+        drawingsCleared = found.clip;
+        found.layer.style.clipPath = found.clip;
+      },
+    });
+  }
+
   const COPIED_MS = 1500;
 
   function copyBlock(button) {
@@ -14997,6 +15052,7 @@
           }
           refreshRailPointer();
           placeOpenRails();
+          clearOpenDrawings();
           placeAfterUpdate(update);
           watchHeaderCaret(update.state);
           if (update.docChanged || update.selectionSet) {

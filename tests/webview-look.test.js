@@ -4225,6 +4225,110 @@ test("a word under an opaque selection colour keeps its letters", { skip }, asyn
   }
 });
 
+// The commonest colour in each of some boxes of the page as it is painted,
+// which is the ground of a box and not its ink.
+async function commonestIn(page, boxes) {
+  const png = await page.screenshot({ encoding: "base64" });
+  return page.evaluate(
+    async (b64, boxes) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+      const cv = new OffscreenCanvas(bmp.width, bmp.height);
+      const g = cv.getContext("2d");
+      g.drawImage(bmp, 0, 0);
+      const k = bmp.width / window.innerWidth;
+      const out = {};
+      for (const name of Object.keys(boxes)) {
+        const b = boxes[name];
+        const d = g.getImageData(Math.round(b.x * k), Math.round(b.y * k), Math.max(1, Math.round(b.width * k)), Math.max(1, Math.round(b.height * k))).data;
+        const counts = new Map();
+        for (let i = 0; i < d.length; i += 4) {
+          const key = d[i] + "," + d[i + 1] + "," + d[i + 2];
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+        out[name] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      }
+      return out;
+    },
+    png,
+    boxes
+  );
+}
+
+test("the drawing under an open source is none of the selection: no tint over it and no box behind its letters, while its source is marked", { skip }, async () => {
+  // A selection that goes over a block takes its source, and the drawing
+  // under the source is no text of the document: tinted with the rows
+  // around it, it read as taken (the owner, 2026-10-13). Read in the
+  // pixels, as every crossing of two inks is: each drawing is painted as it
+  // is with no selection painted at all, the layer put away and the
+  // browser's own selection made clear, and each source is not. The boxes
+  // of the letters are read apart from the drawings they stand in, since the
+  // browser's selection paints behind letters alone.
+  const text =
+    "Words before, with $r^{12} = 2$ in the line.\n\n" +
+    "$$\nf_n = f_0 2^{n/12}\n$$\n\n" +
+    "| Note | Name |\n|---|---|\n| A | la |\n\n" +
+    "```abc\nX:1\nK:C\nCDEF GABc|\n```\n\n" +
+    "Words after.\n";
+  for (const theme of ["light", "dark"]) {
+    const h = await open({ text: text, scores: 1, height: 1100, seed: { settings: { theme: theme } } });
+    try {
+      await setSelection(h.page, [{ anchor: text.indexOf("before"), head: text.indexOf("after") }]);
+      await sleep(500);
+      const boxes = await h.page.evaluate(() => {
+        const box = (el) => {
+          const b = el.getBoundingClientRect();
+          return { x: b.left, y: b.top, width: b.width, height: b.height };
+        };
+        const within = (b) => ({ x: b.x + 2, y: b.y + 2, width: b.width - 4, height: b.height - 4 });
+        const letters = (el) => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          return box(range);
+        };
+        const one = (s) => document.querySelector("#app " + s);
+        const line = (t) => Array.from(document.querySelectorAll("#app .cm-line")).find((l) => l.textContent === t);
+        return {
+          drawings: {
+            "the preview of an equation in a line": within(box(one(".mdm-math--preview"))),
+            "a display equation": within(box(one(".mdm-math--block"))),
+            "the letters of the display equation": letters(one(".mdm-math--block .katex-html")),
+            "a table": within(box(one(".mdm-table"))),
+            "the words of a cell of the table": letters(one(".mdm-table th")),
+            "a score": within(box(one(".mdm-score"))),
+          },
+          sources: {
+            "the source of the display equation": within(box(line("f_n = f_0 2^{n/12}"))),
+            "the source of the table": within(box(line("| Note | Name |"))),
+            "the source of the score": within(box(line("CDEF GABc|"))),
+          },
+        };
+      });
+      const all = Object.assign({}, boxes.drawings, boxes.sources);
+      const marked = await commonestIn(h.page, all);
+      await h.page.evaluate(() => {
+        const tag = document.createElement("style");
+        tag.id = "no-selection";
+        tag.textContent =
+          "#app .cm-selectionLayer { visibility: hidden !important; } " +
+          "#app .cm-content::selection, #app .cm-content ::selection { background: transparent !important; }";
+        document.head.appendChild(tag);
+      });
+      await sleep(100);
+      const bare = await commonestIn(h.page, all);
+      Object.keys(boxes.sources).forEach((name) => {
+        assert.notEqual(marked[name], bare[name], name + " is not marked (" + theme + "), so nothing was under test");
+      });
+      Object.keys(boxes.drawings).forEach((name) => {
+        assert.equal(marked[name], bare[name], name + " is painted as part of the selection (" + theme + ")");
+      });
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+  }
+});
+
 // MDM Light, MDM Dark and MDM White select in the editor's own colour, the
 // brass of the accent (--mdm-play-accent-ink, #8a5f00 at 25% on white and
 // #d9a94f at 30% on black), and not in the VS Code theme's. An own look is

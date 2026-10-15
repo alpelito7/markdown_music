@@ -498,8 +498,10 @@ What it does:
   pointer: what is being taken is in view while it is taken. A press that
   has not travelled five pixels is a click and not a drag, and draws nothing
   until it is released, so that the text does not move under a pointer that
-  has not. An equation whose source KaTeX refuses stays as source with a
-  red edge, and shows KaTeX's message while a caret is in it.
+  has not. The drawing under an open source is no text of the document, and
+  a selection that goes over the block marks the source and not the drawing.
+  An equation whose source KaTeX refuses stays as source with a red edge,
+  and shows KaTeX's message while a caret is in it.
 - **Nobody in it, nothing open.** The carets count only while somebody is in
   the document: with the focus off it every block goes back to its drawing,
   which is the document as it reads. The selection is left as it was, so

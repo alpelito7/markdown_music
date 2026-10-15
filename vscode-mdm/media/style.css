@@ -786,6 +786,24 @@ body {
   z-index: 1 !important;
   mix-blend-mode: multiply;
 }
+/* The drawing under an open source is none of the selection: only the source
+   is text, and what a selection takes of the block is the source. The layer
+   is cut around such a drawing (clearOpenDrawings in main.js, which names the
+   same drawings), and here the browser's own selection, which runs through
+   the letters of the drawing between the row over it and the row under it,
+   paints none of them: with the layer cut they stood out as a box behind
+   every letter of a formula and every cell of a table (seen 2026-10-13). */
+#app .mdm-math--preview::selection,
+#app .mdm-math--preview ::selection,
+#app .mdm-title-block--open::selection,
+#app .mdm-title-block--open ::selection,
+#app .mdm-score:has(> .mdm-chrome--open) ::selection,
+#app .mdm-math--block:has(> .mdm-chrome--open)::selection,
+#app .mdm-math--block:has(> .mdm-chrome--open) ::selection,
+#app .mdm-table:has(> .mdm-chrome--open)::selection,
+#app .mdm-table:has(> .mdm-chrome--open) ::selection {
+  background: transparent;
+}
 #app.mdm--dark .cm-selectionLayer {
   mix-blend-mode: screen;
 }
