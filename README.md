@@ -327,7 +327,10 @@ on a `.play` block (a page has no toolbar, so there the bar stays under the
 score). `_extensions/mdm/resources/mdm-look.css` is that look, a
 port of the editor's own stylesheet (`vscode-mdm/media/style.css`) onto the
 HTML Quarto produces; it spends a handful of custom properties, and the
-filter writes them into the page from what it is told.
+filter writes them into the page from what it is told. Beside it rides
+`resources/mdm-address.js`, which names the links that print their own
+address, the ones of the reference list among them, for the stylesheet to
+set in the code face: citeproc writes those after every filter has run.
 
 What varies travels as plain metadata. The look keys are what the VS Code
 extension passes when it exports (`exportLook` in `vscode-mdm/extension.js`)
@@ -677,6 +680,11 @@ What it does:
   line break is marked at the end of its row. A soft break stays a row of
   its own while editing, as in Typora and Obsidian, where the page runs the
   lines on.
+- **An address printed as it is written** (a bare URL, one in angle
+  brackets, a mail address, the URL or the DOI of an entry of the reference
+  list, a link whose words are its own address) is set in the code face at
+  the size of inline code, as LaTeX sets a `\url`, in the editor, on the
+  page and on paper; a link written in words keeps the face of the prose.
 - **Characters that draw nothing** (a bidi override, a zero-width space, a
   soft hyphen) are left to the page's own drawing while a line is read, and
   named by a mark with a tooltip on the line the caret is on.

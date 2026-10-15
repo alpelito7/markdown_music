@@ -1311,12 +1311,16 @@ local function ensure_look()
   end
   -- With the script that measures, when the page is about to be printed,
   -- what a table and a display equation need (resources/mdm-paper.js): the
-  -- sheet's rules draw one the measure cannot hold smaller, and whole.
+  -- sheet's rules draw one the measure cannot hold smaller, and whole. And
+  -- the one that names the links whose words are their own address
+  -- (resources/mdm-address.js), which the stylesheet sets in the code face:
+  -- the ones in the reference list are citeproc's, written after this
+  -- filter and after mdm-after.lua where the extension hands that one in.
   quarto.doc.add_html_dependency({
     name = "mdm-look",
     version = "0.1.0",
     stylesheets = { "resources/mdm-look.css" },
-    scripts = { "resources/mdm-paper.js" },
+    scripts = { "resources/mdm-paper.js", "resources/mdm-address.js" },
   })
   -- The roman travels only for a page set in it: four faces are 191 KB, and a
   -- self-contained export takes every dependency inside the file, so a page in
@@ -2953,6 +2957,21 @@ function Meta(meta)
     if quarto.doc.is_format("html") and bibliography_has_math(meta) then
       ensure_katex_dep()
     end
+  end
+  -- An address printed as it is written, in the code face on paper as in
+  -- the editor and on the page (`.mdm-address` in style.css, `a.uri` in
+  -- mdm-look.css). Pandoc writes every link whose words are its own address
+  -- as a \url, and a mail address as a \nolinkurl, and the template sets
+  -- both in the face of the words around them (`\urlstyle{same}`) unless
+  -- the header names a style. Quarto's template writes that line after the
+  -- header's includes (after-header-includes.latex, read on 1.9.37), so a
+  -- \urlstyle in the preamble (look_tex) would be undone by it, and the
+  -- variable is the way in. `tt` is the face of inline code, at its scale
+  -- (look_tex), without the chip: the chip is on \texttt, and url.sty sets
+  -- its face with \ttfamily. A document that names a style keeps it.
+  if quarto.doc.is_format("latex") and meta.urlstyle == nil then
+    meta.urlstyle = pandoc.MetaString("tt")
+    changed = true
   end
   -- Which command each level of heading is written as, for the paper to size
   -- the headings by level (heading_commands, over look_tex). A page has h1 to

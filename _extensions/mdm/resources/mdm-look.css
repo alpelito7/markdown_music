@@ -487,6 +487,31 @@ body a:visited {
 body a:hover {
   text-decoration: underline;
 }
+/* A link in the weight of what it stands in, as the editor draws it and as
+   inline code has it below: Quarto's theme sets every link at 400, so a
+   link in a heading, or between `**`, was the one run of regular in a line
+   of bold (400 inside an h2 of 600, read off the matched rules on
+   2026-10-13, with an address in a heading in view). Inside the text
+   alone: the page's own chrome keeps the weights its theme gives it. */
+body main.content a {
+  font-weight: inherit;
+}
+/* An address printed as it is written, which is a link whose words are its
+   own address, in the code face at the size inline code has, as the editor
+   draws it (`#app .mdm-address` in vscode-mdm/media/style.css, where the
+   reason is; the owner's word of 2026-10-13) and as LaTeX sets a \url. A
+   bare URL, one in angle brackets and a mail address come from Pandoc with
+   the class. The URL or the DOI of an entry of the reference list, which
+   citeproc writes after every filter of the extension, and a link written
+   `[url](url)` come without, and resources/mdm-address.js gives it to them
+   as the page loads. No line height of its own, as there: the row of an
+   address is as tall as a row of words, in a heading too. */
+body a.uri,
+body a.email {
+  font-family: var(--mdm-mono);
+  font-size: 0.88em;
+  line-height: 0;
+}
 /* The link AnchorJS hangs on every heading of a Quarto page, moved out of the
    flow and into the margin. It is drawn at opacity 0 until the heading is
    pointed at, so it has never been seen, but in the flow it is an inline box

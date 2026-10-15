@@ -5449,6 +5449,240 @@ test("a paragraph that cites breaks on the same words in the editor as on the pa
   assert.deepEqual(ed[0].ends, pg[0].ends);
 });
 
+// ---------- Addresses ----------
+//
+// An address printed as it is written, a link whose words are its own
+// address, is set in the code face at the size of inline code on the page as
+// in the editor, where LaTeX sets a \url (the owner's word of 2026-10-13,
+// over a URL of the reference list drawn in the roman; webview-look.test.js
+// holds the editor's side on its own). Pandoc classes the ones written as an
+// address. The URL and the DOI of an entry of the list are citeproc's,
+// written after every filter of the extension, and a link written
+// `[url](url)` comes without a class as well, so the page names those itself
+// (resources/mdm-address.js). A title citeproc makes a link of, for a style
+// that prints no address, is words on both surfaces, and so is a link in
+// bold, which the page drew at the weight Quarto's theme gives every link.
+// The style below prints a URL for a page of the web, a DOI for an article
+// and neither for a book; the first entry is long enough for its address to
+// stand where its row ends.
+const ADDRESS_CSL = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info><title>Addresses</title><id>addresses</id><updated>2026-10-13T00:00:00+00:00</updated></info>
+  <citation><layout prefix="(" suffix=")" delimiter="; "><names variable="author"><name form="short"/></names></layout></citation>
+  <bibliography><layout suffix=".">
+    <names variable="author"><name name-as-sort-order="all"/></names>
+    <text variable="title" prefix=". "/>
+    <choose>
+      <if type="webpage"><text variable="URL" prefix=". "/></if>
+      <else-if type="article-journal"><group prefix=". "><text variable="DOI" prefix="https://doi.org/"/></group></else-if>
+    </choose>
+  </layout></bibliography>
+</style>
+`;
+
+const ADDRESS_BIB = `@online{wolfe,
+  author = {Wolfe, Joe}, title = {Note Names, {MIDI} Numbers and Frequencies, with every key of the piano},
+  url = {https://newt.phys.unsw.edu.au/jw/notes.html}, urldate = {2026-10-12}
+}
+@article{knuth84,
+  author = {Knuth, Donald E.}, title = {Literate Programming}, journal = {The Computer Journal},
+  year = {1984}, volume = {27}, number = {2}, pages = {97--111}, doi = {10.1093/comjnl/27.2.97}
+}
+@book{piston,
+  author = {Piston, Walter}, title = {Harmony}, year = {1987}, publisher = {Norton}, url = {https://example.org/harmony}
+}
+`;
+
+const ADDRESS_DOC = `The first paragraph names an address early, https://example.org/a/first/address, and then runs on for long enough that the column has to break it more than once, so that the place where each row ends can be read off both surfaces and set side by side, which is the test the export rule is stated in.
+
+A second one keeps its address for later in the sentence, after a good many words have gone by and the first row is already full, and only then writes <https://example.org/in/angle/brackets> and the mail of somebody, <somebody@example.org>, before it carries on to a third row and ends there, a little after its middle.
+
+Here the address is a link's own words, [https://example.org/own/words](https://example.org/own/words), beside a [link written in words](https://example.org/words) and a **[bold link](https://example.org/bold)**, and after them the three works the list under this is made of [@wolfe; @knuth84; @piston], with enough words left over to fill the rows that follow.
+
+And inline \`code\`, whose face an address is set in, a mail for a link's words, [you@example.org](mailto:you@example.org), and an address that is code, [\`https://example.org/marked\`](https://example.org/marked), which is words.
+
+## A heading at https://example.org/heading
+
+## References
+`;
+
+// What each surface sets an address and a link of words in, read the same
+// way on both; `sel` names the surface's own boxes.
+const ADDRESS_READ = function (sel) {
+  const round = (x) => Math.round(x * 100) / 100;
+  const code = getComputedStyle(document.querySelector(sel.code)).fontFamily;
+  // The width of a letter, off seven that hold no place to break at.
+  const letter = (el) => {
+    const n = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode();
+    const at = n ? n.data.indexOf("example") : -1;
+    if (at < 0) return null;
+    const range = document.createRange();
+    range.setStart(n, at);
+    range.setEnd(n, at + 7);
+    return range.getBoundingClientRect().width / 7;
+  };
+  return {
+    addresses: Array.from(document.querySelectorAll(sel.address)).map((el) => {
+      const s = getComputedStyle(el);
+      const p = getComputedStyle(el.parentElement);
+      return {
+        text: el.textContent,
+        code: s.fontFamily === code,
+        size: round(parseFloat(s.fontSize) / parseFloat(p.fontSize)),
+        lineHeight: s.lineHeight,
+        weight: s.fontWeight === p.fontWeight,
+        letter: letter(el),
+      };
+    }),
+    words: Array.from(document.querySelectorAll(sel.link))
+      .filter((el) => sel.words.indexOf(el.textContent) !== -1)
+      .map((el) => {
+        const s = getComputedStyle(el);
+        const p = getComputedStyle(el.parentElement);
+        return { text: el.textContent, prose: s.fontFamily === p.fontFamily && s.fontSize === p.fontSize, weight: s.fontWeight === p.fontWeight };
+      }),
+    rows: Object.values(eval("(" + sel.ends + ")")(Array.from(document.querySelectorAll(sel.blocks)).filter((b) => b.matches(sel.entry) || b.textContent.length > 200))),
+  };
+}.toString();
+
+test("an address is set in the code face on the page as in the editor, the ones of the reference list among them, and what holds one breaks on the same words", { skip }, async () => {
+  const MOCK = path.join(__dirname, "mocks", "vscode.js");
+  const Module = require("node:module");
+  const resolve = Module._resolveFilename;
+  Module._resolveFilename = function (request, ...rest) {
+    return request === "vscode" ? MOCK : resolve.call(this, request, ...rest);
+  };
+  const vscode = require("vscode");
+  const ext = require("../vscode-mdm/extension.js");
+  const { open: openEditor } = require("./webview/helpers.js");
+  fs.mkdirSync(DIR, { recursive: true });
+  fs.writeFileSync(path.join(DIR, "addresses.bib"), ADDRESS_BIB);
+  fs.writeFileSync(path.join(DIR, "addresses.csl"), ADDRESS_CSL);
+  const docPath = path.join(DIR, "addresses.mdm");
+  fs.writeFileSync(
+    docPath,
+    "---\ntitle: Addresses\nlang: en\nbibliography: addresses.bib\ncsl: addresses.csl\nformat:\n  html:\n    embed-resources: true\nfilters:\n  - mdm\n---\n\n" + ADDRESS_DOC
+  );
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
+  const r = spawnSync(MDM, ["render", "addresses.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const words = ["link written in words", "bold link", "https://example.org/marked", "Harmony"];
+  const pg = await readCiting(
+    "file://" + path.join(DIR, "addresses.html"),
+    (arg) => eval("(" + arg.read + ")")(arg.sel),
+    {
+      read: ADDRESS_READ,
+      sel: {
+        code: "main.content :not(pre) > code",
+        address: "main.content a.uri, main.content a.email",
+        link: "main.content a",
+        words: words,
+        blocks: "main.content p, #refs .csl-entry",
+        entry: "#refs .csl-entry",
+        ends: LINE_ENDS,
+      },
+    }
+  );
+  const uri = "file://" + docPath;
+  vscode._reset();
+  vscode._state.documents.set(uri, fs.readFileSync(docPath, "utf8"));
+  ext.activate({ subscriptions: [], extensionUri: vscode.Uri.file("/ext"), globalState: vscode._memento() });
+  const provider = vscode._state.registeredProviders[vscode._state.registeredProviders.length - 1].provider;
+  let page = null;
+  let receive = null;
+  let dispose = null;
+  const panel = {
+    webview: {
+      asWebviewUri: (u) => u,
+      cspSource: "vscode-resource:",
+      postMessage(msg) {
+        if (!page) return Promise.resolve(false);
+        return page.evaluate((m) => window.postMessage(m, "*"), msg).then(() => true, () => false);
+      },
+      onDidReceiveMessage(handler) {
+        receive = handler;
+      },
+    },
+    onDidDispose(handler) {
+      dispose = handler;
+    },
+  };
+  provider.resolveCustomTextEditor(vscode._makeDocument(uri), panel);
+  const settings = Object.assign(JSON.parse(/window\.MDM_SETTINGS = (\{.*?\});/.exec(panel.webview.html)[1]), {
+    frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light",
+  });
+  const h = await openEditor({ seed: { settings }, scores: 0, toHost: (msg, p) => { page = p; return receive(msg); } });
+  let ed;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+    await h.page.waitForFunction(() => document.querySelectorAll("#app .mdm-refs .csl-entry").length >= 3, { timeout: 20000 });
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await new Promise((r) => setTimeout(r, 500));
+    ed = await h.page.evaluate((arg) => eval("(" + arg.read + ")")(arg.sel), {
+      read: ADDRESS_READ,
+      sel: {
+        code: "#app .mdm-inline-code",
+        address: "#app .mdm-address",
+        // A URL the autolinker finds among a link's words is a link inside
+        // the link here: the outer one is the link.
+        link: "#app .mdm-link:not(.mdm-link .mdm-link), #app .mdm-cite-link",
+        words: words,
+        blocks: "#app .cm-content > .cm-line, #app .mdm-refs .csl-entry",
+        entry: "#app .mdm-refs .csl-entry",
+        ends: LINE_ENDS,
+      },
+    });
+  } finally {
+    dispose();
+    await h.close();
+    Module._resolveFilename = resolve;
+  }
+  // The same links are addresses on both, in the order they are printed in:
+  // three written as one, two written as a link's own words, one in a
+  // heading, and the URL and the DOI of the list.
+  const printed = [
+    "https://example.org/a/first/address",
+    "https://example.org/in/angle/brackets",
+    "somebody@example.org",
+    "https://example.org/own/words",
+    "you@example.org",
+    "https://example.org/heading",
+    "https://newt.phys.unsw.edu.au/jw/notes.html",
+    "https://doi.org/10.1093/comjnl/27.2.97",
+  ];
+  for (const [name, side] of [["the page", pg], ["the editor", ed]]) {
+    assert.deepEqual(side.addresses.map((a) => a.text), printed, name + " sets other links as addresses");
+    for (const a of side.addresses) {
+      const at = name + ", `" + a.text + "`";
+      assert.equal(a.code, true, at + ": not in the face of inline code");
+      assert.equal(a.size, 0.88, at + ": not at the size of inline code");
+      assert.equal(a.lineHeight, "0px", at + ": a line height of its own");
+      assert.equal(a.weight, true, at + ": not in the weight of what it stands in");
+    }
+    // In words: a link, a link in bold, an address written as code, and
+    // the title of the book, which citeproc makes a link of.
+    assert.deepEqual(side.words, words.map((text) => ({ text: text, prose: true, weight: true })), name + ", the links in words");
+  }
+  // As wide on one as on the other, which is what the rows break by. The
+  // faces are each surface's own code face, and on this machine two families
+  // of one width (Noto Sans Mono, Liberation Mono): what would part them is
+  // the roman's adjust reaching the editor's (8.32px a letter for 8.45).
+  pg.addresses.forEach((a, i) => {
+    const b = ed.addresses[i];
+    if (a.letter === null || b.letter === null) return;
+    assert.ok(Math.abs(a.letter - b.letter) / a.letter < 0.005, "`" + a.text + "`: a letter is " + a.letter + "px wide on the page and " + b.letter + " in the editor");
+  });
+  // And the line-break test: the three paragraphs and the three entries.
+  assert.equal(pg.rows.length, 6, "the page: " + JSON.stringify(pg.rows.map((b) => b.text.slice(0, 30))));
+  assert.equal(ed.rows.length, 6, "the editor: " + JSON.stringify(ed.rows.map((b) => b.text.slice(0, 30))));
+  pg.rows.forEach((block, i) => {
+    assert.equal(ed.rows[i].text, block.text, "the editor prints other words than the page");
+    assert.deepEqual(ed.rows[i].ends, block.ends, "`" + block.text.slice(0, 40) + "` breaks on other words");
+  });
+  assert.ok(pg.rows.slice(0, 3).every((b) => b.ends.length >= 2), "a paragraph is too short to test: " + JSON.stringify(pg.rows.map((b) => b.ends)));
+  assert.ok(pg.rows[3].ends.length >= 1, "the first entry of the list is on one row: " + JSON.stringify(pg.rows[3]));
+});
+
 // A numbered style on the page: the numbers in a column as wide as the widest
 // of them, each flush right, and the text half an em after it on every line,
 // as the editor sets the same list (webview-markdown.test.js) and look_tex the

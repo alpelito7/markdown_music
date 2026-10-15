@@ -1578,6 +1578,42 @@ body {
 #app .mdm-link .mdm-link-dest * {
   color: color-mix(in srgb, var(--mdm-ink) 60%, transparent);
 }
+/* An address printed as it is written, which is a link whose words are its
+   own address: a bare URL, one in angle brackets, a mail address, the URL
+   or the DOI in an entry of the reference list, and a link written
+   `[url](url)` (ownAddress in main.js says which). It is set in the code
+   face at the size inline code has, in the link's blue and under its
+   pointer, as LaTeX sets a \url; a link written in words keeps the face of
+   the prose. The owner's word of 2026-10-13, over an entry of the list
+   whose URL stood in the roman.
+   No line height of its own, as a raised word has none (.mdm-sup), so the
+   box of the face adds nothing to the row it is in, whatever the face is.
+   The 1 of the open address above keeps it inside a row of prose and not
+   inside a heading: on the page a `##` that held an address stood 0.94px
+   taller than one of words and a `###` 1.59px, in Liberation Mono, and no
+   taller here, in Noto Sans Mono (measured 2026-10-13), so the two
+   surfaces parted by what the reader's code face happens to be.
+   The page sets the same links the same way (`a.uri` in mdm-look.css, with
+   resources/mdm-address.js naming the ones Pandoc leaves without a class),
+   and a PDF typeset with LaTeX through `urlstyle` (Meta in mdm.lua).
+   And out of the roman's adjust, as the engraving is (`code.language-abc`
+   above): on the page that compensation is a `size-adjust` on the roman's
+   own faces and reaches no other, so the page's code face is drawn as it
+   comes, and an address drawn here at the roman's x-height was 8.32px a
+   character where the page set 8.45 (Noto Sans Mono and Liberation Mono,
+   both 0.6em wide, at 14.08px; measured 2026-10-13). A paragraph that held
+   three of them broke on another word on each surface. Inline code is
+   still inside the adjust, which is item 21 of Pending in tests/README.md.
+   What is not matched is the face itself: VS Code's code face here and the
+   page's own stack there, the same family where both are left as they
+   come on Windows and on a Mac (Consolas, Menlo), and two families of one
+   width on this Linux. */
+#app .mdm-address {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  font-size-adjust: none;
+  line-height: 0;
+}
 /* An escaped character and an entity are text: the highlighter's grey and
    string colour on their spans give way to the ink around them. */
 #app .mdm-escaped,

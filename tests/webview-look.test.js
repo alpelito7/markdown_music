@@ -5204,6 +5204,160 @@ test("an open link's long address breaks where the column ends instead of leavin
   await h.close();
 });
 
+// An address printed as it is written is a link whose words are its own
+// address: bare, in angle brackets, a mail address or a link written
+// `[url](url)`, in the prose, in a heading and in a cell. It is set in the
+// code face at the size inline code has, as LaTeX sets a \url, and a link
+// written in words keeps the face of the prose: the owner's word of
+// 2026-10-13, over a URL of the reference list drawn in the roman (the list
+// is held in html.test.js, where the host that draws it is). It has no line
+// height of its own and is out of the roman's adjust, so its row is a row of
+// words and the address is as wide as the page sets it. What nothing prints
+// is no address: where a link goes, a URL among a link's words, stressed or
+// not, words that hold anything but text, a `www.` name and a definition. And two faults of a cell, found on the way: an
+// address in angle brackets was drawn as nothing, and a `www.` name as a
+// link, which the page does not make of it.
+const ADDRESSES = [
+  "A row of words and nothing else in it.",
+  "",
+  "## Words of a heading",
+  "",
+  "## At https://example.org/head",
+  "",
+  "A bare https://example.org/bare address.",
+  "",
+  "In angle brackets <https://example.org/angle>, a mail <me@example.org>, its own words [https://example.org/own](https://example.org/own) and a mail for words [you@example.org](mailto:you@example.org).",
+  "",
+  "A [worded link](https://example.org/words), a [link holding https://example.org/held among its words](https://example.org/dest), one [holding *https://example.org/stressed* too](https://example.org/dest2), `code` and www.example.org.",
+  "",
+  "| Where | Address |",
+  "| --- | --- |",
+  "| words | words |",
+  "| bare | https://example.org/cell |",
+  "| angle | <https://example.org/cell2> |",
+  "| worded | [a link](https://example.org/cell3) |",
+  "| code | [`https://example.org/em`](https://example.org/em) |",
+  "| www | www.example.org |",
+  "",
+  "[abc]: https://example.org/definition",
+  "",
+].join("\n");
+
+test("an address printed as it is written is set in the code face at the size of inline code, in a row no taller than a row of words, and a link written in words is not", { skip }, async () => {
+  const printed = [
+    "https://example.org/head",
+    "https://example.org/bare",
+    "https://example.org/angle",
+    "me@example.org",
+    "https://example.org/own",
+    "you@example.org",
+    "https://example.org/cell",
+    "https://example.org/cell2",
+  ];
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text: ADDRESSES, scores: 0, seed: { settings: { textFont: face, frontMatter: "hidden" } } });
+    const read = () =>
+      h.page.evaluate(() => {
+        const round = (x) => Math.round(x * 100) / 100;
+        const row = (start) =>
+          Array.from(document.querySelectorAll("#app .cm-content > .cm-line")).find((l) => l.textContent.startsWith(start));
+        const tall = (el) => (el ? round(el.getBoundingClientRect().height) : null);
+        const tr = (first) => Array.from(document.querySelectorAll("#app .mdm-table tr")).find((r) => r.cells[0].textContent === first);
+        const around = (el) => getComputedStyle(el.closest(".cm-line, td, th"));
+        return {
+          code: getComputedStyle(document.querySelector("#app .cm-line .mdm-inline-code")).fontFamily,
+          addresses: Array.from(document.querySelectorAll("#app .mdm-address")).map((el) => {
+            const s = getComputedStyle(el);
+            return {
+              text: el.textContent,
+              face: s.fontFamily,
+              // Of what it stands in: the prose, a heading, a cell.
+              size: round(parseFloat(s.fontSize) / parseFloat(getComputedStyle(el.parentElement).fontSize)),
+              lineHeight: s.lineHeight,
+              adjust: s.fontSizeAdjust,
+              blue: s.color,
+              pointer: s.cursor,
+            };
+          }),
+          // The links that hold no address of their own: the ones in words.
+          worded: Array.from(document.querySelectorAll("#app .mdm-link"))
+            .filter((l) => !l.closest(".mdm-address") && !l.querySelector(".mdm-address") && !l.parentElement.closest(".mdm-link"))
+            .map((l) => ({ text: l.textContent, prose: getComputedStyle(l).fontFamily === around(l).fontFamily, blue: getComputedStyle(l).color })),
+          rows: {
+            words: tall(row("A row of words")),
+            bare: tall(row("A bare")),
+            heading: tall(row("Words of a heading")),
+            headingAddress: tall(row("At https")),
+          },
+          cells: {
+            words: tall(tr("words")),
+            bare: tall(tr("bare")),
+            angle: tall(tr("angle")),
+            angleText: tr("angle").cells[1].textContent,
+            wwwText: tr("www").cells[1].textContent,
+            wwwLinks: tr("www").cells[1].querySelectorAll(".mdm-link").length,
+          },
+          inDefinition: document.querySelectorAll("#app .mdm-linkref-line .mdm-address").length,
+          destinations: Array.from(document.querySelectorAll("#app .mdm-link-dest")).map((d) => ({
+            text: d.textContent,
+            size: getComputedStyle(d).fontSize,
+            addresses: d.querySelectorAll(".mdm-address").length,
+          })),
+          open: Array.from(document.querySelectorAll("#app .mdm-link--open.mdm-address")).map((el) => el.textContent),
+        };
+      });
+    const which = " (" + face + ")";
+    const seen = await read();
+    assert.deepEqual(seen.addresses.map((a) => a.text), printed, "the addresses the page prints are not the ones set as addresses" + which);
+    assert.deepEqual(
+      seen.worded.map((l) => l.text),
+      ["worded link", "link holding https://example.org/held among its words", "holding https://example.org/stressed too", "a link", "https://example.org/em"],
+      "the links written in words" + which
+    );
+    for (const a of seen.addresses) {
+      const at = "`" + a.text + "`" + which;
+      assert.equal(a.face, seen.code, at + ": not in the code face");
+      assert.equal(a.size, 0.88, at + ": not at the size of inline code");
+      assert.equal(a.lineHeight, "0px", at + ": a line height of its own");
+      assert.equal(a.adjust, "none", at + ": inside the roman's adjust, which the page's code face is not");
+      assert.equal(a.blue, seen.worded[0].blue, at + ": out of the link's blue");
+      assert.equal(a.pointer, "pointer", at + ": without the link's pointer");
+    }
+    for (const l of seen.worded) assert.equal(l.prose, true, "the link `" + l.text + "` left the face of the prose" + which);
+    // A row that holds an address is a row of words, in the prose, on a
+    // heading and in a table.
+    assert.equal(seen.rows.bare, seen.rows.words, "a row of prose with an address in it" + which + ": " + JSON.stringify(seen.rows));
+    assert.equal(seen.rows.headingAddress, seen.rows.heading, "a heading with an address in it" + which + ": " + JSON.stringify(seen.rows));
+    assert.equal(seen.cells.bare, seen.cells.words, "a row of the table with an address in it" + which + ": " + JSON.stringify(seen.cells));
+    assert.equal(seen.cells.angle, seen.cells.words, "a row of the table with an address in angle brackets" + which + ": " + JSON.stringify(seen.cells));
+    assert.equal(seen.cells.angleText, "https://example.org/cell2", "the address in angle brackets is not drawn in its cell" + which);
+    assert.equal(seen.cells.wwwText, "www.example.org");
+    assert.equal(seen.cells.wwwLinks, 0, "a `www.` name is a link in a cell, and text on the page" + which);
+    assert.equal(seen.inDefinition, 0, "the address of a definition is set as a printed one" + which);
+    // With the caret in it an address is still the address the page prints,
+    // and its row no taller.
+    await setSelection(h.page, await posOf(h.page, "example.org/bare", 2));
+    await sleep(250);
+    const bare = await read();
+    assert.deepEqual(bare.open, ["https://example.org/bare"], "the bare address did not open as an address" + which);
+    assert.equal(bare.rows.bare, seen.rows.words, "the row of an open address" + which + ": " + JSON.stringify(bare.rows));
+    // A link written with its own address, open: the words are the printed
+    // address, and where it goes is the address of any open link, at its
+    // size and no smaller.
+    await setSelection(h.page, await posOf(h.page, "example.org/own", 2));
+    await sleep(250);
+    const own = await read();
+    assert.deepEqual(own.addresses.map((a) => a.text), printed, "the addresses changed as a link opened" + which);
+    assert.deepEqual(
+      own.destinations,
+      [{ text: "https://example.org/own", size: "14.08px", addresses: 0 }],
+      "where an open link goes" + which
+    );
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
 // A link carries the pointer, as an equation, a picture, a table and a score
 // do, since a click on it opens it; it had the caret of the text. Open, it is
 // text again, the address inside it included, and the key that follows a

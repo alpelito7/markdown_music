@@ -163,6 +163,33 @@ test("on paper the citations link to the list, as on the page, and a document th
   assert.doesNotMatch(plain, /\\citeproc\{ref-knuth1984\}/);
 });
 
+// An address printed as it is written is a \url in Pandoc's LaTeX, and a mail
+// address a \nolinkurl, and the template sets both in the face of the words
+// around them (`\urlstyle{same}`) unless the header names a style. The paper
+// sets them in the code face, as the editor and the page do (the owner's word
+// of 2026-10-13; `urlstyle` in Meta, mdm.lua), a link written in words stays
+// an \href in the face of the prose, and a document that names a style of
+// its own keeps it. Written to .tex alone, with no TeX run: the template's
+// line is what decides, and it comes after the header's includes, where a
+// \urlstyle of the preamble would be undone.
+test("the .tex sets an address in the code face and a link written in words in the prose's, and a document that names a style keeps it", () => {
+  const dir = freshDir("url-style");
+  const body = "A bare https://example.org/bare address, <me@example.org> and a [link in words](https://example.org/words).\n";
+  const tex = (name, extra) => {
+    fs.writeFileSync(path.join(dir, name + ".mdm"), "---\n" + (extra || "") + "filters:\n  - mdm\n---\n\n" + body);
+    const r = runMdm(["render", name + ".mdm", "--to", "latex"], dir);
+    assert.equal(r.status, 0, r.stderr);
+    return fs.readFileSync(path.join(dir, name + ".tex"), "utf8");
+  };
+  const set = tex("set");
+  assert.match(set, /\\url\{https:\/\/example\.org\/bare\}/);
+  assert.match(set, /\\nolinkurl\{me@example\.org\}/);
+  assert.match(set, /\\href\{https:\/\/example\.org\/words\}\{link in words\}/);
+  assert.deepEqual(set.match(/\\urlstyle\{[^}]*\}/g), ["\\urlstyle{tt}"]);
+  const own = tex("own", "urlstyle: same\n");
+  assert.deepEqual(own.match(/\\urlstyle\{[^}]*\}/g), ["\\urlstyle{same}"]);
+});
+
 // The smallest style that asks for no space between entries, as IEEE does.
 const TIGHT_CSL = `<?xml version="1.0" encoding="utf-8"?>
 <style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">

@@ -4241,6 +4241,10 @@
         el = document.createElement("span");
         el.className = "mdm-cite-link";
         const href = c.getAttribute("href") || "";
+        // The URL or the DOI an entry prints is an address (ownAddress); a
+        // title citeproc makes a link of, for a style that prints neither,
+        // is words.
+        if (ownAddress(c.textContent, href)) el.className += " mdm-address";
         if (citedKey(href)) el.setAttribute("data-mdm-ref", citedKey(href));
         else if (/^(?:https?|mailto):/i.test(href)) el.setAttribute("data-mdm-href", href);
       } else if (CITE_TAGS.has(c.tagName)) {
@@ -6239,10 +6243,22 @@
           src: target && target.url ? imageSource(target.url) : null,
           alt: ends.length > 1 ? slice(ends[0].to, ends[1].from) : "",
         });
+      } else if (name === "URL" && !linkedBare(text(child.from, child.to))) {
+        // A bare address with no scheme is text, as it is in the prose
+        // (linkedBare): a cell alone drew `www.example.org` as a link, which
+        // the page does not make of it (seen 2026-10-13).
+        push(slice(child.from, child.to));
       } else if (name === "Link" || name === "Autolink" || name === "URL") {
         const target = name === "Link" ? linkTarget(child, text, refs) : null;
         const url = child.getChild("URL");
-        const inner = cellParts(child, text, LINK_SKIP, marks, refs);
+        // An address in angle brackets has no words but the address. Read as
+        // a link's words are, with the URL skipped, it came out with none,
+        // and a cell that held `<https://example.org>` was drawn empty (seen
+        // 2026-10-13).
+        const inner =
+          name === "Autolink" && url
+            ? [{ kind: "text", text: text(url.from, url.to) }]
+            : cellParts(child, text, LINK_SKIP, marks, refs);
         parts.push({
           kind: "link",
           href: target && target.url ? target.url : url ? unbracket(text(url.from, url.to)) : partsText(inner),
@@ -6490,6 +6506,13 @@
         // puts the caret in the source, as it does everywhere else.
         const link = document.createElement("span");
         link.className = "mdm-link";
+        // An address written in a cell or a caption, bare, in angle brackets
+        // or as its own words, as one in the prose (ownAddress); words that
+        // hold anything but text are not one, on the page either.
+        const plain = p.parts.every(function (q) {
+          return q.kind === "text";
+        });
+        if (plain && ownAddress(partsText(p.parts), p.href)) link.className += " mdm-address";
         // The tooltip is the destination and the Markdown title rides
         // beside it, the pair a link in the prose carries, with the click
         // that follows it under the destination where there is one; the
@@ -7545,6 +7568,25 @@
     });
   }
 
+  // Whether an address written bare is a link: when it has a scheme or is a
+  // mail address, which is what the page links (Pandoc's autolink_bare_uris,
+  // the export's reader, measured on 3.8.3). A `www.` address, which GFM
+  // links too, is text on the page and so is text here (G017). The prose and
+  // a cell ask the same question, so they ask it here.
+  function linkedBare(address) {
+    return /^[a-z][a-z0-9+.-]*:|@/i.test(address);
+  }
+
+  // Whether a link prints its own address: its words are the address it goes
+  // to, or that address without its `mailto:`. Such a link is set in the code
+  // face (.mdm-address in style.css, where the reason is), in the prose, in a
+  // cell and in the reference list alike. The page asks the same question of
+  // its links (resources/mdm-address.js), and Pandoc's LaTeX writer answers
+  // it for the paper, where such a link is a \url and any other an \href.
+  function ownAddress(words, href) {
+    return !!href && (words === href || "mailto:" + words === href);
+  }
+
   // The character an entity stands for, or the entity itself when it stands
   // for nothing (`&bogus;`), decoded by the browser.
   function decodeEntity(raw) {
@@ -8447,6 +8489,13 @@
           }
           if (target && target.title) attributes["data-mdm-title"] = target.title;
           const open = touched(n.from, n.to);
+          // A link written with its own address for words, `[url](url)`, is
+          // an address as the page prints it, and the words are set as one,
+          // open or shut (ownAddress).
+          const ends = node.getChildren("LinkMark");
+          if (target && ends.length > 1 && ownAddress(text(ends[0].to, ends[1].from), target.url)) {
+            decos.push(Decoration.mark({ class: "mdm-address" }).range(ends[0].to, ends[1].from));
+          }
           decos.push(
             Decoration.mark({
               // Open, it is text being written, and the pointer gives way to
@@ -8476,13 +8525,22 @@
           // `www.` address, which GFM links too, is text on the page and so
           // is text here (G017). An address in angle brackets is a link
           // either way.
-          if (name === "URL" && !/^[a-z][a-z0-9+.-]*:|@/i.test(text(n.from, n.to))) return false;
+          if (name === "URL" && !linkedBare(text(n.from, n.to))) return false;
           // With the caret in it, it is text being written, as a link is. Its
           // tooltip is the click that follows it, its destination being its
           // own text.
+          // It is an address the page prints as written, and is set as one
+          // (.mdm-address), unless it is a link's or a picture's: where one
+          // of those goes is not printed, and a URL the autolinker finds
+          // among a link's words, inside whatever marks they carry, is those
+          // words.
+          let printed = true;
+          for (let up = node.parent; up && printed; up = up.parent) {
+            if (up.name === "Link" || up.name === "Image") printed = false;
+          }
           decos.push(
             Decoration.mark({
-              class: touched(n.from, n.to) ? "mdm-link mdm-link--open" : "mdm-link",
+              class: (touched(n.from, n.to) ? "mdm-link mdm-link--open" : "mdm-link") + (printed ? " mdm-address" : ""),
               attributes: { title: followHint() },
             }).range(n.from, n.to)
           );
