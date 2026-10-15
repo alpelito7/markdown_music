@@ -882,6 +882,39 @@ test("the YAML button shows the source in place of the drawing, and what it show
 // closed it, and the host says so a moment later: open as a click would have
 // left it, where it draws a title. By then the carets may be elsewhere, and
 // the source with nobody in it would have stayed for good.
+test("a selection dragged up into the header's source draws the title under it with the button still down", { skip }, async () => {
+  // The header's turn of what every drawn block does while a selection is
+  // dragged over it (webview-editing.test.js, "a selection dragged over
+  // what is drawn"): a header the button keeps in view has its title drawn
+  // under it while a caret is in it, and a drag that reaches it is a caret
+  // in it from then, not from the release of the button.
+  const h = await editor(TITLED, true, { pinned: true });
+  try {
+    const line = (text) =>
+      h.page.evaluate((t) => {
+        const l = Array.from(document.querySelectorAll("#app .cm-line")).find((e) => e.textContent.indexOf(t) !== -1);
+        const b = l.getBoundingClientRect();
+        return [b.left + 60, b.top + b.height / 2];
+      }, text);
+    assert.equal((await head(h.page)).blocks, 0, "the title is drawn under a source no caret is in");
+    const from = await line("More prose under it.");
+    await h.page.mouse.move(from[0], from[1]);
+    await h.page.mouse.down();
+    const to = await line("author: alpelito7");
+    await h.page.mouse.move(to[0], to[1], { steps: 8 });
+    await sleep(200);
+    const seen = await head(h.page);
+    assert.equal(seen.blocks, 1, "the drag reached the header and its title is not drawn, the button still down");
+    assert.equal(seen.open, true);
+    await h.page.mouse.up();
+    await sleep(150);
+    assert.equal((await head(h.page)).blocks, 1);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
 test("a header the host opens with no caret in it is put away again", { skip }, async () => {
   const typed = "---\ntitle: Typed\n---\n\n";
   for (const [where, asks] of [["Typed", []], ["More prose", [LEAVE]]]) {

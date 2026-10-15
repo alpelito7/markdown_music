@@ -3966,7 +3966,24 @@
   // selected a range. The rendering holds its layout until the release, when
   // the reveal is drawn in one go; the selection and the focus travel as
   // they always did, only the drawing waits.
+  //
+  // That is a click. A press that travels is a selection being drawn, and
+  // what it passes over is shown as it passes, as the keyboard's selection
+  // shows it: the source of an equation, of a table, of a score, of
+  // whatever is drawn in place of its text, so that what is being taken is
+  // in view while it is taken (the owner, 2026-10-13; until then a drag
+  // went over drawings that stayed shut until the button came up). The
+  // press is a drag once the pointer is DRAG_SLOP pixels from where it went
+  // down, further than the wobble of a click, and from there the drawing
+  // follows every move until the release (`pointerDragged`). What the hold
+  // protected a click from happens to a drag once, where it starts: a
+  // heading pressed in and dragged shows its `## ` and stands 65 px to the
+  // right of where it was, and the selection is read from the pointer on
+  // the text as it stands then.
   let pointerHeld = false;
+  let pointerDragged = false;
+  let pressedWhere = null;
+  const DRAG_SLOP = 5;
   let heldRebuild = false;
   const pointerReleased = CM.StateEffect.define();
 
@@ -9217,8 +9234,9 @@
         return e.is(pointerReleased);
       });
       // A caret or the focus moving under a held button: the rebuild waits
-      // for the release (pointerHeld). The text changing, or the tree, or
-      // the count the host keeps back, is drawn at once whatever the button.
+      // for the release, or for the press to become a drag (pointerHeld,
+      // pointerDragged). The text changing, or the tree, or the count the
+      // host keeps back, is drawn at once whatever the button.
       const byGesture =
         tr.selection || tr.state.field(focusField) !== tr.startState.field(focusField);
       const byContent =
@@ -9236,7 +9254,7 @@
         // The configuration, which is how a changed editor.multiCursorModifier
         // comes in (gestures), and with it the click a link's tooltip names.
         tr.reconfigured;
-      if (byContent || released || (byGesture && !pointerHeld)) {
+      if (byContent || released || (byGesture && (!pointerHeld || pointerDragged))) {
         heldRebuild = false;
         return rebuilt(value, tr);
       }
@@ -15046,7 +15064,11 @@
         // A left button going down over the editor holds the drawing (see
         // pointerHeld); the buttons of a block's rail and the toolbar move
         // no caret by being pressed and do not.
-        if (e.button === 0 && view && view.dom.contains(e.target)) pointerHeld = true;
+        if (e.button === 0 && view && view.dom.contains(e.target)) {
+          pointerHeld = true;
+          pointerDragged = false;
+          pressedWhere = [e.clientX, e.clientY];
+        }
         // A press on the scrollbar takes the focus to the scroller, which
         // the browser does before the handle moves, and what is typed after
         // the drag then goes nowhere (measured in the harness with the bars
@@ -15061,6 +15083,7 @@
     const releasePointer = function () {
       if (!pointerHeld) return;
       pointerHeld = false;
+      pointerDragged = false;
       if (heldRebuild && view) view.dispatch({ effects: pointerReleased.of(true) });
       // And the header's source a press took the carets out of (leaveHeader).
       releaseHeader();
@@ -15071,6 +15094,29 @@
     };
     window.addEventListener("mouseup", releasePointer, true);
     window.addEventListener("blur", releasePointer);
+    // The press becoming a drag (pointerDragged): heard before CodeMirror
+    // hears the move, so that what the press had waiting is drawn first and
+    // the move is read on the text as it then stands. A move with no button
+    // down is a release this page was not told of, the button having come up
+    // over another frame of the window (the page is an iframe, and the
+    // workbench around it keeps what is released over it): without this the
+    // drawing stayed held until the next press, the keyboard's selection
+    // opening nothing meanwhile.
+    window.addEventListener(
+      "mousemove",
+      function (e) {
+        if (!pointerHeld) return;
+        if (!(e.buttons & 1)) {
+          releasePointer();
+          return;
+        }
+        if (pointerDragged || !pressedWhere) return;
+        if (Math.hypot(e.clientX - pressedWhere[0], e.clientY - pressedWhere[1]) < DRAG_SLOP) return;
+        pointerDragged = true;
+        if (heldRebuild && view) view.dispatch({ effects: pointerReleased.of(true) });
+      },
+      true
+    );
     view.dom.addEventListener("focusin", syncFocus);
     view.dom.addEventListener("focusout", function () {
       // On the way out the focus has not landed yet: activeElement is still

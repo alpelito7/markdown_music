@@ -345,6 +345,138 @@ test("a triple click selects the line under the pointer, line break included", {
   await h.close();
 });
 
+// ---- A selection drawn with the pointer ----
+
+// Whether the source of each drawn thing of SWEPT is in the text on screen,
+// and how many of the blocks that keep their drawing under an open source
+// have one drawn: the preview beside an equation in a line, the display
+// equation, the table and the score.
+const SWEPT =
+  "Opening words, with nothing drawn in them, to press in.\n\n" +
+  "A ratio $r$ in a line, cited [@knuth1984], and a [link](https://example.org) to follow.\n\n" +
+  "$$\nf_n = f_0 2^{n/12}\n$$ {#eq-notes}\n\n" +
+  "| Note | Name |\n|---|---|\n| A | la |\n\n" +
+  "```abc\nX:1\nK:C\nCDEF GABc|\n```\n\n" +
+  "![A picture](icon.png)\n\n" +
+  "Closing words, after everything that is drawn.\n";
+function sourcesShown(page) {
+  return page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll("#app .cm-line")).map((l) => l.textContent);
+    const says = (s) => lines.some((t) => t.indexOf(s) !== -1);
+    return {
+      inline: says("$r$"),
+      citation: says("[@knuth1984]"),
+      link: says("(https://example.org)"),
+      equation: says("$$ {#eq-notes}"),
+      table: says("| Note | Name |"),
+      score: says("CDEF GABc|"),
+      picture: says("![A picture](icon.png)"),
+      under: [".mdm-math--preview", ".mdm-math--block", ".mdm-table", ".mdm-score"].filter((s) => document.querySelector("#app " + s)).length,
+    };
+  });
+}
+
+test("a selection dragged over what is drawn shows the source of each as it passes, the button still down: an equation in a line, a citation, a link, a display equation, a table, a score and a picture", { skip }, async () => {
+  // What is taken is what is seen (the owner, 2026-10-13): a drawing the
+  // selection goes over is put into its source while it goes, the drawing
+  // under it, as the keyboard's selection does it. Until then the rendering
+  // was held for as long as the button was down, a drag like a click, and
+  // the reader let go over an equation that had been a drawing all the way.
+  // Every kind of thing that is drawn in place of its text is named here;
+  // the header's turn is in webview-title.test.js.
+  const base = "file://" + path.resolve(__dirname, "../vscode-mdm/media") + "/";
+  const h = await open({ text: SWEPT, scores: 1, height: 1500, seed: { docBase: base } });
+  try {
+    // The host, for the citation to be a drawing before the drag.
+    await h.page.waitForFunction(() => window.__posts.some((m) => m.type === "cites"), { timeout: 10000 });
+    await h.page.evaluate(() => {
+      const asked = window.__posts.filter((m) => m.type === "cites").pop();
+      window.postMessage(
+        { type: "cites", seq: asked.seq, state: "ok", missing: [], html: '<p><span id="mdmcite-0"><span class="citation">(Knuth 1984)</span></span></p>' },
+        "*"
+      );
+    });
+    await h.page.waitForFunction(() => document.querySelector("#app .mdm-cited") && document.querySelector("#app img.mdm-image"), { timeout: 10000 });
+    await sleep(200);
+    const nothing = { inline: false, citation: false, link: false, equation: false, table: false, score: false, picture: false, under: 3 };
+    assert.deepEqual(await sourcesShown(h.page), nothing, "a source is in view before anything is pressed");
+    const from = await coordsAt(h.page, (await posOf(h.page, "Opening")) + 3);
+    await h.page.mouse.move(from.x, from.y);
+    await h.page.mouse.down();
+    // To the closing words, wherever they stand by then: every source that
+    // opens on the way pushes them down.
+    const closing = await posOf(h.page, "after everything");
+    for (let i = 0; i < 4; i++) {
+      const to = await coordsAt(h.page, closing);
+      await h.page.mouse.move(to.x, to.y, { steps: 6 });
+      await sleep(150);
+    }
+    const everything = { inline: true, citation: true, link: true, equation: true, table: true, score: true, picture: true, under: 4 };
+    assert.deepEqual(await sourcesShown(h.page), everything, "with the button still down");
+    const taken = (await selectionRanges(h.page))[0];
+    assert.ok(taken[0] <= 6 && taken[1] >= closing, "the drag took " + JSON.stringify(taken) + ", which is not from the opening words to the closing ones");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    await h.page.mouse.up();
+    await sleep(150);
+    assert.deepEqual(await sourcesShown(h.page), everything, "after the release");
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a press shows nothing until it has travelled five pixels, and from there what it stands in", { skip }, async () => {
+  // The hold a click needs (the two tests above) is kept for a click: a
+  // press is a drag once the pointer is five pixels from where it went
+  // down, which no wobble of a click is.
+  const h = await open({ text: "## Some Title Here\n\nAnd a line.\n", scores: 0 });
+  try {
+    await setSelection(h.page, 24); // the caret elsewhere, the heading at rest
+    const title = await posOf(h.page, "Title");
+    const at = await coordsAt(h.page, title + 2);
+    const marks = async () => (await lineAt(h.page, title)).text.indexOf("## ") === 0;
+    await h.page.mouse.move(at.x, at.y);
+    await h.page.mouse.down();
+    await sleep(100);
+    assert.equal(await marks(), false, "the press drew the marks of the heading before its release");
+    await h.page.mouse.move(at.x + 4, at.y);
+    await sleep(100);
+    assert.equal(await marks(), false, "four pixels of travel drew them");
+    await h.page.mouse.move(at.x + 6, at.y);
+    await sleep(100);
+    assert.equal(await marks(), true, "six pixels of travel did not");
+    await h.page.mouse.up();
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a button that came up outside the page does not leave the drawing held", { skip }, async () => {
+  // The page is an iframe, and a button let go over the workbench around it
+  // is never heard here. The drawing waited for that release for good: the
+  // keyboard's selection opened nothing until the next press in the page.
+  // A move with no button down is that release, heard late.
+  const h = await open({ text: "Words to press in.\n\n$$\na^2\n$$\n\nMore words.\n", scores: 0 });
+  try {
+    const at = await coordsAt(h.page, (await posOf(h.page, "Words")) + 2);
+    await h.page.mouse.move(at.x, at.y);
+    await h.page.mouse.down();
+    await h.page.evaluate(
+      (x, y) => window.dispatchEvent(new MouseEvent("mousemove", { clientX: x, clientY: y, buttons: 0, bubbles: true })),
+      at.x + 40,
+      at.y
+    );
+    await setSelection(h.page, [{ anchor: 0, head: await posOf(h.page, "More") }]);
+    await sleep(150);
+    assert.equal(await count(h.page, ".cm-line.mdm-math-line"), 3, "the equation the selection reached is not open");
+    await h.page.mouse.up();
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
 // ---- Vertical motion, and the sample it depends on ----
 
 // The number of the line the main caret is on.

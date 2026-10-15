@@ -493,9 +493,13 @@ What it does:
   drawn: an equation as KaTeX, a score as its engraving, a fence as a card of
   highlighted code. A block a caret is in shows its source, with the rendered
   form under it as a live preview. Every selection range counts, so each of
-  several carets opens the thing it edits. An equation whose source KaTeX
-  refuses stays as source with a red edge, and shows KaTeX's message while a
-  caret is in it.
+  several carets opens the thing it edits, and a selection opens what it
+  goes over as it goes over it, made with the keyboard or dragged with the
+  pointer: what is being taken is in view while it is taken. A press that
+  has not travelled five pixels is a click and not a drag, and draws nothing
+  until it is released, so that the text does not move under a pointer that
+  has not. An equation whose source KaTeX refuses stays as source with a
+  red edge, and shows KaTeX's message while a caret is in it.
 - **Nobody in it, nothing open.** The carets count only while somebody is in
   the document: with the focus off it every block goes back to its drawing,
   which is the document as it reads. The selection is left as it was, so
