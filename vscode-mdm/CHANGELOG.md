@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.8.0
+
+- Score navigation, the first row of the new Score menu, freezes the text
+  and gives the keyboard to the scores, as a tablature editor does. A click
+  on a staff puts a cursor there, on a place of one voice and a step of the
+  staff: the arrows walk it along its part and up and down, Ctrl with Up and
+  Down goes to the staff above or below, and Ctrl+Shift, with nothing
+  selected, to the same part a line away. The digits write a note where the
+  cursor stands, from 1, a whole note, down to 7, a sixty-fourth, and 0 a
+  rest; with Ctrl or Alt the note goes in before the cursor's or after it.
+  Enter adds a note to a chord, Delete and Backspace take a note or a rest
+  out, and Backspace steps back. Shift with the arrows selects in the
+  cursor's part, and with Ctrl in every part; a selection plays alone, is
+  copied, cut and pasted, and takes a bar beside it with Ctrl and Left or
+  Right, as the cursor's bar does. Space plays from the cursor. With the
+  pointer on a score, two arrows at the end of each line send its last bar
+  down or bring the next one up, the end goes to any barline it is dragged
+  to, and a + under a barline adds a bar. Every change is written into the
+  score's ABC as an edit of the text, which Ctrl+Z takes back, and the row
+  turned off gives the text back.
+- A side panel keeps Score navigation in sight down the right edge while it
+  is on: on its Buttons face the note lengths and what the keys do, as
+  buttons, and on its Keys face every key of the mode. It comes with the
+  mode unless the Side panel row of the Score menu is unticked
+  (`mdm.scorePanel`), and it opens on the face it was left on
+  (`mdm.scorePanelFace`).
+- The toolbar is one row: the outline and seven words, Edit, Format,
+  Paragraph, Insert, Page, Score and Export, each over a menu, where a row
+  names its key if it has one and a switch is ticked while it is on. What
+  the two rows of buttons did is in the menus: undo, find and the
+  multicursor's switch under Edit, the marks on words under Format, the
+  headings, the lists, the quote and the code block under Paragraph, what a
+  document holds beside its words under Insert, the theme, the font, the
+  justification, the hyphenation and the YAML header under Page, and the
+  music under Score.
+- A selection dragged with the mouse opens what it passes over as the
+  pointer moves, as the keyboard's selection does: an equation, a citation,
+  a link, a table, a score, a picture, the title block. They stayed shut
+  until the button came up. A press that has not moved five pixels is still
+  a click, and nothing moves under it until it is released.
+- The drawing under an open source is no longer tinted by a selection that
+  runs over it: only the source is text, and what is marked is what is
+  copied.
+- An address printed as it is written is set in the code face at the size of
+  inline code, in the editor, on the exported page and on paper, as LaTeX
+  sets a `\url`: a bare URL, one in angle brackets, a mail address, a link
+  whose words are its own address, and the URL or the DOI of an entry of the
+  reference list. A link written in words keeps the face of the prose. On
+  the page a link takes the weight of what it stands in, where one in a
+  heading was regular, and in a table's cell an address in angle brackets is
+  no longer drawn empty.
+- Ctrl+click follows a link when the click is let go. Followed on the press,
+  a link to a website brought up VS Code's dialog while the window still
+  held the pointer, which stayed a hand, and Open took no click. A
+  Ctrl+click on a link in a table's cell no longer opens the table's source
+  as well.
+- A citation edited and put back is drawn again. One typed into and restored
+  before the editor had asked about it, one written over with the same text,
+  and one answered while a letter more stood in it stayed as written until
+  the editor was opened again.
+- Backspace after the marker of an empty item takes the marker and leaves
+  the caret on its line. It left a blank line where the item had been and
+  put the caret on a new line under it.
+- The README the Marketplace shows has a third clip, of Score navigation
+  writing an organ score from the keys, and the tour and the Markdown clip
+  are recorded again on the toolbar of words.
+
 ## 0.7.3
 
 - A figure with a label, `{#fig-circle}` in braces straight after its image,
