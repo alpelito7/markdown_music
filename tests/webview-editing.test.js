@@ -28,6 +28,10 @@ const {
   lineAt,
   postSettings,
   setSettingPosts,
+  pressBar,
+  barState,
+  panelState,
+  keyLines,
   clickAt,
   dblClickAt,
 } = require("./webview/helpers.js");
@@ -159,6 +163,94 @@ test("an Alt used with the mouse keeps its release out of the host's menu bar", 
     "down:Alt",
     "up:Alt",
   ]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The owner's report of 2026-10-03, twice the same day: "estoy dando alt tab
+// y al regresar sigo sin poder seguir usando ->". Measured in VS Code
+// 1.133.0 under kwin_x11 5.27.11, with the switcher's own Alt+Tab: the
+// release of Alt is the window manager's and never comes to the page, the
+// workbench goes on believing Alt down, and with Alt let go before Tab on
+// the way back the release of Tab is the first thing the window is sent.
+// The workbench read Alt as let go cleanly off it and took the focus to its
+// menu bar; the arrows walked the menus. In the text as in the score mode,
+// and in all four orders the two keys can be let go in, away and back, once
+// the release was kept here.
+test("a release that comes in alone after an Alt whose own release was lost, as Alt+Tab leaves it, is kept from the host, and the next press tells it Alt is up", { skip }, async () => {
+  const h = await open({ text: "alpha\nbeta\ngamma\n", scores: 0 });
+  // The stand-in for the preload, as above, with the Alt each key carries:
+  // it is what the workbench writes down of every key it is sent.
+  await h.page.evaluate(() => {
+    window.__host = [];
+    const hear = (e) => window.__host.push((e.type === "keydown" ? "down:" : "up:") + e.key + (e.altKey ? "+alt" : ""));
+    window.addEventListener("keydown", hear);
+    window.addEventListener("keyup", hear);
+    window.__page = [];
+    window.__mdm.view.contentDOM.addEventListener("keyup", (e) => window.__page.push("up:" + e.key));
+  });
+  const host = () => h.page.evaluate(() => window.__host.splice(0));
+  const first = await coordsAt(h.page, 0);
+  await h.page.mouse.click(first.x, first.y);
+  await sleep(600);
+  // Alt down and no release, and a release with no press: sent past the
+  // keyboard the test holds, which would put Alt on every key after it.
+  const cdp = await h.page.target().createCDPSession();
+  const altDown = () => cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18, nativeVirtualKeyCode: 18, modifiers: 1 });
+  const up = (key, code, vk, modifiers) => cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: key, code: code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: modifiers || 0 });
+  await altDown();
+  assert.deepEqual(await host(), ["down:Alt+alt"]);
+  // Tab let go after Alt, the window back by then: the page has it, the
+  // host does not.
+  await up("Tab", "Tab", 9);
+  assert.deepEqual(await host(), []);
+  assert.deepEqual(await h.page.evaluate(() => window.__page.splice(0)), ["up:Tab"]);
+  // Nor any release after it, while no press has told the host.
+  await up("Shift", "ShiftLeft", 16);
+  assert.deepEqual(await host(), []);
+  // The next press tells it, and is typed as it is.
+  await h.page.keyboard.type("X");
+  assert.deepEqual(await host(), ["down:X", "up:X"]);
+  assert.equal(await docText(h.page), "Xalpha\nbeta\ngamma\n");
+  // Told, the host is sent every release again.
+  await up("Tab", "Tab", 9);
+  assert.deepEqual(await host(), ["up:Tab"]);
+  // A release with Alt in it says nothing of Alt, and goes on.
+  await h.page.keyboard.down("Alt");
+  await h.page.keyboard.down("F8");
+  await h.page.keyboard.up("F8");
+  await h.page.keyboard.up("Alt");
+  assert.deepEqual(await host(), ["down:Alt+alt", "down:F8+alt", "up:F8+alt", "up:Alt"]);
+  // Alt's own release goes on under whatever name the keyboard gives the
+  // key: with Shift held, the left Alt of an X11 keyboard is named Meta.
+  await altDown();
+  await up("Meta", "AltLeft", 18, 8);
+  assert.deepEqual(await host(), ["down:Alt+alt", "up:Meta"]);
+
+  // An Alt the window was left under is no tap, wherever it is let go:
+  // back with the key still held, its release is kept from the host too
+  // (measured the same day: Alt held, another window opened over VS Code
+  // and closed, Alt let go, and the focus was in the menu bar).
+  await h.page.keyboard.down("Alt");
+  await h.page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await h.page.keyboard.up("Alt");
+  assert.deepEqual(await host(), ["down:Alt+alt"]);
+  // A key the page made itself is one the host drops (shouldForwardKeyEvent
+  // asks for the reader's own), and tells nothing of Alt here either: the
+  // release after it goes on.
+  await h.page.keyboard.type("Y");
+  await host();
+  await h.page.evaluate(() => window.__mdm.view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "a", altKey: true, bubbles: true })));
+  await up("Tab", "Tab", 9);
+  assert.deepEqual(await host(), ["down:a+alt", "up:Tab"]);
+  // A window left with no Alt held keeps nothing back, and the next tap is
+  // a tap again: the File menu is VS Code's.
+  await h.page.keyboard.type("Y");
+  await h.page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await host();
+  await h.page.keyboard.down("Alt");
+  await h.page.keyboard.up("Alt");
+  assert.deepEqual(await host(), ["down:Alt+alt", "up:Alt"]);
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -750,13 +842,15 @@ async function pressOn(text, pos, keys) {
   return { text: out, head, focused, ranges };
 }
 
-// The toolbar button `name` pressed `times` times with the selection at
-// `pos`, as pressOn takes it.
+// The control of the bar called `name` pressed `times` times with the
+// selection at `pos`, as pressOn takes it. Nearly all of them are rows of a
+// menu since the bar went to words, and are reached the way a hand reaches
+// one, the word first (pressBar).
 async function buttonOn(text, pos, name, times) {
   const h = await open({ text, scores: 0 });
   await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
   for (let i = 0; i < (times || 1); i++) {
-    await h.page.click('#app button[data-type="' + name + '"]');
+    await pressBar(h.page, name);
     await sleep(120);
   }
   const out = await docText(h.page);
@@ -1311,13 +1405,14 @@ test("the small caps button writes Pandoc's span and joins the one it finds", { 
   assert.equal(out.text, "Some [words]{.mark .smallcaps} here.\n");
 });
 
-// The six of the Insert group, the buttons that close the first row of the
-// bar (design-annotation-icons.html, the set the owner picked; they were one
-// menu button until the bar went to two rows).
+// The six of the Insert menu (design-annotation-icons.html, the set the
+// owner picked). They were one menu button, then six buttons closing the
+// first row of a bar in two rows, and are the rows under the word Insert
+// since the bar went to words (2026-10-13).
 async function insertOn(text, pos, row) {
   const h = await open({ text, scores: 0 });
   await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
-  await h.page.click('#app button[data-type="insert-' + row + '"]');
+  await pressBar(h.page, "insert-" + row);
   await sleep(120);
   const out = await docText(h.page);
   const ranges = await selectionRanges(h.page);
@@ -1328,50 +1423,397 @@ async function insertOn(text, pos, row) {
   return { text: out, ranges, open: open_, focused };
 }
 
-// The bar stands in two rows, and where it breaks is a decision: the first
-// row is what a reader writes (the words, the blocks, and the six things a
-// document holds beside them), the second what the document as a whole is
-// set in. So the first row ends on the rule and the second begins under the
-// outline button, at the same left edge, whatever the width of the pane.
-test("the bar stands in two rows, the first closing on the rule and the second opening under the outline", { skip }, async () => {
+// The bar is one row: the outline, and seven words that are each a menu
+// (variant A of design-toolbar.html, the owner's pick of 2026-10-13, built in
+// two rounds that day: the six words of the text, and then Score, beside
+// Page, which took in the buttons of the music that had been left at the far
+// end of the row). It stood in two rows of buttons from 2026-09-19, 65px of
+// chrome over the text, and is 35px. Nothing stands on it but the outline's
+// button and the words. In a pane too narrow for the row the words that do
+// not fit take the next one, each whole.
+test("the bar is one row, seven words after the outline and nothing else", { skip }, async () => {
   const h = await open({ text: "Text.\n", scores: 0 });
+  const seen = () =>
+    h.page.evaluate(() => {
+      const bar = document.querySelector("#app .mdm-toolbar");
+      const box = (el) => {
+        const b = el.getBoundingClientRect();
+        return { top: Math.round(b.top), left: Math.round(b.left), right: Math.round(b.right) };
+      };
+      return {
+        height: bar.getBoundingClientRect().height,
+        inner: Math.round(bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight)),
+        outline: box(bar.querySelector(':scope > .mdm-toolbar__item > button[data-type="outline"]')),
+        words: [...bar.querySelectorAll(":scope > .mdm-toolbar__item > .mdm-word")].map((w) => Object.assign({ name: w.textContent }, box(w))),
+        // Whatever stands on the bar itself, the rows of its menus apart.
+        controls: [...bar.querySelectorAll("button")].filter((b) => !b.closest(".mdm-menu")).map((b) => b.getAttribute("data-type")),
+      };
+    });
   for (const width of [900, 1400]) {
     await h.page.setViewport({ width, height: 900 });
     await sleep(250);
-    const seen = await h.page.evaluate(() => {
-      const bar = document.querySelector("#app .mdm-toolbar");
-      const rows = new Map();
-      [...bar.children].forEach((el) => {
-        const box = el.getBoundingClientRect();
-        const button = el.querySelector("button");
-        if (!button || !box.height) return;
-        const top = Math.round(box.top);
-        if (!rows.has(top)) rows.set(top, []);
-        rows.get(top).push({ name: button.getAttribute("data-type"), left: Math.round(box.left) });
-      });
-      return [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([top, items]) => ({ top, items }));
-    });
-    assert.equal(seen.length, 2, "the bar is not in two rows at " + width + ": " + JSON.stringify(seen.map((r) => r.items.length)));
-    const first = seen[0].items.map((i) => i.name);
-    const second = seen[1].items.map((i) => i.name);
-    assert.equal(first[0], "outline", width + ": the first row does not open on the outline");
-    assert.equal(first[first.length - 1], "insert-rule", width + ": the first row does not close on the rule");
-    assert.deepEqual(first.slice(-7), [
-      "insert-symbol",
-      "insert-equation",
-      "insert-equation-block",
-      "insert-table",
-      "insert-picture",
-      "insert-footnote",
-      "insert-rule",
-    ], width + ": the seven do not close the first row");
-    assert.equal(second[0], "mdm-match-substring", width + ": the second row does not open on the multicursor");
-    assert.equal(second[second.length - 1], "mdm-follow", width + ": the second row does not close on the playhead");
-    assert.equal(seen[1].items[0].left, seen[0].items[0].left, width + ": the second row does not start under the outline");
-    // Two rows of buttons and nothing between them: the break draws nothing
-    // and takes no height, so the rows stand a row apart and no more.
-    assert.ok(seen[1].top - seen[0].top <= 32, width + ": the rows stand " + (seen[1].top - seen[0].top) + "px apart");
+    const s = await seen();
+    assert.deepEqual(s.words.map((w) => w.name), ["Edit", "Format", "Paragraph", "Insert", "Page", "Score", "Export"], width + ": the words");
+    assert.deepEqual(
+      s.controls,
+      ["outline", "menu-edit", "menu-format", "menu-paragraph", "menu-insert", "menu-page", "menu-score", "menu-export"],
+      width + ": what stands on the bar"
+    );
+    const tops = [...new Set([s.outline].concat(s.words).map((c) => c.top))];
+    assert.equal(tops.length, 1, width + ": the bar is not one row: " + tops);
+    // A row of 28px controls, 3px of padding over and under it, and the rule.
+    assert.equal(s.height, 35, width + ": the bar is " + s.height + "px tall");
+    const run = [Object.assign({ name: "the outline" }, s.outline)].concat(s.words);
+    for (let i = 1; i < run.length; i++) {
+      assert.ok(run[i - 1].right <= run[i].left, width + ": " + run[i].name + " does not come after " + run[i - 1].name);
+    }
   }
+  // Too narrow for the whole row: the words that do not fit take the next,
+  // and none is cut by the pane's edge.
+  await h.page.setViewport({ width: 420, height: 900 });
+  await sleep(250);
+  const narrow = await seen();
+  const wordTops = [...new Set(narrow.words.map((w) => w.top))];
+  assert.equal(wordTops.length, 2, "at " + 420 + "px the words are on " + wordTops.length + " rows, so this reads nothing");
+  for (const w of narrow.words) assert.ok(w.right <= narrow.inner, "at " + 420 + "px " + w.name + " is cut by the pane's edge");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A word opens its menu on a press and shuts it on a second one, as every
+// drop-down of the bar does, and the menu goes away on Escape and on a press
+// anywhere else. The word whose menu is open stands on the disc of a held
+// state, which is the whole of the mark. And the manners of a menu bar:
+// once a press has opened one menu, the pointer coming to another word opens
+// that one in its place, so the row can be looked along without a press on
+// each; with nothing open the pointer opens nothing. A press on a word whose
+// menu the pointer has just opened leaves it open, where a menu bar would
+// shut it: a hand that goes from one word to press another means to see the
+// second one's menu, and the pointer gets there before the press does.
+test("a word opens its menu on a press, and with one open the pointer on another word opens that one", { skip }, async () => {
+  const h = await open({ text: "Some words here.\n", scores: 0 });
+  const open_ = () =>
+    h.page.evaluate(() =>
+      [...document.querySelectorAll("#app .mdm-toolbar__item--open")].map((item) => {
+        const b = item.querySelector(":scope > button");
+        return [b.getAttribute("data-type"), getComputedStyle(item.querySelector(":scope > .mdm-menu")).display, getComputedStyle(b).backgroundColor];
+      })
+    );
+  const ground = (name, state) =>
+    h.page.evaluate(
+      (name, state) => {
+        // What the two steps of the brass ladder come to on this bar.
+        const probe = document.createElement("span");
+        probe.style.background = "color-mix(in srgb, var(--mdm-play-accent) " + state + "%, transparent)";
+        document.querySelector("#app .mdm-toolbar").appendChild(probe);
+        const want = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return [getComputedStyle(document.querySelector('#app button[data-type="' + name + '"]')).backgroundColor, want];
+      },
+      name,
+      state
+    );
+  const over = async (name) => {
+    const at = await h.page.evaluate((n) => {
+      const b = document.querySelector('#app button[data-type="' + n + '"]').getBoundingClientRect();
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    }, name);
+    await h.page.mouse.move(at.x, at.y);
+    await sleep(80);
+  };
+  // Nothing open: the pointer along the words opens nothing.
+  for (const name of ["menu-edit", "menu-format", "menu-page"]) await over(name);
+  assert.deepEqual(await open_(), [], "the pointer alone opened a menu");
+  // Under the pointer a word wears the wash, and no more.
+  let [is, want] = await ground("menu-page", 12);
+  assert.equal(is, want, "a word under the pointer does not wear the wash");
+
+  await h.page.click('#app button[data-type="menu-format"]');
+  await sleep(80);
+  let seen = await open_();
+  assert.deepEqual(seen.map((s) => s.slice(0, 2)), [["menu-format", "block"]]);
+  [is, want] = await ground("menu-format", 22);
+  assert.equal(is, want, "the word whose menu is open does not stand on the disc");
+  // The focus stays in the text, or goes there: the bar is not somewhere to be.
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, "opening a menu left the text unfocused");
+
+  // The pointer on another word, with no press.
+  await over("menu-insert");
+  assert.deepEqual((await open_()).map((s) => s.slice(0, 2)), [["menu-insert", "block"]], "the pointer on Insert did not open it in place of Format");
+  await over("menu-edit");
+  assert.deepEqual((await open_()).map((s) => s.slice(0, 2)), [["menu-edit", "block"]]);
+  // Not on a button of the bar: the outline is not a menu, and the menu that
+  // was open stays.
+  await over("outline");
+  assert.deepEqual((await open_()).map((s) => s.slice(0, 2)), [["menu-edit", "block"]], "the pointer on a button shut the menu");
+
+  // A press on the word the pointer opened leaves its menu open; the press
+  // after that one shuts it, and the pointer opens nothing after.
+  await h.page.click('#app button[data-type="menu-edit"]');
+  await sleep(80);
+  assert.deepEqual((await open_()).map((s) => s.slice(0, 2)), [["menu-edit", "block"]], "a press shut the menu the pointer had just opened");
+  await h.page.click('#app button[data-type="menu-edit"]');
+  await sleep(80);
+  assert.deepEqual(await open_(), [], "a second press left the menu open");
+  await over("menu-format");
+  assert.deepEqual(await open_(), [], "the pointer opened a menu after the last one was shut");
+
+  // Escape, and a press in the text.
+  await h.page.click('#app button[data-type="menu-page"]');
+  await sleep(80);
+  assert.equal((await open_()).length, 1);
+  await h.page.keyboard.press("Escape");
+  await sleep(80);
+  assert.deepEqual(await open_(), [], "Escape left the menu open");
+  await h.page.click('#app button[data-type="menu-page"]');
+  await sleep(80);
+  await clickAt(h.page, 3);
+  assert.deepEqual(await open_(), [], "a press in the text left the menu open");
+
+  // A press on another word, with one open, ends with that one open and no
+  // other: the way a hand that does not know the pointer is enough does it.
+  await h.page.click('#app button[data-type="menu-edit"]');
+  await h.page.click('#app button[data-type="menu-export"]');
+  await sleep(80);
+  assert.deepEqual((await open_()).map((s) => s[0]), ["menu-export"]);
+  // And the same press again shuts it.
+  await h.page.click('#app button[data-type="menu-export"]');
+  await sleep(80);
+  assert.deepEqual(await open_(), []);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Two rows of the Page menu lead to more, the themes and the languages, and
+// say so with the arrowhead at their far edge. The submenu opens beside its
+// row when the pointer comes to the row, and on a press; it stays up while
+// the pointer crosses the rows under its own on the way to it, which is a
+// diagonal, and goes when the pointer has stayed on another row. A press on
+// one of its rows does what the row says and puts every menu away.
+test("a row that leads to more opens its submenu beside it, and the pointer may cross other rows on the way in", { skip }, async () => {
+  const h = await open({ text: "Some words here.\n", scores: 0, seed: { themes: [{ name: "Monokai", kind: "dark" }] } });
+  const center = (name) =>
+    h.page.evaluate((n) => {
+      const b = document.querySelector('#app button[data-type="' + n + '"]').getBoundingClientRect();
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2, left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+    }, name);
+  // The rows of the Page menu that lead to more, each with its submenu.
+  const subs = () =>
+    h.page.evaluate(() =>
+      [...document.querySelectorAll('#app .mdm-toolbar button[data-type="menu-page"] + .mdm-menu > .mdm-menu__group')].map((g) => {
+        const row = g.querySelector(":scope > button");
+        const sub = g.querySelector(":scope > .mdm-menu");
+        const s = sub.getBoundingClientRect();
+        const r = row.getBoundingClientRect();
+        const first = sub.querySelector(".mdm-menu__item");
+        return {
+          name: row.getAttribute("data-type"),
+          more: !!row.querySelector(".mdm-menu__more svg"),
+          shown: getComputedStyle(sub).display !== "none",
+          left: s.left - g.closest(".mdm-menu").getBoundingClientRect().right,
+          level: first ? Math.round(first.getBoundingClientRect().top - r.top) : null,
+          washed: getComputedStyle(row).backgroundColor !== "rgba(0, 0, 0, 0)",
+        };
+      })
+    );
+  await h.page.click('#app button[data-type="menu-page"]');
+  await sleep(80);
+  let seen = await subs();
+  assert.deepEqual(seen.map((s) => [s.name, s.more, s.shown]), [["mdm-theme", true, false], ["mdm-hyphenation", true, false]]);
+
+  // The pointer on the row: the themes, beside the panel and level with the row.
+  const theme = await center("mdm-theme");
+  await h.page.mouse.move(theme.x, theme.y);
+  await sleep(80);
+  seen = await subs();
+  assert.deepEqual(seen.map((s) => s.shown), [true, false], "the pointer on Theme did not open the themes");
+  assert.ok(seen[0].left >= 0 && seen[0].left <= 4, "the themes are " + seen[0].left + "px from their panel's edge");
+  assert.equal(seen[0].level, 0, "the first theme is not level with the row it hangs from");
+
+  // Down across the rows under it and into the submenu, as a hand goes to the
+  // last theme: the submenu is still there when the pointer arrives. One
+  // stroke, a straight line from the row to the last theme, so that the time
+  // between the row it crosses and the submenu is the stroke's own and not
+  // this test's; and it does cross one, leaving the panel below the row of
+  // the themes.
+  const last = await center("mdm-theme-4");
+  const font = await center("mdm-text-font");
+  const panelRight = await h.page.$eval("#app .mdm-toolbar__item--open > .mdm-menu", (el) => el.getBoundingClientRect().right);
+  const leaves = theme.y + ((last.y - theme.y) * (panelRight - theme.x)) / (last.x - theme.x);
+  assert.ok(leaves > font.top + 2 && leaves < font.bottom + 60, "the stroke crosses no row on its way to the submenu, so this reads nothing: " + leaves);
+  await h.page.mouse.move(last.x, last.y, { steps: 10 });
+  await sleep(400);
+  seen = await subs();
+  assert.deepEqual(seen.map((s) => s.shown), [true, false], "the themes went from under the pointer");
+  // The row it hangs from keeps the wash of a row under the pointer for as
+  // long as the submenu is up, with the pointer gone from it.
+  assert.ok(seen[0].washed, "the row lost its wash with the pointer in its submenu");
+  await h.page.mouse.click(last.x, last.y);
+  await sleep(120);
+  assert.deepEqual(await setSettingPosts(h.page), [{ type: "setSetting", key: "theme", value: "Monokai" }]);
+  assert.equal(await h.page.$$eval("#app .mdm-toolbar__item--open, #app .mdm-menu__group--open", (els) => els.length), 0, "a press on a row of the submenu left a menu open");
+
+  // The submenu holds itself, and not only its rows: across a row and onto
+  // its own edge, where no row of it is, it is still there.
+  await h.page.click('#app button[data-type="menu-page"]');
+  await h.page.mouse.move(theme.x, theme.y);
+  await sleep(80);
+  const edge = await h.page.evaluate(() => {
+    const sub = document.querySelector("#app .mdm-menu__group--open > .mdm-menu");
+    const b = sub.getBoundingClientRect();
+    const at = { x: b.left + b.width / 2, y: b.bottom - 2 };
+    return Object.assign(at, { bare: document.elementFromPoint(at.x, at.y) === sub });
+  });
+  assert.ok(edge.bare, "the point picked on the submenu's edge is on one of its rows, so this reads nothing");
+  await h.page.mouse.move(font.x, font.y);
+  await h.page.mouse.move(edge.x, edge.y);
+  await sleep(400);
+  assert.deepEqual((await subs()).map((s) => s.shown), [true, false], "the themes went with the pointer on their own edge");
+
+  // The pointer staying on another row puts the submenu away, and on the
+  // other row that leads to more, opens that one in its place.
+  await h.page.mouse.move(theme.x, theme.y);
+  await sleep(80);
+  assert.deepEqual((await subs()).map((s) => s.shown), [true, false]);
+  await h.page.mouse.move(font.x, font.y);
+  await h.page.waitForFunction(() => !document.querySelector("#app .mdm-menu__group--open"), { timeout: 3000 });
+  const hyph = await center("mdm-hyphenation");
+  await h.page.mouse.move(theme.x, theme.y);
+  await sleep(80);
+  await h.page.mouse.move(hyph.x, hyph.y);
+  await h.page.waitForFunction(
+    () => {
+      const open = document.querySelectorAll("#app .mdm-menu__group--open > button");
+      return open.length === 1 && open[0].getAttribute("data-type") === "mdm-hyphenation";
+    },
+    { timeout: 3000 }
+  );
+
+  // A press opens it too, and a second press does not shut it.
+  await h.page.keyboard.press("Escape");
+  await h.page.mouse.move(5, 300);
+  await pressBar(h.page, "mdm-theme");
+  await sleep(80);
+  assert.deepEqual((await subs()).map((s) => s.shown), [true, false], "a press on Theme did not open the themes");
+  await h.page.click('#app button[data-type="mdm-theme"]');
+  await sleep(80);
+  assert.deepEqual((await subs()).map((s) => s.shown), [true, false], "a second press on Theme shut the themes");
+  // Escape puts the submenu away with its menu, and the menu opens again
+  // with none.
+  await h.page.keyboard.press("Escape");
+  await sleep(80);
+  await h.page.mouse.move(5, 300);
+  await h.page.click('#app button[data-type="menu-page"]');
+  await sleep(80);
+  assert.deepEqual((await subs()).map((s) => s.shown), [false, false], "the menu opened with a submenu left over");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// A submenu hangs to the right of its panel, and #app clips what passes its
+// right edge: where the pane ends before the submenu would, it hangs to the
+// left instead, and in a pane too narrow for either it is moved in over its
+// own panel. Whatever the width, every row of it is inside the pane.
+test("a submenu that would pass the pane's edge opens on the other side, and inside the pane at any width", { skip }, async () => {
+  const h = await open({ text: "Text.\n", scores: 0 });
+  const sides = [];
+  for (const width of [900, 560, 430, 300, 900]) {
+    await h.page.setViewport({ width, height: 900 });
+    await sleep(250);
+    for (const row of ["mdm-theme", "mdm-hyphenation"]) {
+      await pressBar(h.page, row);
+      await sleep(120);
+      const m = await h.page.evaluate((row) => {
+        const group = document.querySelector('#app button[data-type="' + row + '"]').parentNode;
+        const sub = group.querySelector(":scope > .mdm-menu").getBoundingClientRect();
+        const panel = group.closest(".mdm-menu").getBoundingClientRect();
+        const pane = document.getElementById("app").getBoundingClientRect();
+        return {
+          shown: sub.width > 0,
+          left: sub.left,
+          right: sub.right,
+          top: sub.top,
+          bottom: sub.bottom,
+          panelLeft: panel.left,
+          panelRight: panel.right,
+          paneLeft: pane.left,
+          paneRight: pane.right,
+          paneBottom: pane.bottom,
+          page: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth,
+        };
+      }, row);
+      assert.ok(m.shown, width + ": " + row + " did not open");
+      assert.ok(m.right <= m.paneRight + 0.5, width + ": " + row + " passes the right edge by " + (m.right - m.paneRight) + "px");
+      assert.ok(m.left >= m.paneLeft - 0.5, width + ": " + row + " passes the left edge by " + (m.paneLeft - m.left) + "px");
+      assert.ok(m.bottom <= m.paneBottom + 0.5, width + ": " + row + " passes the foot of the pane");
+      assert.equal(m.page, 0, width + ": the page scrolls sideways by " + m.page + "px with " + row + " open");
+      sides.push(m.left >= m.panelRight ? "right" : m.right <= m.panelLeft ? "left" : "over");
+      await h.page.keyboard.press("Escape");
+      await sleep(60);
+    }
+  }
+  // The three places it can stand were all seen, and at 900px again it is
+  // back at the right: nothing of a narrower pane is left on it.
+  for (const side of ["right", "left", "over"]) assert.ok(sides.includes(side), "no width put a submenu " + side + ": " + sides);
+  assert.deepEqual(sides.slice(0, 2), ["right", "right"]);
+  assert.deepEqual(sides.slice(-2), ["right", "right"], "back at 900px the submenus are not back at the right: " + sides);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The press that puts away what is open for editing is read where it lands
+// (dismissFromOutside), and a row is two presses: the word, and then the
+// row. So a word over rows that work on the selection leaves the block
+// open, or its row would find the selection gone; and under it a row that
+// does not work on the selection puts the block away as the button it was
+// did, while one that does finds the selection where it is. A word with no
+// such row puts the block away at once.
+test("a word over rows that work on the selection leaves the block open, and each row answers for itself", { skip }, async () => {
+  const text = "Before.\n\n$$\na^2 + b^2\n$$\n\nAfter.\n";
+  const h = await open({ text, scores: 0 });
+  const at = text.indexOf("a^2");
+  const source = () => count(h.page, ".cm-line.mdm-src-line");
+  const inside = async () => {
+    await h.page.keyboard.press("Escape");
+    await setSelection(h.page, [{ anchor: at, head: at + 3 }]);
+    await sleep(250);
+    assert.ok((await source()) > 0, "the equation never opened");
+  };
+  // Every word over a row that works on the selection, or that reads where
+  // the caret is (the switch of the score mode, under Score): pressed, the
+  // source is still there.
+  for (const word of ["menu-edit", "menu-format", "menu-paragraph", "menu-insert", "menu-score"]) {
+    await inside();
+    await h.page.click('#app button[data-type="' + word + '"]');
+    await sleep(200);
+    assert.ok((await source()) > 0, "a press on " + word + " put the equation away");
+  }
+  // And the two that have none: pressed, it is put away.
+  for (const word of ["menu-page", "menu-export"]) {
+    await inside();
+    await h.page.click('#app button[data-type="' + word + '"]');
+    await sleep(200);
+    assert.equal(await source(), 0, "a press on " + word + " left the equation open");
+  }
+  // Under Edit, the search works on the selection and finds it: the field
+  // is filled with what was selected inside the block.
+  await inside();
+  await pressBar(h.page, "find");
+  await sleep(250);
+  assert.equal(await h.page.$eval('#app .mdm-search [name="search"]', (f) => f.value), "a^2", "Find did not find the selection where it was");
+  await h.page.click('#app .mdm-search [name="close"]');
+  // Under the same word, the switch of Ctrl+D is not about the selection:
+  // its row puts the block away, as its button did.
+  await inside();
+  await pressBar(h.page, "mdm-match-substring");
+  await sleep(200);
+  assert.equal(await source(), 0, "a row that does not work on the selection left the equation open");
+  // And under Score, whose word the switch of the mode keeps exempt, a row
+  // about the look of a score.
+  await inside();
+  await pressBar(h.page, "mdm-staff-lines");
+  await sleep(200);
+  assert.equal(await source(), 0, "a row of the Score menu that does not read the caret left the equation open");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1515,13 +1957,21 @@ const SYMBOL_PANEL = [
 // the owner's layout of 2026-09-23, over a grid that stood every dotted note,
 // pair and rest under the note of its value and left the panel a ragged left
 // edge. A cell's name is on the caption line under the rows, since a tooltip
-// is put away while its panel is open.
-test("the music symbol button opens its notes, rests and accidentals, a family to a row and flush left", { skip }, async () => {
+// is put away while its panel is open. The panel hangs from the Music symbol
+// row of the Insert menu, the last of its rows and the one that is the
+// music's, under a rule: it was a button of the bar until the music went
+// under the words (2026-10-13).
+test("the Music symbol row of the Insert menu opens its notes, rests and accidentals, a family to a row and flush left", { skip }, async () => {
   const h = await open({ text: "Text.\n", scores: 0 });
-  await h.page.click('#app button[data-type="insert-symbol"]');
+  await pressBar(h.page, "insert-symbol");
   await sleep(120);
+  assert.equal(
+    await h.page.$eval("#app .mdm-menu--glyphs", (panel) => getComputedStyle(panel).display !== "none" && panel.parentNode.querySelector(":scope > button").getAttribute("data-type")),
+    "insert-symbol",
+    "the symbols do not hang from their row"
+  );
   const families = await h.page.evaluate(() => {
-    const panel = document.querySelector("#app .mdm-toolbar__item--open .mdm-menu");
+    const panel = document.querySelector("#app .mdm-menu--glyphs");
     const out = [];
     for (const el of panel.querySelectorAll(".mdm-menu__head, .mdm-menu__item")) {
       if (el.classList.contains("mdm-menu__head")) {
@@ -1560,17 +2010,25 @@ test("the music symbol button opens its notes, rests and accidentals, a family t
   assert.equal(top("Accidentals"), top("Beamed notes"), "the accidentals do not share the beamed pair's row");
   const pair = row.get("Beamed notes");
   assert.ok(left("Accidentals") > pair[pair.length - 1][5], "the accidentals do not stand beside the beamed pair");
-  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "\u00a0");
+  const caption = () => h.page.$eval("#app .mdm-menu--glyphs .mdm-menu__caption", (c) => c.textContent);
+  assert.equal(await caption(), "\u00a0");
   await h.page.hover('#app .mdm-menu [data-type="symbol-dotted-quarter"]');
   await sleep(60);
-  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "Dotted quarter note");
+  assert.equal(await caption(), "Dotted quarter note");
+  // A name is a cell's: the pointer on the row the panel hangs from, or on
+  // another row of the menu, names nothing.
+  await h.page.hover('#app .mdm-toolbar button[data-type="insert-symbol"]');
+  await sleep(60);
+  assert.equal(await caption(), "\u00a0", "the caption names something that is not a symbol");
+  await h.page.hover('#app .mdm-menu [data-type="symbol-dotted-quarter"]');
+  await sleep(60);
   // Blank again when the panel opens anew: a click on a cell hides the panel
   // under the pointer, with the name it was showing still on it.
   await h.page.click('#app .mdm-menu [data-type="symbol-dotted-quarter"]');
   await sleep(120);
-  await h.page.click('#app button[data-type="insert-symbol"]');
+  await pressBar(h.page, "insert-symbol");
   await sleep(120);
-  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "\u00a0");
+  assert.equal(await caption(), "\u00a0");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1578,13 +2036,14 @@ test("the music symbol button opens its notes, rests and accidentals, a family t
 async function symbolOn(text, pos, name) {
   const h = await open({ text, scores: 0 });
   await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
-  await h.page.click('#app button[data-type="insert-symbol"]');
-  await sleep(120);
-  await h.page.click('#app .mdm-menu [data-type="symbol-' + name + '"]');
+  // The word, the row, and the cell: three presses, and the selection is
+  // still where it was for the third (every one of them is exempt from the
+  // press that puts a block away).
+  await pressBar(h.page, "symbol-" + name);
   await sleep(120);
   const out = await docText(h.page);
   const ranges = await selectionRanges(h.page);
-  const open_ = await h.page.$$eval("#app .mdm-toolbar__item--open", (els) => els.length);
+  const open_ = await h.page.$$eval("#app .mdm-toolbar__item--open, #app .mdm-menu__group--open", (els) => els.length);
   const focused = await h.page.evaluate(() => !!document.activeElement.closest(".cm-content"));
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -1606,6 +2065,10 @@ test("a music symbol goes in at every caret and over a selection, with the caret
   out = await symbolOn("Bb and Eb.\n", [{ anchor: 1, head: 2 }, { anchor: 8, head: 9 }], "flat");
   assert.equal(out.text, "B\u266D and E\u266D.\n");
   assert.deepEqual(out.ranges, [[2, 2], [9, 9]]);
+  // Inside a block open for editing, which the three presses leave open: the
+  // symbol goes into the equation's source, and not under it.
+  out = await symbolOn("Before.\n\n$$\na^2\n$$\n\nAfter.\n", 15, "sharp");
+  assert.equal(out.text, "Before.\n\n$$\na^2\u266F\n$$\n\nAfter.\n");
 });
 
 // From the keyboard: a cell with the focus names itself on the caption,
@@ -1616,11 +2079,12 @@ test("a music symbol goes in at every caret and over a selection, with the caret
 test("a music symbol can be chosen from the keyboard, and the panel opens blank again", { skip }, async () => {
   const h = await open({ text: "In B .\n", scores: 0 });
   await setSelection(h.page, [{ anchor: 4 }]);
-  await h.page.click('#app button[data-type="insert-symbol"]');
+  await pressBar(h.page, "insert-symbol");
   await sleep(120);
+  const caption = () => h.page.$eval("#app .mdm-menu--glyphs .mdm-menu__caption", (c) => c.textContent);
   await h.page.focus('#app .mdm-menu [data-type="symbol-flat"]');
   await sleep(60);
-  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "Flat");
+  assert.equal(await caption(), "Flat");
   await h.page.keyboard.press("Enter");
   await sleep(120);
   assert.equal(await docText(h.page), "In B\u266D .\n");
@@ -1629,24 +2093,34 @@ test("a music symbol can be chosen from the keyboard, and the panel opens blank 
     true,
     "the keyboard was not handed back to the text"
   );
-  await h.page.click('#app button[data-type="insert-symbol"]');
+  await pressBar(h.page, "insert-symbol");
   await sleep(120);
-  assert.equal(await h.page.$eval("#app .mdm-menu__caption", (c) => c.textContent), "\u00a0");
+  assert.equal(await caption(), "\u00a0");
+  // And the same after Escape, which shuts the menus with a cell still
+  // holding the focus.
+  await h.page.focus('#app .mdm-menu [data-type="symbol-sharp"]');
+  await sleep(60);
+  assert.equal(await caption(), "Sharp");
+  await h.page.keyboard.press("Escape");
+  await sleep(120);
+  await pressBar(h.page, "insert-symbol");
+  await sleep(120);
+  assert.equal(await caption(), "\u00a0", "the name the focus left was still there after Escape");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
 
-// A panel hangs from its button's left edge and #app clips what passes its
-// right edge, so a panel wider than the room left there opens moved in, and
-// back under its button when there is room again. The symbol panel is 314px
-// wide and its button stands near the end of the first row: at 900px it
-// would have passed the edge by 23px and at 800 by 123 (measured).
-test("a panel that would pass the pane's right edge opens moved in, and under its button when there is room", { skip }, async () => {
+// A panel hangs from the left edge of its word and #app clips what passes
+// its right edge, so a menu wider than the room left there opens moved in,
+// and back under its word when there is room again. The last word is the one
+// it happens to: Export, whose menu is wider than the word.
+test("a menu that would pass the pane's right edge opens moved in, and under its word when there is room", { skip }, async () => {
   const h = await open({ text: "Text.\n", scores: 0 });
-  for (const width of [900, 800, 620, 900]) {
+  const moved = [];
+  for (const width of [900, 520, 900]) {
     await h.page.setViewport({ width, height: 900 });
     await sleep(250);
-    await h.page.click('#app button[data-type="insert-symbol"]');
+    await h.page.click('#app button[data-type="menu-export"]');
     await sleep(120);
     const m = await h.page.evaluate(() => {
       const item = document.querySelector("#app .mdm-toolbar__item--open");
@@ -1655,16 +2129,19 @@ test("a panel that would pass the pane's right edge opens moved in, and under it
       const pane = document.getElementById("app").getBoundingClientRect();
       return { left: panel.left, right: panel.right, width: panel.width, button: button.left, paneLeft: pane.left, paneRight: pane.right };
     });
-    assert.ok(m.right <= m.paneRight, width + ": the panel passes the right edge by " + (m.right - m.paneRight) + "px");
-    assert.ok(m.left >= m.paneLeft, width + ": the panel passes the left edge");
+    assert.ok(m.right <= m.paneRight, width + ": the menu passes the right edge by " + (m.right - m.paneRight) + "px");
+    assert.ok(m.left >= m.paneLeft, width + ": the menu passes the left edge");
     if (m.button + m.width <= m.paneRight - 4) {
-      assert.equal(Math.round(m.left), Math.round(m.button), width + ": the panel does not stand under its button");
+      assert.equal(Math.round(m.left), Math.round(m.button), width + ": the menu does not stand under its word");
+      moved.push(false);
     } else {
-      assert.ok(m.left < m.button, width + ": the panel was not moved in");
+      assert.ok(m.left < m.button, width + ": the menu was not moved in");
+      moved.push(true);
     }
-    await h.page.click('#app button[data-type="insert-symbol"]');
+    await h.page.click('#app button[data-type="menu-export"]');
     await sleep(120);
   }
+  assert.deepEqual(moved, [false, true, false], "the menu was never short of room, or never had it back, so this reads nothing");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1855,14 +2332,13 @@ test("on an empty line the line buttons start a line of their kind, parted from 
   assert.equal(out.text, "```\n\n```\n");
 });
 
-// The heading button opens a menu of Paragraph and the six levels; a row sets
+// The Paragraph menu opens on Paragraph and the six levels; a row sets
 // the level of every selected line, and the level the caret's line has
 // already, picked again, takes the heading off. Level 0 is the Paragraph row.
 async function headingOn(text, pos, level) {
   const h = await open({ text, scores: 0 });
   await setSelection(h.page, Array.isArray(pos) ? pos.map((p) => (typeof p === "number" ? { anchor: p } : p)) : pos);
-  await h.page.click('#app button[data-type="headings"]');
-  await h.page.click('#app .mdm-menu__item[data-type="' + (level ? "heading-" + level : "paragraph") + '"]');
+  await pressBar(h.page, level ? "heading-" + level : "paragraph");
   await sleep(120);
   const out = await docText(h.page);
   const ranges = await selectionRanges(h.page);
@@ -1874,19 +2350,21 @@ async function headingOn(text, pos, level) {
   return { text: out, ranges, open: open_, focused };
 }
 
+// The rows of the levels: the first seven of the Paragraph menu, which were
+// the heading button's own menu while the bar was buttons.
 const menuRows = (page) =>
-  page.$$eval('#app button[data-type="headings"] + .mdm-menu .mdm-menu__item', (els) =>
-    els.map((el) => [el.getAttribute("data-type"), el.textContent])
+  page.$$eval('#app button[data-type="menu-paragraph"] + .mdm-menu > .mdm-menu__item', (els) =>
+    els.slice(0, 7).map((el) => [el.getAttribute("data-type"), el.textContent])
   );
 
 // The Paragraph row went when the ticked level picked again started taking
 // the heading off, and it is back with the keys: at the keyboard there is no
 // tick to read, so a hand needs one key that says paragraph whatever the line
 // was. Every row names its key, written as VS Code writes it per platform.
-test("the heading menu lists Paragraph and the six levels, the caret's line ticked, each naming its key", { skip }, async () => {
+test("the Paragraph menu opens on Paragraph and the six levels, the caret's line ticked, each naming its key", { skip }, async () => {
   const h = await open({ text: "## Title\n\nBody.\n", scores: 0 });
   await setSelection(h.page, 4);
-  await h.page.click('#app button[data-type="headings"]');
+  await h.page.click('#app button[data-type="menu-paragraph"]');
   assert.deepEqual(await menuRows(h.page), [
     ["paragraph", "ParagraphCtrl+0"],
     ["heading-1", "Heading 1Ctrl+1"],
@@ -1897,9 +2375,9 @@ test("the heading menu lists Paragraph and the six levels, the caret's line tick
     ["heading-6", "Heading 6Ctrl+6"],
   ]);
   // Read again at each opening: on a paragraph the tick is on Paragraph.
-  await h.page.click('#app button[data-type="headings"]');
+  await h.page.click('#app button[data-type="menu-paragraph"]');
   await setSelection(h.page, 12);
-  await h.page.click('#app button[data-type="headings"]');
+  await h.page.click('#app button[data-type="menu-paragraph"]');
   assert.deepEqual(
     (await menuRows(h.page)).filter((r) => r[1].includes("✓")).map((r) => r[0]),
     ["paragraph"]
@@ -1912,7 +2390,7 @@ test("the heading menu lists Paragraph and the six levels, the caret's line tick
   // under Option on a Mac).
   const mac = await open({ text: "Body.\n", scores: 0, platform: "MacIntel" });
   await setSelection(mac.page, 2);
-  await mac.page.click('#app button[data-type="headings"]');
+  await mac.page.click('#app button[data-type="menu-paragraph"]');
   assert.deepEqual((await menuRows(mac.page))[0], ["paragraph", "Paragraph✓⌥⌘0"]);
   assert.deepEqual(mac.errors, []);
   await mac.close();
@@ -2072,7 +2550,7 @@ test("the code block carries the marks of the quote or the item it opens in, and
   ]) {
     const h = await open({ text, scores: 0 });
     await setSelection(h.page, at);
-    await h.page.click('#app button[data-type="code-block"]');
+    await pressBar(h.page, "code-block");
     await sleep(120);
     await h.page.keyboard.type("abc");
     await h.page.keyboard.press("Enter");
@@ -2095,17 +2573,16 @@ test("Enter in a fence inside a task keeps to the item's column, not past its bo
 // C, with the second modifier every block key has: the code block was on
 // Notion's Ctrl+Shift+8 for a day and moved for the symmetry, so that every
 // digit is a heading level and every block without one is a letter. Not E,
-// the letter of its inline twin, which is Show Explorer in VS Code. The tip
+// the letter of its inline twin, which is Show Explorer in VS Code. The row
 // names the key as VS Code writes it on each platform.
-test("Ctrl+Shift+C does what the code block button does, the tip names it, and abc typed after the backticks makes a score", { skip }, async () => {
+test("Ctrl+Shift+C does what the Code block row does, the row names it, and abc typed after the backticks makes a score", { skip }, async () => {
   const text = "Some prose.\n\n";
-  const tipOf = (page) =>
-    page.evaluate(() => {
-      const b = document.querySelector('#app button[data-type="code-block"]');
-      return [b.getAttribute("aria-label"), b.getAttribute("aria-keyshortcuts")];
-    });
+  const keyOf = async (page) => {
+    const row = await barState(page, "code-block");
+    return [row.under, row.name, row.key, row.keys];
+  };
   const h = await open({ text, scores: 0 });
-  assert.deepEqual(await tipOf(h.page), ["Code block (Ctrl+Shift+C)", "Control+Shift+C"]);
+  assert.deepEqual(await keyOf(h.page), ["menu-paragraph", "Code block", "Ctrl+Shift+C", "Control+Shift+C"]);
   await setSelection(h.page, 13);
   await blockChord(h.page, "c");
   assert.equal(await docText(h.page), "Some prose.\n\n```\n```");
@@ -2122,7 +2599,7 @@ test("Ctrl+Shift+C does what the code block button does, the tip names it, and a
   await h.close();
 
   const mac = await open({ text, scores: 0, platform: "MacIntel" });
-  assert.deepEqual(await tipOf(mac.page), ["Code block (⌥⌘C)", "Meta+Alt+C"]);
+  assert.deepEqual(await keyOf(mac.page), ["menu-paragraph", "Code block", "⌥⌘C", "Meta+Alt+C"]);
   await setSelection(mac.page, 13);
   await chord(mac.page, ["Meta", "Alt"], "c");
   assert.equal(await docText(mac.page), "Some prose.\n\n```\n```");
@@ -2135,21 +2612,27 @@ test("Ctrl+Shift+C does what the code block button does, the tip names it, and a
 // as long as a button was held down and came back when it was let go: the
 // owner saw the `##` of a heading go and return around a press on the
 // heading menu (2026-09-19), and it was every button of the bar. Measured
-// with the button held, which is where it shows; the pointer leaves the
-// button before it is let go, so no press is made and the text is the same
-// one throughout.
-test("a button held down leaves the caret's line showing its source, and the focus in the text", { skip }, async () => {
+// with the control held, which is where it shows; the pointer leaves it
+// before it is let go, so no press is made and the text is the same one
+// throughout. A word, a button, and a row under a word that has been opened:
+// the three things the bar is made of now. And a legend, which is no button
+// and is pressed all the same by whoever takes it for a row. Not the score
+// panel, chrome as the bar is: it is up only under the score mode, where the
+// text holds no caret to lose, and what a press on it has to leave alone
+// there is the mode's keyboard (SM112 in webview-score-mode.test.js).
+test("a word, a button or a row of the bar held down leaves the caret's line showing its source, and the focus in the text", { skip }, async () => {
   const h = await open({ text: "## From equations to score\n\nBody.\n", scores: 0 });
   await setSelection(h.page, 6);
   await sleep(150);
   const state = () =>
     h.page.evaluate(() => [document.querySelector("#app .cm-line").textContent, window.__mdm.view.hasFocus]);
   assert.deepEqual(await state(), ["## From equations to score", true]);
-  for (const name of ["headings", "bold", "unordered-list", "mdm-theme"]) {
-    const at = await h.page.evaluate((n) => {
-      const b = document.querySelector('#app button[data-type="' + n + '"]').getBoundingClientRect();
-      return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-    }, name);
+  const hold = async (name) => {
+    const at = await h.page.evaluate((selector) => {
+      const b = document.querySelector(selector).getBoundingClientRect();
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2, shown: b.width > 0 };
+    }, '#app .mdm-toolbar [data-type="' + name + '"]');
+    assert.ok(at.shown, name + " is not on screen to be held");
     await h.page.mouse.move(at.x, at.y);
     await h.page.mouse.down();
     await sleep(60);
@@ -2157,7 +2640,27 @@ test("a button held down leaves the caret's line showing its source, and the foc
     await h.page.mouse.move(at.x, at.y + 300);
     await h.page.mouse.up();
     await sleep(80);
+  };
+  for (const name of ["menu-format", "menu-page", "menu-score", "outline"]) await hold(name);
+  for (const [word, row] of [
+    ["menu-format", "bold"],
+    ["menu-paragraph", "unordered-list"],
+    ["menu-page", "mdm-theme"],
+    ["menu-score", "mdm-staff-lines"],
+  ]) {
+    await h.page.click('#app button[data-type="' + word + '"]');
+    await sleep(80);
+    assert.deepEqual(await state(), ["## From equations to score", true], word + " opened");
+    await hold(row);
+    await h.page.keyboard.press("Escape");
+    await sleep(60);
   }
+  // A legend, under the row of the Score menu that leads to it.
+  await pressBar(h.page, "score-notes");
+  await sleep(80);
+  await hold("score-keys-sides");
+  await h.page.keyboard.press("Escape");
+  await sleep(60);
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -2311,29 +2814,30 @@ test("Ctrl+<digit> sets the heading of that level, the level a line has takes it
   await mac.close();
 });
 
-test("Ctrl+Shift+T does what its button does, and the lists and the quote name no key", { skip }, async () => {
-  const tips = (page) =>
-    page.evaluate(() =>
-      ["unordered-list", "ordered-list", "task-list", "quote"].map((name) => {
-        const b = document.querySelector('#app button[data-type="' + name + '"]');
-        return [b.getAttribute("aria-label"), b.getAttribute("aria-keyshortcuts")];
-      })
-    );
+test("Ctrl+Shift+T does what its row does, and the lists and the quote name no key", { skip }, async () => {
+  const keys = async (page) => {
+    const out = [];
+    for (const name of ["unordered-list", "ordered-list", "task-list", "quote"]) {
+      const row = await barState(page, name);
+      out.push([row.name, row.key, row.keys]);
+    }
+    return out;
+  };
   const h = await open({ text: "Violin\n", scores: 0 });
-  // U, O and Q were theirs for a day and went on 2026-09-19: a tip that
-  // names a key the editor no longer answers is a tip that lies, so the
+  // U, O and Q were theirs for a day and went on 2026-09-19: a row that
+  // names a key the editor no longer answers is a row that lies, so the
   // three name none, and carry no aria-keyshortcuts for a screen reader
   // either.
-  assert.deepEqual(await tips(h.page), [
-    ["Unordered list", null],
-    ["Ordered list", null],
-    ["Task list (Ctrl+Shift+T)", "Control+Shift+T"],
-    ["Quote", null],
+  assert.deepEqual(await keys(h.page), [
+    ["Unordered list", null, null],
+    ["Ordered list", null, null],
+    ["Task list", "Ctrl+Shift+T", "Control+Shift+T"],
+    ["Quote", null, null],
   ]);
   assert.deepEqual(h.errors, []);
   await h.close();
 
-  // Every button writes its own mark, key or no key.
+  // Every row writes its own mark, key or no key.
   const pairs = [
     ["unordered-list", "- Violin\n"],
     ["ordered-list", "1. Violin\n"],
@@ -2354,7 +2858,7 @@ test("Ctrl+Shift+T does what its button does, and the lists and the quote name n
   // On a Mac the row is Cmd+Option, where Cmd+Shift+3, 4 and 5 are the
   // system's screenshots.
   const mac = await open({ text: "Violin\n", scores: 0, platform: "MacIntel" });
-  assert.deepEqual((await tips(mac.page))[2], ["Task list (\u2325\u2318T)", "Meta+Alt+T"]);
+  assert.deepEqual((await keys(mac.page))[2], ["Task list", "\u2325\u2318T", "Meta+Alt+T"]);
   await setSelection(mac.page, 3);
   await chord(mac.page, ["Meta", "Alt"], "t");
   assert.equal(await docText(mac.page), "- [ ] Violin\n");
@@ -3226,7 +3730,7 @@ test("the search is a row under the toolbar that counts its matches and keeps it
 });
 
 // The row is under the toolbar's drop-downs and over the text. CodeMirror's
-// base theme stacks its panels at 300, and the theme menu, which hangs from
+// base theme stacks its panels at 300, and the theme menu, which hung from
 // the toolbar (z-index 2), opened under the search row (seen 2026-09-19);
 // the row is at 1 now, still over the scroller, which is a layer of its own
 // at 0. Read with elementFromPoint where the two overlap, and over the text
@@ -3237,7 +3741,7 @@ test("a drop-down of the toolbar opens over the search row, and the text scrolls
   await setSelection(h.page, 3);
   await chord(h.page, ["Control"], "f");
   await sleep(200);
-  await h.page.click('#app button[data-type="mdm-theme"]');
+  await h.page.click('#app button[data-type="menu-edit"]');
   await sleep(200);
   const hit = await h.page.evaluate(() => {
     const row = document.querySelector("#app .cm-panels-top").getBoundingClientRect();
@@ -3248,7 +3752,7 @@ test("a drop-down of the toolbar opens over the search row, and the text scrolls
     return { overlap: menu.top < row.bottom && menu.bottom > row.top, inMenu: !!(el && el.closest(".mdm-menu")), el: el && el.className };
   });
   assert.ok(hit.overlap, "the menu does not reach down over the search row, so this reads nothing");
-  assert.ok(hit.inMenu, "the search row is drawn over the theme menu: " + hit.el);
+  assert.ok(hit.inMenu, "the search row is drawn over the menu: " + hit.el);
   // A click on the text puts the menu away and leaves the search open.
   await h.page.click("#app .cm-content");
   await h.page.evaluate(() => {
@@ -3772,7 +4276,7 @@ test("Ctrl+Z and Ctrl+Y answered by the workbench as well as here leave the text
   const before = "Before.\n\nAfter.\n";
   const cases = [
     {
-      act: (page) => page.click('#app button[data-type="code-block"]'),
+      act: (page) => pressBar(page, "code-block"),
       after: "Before.\n\n```\n```\n\nAfter.\n",
       // What the host wrote: "```\n```\n\n" at the head of the third line.
       undo: [{ from: { line: 2, ch: 0 }, to: { line: 5, ch: 0 }, text: "" }],
@@ -3843,21 +4347,23 @@ test("Ctrl+S sends the held edit ahead of the save", { skip }, async () => {
   await h.close();
 });
 
-test("a header typed into a file that had none stays on screen, lights the button and offers to hide it", { skip }, async () => {
-  const label = (h) =>
-    h.page.evaluate(() => {
-      const b = document.querySelector('#app button[data-type="mdm-front-matter"]');
-      return [b.getAttribute("aria-label"), b.classList.contains("mdm-btn--on"), b.classList.contains("mdm-btn--off")];
-    });
+test("a header typed into a file that had none stays on screen, ticks its row, and a press hides it", { skip }, async () => {
+  // The row is named for what it shows, ticked while its own press keeps the
+  // header in view and greyed in a file that has none.
+  const label = async (h) => {
+    const row = await barState(h.page, "mdm-front-matter");
+    return [row.under, row.name, row.on, row.off];
+  };
   // The host's answer to a header typed here: the same text, carrying it.
-  // One that draws nothing stays as typed (`pinned`), and the button is lit
-  // and offers to hide it. One that draws a title is open as a click on that
-  // title would have left it, to go when the carets leave it: the button did
-  // not open it, so it stays dark, and a press keeps the source
-  // (webview-title.test.js has the rest of that).
+  // One that draws nothing stays as typed (`pinned`), and the row is ticked
+  // and a press hides it. One that draws a title is open as a click on that
+  // title would have left it, to go when the carets leave it: the row did
+  // not open it, so it is not ticked, and a press keeps the source
+  // (webview-title.test.js has the rest of that). The row is reached through
+  // the word Page, whose press puts no such source away on the way.
   const cases = [
-    ["lang: en", true, ["Hide YAML header", true, false], { type: "header", open: false }],
-    ["title: t", false, ["Show YAML header", false, false], { type: "header", open: true }],
+    ["lang: en", true, ["menu-page", "YAML header", true, false], { type: "header", open: false }],
+    ["title: t", false, ["menu-page", "YAML header", false, false], { type: "header", open: true }],
   ];
   for (const [line, pinned, lamp, asked] of cases) {
     const h = await open({
@@ -3866,7 +4372,7 @@ test("a header typed into a file that had none stays on screen, lights the butto
       withFrontMatter: false,
       frontMatter: "",
     });
-    assert.deepEqual(await label(h), ["No YAML header in this file", false, true]);
+    assert.deepEqual(await label(h), ["menu-page", "YAML header", false, true]);
     // The header as typed, the caret still in it: the host's answer brings
     // no text the editor does not hold already.
     await h.page.evaluate((key) => {
@@ -3883,7 +4389,7 @@ test("a header typed into a file that had none stays on screen, lights the butto
     );
     await sleep(100);
     assert.deepEqual(await label(h), lamp, line);
-    await h.page.click('#app button[data-type="mdm-front-matter"]');
+    await pressBar(h.page, "mdm-front-matter");
     const posts = await h.page.evaluate(() => window.__posts.filter((m) => m.type === "header"));
     assert.deepEqual(posts, [asked], line);
     assert.deepEqual(await setSettingPosts(h.page), [], "the press asked for a setting");
@@ -3931,40 +4437,41 @@ test("Ctrl+B wraps every range and unwraps it again", { skip }, async () => {
   await h.close();
 });
 
-// The four buttons that share a Mod- binding name it in their tip, and the
-// chord a tip names is the one that does what the button does: each is
-// pressed on a selected word and the file compared with a click of the button
-// on the same selection. On a Mac the tip says the Cmd CodeMirror binds `Mod`
-// to there, read under a navigator.platform that says Mac.
-test("the bold, italic, code and link buttons name the shortcut that does what they do", { skip }, async () => {
+// The four rows of the Format menu that share a Mod- binding name it at
+// their far edge, and the chord a row names is the one that does what the
+// row does: each is pressed on a selected word and the file compared with a
+// press of the row on the same selection. On a Mac the row says the Cmd
+// CodeMirror binds `Mod` to there, read under a navigator.platform that says
+// Mac.
+test("the Bold, Italic, Inline code and Link rows name the shortcut that does what they do", { skip }, async () => {
   const text = "one word here\n";
   const h = await open({ text, scores: 0 });
-  const buttons = ["bold", "italic", "inline-code", "link"];
-  const tips = await h.page.evaluate((names) =>
-    names.map((n) => {
-      const b = document.querySelector('#app button[data-type="' + n + '"]');
-      return [b.getAttribute("aria-label"), b.getAttribute("aria-keyshortcuts")];
-    }), buttons);
-  assert.deepEqual(tips, [
-    ["Bold (Ctrl+B)", "Control+B"],
-    ["Italic (Ctrl+I)", "Control+I"],
-    ["Inline code (Ctrl+E)", "Control+E"],
-    ["Link (Ctrl+K)", "Control+K"],
+  const rows = ["bold", "italic", "inline-code", "link"];
+  const named = [];
+  for (const name of rows) {
+    const row = await barState(h.page, name);
+    named.push([row.under, row.name, row.key, row.keys]);
+  }
+  assert.deepEqual(named, [
+    ["menu-format", "Bold", "Ctrl+B", "Control+B"],
+    ["menu-format", "Italic", "Ctrl+I", "Control+I"],
+    ["menu-format", "Inline code", "Ctrl+E", "Control+E"],
+    ["menu-format", "Link", "Ctrl+K", "Control+K"],
   ]);
   const word = [{ anchor: 4, head: 8 }];
-  for (let i = 0; i < buttons.length; i++) {
-    const key = /\(Ctrl\+(.)\)$/.exec(tips[i][0])[1].toLowerCase();
+  for (let i = 0; i < rows.length; i++) {
+    const key = /^Ctrl\+(.)$/.exec(named[i][2])[1].toLowerCase();
     await setSelection(h.page, word);
-    await h.page.click('#app button[data-type="' + buttons[i] + '"]');
+    await pressBar(h.page, rows[i]);
     const clicked = await docText(h.page);
-    assert.notEqual(clicked, text, buttons[i] + " changed nothing, so the comparison reads nothing");
+    assert.notEqual(clicked, text, rows[i] + " changed nothing, so the comparison reads nothing");
     await h.page.evaluate((t) => {
       const view = window.__mdm.view;
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: t } });
     }, text);
     await setSelection(h.page, word);
     await chord(h.page, ["Control"], key);
-    assert.equal(await docText(h.page), clicked, "Ctrl+" + key.toUpperCase() + " does not do what " + buttons[i] + " does");
+    assert.equal(await docText(h.page), clicked, "Ctrl+" + key.toUpperCase() + " does not do what " + rows[i] + " does");
     await h.page.evaluate((t) => {
       const view = window.__mdm.view;
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: t } });
@@ -3974,16 +4481,124 @@ test("the bold, italic, code and link buttons name the shortcut that does what t
   await h.close();
 
   const mac = await open({ text, scores: 0, platform: "MacIntel" });
-  const macTips = await mac.page.evaluate(() => {
-    const b = document.querySelector('#app button[data-type="bold"]');
-    return [navigator.platform, b.getAttribute("aria-label"), b.getAttribute("aria-keyshortcuts")];
-  });
-  assert.deepEqual(macTips, ["MacIntel", "Bold (\u2318B)", "Meta+B"]);
+  const bold = await barState(mac.page, "bold");
+  assert.deepEqual(
+    [await mac.page.evaluate(() => navigator.platform), bold.name, bold.key, bold.keys],
+    ["MacIntel", "Bold", "\u2318B", "Meta+B"]
+  );
   // And the Cmd it names is what CodeMirror binds there.
   await setSelection(mac.page, word);
   await chord(mac.page, ["Meta"], "b");
   assert.equal(await docText(mac.page), "one **word** here\n");
   await mac.close();
+});
+
+// Ctrl+Shift+<letter> as a keyboard sends it, the shifted character under
+// the key's own code, through CDP for the reason blockChord gives.
+async function ctrlShift(page, letter) {
+  const upper = letter.toUpperCase();
+  const cdp = await page.createCDPSession();
+  for (const type of ["rawKeyDown", "keyUp"]) {
+    await cdp.send("Input.dispatchKeyEvent", {
+      type: type,
+      key: upper,
+      code: "Key" + upper,
+      windowsVirtualKeyCode: upper.charCodeAt(0),
+      nativeVirtualKeyCode: upper.charCodeAt(0),
+      modifiers: 2 | 8,
+    });
+  }
+  await cdp.detach();
+}
+
+// The rows that came with the menus name keys that had no button: the keys
+// CodeMirror binds by itself and the few the editor binds beside them. A row
+// is there for its key to be found, so the key it names has to be the one
+// that does what the row does, and that is held by doing both: the key is
+// pressed on a fixture in one editor and the row on the same fixture in
+// another, and the two must leave the same text, the same selection and the
+// same search row, none of which may be what they started from.
+const KEYED = [
+  {
+    row: "undo",
+    text: "one\n",
+    at: 3,
+    before: (page) => page.keyboard.type("X"),
+    key: (page) => chord(page, ["Control"], "z"),
+  },
+  {
+    row: "redo",
+    text: "one\n",
+    at: 3,
+    before: async (page) => {
+      await page.keyboard.type("X");
+      await chord(page, ["Control"], "z");
+    },
+    key: (page) => chord(page, ["Control"], "y"),
+  },
+  { row: "find", text: "one word here\n", at: [{ anchor: 4, head: 8 }], key: (page) => chord(page, ["Control"], "f") },
+  { row: "replace", text: "one word here\n", at: [{ anchor: 4, head: 8 }], key: (page) => chord(page, ["Control"], "h") },
+  { row: "select-next-match", text: "two and two and two\n", at: 1, times: 2, key: (page) => chord(page, ["Control"], "d") },
+  { row: "select-all-matches", text: "two and two and two\n", at: [{ anchor: 0, head: 3 }], key: (page) => ctrlShift(page, "l") },
+  { row: "add-caret-above", text: "first line\nsecond line\nthird line\n", at: 14, key: (page) => chord(page, ["Control", "Alt"], "ArrowUp") },
+  { row: "add-caret-below", text: "first line\nsecond line\nthird line\n", at: 14, key: (page) => chord(page, ["Control", "Alt"], "ArrowDown") },
+  { row: "move-line-up", text: "first line\nsecond line\nthird line\n", at: 14, key: (page) => chord(page, ["Alt"], "ArrowUp") },
+  { row: "move-line-down", text: "first line\nsecond line\nthird line\n", at: 14, key: (page) => chord(page, ["Alt"], "ArrowDown") },
+  { row: "delete-line", text: "first line\nsecond line\nthird line\n", at: 14, key: (page) => ctrlShift(page, "k") },
+  { row: "line-break", text: "A paragraph of words.\n", at: 14, key: (page) => chord(page, ["Shift"], "Enter") },
+  { row: "leave-block", text: CODE, at: CODE.indexOf("x = 1") + 2, key: (page) => chord(page, ["Control"], "Enter") },
+];
+
+async function keyedState(one, how) {
+  const h = await open({ text: one.text, scores: 0 });
+  await setSelection(h.page, one.at);
+  if (one.before) await one.before(h.page);
+  await sleep(100);
+  const read = () =>
+    h.page.evaluate(() => {
+      const v = window.__mdm.view;
+      const panel = document.querySelector("#app .mdm-search");
+      return {
+        text: v.state.doc.toString(),
+        ranges: v.state.selection.ranges.map((r) => [r.from, r.to]),
+        search: panel ? [panel.querySelector('[name="search"]').value, document.activeElement && document.activeElement.getAttribute("name")] : null,
+      };
+    });
+  const start = await read();
+  for (let i = 0; i < (one.times || 1); i++) {
+    if (how === "key") await one.key(h.page);
+    else await pressBar(h.page, one.row);
+    await sleep(150);
+  }
+  const end = await read();
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  return { start, end };
+}
+
+test("every row of the Edit and Paragraph menus that names a key does what the key does", { skip }, async () => {
+  for (const one of KEYED) {
+    const byKey = await keyedState(one, "key");
+    assert.notDeepEqual(byKey.end, byKey.start, "the key of " + one.row + " did nothing, so the comparison reads nothing");
+    const byRow = await keyedState(one, "row");
+    assert.deepEqual(byRow.start, byKey.start, one.row + ": the two editors did not start alike");
+    assert.deepEqual(byRow.end, byKey.end, "the row " + one.row + " does not do what its key does");
+  }
+  // And the two that can have nothing to do say so with their menu shut,
+  // as the buttons they were did on the bar: greyed on a fresh document,
+  // Undo live once something is typed, and Redo once it is taken back.
+  const h = await open({ text: "one\n", scores: 0 });
+  await setSelection(h.page, 3);
+  const greyed = async () => [(await barState(h.page, "undo")).off, (await barState(h.page, "redo")).off];
+  assert.deepEqual(await greyed(), [true, true], "on a fresh document");
+  await h.page.keyboard.type("X");
+  await sleep(100);
+  assert.deepEqual(await greyed(), [false, true], "with a letter typed");
+  await chord(h.page, ["Control"], "z");
+  await sleep(100);
+  assert.deepEqual(await greyed(), [true, false], "with the letter taken back");
+  assert.deepEqual(h.errors, []);
+  await h.close();
 });
 
 test("Ctrl+Enter leaves a fenced block into a fresh paragraph below it", { skip }, async () => {
@@ -4524,7 +5139,7 @@ test("a click outside the text puts away what is open for editing", { skip }, as
   // answered by whatever it was for.
   const elsewhere = [
     ["the outline panel", "#app .mdm-outline__title"],
-    ["a toolbar button", '#app button[data-type="mdm-theme"]'],
+    ["a word of the bar whose rows are not about the selection", '#app button[data-type="menu-page"]'],
     ["the toolbar itself", "#app .mdm-toolbar"],
   ];
   await pressOutline(h.page, true);
@@ -5133,12 +5748,11 @@ test("a click off the text puts the document in visual mode", { skip }, async ()
     const c = window.__mdm.view.contentDOM.getBoundingClientRect();
     return { x: c.right + 60, y: c.top + 20 };
   });
-  // The bare strip of the bar, past the last button.
+  // The bare strip of the bar, past the last of its words.
   const bare = await h.page.evaluate(() => {
     const bar = document.querySelector("#app .mdm-toolbar").getBoundingClientRect();
-    const items = document.querySelectorAll("#app .mdm-toolbar__item");
-    const last = items[items.length - 1].getBoundingClientRect();
-    return { x: (last.right + bar.right) / 2, y: bar.top + bar.height / 2 };
+    const word = document.querySelector('#app button[data-type="menu-export"]').getBoundingClientRect();
+    return { x: (word.right + bar.right) / 2, y: bar.top + bar.height / 2 };
   });
 
   // A caret in the heading shows its `##`, the case this was reported from.
@@ -5382,10 +5996,10 @@ test("the outline panel is as wide as the grip is dragged", { skip }, async () =
 });
 
 // Ctrl+D matches whole words by default, like VS Code: "score" walks the
-// standalone occurrences and steps over "scores". The toolbar toggle turns on
-// substring matching, where "score" also lands inside "scores". Regression
-// guard for the toggle the user asked for.
-test("the Ctrl+D toggle switches whole-word matching to substring", { skip }, async () => {
+// standalone occurrences and steps over "scores". The switch in the Edit menu
+// turns on substring matching, where "score" also lands inside "scores".
+// Regression guard for the toggle the user asked for.
+test("the Ctrl+D switch of the Edit menu takes whole-word matching to substring", { skip }, async () => {
   const h = await open({ text: "score and scores and a score here\n", scores: 0, seed: { settings: { frontMatter: "hidden" } } });
   await h.page.evaluate(() => window.__mdm.view.focus());
   const ranges = () => h.page.evaluate(() => window.__mdm.view.state.selection.ranges.map((r) => [r.from, r.to]));
@@ -5395,29 +6009,28 @@ test("the Ctrl+D toggle switches whole-word matching to substring", { skip }, as
   await chord(h.page, ["Control"], "d");
   await chord(h.page, ["Control"], "d");
   assert.deepEqual(await ranges(), [[0, 5], [23, 28]]);
-  // The button carries a text for each state, naming what the click switches
-  // to rather than the state in use, the way the staff, alignment and header
-  // buttons do. It names the feature and not the chord: the key is one way of
-  // reaching a multicursor and the button is another.
-  const matchButton = () =>
-    h.page.evaluate(() => {
-      const b = document.querySelector('#app button[data-type="mdm-match-substring"]');
-      return { tip: b.getAttribute("aria-label"), lit: b.classList.contains("mdm-btn--on") };
-    });
-  assert.deepEqual(await matchButton(), { tip: "Multicursor matches inside words", lit: false });
-  // Toggle on. The press asks the host (mdm.multicursorMatch) and the button
-  // lights when the value comes back, the way the rest of the bar works, so
-  // the toggle is still on when the document is opened again.
-  await h.page.click('#app button[data-type="mdm-match-substring"]');
+  // The switch is a row, named for what it turns on and ticked while that is
+  // on: it was a button whose tip named what the click switched to, with a
+  // text for each state. It names the feature and not the chord: the key is
+  // one way of reaching a multicursor and the row over it is another.
+  const matchRow = async () => {
+    const row = await barState(h.page, "mdm-match-substring");
+    return { under: row.under, name: row.name, ticked: row.on };
+  };
+  assert.deepEqual(await matchRow(), { under: "menu-edit", name: "Match inside words", ticked: false });
+  // Switched on. The press asks the host (mdm.multicursorMatch) and the row
+  // is ticked when the value comes back, the way the rest of the bar works,
+  // so the switch is still on when the document is opened again.
+  await pressBar(h.page, "mdm-match-substring");
   await sleep(150);
   assert.deepEqual(await setSettingPosts(h.page), [
     { type: "setSetting", key: "multicursorMatch", value: "substring" },
   ]);
-  assert.equal((await matchButton()).lit, false, "lit before the host answered");
+  assert.equal((await matchRow()).ticked, false, "ticked before the host answered");
   await postSettings(h.page, { multicursorMatch: "substring", frontMatter: "hidden" });
   await sleep(200);
   await h.page.evaluate(() => window.__mdm.view.focus());
-  assert.deepEqual(await matchButton(), { tip: "Multicursor matches whole words", lit: true });
+  assert.deepEqual(await matchRow(), { under: "menu-edit", name: "Match inside words", ticked: true });
   // Now the "score" inside "scores" is caught too.
   await h.page.evaluate(() => window.__mdm.view.dispatch({ selection: { anchor: 2 } }));
   await chord(h.page, ["Control"], "d");
@@ -5504,91 +6117,444 @@ test("a drawn block is numbered by its first line, and by every line once a care
   await h.close();
 });
 
-// The bar is grouped by concept, the separators are where the concept
-// changes, and since 2026-09-19 it stands in two rows: `/` is where the
-// first one ends (rowBreak in main.js). The small caps, superscript and
-// subscript buttons came in with the words that day
-// (design-annotation-icons.html) and the six of the Insert group close the
-// first row behind a separator of their own, spelled out as buttons where
-// one menu button held them while the bar was a single row: that row is what they cost, and the owner asked
-// to see the bar in two rather than pay it. The music symbol button opens
-// that group since 2026-09-23, the smallest thing a line can hold. The second
-// row starts under the outline button, with everything that switches the
-// document as a whole.
-// Written out in full because the order carries a decision that no
-// single button can hold on its own: outline leads, because its panel opens
-// down the left edge and the button sits on the side the panel appears; the
-// export follows alone, being the one button that leaves the editor; then the
-// history, then the marks that act on the caret, then the blocks, then the one
-// that changes what a selection matches. Inline code is the last of the marks
-// and the code block the first of the blocks, so the two chevrons meet at the
-// separator: one marks words inside a line, the other makes the line a block,
-// which is the cut that separator makes. The last three groups are the ones
-// that used to be a single run of seven: the page (what it is painted in,
-// what it is set in, whether it shows the block at the top that is not prose),
-// then the score (the three that dress the music and touch nothing else), then
-// the playing, alone at the end because it is the only button here that
-// changes what the editor does rather than what anything looks like.
-const BAR = [
-  "outline",
-  "|",
-  "mdm-export",
-  "|",
-  "undo",
-  "redo",
-  "|",
-  "headings",
-  "bold",
-  "italic",
-  "strikethrough",
-  "superscript",
-  "subscript",
-  "small-caps",
-  "highlight",
-  "link",
-  "inline-code",
-  "|",
-  "code-block",
-  "unordered-list",
-  "ordered-list",
-  "task-list",
-  "quote",
-  "|",
-  "insert-symbol",
-  "insert-equation",
-  "insert-equation-block",
-  "insert-table",
-  "insert-picture",
-  "insert-footnote",
-  "insert-rule",
-  "/",
-  "mdm-match-substring",
-  "|",
-  "mdm-theme",
-  "mdm-text-font",
-  "mdm-text-align",
-  "mdm-hyphenation",
-  "mdm-front-matter",
-  "|",
-  "mdm-score-fill",
-  "mdm-staff-lines",
-  "mdm-score-align",
-  "|",
-  "mdm-follow",
+// The bar is grouped by concept, and since 2026-10-13 the concepts are
+// words, each over a menu: the owner's pick of variant A of
+// design-toolbar.html. Before that it was two rows of buttons (2026-09-19),
+// which is where the order inside each menu comes from. Written out in full
+// because the order carries decisions that no single control can hold on its
+// own.
+//
+// The bar: the outline leads, because its panel opens down the left edge and
+// the button sits on the side the panel appears. Then the words, in the
+// order a document is made in: what is done to the text as a whole, the
+// marks on words, what a line is, what a document holds beside its words,
+// what the page is set in, the music, and last the one that leaves the
+// editor. Score stands beside Page, where the owner asked for it; the sheet
+// drew it apart at the far end of the row, where the six buttons of the
+// music stood for the hours between the two rounds.
+//
+// The menus: a rule is where a run of rows ends. In Edit, going back and
+// forth, the search, the carets (the switch that was the multicursor button
+// third among them) and the lines. In Format the marks in the order the bar
+// had them, the small caps, superscript and subscript where they came in
+// with the words on 2026-09-19 (design-annotation-icons.html), and under a
+// rule the two that are not a way of saying a word, the link and the inline
+// code, which is last so that it is the one beside the next menu: one marks
+// words inside a line and the other makes the line a block. In Paragraph
+// the levels, the blocks that have none, and the two ways out of a line.
+// In Insert the six that were one menu button, then six buttons, in the
+// order a reader meets them, and under a rule the one that is the music's,
+// the symbols, with their panel of glyphs for a submenu. In Page the
+// outline, and under a rule the theme, which the rest of the look depends
+// on, the face, the two that decide how a line meets the right edge, and the
+// header. In Score the two switches, of the mode and of the panel that keeps
+// its keys at the side; what the keys of the mode do, in three runs each
+// under a row of its own, the notes, the bars, and the moving and the
+// selecting; the playing; and the three that dress a score, the box, the
+// lines inside it and where the box sits.
+const BAR = ["outline", "|", "menu-edit", "menu-format", "menu-paragraph", "menu-insert", "menu-page", "menu-score", "menu-export"];
+
+const MENUS = {
+  "menu-edit": [
+    "undo",
+    "redo",
+    "|",
+    "find",
+    "replace",
+    "|",
+    "select-next-match",
+    "select-all-matches",
+    "mdm-match-substring",
+    "add-caret-above",
+    "add-caret-below",
+    "|",
+    "move-line-up",
+    "move-line-down",
+    "delete-line",
+  ],
+  "menu-format": ["bold", "italic", "strikethrough", "superscript", "subscript", "small-caps", "highlight", "|", "link", "inline-code"],
+  "menu-paragraph": [
+    "paragraph",
+    "heading-1",
+    "heading-2",
+    "heading-3",
+    "heading-4",
+    "heading-5",
+    "heading-6",
+    "|",
+    "code-block",
+    "unordered-list",
+    "ordered-list",
+    "task-list",
+    "quote",
+    "|",
+    "line-break",
+    "leave-block",
+  ],
+  "menu-insert": ["insert-equation", "insert-equation-block", "insert-table", "insert-picture", "insert-footnote", "insert-rule", "|", ["insert-symbol", "glyphs"]],
+  "menu-page": [
+    "page-outline",
+    "|",
+    ["mdm-theme", ["mdm-theme-0", "mdm-theme-1", "mdm-theme-2", "mdm-theme-3"]],
+    "mdm-text-font",
+    "mdm-text-align",
+    [
+      "mdm-hyphenation",
+      ["none", "de", "en", "es", "fr", "it", "nl", "pl", "pt", "ru", "uk"].map((tag) => "mdm-hyphenation-" + tag),
+    ],
+    "mdm-front-matter",
+  ],
+  "menu-score": [
+    "mdm-score-navigation",
+    "mdm-score-panel",
+    "|",
+    [
+      "score-notes",
+      [
+        "score-note-1",
+        "score-note-2",
+        "score-note-3",
+        "score-note-4",
+        "score-note-5",
+        "score-note-6",
+        "score-note-7",
+        "|",
+        "score-rest",
+        "score-keys-rest",
+        "|",
+        "score-keys-sides",
+        "score-chord",
+        "score-take-out",
+      ],
+    ],
+    ["score-bars", ["score-bar-before", "score-bar-after"]],
+    [
+      "score-moves",
+      [
+        "score-keys-across",
+        "score-keys-step",
+        "score-keys-staff",
+        "score-keys-line",
+        "|",
+        "score-keys-select",
+        "score-keys-select-parts",
+        "score-select-all",
+        "score-copy",
+        "score-cut",
+        "score-paste",
+        "score-let-go",
+      ],
+    ],
+    "|",
+    "score-play",
+    "mdm-follow",
+    "|",
+    ["mdm-score-fill", ["mdm-score-none", "mdm-score-paper", "mdm-score-slate", "mdm-score-brass"]],
+    "mdm-staff-lines",
+    "mdm-score-align",
+  ],
+  "menu-export": ["# Document", "mdm-export-html", "mdm-export-pdf", "mdm-export-both", "# Audio", "(one file per score)", "mdm-export-midi", "mdm-export-wav"],
+};
+
+test("the bar is grouped by what a control is about, and so is the menu under each word", { skip }, async () => {
+  const h = await open({});
+  const seen = await h.page.evaluate(() => {
+    const rows = (panel) =>
+      [...panel.children].map((el) =>
+        el.classList.contains("mdm-menu__rule")
+          ? "|"
+          : el.classList.contains("mdm-menu__head")
+          ? "# " + el.textContent
+          : el.classList.contains("mdm-menu__note")
+          ? "(" + el.textContent + ")"
+          : el.classList.contains("mdm-menu__group")
+          ? [
+              el.querySelector(":scope > button").getAttribute("data-type"),
+              // The one submenu that is not a list of rows: the music symbols,
+              // whose cells are read by a test of their own.
+              el.querySelector(":scope > .mdm-menu").classList.contains("mdm-menu--glyphs") ? "glyphs" : rows(el.querySelector(":scope > .mdm-menu")),
+            ]
+          : el.getAttribute("data-type")
+      );
+    const bar = [];
+    const menus = {};
+    for (const el of document.querySelector("#app .mdm-toolbar").children) {
+      if (el.classList.contains("mdm-toolbar__sep")) {
+        bar.push("|");
+        continue;
+      }
+      const button = el.querySelector(":scope > button");
+      bar.push(button.getAttribute("data-type"));
+      if (button.classList.contains("mdm-word")) menus[button.getAttribute("data-type")] = rows(el.querySelector(":scope > .mdm-menu"));
+    }
+    return { bar, menus };
+  });
+  assert.deepEqual(seen.bar, BAR);
+  assert.deepEqual(seen.menus, MENUS);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// What each row says: its name, and at its far edge the key it shares with
+// the keyboard, written as VS Code writes one on the platform in use. The
+// names of the rows that were buttons are the names their tips had; a row
+// that is a switch is named for what it turns on, since the tick beside it
+// says whether it is on (LaTeX font, Justified text, YAML header, Match
+// inside words, and of the music Follow the playhead, Ink staff lines and
+// Scores at the left), where its button's tip named what the press would
+// lead to. A row with a glyph wears the one its button wore, and the glyph
+// of a family that was one button stands on the first row of the family.
+// The levels name Ctrl and the digit on a PC, the keys main gave them on
+// 2026-10-03, and Option and Cmd with it on a Mac.
+const ROWS = [
+  // name, what it says, its key on a PC and on a Mac, whether it has a glyph
+  ["undo", "Undo", "Ctrl+Z", "\u2318Z", true],
+  ["redo", "Redo", "Ctrl+Y", "\u21e7\u2318Z", true],
+  ["find", "Find", "Ctrl+F", "\u2318F", true],
+  ["replace", "Replace", "Ctrl+H", "\u2325\u2318F", false],
+  ["select-next-match", "Add the next match", "Ctrl+D", "\u2318D", true],
+  ["select-all-matches", "Select every match", "Ctrl+Shift+L", "\u21e7\u2318L", false],
+  ["mdm-match-substring", "Match inside words", null, null, false],
+  ["add-caret-above", "Add a caret above", "Ctrl+Alt+\u2191", "\u2325\u2318\u2191", false],
+  ["add-caret-below", "Add a caret below", "Ctrl+Alt+\u2193", "\u2325\u2318\u2193", false],
+  ["move-line-up", "Move the line up", "Alt+\u2191", "\u2325\u2191", false],
+  ["move-line-down", "Move the line down", "Alt+\u2193", "\u2325\u2193", false],
+  ["delete-line", "Delete the line", "Ctrl+Shift+K", "\u21e7\u2318K", false],
+  ["bold", "Bold", "Ctrl+B", "\u2318B", true],
+  ["italic", "Italic", "Ctrl+I", "\u2318I", true],
+  ["strikethrough", "Strikethrough", null, null, true],
+  ["superscript", "Superscript", null, null, true],
+  ["subscript", "Subscript", null, null, true],
+  ["small-caps", "Small caps", null, null, true],
+  ["highlight", "Highlight", null, null, true],
+  ["link", "Link", "Ctrl+K", "\u2318K", true],
+  ["inline-code", "Inline code", "Ctrl+E", "\u2318E", true],
+  ["paragraph", "Paragraph", "Ctrl+0", "\u2325\u23180", false],
+  ["heading-1", "Heading 1", "Ctrl+1", "\u2325\u23181", true],
+  ["heading-2", "Heading 2", "Ctrl+2", "\u2325\u23182", false],
+  ["heading-3", "Heading 3", "Ctrl+3", "\u2325\u23183", false],
+  ["heading-4", "Heading 4", "Ctrl+4", "\u2325\u23184", false],
+  ["heading-5", "Heading 5", "Ctrl+5", "\u2325\u23185", false],
+  ["heading-6", "Heading 6", "Ctrl+6", "\u2325\u23186", false],
+  ["code-block", "Code block", "Ctrl+Shift+C", "\u2325\u2318C", true],
+  ["unordered-list", "Unordered list", null, null, true],
+  ["ordered-list", "Ordered list", null, null, true],
+  ["task-list", "Task list", "Ctrl+Shift+T", "\u2325\u2318T", true],
+  ["quote", "Quote", null, null, true],
+  ["line-break", "Line break", "Shift+Enter", "\u21e7Enter", false],
+  ["leave-block", "Out of the block", "Ctrl+Enter", "\u2318Enter", false],
+  ["insert-equation", "Equation", null, null, true],
+  ["insert-equation-block", "Equation block", null, null, true],
+  ["insert-table", "Table", null, null, true],
+  ["insert-picture", "Picture", null, null, true],
+  ["insert-footnote", "Footnote", null, null, true],
+  ["insert-rule", "Horizontal rule", null, null, true],
+  ["insert-symbol", "Music symbol", null, null, true],
+  ["page-outline", "Outline", null, null, true],
+  ["mdm-theme", "Theme", null, null, true],
+  ["mdm-text-font", "LaTeX font", null, null, true],
+  ["mdm-text-align", "Justified text", null, null, true],
+  ["mdm-hyphenation", "Hyphenation", null, null, true],
+  ["mdm-front-matter", "YAML header", null, null, true],
+  ["mdm-score-navigation", "Score navigation", null, null, true],
+  ["mdm-score-panel", "Side panel", null, null, true],
+  ["score-notes", "Notes", null, null, false],
+  ["score-bars", "Bars", null, null, false],
+  ["score-moves", "Move and select", null, null, false],
+  ["score-play", "Play/pause", "Space", "Space", true],
+  ["mdm-follow", "Follow the playhead", null, null, true],
+  ["mdm-score-fill", "Score fill", null, null, true],
+  ["mdm-staff-lines", "Ink staff lines", null, null, true],
+  ["mdm-score-align", "Scores at the left", null, null, true],
+  ["mdm-export-html", "HTML", null, null, false],
+  ["mdm-export-pdf", "PDF", null, null, false],
+  ["mdm-export-both", "HTML + PDF", null, null, false],
+  ["mdm-export-midi", "MIDI", null, null, false],
+  ["mdm-export-wav", "WAV", null, null, false],
 ];
 
-test("the toolbar is grouped by what a button is about", { skip }, async () => {
-  const h = await open({});
-  const seen = await h.page.evaluate(() =>
-    Array.from(document.querySelectorAll("#app .mdm-toolbar > *")).map((el) =>
-      el.classList.contains("mdm-toolbar__sep")
-        ? "|"
-        : el.classList.contains("mdm-toolbar__break")
-        ? "/"
-        : el.querySelector("button").getAttribute("data-type")
-    )
-  );
-  assert.deepEqual(seen, BAR);
+test("every row says its name, and the key it shares with the keyboard as the platform writes it", { skip }, async () => {
+  for (const [platform, column] of [
+    [undefined, 2],
+    ["MacIntel", 3],
+  ]) {
+    const h = await open({ text: "Text.\n", scores: 0, platform });
+    const said = [];
+    for (const row of ROWS) {
+      const s = await barState(h.page, row[0]);
+      assert.ok(s && s.kind === "row", row[0] + " is not a row of a menu");
+      said.push([row[0], s.name, s.key, s.glyph !== ""]);
+    }
+    assert.deepEqual(said, ROWS.map((row) => [row[0], row[1], row[column], row[4]]), platform || "a PC");
+    // And every row of the seven menus is in that list: one added without a
+    // line here would be a row nobody decided the name of.
+    const all = await h.page.$$eval("#app .mdm-word + .mdm-menu > .mdm-menu__item, #app .mdm-word + .mdm-menu > .mdm-menu__group > .mdm-menu__item", (els) =>
+      els.map((el) => el.getAttribute("data-type"))
+    );
+    assert.deepEqual(all.slice().sort(), ROWS.map((row) => row[0]).sort(), platform || "a PC");
+    // The glyph of the outline is the one drawing in both places it stands.
+    const [button, row] = [await barState(h.page, "outline"), await barState(h.page, "page-outline")];
+    assert.ok(button.glyph !== "" && button.glyph === row.glyph, "the outline's row does not wear the outline's glyph");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// What the keys of the score mode do, under the three rows of the Score menu
+// that lead to them: the rows variant A of design-toolbar.html drew there,
+// but for the three it marked as what the editor cannot do yet (a metronome,
+// a check of the bars and a fill of one with rests). A row with one key is a
+// command, and names the key as every row does. A row that shows a pair of
+// keys or a run of them is a legend: the pair is written with what its two
+// keys share once, the run by its two ends, two runs told apart by a modifier
+// as one with the two modifiers either side of a slash, as the name has its two
+// halves (Note to the left/right, the owner's ask of 2026-10-14), and it names
+// no one key to whoever reads the bar without seeing it. The glyphs are the ones the sheet
+// drew.
+//
+// The names are the owner's where he gave one (2026-10-13, the round after
+// the rows were first written), and the others were brought to what his have
+// in common: left and right for where a thing goes, a slash between the two
+// halves of a pair of keys, and no article at the head of a name.
+//
+// The score panel shows the same keys, read off the same roster (scoreRoster
+// in main.js), on two faces. On Buttons, the commands: a figure, the rest,
+// the chord and what takes out as keys of its pad, and the rest as the rows
+// they are in the menu; the legends are not there, being a help and no
+// buttons. On Keys, every one of them as a line, but the seven figures,
+// which are one line there (SM119 holds that face whole). Whatever stands in
+// two places says the same in both.
+const SCORE_ROWS = [
+  // name, what it says, its keys on a PC and on a Mac, whether it has a
+  // glyph, and what it is: a command, a key of the panel's pad, or a legend
+  ["score-note-1", "Whole note", "1", "1", true, "pad"],
+  ["score-note-2", "Half note", "2", "2", true, "pad"],
+  ["score-note-3", "Quarter note", "3", "3", true, "pad"],
+  ["score-note-4", "Eighth note", "4", "4", true, "pad"],
+  ["score-note-5", "Sixteenth note", "5", "5", true, "pad"],
+  ["score-note-6", "32nd note", "6", "6", true, "pad"],
+  ["score-note-7", "64th note", "7", "7", true, "pad"],
+  ["score-rest", "Rest", "0", "0", true, "pad"],
+  ["score-keys-rest", "Rest of given length", "Shift+1\u20267", "\u21e71\u20267", true, "legend"],
+  ["score-keys-sides", "Note to the left/right", "Ctrl/Alt+1\u20267", "\u2318/\u23251\u20267", false, "legend"],
+  ["score-chord", "A note more in the chord", "Enter", "Enter", true, "pad"],
+  ["score-take-out", "Take out", "Delete", "Delete", true, "pad"],
+  ["score-bar-before", "Add bar to the left", "Ctrl+\u2190", "\u2318\u2190", true, "command"],
+  ["score-bar-after", "Add bar to the right", "Ctrl+\u2192", "\u2318\u2192", true, "command"],
+  ["score-keys-across", "Move left/right", "\u2190 \u2192", "\u2190 \u2192", false, "legend"],
+  ["score-keys-step", "Step up/down", "\u2191 \u2193", "\u2191 \u2193", false, "legend"],
+  ["score-keys-staff", "Staff above/below", "Ctrl+\u2191 \u2193", "\u2318\u2191 \u2193", false, "legend"],
+  ["score-keys-line", "Line above/below", "Ctrl+Shift+\u2191 \u2193", "\u21e7\u2318\u2191 \u2193", false, "legend"],
+  ["score-keys-select", "Select", "Shift+\u2190 \u2192", "\u21e7\u2190 \u2192", false, "legend"],
+  ["score-keys-select-parts", "Select in every part", "Ctrl+Shift+\u2190 \u2192", "\u21e7\u2318\u2190 \u2192", false, "legend"],
+  ["score-select-all", "Select all scores", "Ctrl+A", "\u2318A", false, "command"],
+  ["score-copy", "Copy", "Ctrl+C", "\u2318C", false, "command"],
+  ["score-cut", "Cut", "Ctrl+X", "\u2318X", false, "command"],
+  ["score-paste", "Paste", "Ctrl+V", "\u2318V", false, "command"],
+  ["score-let-go", "Let go", "Escape", "Escape", false, "command"],
+];
+
+test("the rows under Notes, Bars and Move and select name the keys of the score mode, a legend its pair or its run, and the score panel says the same", { skip }, async () => {
+  for (const [platform, column] of [
+    [undefined, 2],
+    ["MacIntel", 3],
+  ]) {
+    const h = await open({ text: "Text.\n", scores: 0, platform });
+    const said = [];
+    const glyphs = new Map();
+    const lines = (await keyLines(h.page)).filter((l) => typeof l !== "string");
+    for (const row of SCORE_ROWS) {
+      const s = await barState(h.page, row[0]);
+      assert.ok(s, row[0] + " is not under the Score menu");
+      assert.equal(s.under, "menu-score", row[0]);
+      assert.equal(s.kind, row[5] === "legend" ? "legend" : "row", row[0]);
+      // A legend names no one key: nothing for a screen reader to announce
+      // as the shortcut of a control, which it is not.
+      assert.equal(s.keys === null, row[5] === "legend", row[0] + " and aria-keyshortcuts");
+      said.push([row[0], s.name, s.key, s.glyph !== ""]);
+      if (s.glyph) glyphs.set(row[0], s.glyph);
+      // The same thing on the panel's Buttons face: a key of the pad, with
+      // its name where the caption reads it and its key under its glyph, or
+      // the row again; and no legend.
+      const p = await panelState(h.page, row[0]);
+      if (row[5] === "legend") assert.equal(p, null, row[0] + " is on the Buttons face of the score panel");
+      else {
+        assert.ok(p, row[0] + " is not on the score panel");
+        assert.equal(p.kind, row[5] === "pad" ? "key" : "row", row[0] + " on the panel");
+        assert.deepEqual([p.name, p.key, p.keys, p.glyph], [s.name, s.key, s.keys, s.glyph], row[0] + " does not say on the panel what it says in the menu");
+      }
+      // And on its Keys face, a line that says the same, but a figure's.
+      const line = lines.find((l) => l.line === row[0]);
+      if (/^score-note-/.test(row[0])) assert.equal(line, undefined, row[0] + " is a line of its own on the Keys face");
+      else {
+        assert.ok(line, row[0] + " is not on the Keys face");
+        assert.deepEqual([line.name, line.key, line.glyph], [s.name, s.key, s.glyph], row[0] + " does not say on the Keys face what it says in the menu");
+      }
+    }
+    assert.deepEqual(said, SCORE_ROWS.map((row) => [row[0], row[1], row[column], row[4]]), platform || "a PC");
+    // Every row of the three submenus is in that list, and so is every
+    // control of the panel but its three switches (the two at its head and
+    // the playhead's), the two words over its faces and the play: the
+    // commands of the list, the rows of the menu itself (ROWS), and the
+    // words, which are the panel's own.
+    const under = await h.page.$$eval(
+      '#app .mdm-toolbar [data-type="score-notes"] + .mdm-menu > [data-type], #app .mdm-toolbar [data-type="score-bars"] + .mdm-menu > [data-type], #app .mdm-toolbar [data-type="score-moves"] + .mdm-menu > [data-type]',
+      (els) => els.map((el) => el.getAttribute("data-type"))
+    );
+    assert.deepEqual(under, SCORE_ROWS.map((row) => row[0]), platform || "a PC");
+    const onPanel = await h.page.$$eval("#app .mdm-score-panel [data-type]", (els) => els.map((el) => el.getAttribute("data-type")));
+    assert.deepEqual(
+      onPanel.slice().sort(),
+      SCORE_ROWS.filter((row) => row[5] !== "legend")
+        .map((row) => row[0])
+        .concat(["mdm-score-navigation", "mdm-score-panel", "score-face-buttons", "score-face-keys", "score-play", "mdm-follow"])
+        .sort(),
+      platform || "a PC"
+    );
+    // The two switches at the panel's head are their rows of the menu as
+    // buttons, with the glyph each row wears (2026-10-15); the play and the
+    // playhead are rows there as here.
+    for (const name of ["mdm-score-navigation", "mdm-score-panel", "score-play", "mdm-follow"]) {
+      const [s, p] = [await barState(h.page, name), await panelState(h.page, name)];
+      const head = name === "mdm-score-navigation" || name === "mdm-score-panel";
+      assert.deepEqual([p.kind, p.name, p.key, p.glyph], [head ? "switch" : "row", s.name, s.key, s.glyph], name + " does not say on the panel what it says in the menu");
+    }
+    // No two of the glyphs are one drawing.
+    assert.equal(new Set(glyphs.values()).size, glyphs.size, "two rows of the score's keys wear the same glyph");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
+// A legend is read and not pressed. A press on one, which a hand that takes
+// it for a row will make, does nothing: the menu it stands in stays up, the
+// text is not written into, and the focus does not leave the text, since a
+// press on the chrome never takes it.
+test("a press on a legend does nothing: its menu stays up, and the focus stays in the text", { skip }, async () => {
+  const h = await open({ text: "Some words here.\n", scores: 0 });
+  await setSelection(h.page, 5);
+  await pressBar(h.page, "score-moves");
+  await sleep(120);
+  const open_ = () => h.page.$$eval("#app .mdm-toolbar__item--open > button, #app .mdm-menu__group--open > button", (els) => els.map((el) => el.getAttribute("data-type")));
+  assert.deepEqual(await open_(), ["menu-score", "score-moves"]);
+  const look = await h.page.$eval('#app .mdm-toolbar [data-type="score-keys-staff"]', (el) => {
+    const cs = getComputedStyle(el);
+    return { tag: el.tagName, cursor: cs.cursor, role: el.getAttribute("role") };
+  });
+  // No button, and no hand over it.
+  assert.deepEqual(look, { tag: "DIV", cursor: "default", role: null });
+  await h.page.click('#app .mdm-toolbar [data-type="score-keys-staff"]');
+  await sleep(120);
+  assert.deepEqual(await open_(), ["menu-score", "score-moves"], "a press on a legend shut its menu");
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, "a press on a legend took the focus off the text");
+  assert.equal(await docText(h.page), "Some words here.\n");
+  // Nor does the wash of a row come under the pointer on one, which is
+  // standing on it since the press; a row that can be pressed wears it.
+  const ground = (name) => h.page.$eval('#app .mdm-toolbar [data-type="' + name + '"]', (el) => getComputedStyle(el).backgroundColor);
+  assert.equal(await ground("score-keys-staff"), "rgba(0, 0, 0, 0)", "a legend wears the wash of a row under the pointer");
+  await h.page.hover('#app .mdm-toolbar [data-type="mdm-score-panel"]');
+  await sleep(80);
+  assert.notEqual(await ground("mdm-score-panel"), "rgba(0, 0, 0, 0)", "a row under the pointer wears no wash, so the legend's bare ground says nothing");
   assert.deepEqual(h.errors, []);
   await h.close();
 });

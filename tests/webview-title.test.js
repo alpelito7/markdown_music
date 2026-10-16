@@ -2,8 +2,8 @@
 // what the YAML header puts at the head of the page, the title, the subtitle,
 // the names and the date, drawn where the page has it, with the hand, and
 // opened into its YAML by a click as a table is opened into its rows. A header
-// that prints nothing draws nothing, and the YAML button of the toolbar is its
-// way in. Asked for by the owner on 2026-10-03, who chose the second half from
+// that prints nothing draws nothing, and the YAML header row of the Page menu
+// is its way in. Asked for by the owner on 2026-10-03, who chose the second half from
 // six proposals (design/design-yaml-header.html, A), and on 2026-10-04 asked
 // for the rest of what the page prints there: the affiliations, the dates
 // and the DOI, the abstract and the keywords, the categories and the
@@ -11,7 +11,8 @@
 // told the two ways in apart: what a click on the title opens goes away when
 // the carets leave it, as a table's source does, and what the button shows
 // stays, with no title drawn under it ("Opened by a click, shown by the
-// button").
+// button"). The button became the YAML header row of the Page menu when the
+// bar became words over menus (2026-10-13), and is that row here.
 //
 // The header's source is open or put away by the host (the `header` message;
 // extension-host.test.js holds that end, and the setting that keeps a header
@@ -30,7 +31,7 @@ const path = require("node:path");
 const Module = require("node:module");
 
 const { frontMatter } = require("../vscode-mdm/transforms.js");
-const { open, update, skip, docText, setSelection } = require("./webview/helpers.js");
+const { open, update, skip, docText, setSelection, pressBar, barState } = require("./webview/helpers.js");
 
 // The host itself, for the tests that put it on the other end of the wire
 // ("With the host on the other end"): require("vscode") is the mock, as in
@@ -79,7 +80,7 @@ const bare = (text) => open({ text: text, scores: 0, withFrontMatter: false, fro
 // click on the title opens it.
 const answer = (page, text, shown, stays) => update(page, text, shown, 0, frontMatter(text), stays);
 // What a click on the drawn title asks, what the carets leaving ask, and
-// what the YAML button asks.
+// what the YAML header row asks.
 const PEEK = { type: "header", open: true, peek: true };
 const LEAVE = { type: "header", open: false, peek: true };
 const SHOW = { type: "header", open: true };
@@ -159,22 +160,16 @@ test("a header that names a title is drawn as the title block, over the first li
   await h.close();
 });
 
-test("a header that prints nothing draws nothing, and the YAML button is its way in", { skip }, async () => {
+test("a header that prints nothing draws nothing, and the YAML header row is its way in", { skip }, async () => {
   const h = await editor(BARE, false);
   const seen = await head(h.page);
   assert.equal(seen.blocks, 0, "a header that names only a language drew a block");
   assert.equal(seen.card, 0);
   assert.match(seen.order, /^line/, seen.order);
   assert.deepEqual(seen.numbers, ["5", "6", "7"]);
-  const button = '#app button[data-type="mdm-front-matter"]';
-  assert.deepEqual(
-    await h.page.evaluate((sel) => {
-      const b = document.querySelector(sel);
-      return [b.getAttribute("aria-label"), b.classList.contains("mdm-btn--on"), b.classList.contains("mdm-btn--off")];
-    }, button),
-    ["Show YAML header", false, false]
-  );
-  await h.page.click(button);
+  const row = await barState(h.page, "mdm-front-matter");
+  assert.deepEqual([row.name, row.on, row.off], ["YAML header", false, false]);
+  await pressBar(h.page, "mdm-front-matter");
   await sleep(150);
   assert.deepEqual(await headerPosts(h.page), [SHOW]);
   await answer(h.page, BARE, true, true);
@@ -599,13 +594,13 @@ test("a header that draws nothing has no copy button until its YAML is shown, an
 // stays. These play the host, as the tests above do; the last two of the
 // file put the real one on the wire.
 
-const FM = '#app button[data-type="mdm-front-matter"]';
-// Its tooltip, whether it is lit, whether it is greyed out.
-const fmButton = (page) =>
-  page.evaluate((sel) => {
-    const b = document.querySelector(sel);
-    return [b.getAttribute("aria-label"), b.classList.contains("mdm-btn--on"), b.classList.contains("mdm-btn--off")];
-  }, FM);
+// The YAML header row: its name, whether it is ticked, whether it is greyed
+// out. Ticked where the button was lit; the row keeps one name where the
+// button's tooltip said which way a press would go.
+const fmButton = async (page) => {
+  const row = await barState(page, "mdm-front-matter");
+  return [row.name, row.on, row.off];
+};
 // A point on the line of the text that reads `text`, a little way into it.
 const onLine = (page, text) =>
   page.evaluate((t) => {
@@ -647,7 +642,7 @@ test("the source a click opened is put away when the carets leave it, at the rel
   await peek(h.page, TITLED);
   assert.deepEqual(await headerPosts(h.page), [PEEK]);
   // The button of the bar is dark: it is not what opened this.
-  assert.deepEqual(await fmButton(h.page), ["Show YAML header", false, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", false, false]);
   // Moving about the source asks nothing: an arrow, a click on another of
   // its lines.
   await h.page.keyboard.press("ArrowDown");
@@ -725,7 +720,7 @@ test("the source a click opened is put away when the carets leave it, at the rel
   await h.close();
 });
 
-test("a click outside the text puts that source away as well, and the YAML button keeps it instead", { skip }, async () => {
+test("a click outside the text puts that source away as well, and the YAML header row keeps it instead", { skip }, async () => {
   const h = await editor(TITLED, false);
   // The dead margin beside the column, as it puts a table's source away.
   await peek(h.page, TITLED);
@@ -738,25 +733,26 @@ test("a click outside the text puts that source away as well, and the YAML butto
   assert.deepEqual(await headerPosts(h.page), [LEAVE], "asked again before the answer");
   await answer(h.page, TITLED, false);
   assert.equal((await head(h.page)).card, 0);
-  // The bar, on a button that is not about the selection.
+  // The bar, on a row that is not about the selection.
   await peek(h.page, TITLED);
   await forget(h.page);
-  await h.page.click('#app button[data-type="mdm-staff-lines"]');
+  await pressBar(h.page, "mdm-staff-lines");
   await sleep(150);
   assert.deepEqual(await headerPosts(h.page), [LEAVE]);
   await answer(h.page, TITLED, false);
-  // Its own button asks one thing, and it is to keep the source: put away
-  // first, the header would go and come back under the reader.
+  // Its own row asks one thing, and it is to keep the source: put away
+  // first, the header would go and come back under the reader. The word Page
+  // pressed on the way to it puts nothing away (opensMenuOf in main.js).
   await peek(h.page, TITLED);
   await forget(h.page);
-  await h.page.click(FM);
+  await pressBar(h.page, "mdm-front-matter");
   await sleep(150);
   assert.deepEqual(await headerPosts(h.page), [SHOW]);
   // With nothing open a click out there asks nothing.
   await answer(h.page, TITLED, false);
   await forget(h.page);
   await clickMargin(h.page);
-  await h.page.click('#app button[data-type="mdm-staff-lines"]');
+  await pressBar(h.page, "mdm-staff-lines");
   await sleep(150);
   assert.deepEqual(await headerPosts(h.page), []);
   assert.deepEqual(h.errors, []);
@@ -791,9 +787,9 @@ test("the scrollbar's handle leaves the source a click opened where it is", { sk
   await h.close();
 });
 
-test("the YAML button shows the source in place of the drawing, and what it shows stays", { skip }, async () => {
+test("the YAML header row shows the source in place of the drawing, and what it shows stays", { skip }, async () => {
   const h = await editor(LONG_TITLED, false);
-  await h.page.click(FM);
+  await pressBar(h.page, "mdm-front-matter");
   await sleep(150);
   assert.deepEqual(await headerPosts(h.page), [SHOW]);
   await answer(h.page, LONG_TITLED, true, true);
@@ -802,7 +798,7 @@ test("the YAML button shows the source in place of the drawing, and what it show
   assert.equal(seen.blocks, 0, "the title is drawn under a source the button shows");
   assert.match(seen.order, /^fm fm fm fm fm fm line/, seen.order);
   assert.deepEqual(seen.numbers, ["1", "2", "3"]);
-  assert.deepEqual(await fmButton(h.page), ["Hide YAML header", true, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", true, false]);
   // The caret was at the head of the body, where a document nobody has
   // clicked in has it, and it is there still: the press gives the text the
   // focus, and a caret left at the head of the text would be in the header
@@ -832,7 +828,7 @@ test("the YAML button shows the source in place of the drawing, and what it show
   assert.deepEqual((await head(h.page)).title, ["A Markdown Music working prototype"]);
   assert.ok((await partRebuilds(h.page)) > parts, "the keystrokes redrew the whole document, so the partial road was not under test");
   assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
-  assert.deepEqual(await fmButton(h.page), ["Hide YAML header", true, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", true, false]);
   // And it goes when the carets leave: a click in the body, the document
   // left to nobody. The source stays, and nothing is asked of the host.
   await clickLine(h.page, "More prose under it.");
@@ -861,7 +857,7 @@ test("the YAML button shows the source in place of the drawing, and what it show
   assert.equal(seen.blocks, 1, "the mark alone did not bring the drawing back");
   assert.equal(seen.open, true);
   assert.deepEqual(seen.title, ["A Markdown Music working prototype"]);
-  assert.deepEqual(await fmButton(h.page), ["Show YAML header", false, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", false, false]);
   assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
   // The caret out of it, which asks for a source a click opened to be put
   // away; the host says it is the button's again, and the drawing goes.
@@ -871,7 +867,7 @@ test("the YAML button shows the source in place of the drawing, and what it show
   await answer(h.page, text, true, true);
   assert.equal((await head(h.page)).blocks, 0);
   // The button again puts it away.
-  await h.page.click(FM);
+  await pressBar(h.page, "mdm-front-matter");
   await sleep(150);
   assert.deepEqual(await headerPosts(h.page), [SHOW, LEAVE, HIDE]);
   assert.deepEqual(h.errors, []);
@@ -932,7 +928,7 @@ test("a header the host opens with no caret in it is put away again", { skip }, 
     const seen = await head(h.page);
     assert.equal(seen.card, 3, where);
     assert.equal(seen.blocks, 1, "the typed title is not drawn under its source");
-    assert.deepEqual(await fmButton(h.page), ["Show YAML header", false, false], where);
+    assert.deepEqual(await fmButton(h.page), ["YAML header", false, false], where);
     // Only as the source opens: an update that finds it open already, the
     // file having changed beside the editor, asks nothing more of it.
     await forget(h.page);
@@ -1233,7 +1229,7 @@ test("the header opened again does not give its old steps back their place", { s
     const text = await docText(again.page);
     await answer(again.page, text, false);
     const left = await docText(again.page);
-    if (how === "button") await again.page.click('#app button[data-type="undo"]');
+    if (how === "button") await pressBar(again.page, "undo");
     else if (how === "selection") await ctrl(again.page, "u");
     else {
       await again.page.evaluate(() =>
@@ -1382,7 +1378,7 @@ test("from a click to a click away, with the host on the other end", { skip }, a
   let seen = await head(h.page);
   assert.equal(seen.card, 0);
   assert.equal(seen.blocks, 1);
-  assert.deepEqual(await fmButton(h.page), ["Show YAML header", false, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", false, false]);
   // A click opens the source over the drawing, and a click in the body
   // puts it away with the caret where the click was.
   await clickOn(h.page, "#app .mdm-title");
@@ -1422,18 +1418,18 @@ test("from a click to a click away, with the host on the other end", { skip }, a
   // The button: the source alone, and it stays through a click in the body
   // and one in the margin, until the button is pressed again. It is the
   // setting, for a header that draws a title as for any other.
-  await h.page.click(FM);
+  await pressBar(h.page, "mdm-front-matter");
   await settle();
   seen = await head(h.page);
   assert.equal(seen.card, 6);
   assert.equal(seen.blocks, 0, "the title is drawn under a source the button shows");
-  assert.deepEqual(await fmButton(h.page), ["Hide YAML header", true, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", true, false]);
   assert.deepEqual(vscode._state.updates.map((u) => u.key + "=" + u.value), ["mdm.frontMatter=shown"]);
   await clickLine(h.page, "More prose under it.");
   await clickMargin(h.page);
   await settle();
   assert.equal((await head(h.page)).card, 6, "a click outside put away what the button shows");
-  await h.page.click(FM);
+  await pressBar(h.page, "mdm-front-matter");
   await settle();
   seen = await head(h.page);
   assert.equal(seen.card, 0);
@@ -1444,11 +1440,11 @@ test("from a click to a click away, with the host on the other end", { skip }, a
   // the header gone between.
   await clickOn(h.page, "#app .mdm-title");
   await settle();
-  await h.page.click(FM);
+  await pressBar(h.page, "mdm-front-matter");
   await settle();
   seen = await head(h.page);
   assert.equal(seen.card, 6);
-  assert.deepEqual(await fmButton(h.page), ["Hide YAML header", true, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", true, false]);
   await clickLine(h.page, "More prose under it.");
   await settle();
   seen = await head(h.page);
@@ -1464,7 +1460,7 @@ test("where headers are kept in view every header comes up as its YAML, with the
   let seen = await head(t.page);
   assert.equal(seen.card, 6, "a titled header was not kept in view by the setting");
   assert.equal(seen.blocks, 0);
-  assert.deepEqual(await fmButton(t.page), ["Hide YAML header", true, false]);
+  assert.deepEqual(await fmButton(t.page), ["YAML header", true, false]);
   // What is typed in it is drawn under it while the caret is there.
   await clickLine(t.page, "author: alpelito7");
   await t.page.keyboard.press("End");
@@ -1480,7 +1476,7 @@ test("where headers are kept in view every header comes up as its YAML, with the
   assert.equal(seen.blocks, 0);
   assert.deepEqual(await headerPosts(t.page), [], "and the editor asked for it");
   // The button puts it away and the title is drawn, and that is the setting.
-  await t.page.click(FM);
+  await pressBar(t.page, "mdm-front-matter");
   await settle();
   seen = await head(t.page);
   assert.equal(seen.card, 0);
@@ -1495,7 +1491,7 @@ test("where headers are kept in view every header comes up as its YAML, with the
   seen = await head(h.page);
   assert.equal(seen.card, 3);
   assert.equal(seen.blocks, 0);
-  assert.deepEqual(await fmButton(h.page), ["Hide YAML header", true, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", true, false]);
   await clickLine(h.page, "lang: en");
   await clickLine(h.page, "More prose under it.");
   await clickMargin(h.page);
@@ -1514,9 +1510,9 @@ test("where headers are kept in view every header comes up as its YAML, with the
   seen = await head(h.page);
   assert.equal(seen.card, 4);
   assert.equal(seen.blocks, 0);
-  assert.deepEqual(await fmButton(h.page), ["Hide YAML header", true, false]);
+  assert.deepEqual(await fmButton(h.page), ["YAML header", true, false]);
   // The button puts it away, and the title is drawn.
-  await h.page.click(FM);
+  await pressBar(h.page, "mdm-front-matter");
   await settle();
   seen = await head(h.page);
   assert.equal(seen.card, 0);

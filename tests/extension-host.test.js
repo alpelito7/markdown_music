@@ -119,6 +119,10 @@ test("hostile setting values never reach the webview HTML", () => {
     "mdm.frontMatter": null,
     "mdm.outline": { shown: true },
     "mdm.outlineWidth": "</script>",
+    // Not its fallback with junk after it, which would come to the
+    // fallback whether the allowlist read the value whole or by its head.
+    "mdm.scorePanel": "hidden</script>",
+    "mdm.scorePanelFace": "keys; drop",
     "mdm.multicursorMatch": ["substring"],
     "mdm.followPlayhead": 0,
     "mdm.textFont": "roman; drop",
@@ -135,6 +139,8 @@ test("hostile setting values never reach the webview HTML", () => {
     scoreAlign: "center",
     frontMatter: "hidden",
     outline: "hidden",
+    scorePanel: "shown",
+    scorePanelFace: "buttons",
     multicursorMatch: "word",
     followPlayhead: "follow",
     textFont: "roman",
@@ -154,6 +160,8 @@ test("valid setting values pass through to the webview HTML", () => {
     "mdm.frontMatter": "shown",
     "mdm.outline": "shown",
     "mdm.outlineWidth": 480,
+    "mdm.scorePanel": "shown",
+    "mdm.scorePanelFace": "keys",
     "mdm.multicursorMatch": "substring",
     "mdm.followPlayhead": "still",
     "mdm.textFont": "sans",
@@ -168,6 +176,8 @@ test("valid setting values pass through to the webview HTML", () => {
     scoreAlign: "left",
     frontMatter: "shown",
     outline: "shown",
+    scorePanel: "shown",
+    scorePanelFace: "keys",
     multicursorMatch: "substring",
     followPlayhead: "still",
     textFont: "sans",
@@ -176,6 +186,26 @@ test("valid setting values pass through to the webview HTML", () => {
     outlineWidth: 480,
     multiCursorModifier: "alt",
   });
+});
+
+// What a setting comes to with nothing set is the manifest's default in VS
+// Code and the allowlist's first word here (readSettings), and the two are one:
+// else a settings.json that carries junk (above) would bring up another editor
+// than one that carries nothing. Score navigation comes with its side panel
+// unless the Side panel row has turned it off (the owner's ask of 2026-10-14).
+test("a setting left unset comes to the default the manifest declares, and the score panel's is shown", () => {
+  const props = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "vscode-mdm", "package.json"), "utf8")).contributes.configuration.properties;
+  const unset = settingsOf(boot("Body\n", {}));
+  let read = 0;
+  for (const [key, spec] of Object.entries(props)) {
+    const name = key.replace(/^mdm\./, "");
+    if (!(name in unset)) continue;
+    read++;
+    assert.equal(unset[name], spec.default, key + " comes to another value than its default");
+  }
+  assert.equal(read, Object.keys(unset).length - 1, "a setting the page is given is not in the manifest");
+  assert.equal(props["mdm.scorePanel"].default, "shown");
+  assert.equal(unset.scorePanel, "shown");
 });
 
 // The width of the outline panel is the one setting that is a number, so it is
@@ -212,17 +242,23 @@ test("setSetting stores a width, clamped, and refuses what is not a number", asy
   );
 });
 
-test("setSetting writes the outline and the Ctrl+D toggle, and no other word", async () => {
+test("setSetting writes the outline, the score panel, its face and the Ctrl+D toggle, and no other word", async () => {
   const h = boot("Body\n", {});
   await h.receive({ type: "setSetting", key: "outline", value: "shown" });
   await h.receive({ type: "setSetting", key: "multicursorMatch", value: "substring" });
+  await h.receive({ type: "setSetting", key: "scorePanel", value: "shown" });
+  await h.receive({ type: "setSetting", key: "scorePanelFace", value: "keys" });
   await h.receive({ type: "setSetting", key: "outline", value: "peek" });
   await h.receive({ type: "setSetting", key: "multicursorMatch", value: "regex" });
+  await h.receive({ type: "setSetting", key: "scorePanel", value: "pinned" });
+  await h.receive({ type: "setSetting", key: "scorePanelFace", value: "both" });
   assert.deepEqual(
     vscode._state.updates.map((u) => [u.key, u.value]),
     [
       ["mdm.outline", "shown"],
       ["mdm.multicursorMatch", "substring"],
+      ["mdm.scorePanel", "shown"],
+      ["mdm.scorePanelFace", "keys"],
     ]
   );
 });
@@ -5498,6 +5534,16 @@ test("the page loads the audio module before the editor that calls it", () => {
   assert.ok(audio !== -1, "mdm-audio.js is not on the page");
   assert.ok(main !== -1);
   assert.ok(audio < main, "main.js runs before the module it exports the audio with");
+});
+
+// The score mode moves bars from line to line with media/mdm-bars.js
+// (score-bars.test.js), which main.js reads off window.MDM_BARS.
+test("the page loads the module that moves bars before the editor that calls it", () => {
+  const h = boot("Body\n");
+  const bars = h.html.indexOf("/mdm-bars.js");
+  const main = h.html.indexOf("/main.js");
+  assert.ok(bars !== -1, "mdm-bars.js is not on the page");
+  assert.ok(bars < main, "main.js runs before the module it moves bars with");
 });
 
 // ---------- A link followed from the editor ----------

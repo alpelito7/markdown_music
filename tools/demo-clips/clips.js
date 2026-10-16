@@ -1,5 +1,7 @@
-// The clips, one object each, written as beats. There are two and the README
-// carries both: the tour, on demo.mdm, and the Markdown one, on markdown.mdm.
+// The clips, one object each, written as beats. There are three: the tour, on
+// demo.mdm, the Markdown one, on markdown.mdm, and the one of the score mode,
+// on score-navigation.mdm. The README carries the first two, and the third
+// from the day it has a section for the mode.
 //
 // A loop has no seam: a clip ends on the frame it opened on, or ends
 // elsewhere and dissolves back into its first frame as the tour does, and
@@ -58,6 +60,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { sleep } = require("./rig.js");
+const { readTime } = require("./motion.js");
 const { REPO, WORKSPACE } = require("./paths.js");
 
 // ---------------------------------------------------------------- helpers
@@ -252,14 +255,86 @@ async function warmPiano(rig) {
   await sleep(800);
 }
 
-// The toolbar's font button, pressed. It is a toggle, and the take opens on
-// the sans (mdm.textFont in the tour's settings), so the first press sets the
-// document in Latin Modern. frame() uses it off camera to measure the page on
-// the face the scroll will land in.
-async function pressTextFont(rig) {
-  const btn = await rig.at('#app button[data-type="mdm-text-font"]');
-  await rig.warp(btn.x, btn.y);
+// ---------------------------------------------------------------- the bar
+
+// The bar is the outline's button and seven words, each over a menu (the
+// owner's pick of 2026-10-13), where it was two rows of buttons named by
+// their tooltips. What a take sets is a row of a menu: the pointer goes to
+// the word and presses it, the menu opens, the pointer comes down to the
+// row, stays on it for as long as its name takes to read (motion.js,
+// readTime, the time a tooltip was left up), and presses it. A row in a
+// submenu, a theme or a language, is reached through the row it hangs from,
+// which opens it under the pointer on the way.
+function wordAt(rig, word) {
+  return rig.at(`#app .mdm-toolbar button[data-type="${word}"]`);
+}
+// On the row's name, a third of the way in, where a hand reading it stops.
+function rowAt(rig, type) {
+  return rig.at(`#app .mdm-toolbar button.mdm-menu__item[data-type="${type}"]`, { fx: 0.3 });
+}
+// A row of a submenu by its name, the themes' indices being whatever themes
+// are installed.
+function subRowAt(rig, label) {
+  return rig.atLabel("#app .mdm-toolbar .mdm-menu--sub .mdm-menu__item", label);
+}
+async function opened(rig, word) {
+  await rig.waitFor((w) => !!document.querySelector(`#app .mdm-toolbar__item--open > button[data-type="${w}"]`), {
+    arg: word,
+    timeout: 3000,
+    poll: 40,
+  });
+}
+// `row` is the data-type of a row of the word's menu, or { label, via } for
+// a row of the submenu that hangs from the row `via`. `says` is its name.
+async function pick(rig, word, row, says) {
+  await rig.pressAt(await wordAt(rig, word), { size: 60 });
+  await opened(rig, word);
+  await sleep(220);
+  let at;
+  if (typeof row === "string") {
+    at = await rowAt(rig, row);
+  } else {
+    await rig.moveTo(await rowAt(rig, row.via), undefined, { size: 160 });
+    await rig.waitFor(
+      (v) => {
+        const r = document.querySelector(`#app .mdm-toolbar button.mdm-menu__item[data-type="${v}"]`);
+        return !!r && !!r.closest(".mdm-menu__group--open");
+      },
+      { arg: row.via, timeout: 3000, poll: 40 }
+    );
+    await sleep(200);
+    at = await subRowAt(rig, row.label);
+  }
+  await rig.moveTo(at, undefined, { size: 160 });
+  await sleep(readTime(says));
   await rig.click();
+}
+// The same off camera: no travel, no reading.
+async function pickNow(rig, word, row) {
+  const w = await wordAt(rig, word);
+  await rig.warp(w.x, w.y);
+  await rig.click();
+  await opened(rig, word);
+  await sleep(150);
+  let at;
+  if (typeof row === "string") {
+    at = await rowAt(rig, row);
+  } else {
+    const via = await rowAt(rig, row.via);
+    await rig.warp(via.x, via.y);
+    await sleep(400);
+    at = await subRowAt(rig, row.label);
+  }
+  await rig.warp(at.x, at.y);
+  await rig.click();
+}
+
+// The LaTeX font row of the Page menu, pressed. It is a switch, and the take
+// opens on the sans (mdm.textFont in the tour's settings), so the first press
+// sets the document in Latin Modern. frame() uses it off camera to measure
+// the page on the face the scroll will land in.
+async function pressTextFont(rig) {
+  await pickNow(rig, "menu-page", "mdm-text-font");
   // CodeMirror re-measures the width of a character and the height of a line
   // on a face swap (applyTextFont in main.js); the prose is not at its new
   // height until that has been through.
@@ -349,35 +424,25 @@ const tour = {
   },
   async beats(rig) {
     const edit = tour.edit;
-    const button = (type) => rig.at(`#app button[data-type="${type}"]`);
-    const row = (label) => rig.atLabel("#app .mdm-menu__item", label);
     await sleep(500);
 
-    // The face, first of the four. Its tooltip reads "LaTeX font" here and
-    // not "Usual Markdown font": textFontTip (main.js) names the press and
-    // not the state, so on the sans it says where the press goes. What
-    // changes is every word on the page and not one button, so the pointer
-    // stays on a little longer after this press than after the next ones.
-    await rig.pressAt(await button("mdm-text-font"), { tip: true });
+    // The face, first of the four, from the Page menu. What changes is every
+    // word on the page and not one row, so the pointer stays on a little
+    // longer after this press than after the next ones.
+    await pick(rig, "menu-page", "mdm-text-font", "LaTeX font");
     await sleep(520);
 
-    // The three settings after it, each named by its own tooltip. The theme
-    // is picked from a menu, and the pointer is on its row long enough for
-    // the row to be read before it is pressed.
-    await rig.pressAt(await button("mdm-theme"), { tip: true });
-    await sleep(340);
-    await rig.pressAt(await row("MDM Light"), { settle: 300, size: 110 });
+    // The three settings after it, each in the menu of its kind: the theme
+    // from the submenu of its row of Page, the staff lines from Score, and
+    // Ctrl+D inside words from Edit, which is the setting the edit below
+    // turns on.
+    await pick(rig, "menu-page", { via: "mdm-theme", label: "MDM Light" }, "MDM Light");
     await sleep(480);
 
-    await rig.pressAt(await button("mdm-staff-lines"), { tip: true });
+    await pick(rig, "menu-score", "mdm-staff-lines", "Ink staff lines");
     await sleep(420);
 
-    // Longer on this one, by what it says: its tooltip names the setting
-    // the edit below turns on, in five words where the others have one or
-    // two, and the rig leaves it whole for 1.4 s (at 620 ms from the
-    // pointer's arrival, in the first takes, it was gone before it could be
-    // read).
-    await rig.pressAt(await button("mdm-match-substring"), { tip: true });
+    await pick(rig, "menu-edit", "mdm-match-substring", "Match inside words");
     await sleep(480);
 
     // Down to the score, to the offset frame() measured. The theme and the ink
@@ -741,7 +806,7 @@ const markdown = {
   // Copied beside the document before every take, as the document is.
   files: ["markdown.bib"],
   alt:
-    "In Latin Modern on MDM Light, the toolbar justifies the text, and English chosen from the hyphenation menu divides its words and writes lang: en into the YAML header that the YAML button shows and hides. Three words turn bold as two asterisks are typed over them, three lines become a list, a phrase is highlighted, a table is filled cell by cell and a pasted picture is saved beside the document. Under an equation numbered at the margin, a citation typed as its key is drawn as the page prints it, and a click on its work, listed at the end, opens the bibliography beside the document at its entry.",
+    "In Latin Modern on MDM Light, the Page menu justifies the text, and English chosen under Hyphenation divides its words and writes lang: en into the YAML header, which the YAML header row shows and hides. Three words turn bold as two asterisks are typed over them, three lines become a list, a phrase is highlighted, a table is filled cell by cell and a pasted picture is saved beside the document. Under an equation numbered at the margin, a citation typed as its key is drawn as the page prints it, and a click on its work, listed at the end, opens the bibliography beside the document at its entry.",
   frameRate: 14,
   settings: { "mdm.textAlign": "left" },
   dissolve: 0.6,
@@ -767,33 +832,33 @@ const markdown = {
   },
   settle: settleUnderHeading,
   async beats(rig) {
-    const button = (type) => rig.at(`#app button[data-type="${type}"]`);
     await sleep(500);
 
-    // Justified. The tooltip reads "Justify text" on the ragged page
-    // (textAlignTip names the press), and every paragraph on screen squares
-    // up at once.
-    await rig.pressAt(await button("mdm-text-align"), { tip: true });
+    // Justified, from the Page menu: every paragraph on screen squares up at
+    // once.
+    await pick(rig, "menu-page", "mdm-text-align", "Justified text");
     await sleep(460);
 
-    // English, from the hyphenation menu. The host writes the header and
-    // answers, and the button lights once the language is dividing the
-    // prose: waited for, so the hold after it is a hold on divided words and
-    // not on a round trip.
-    await rig.pressAt(await button("mdm-hyphenation"), { tip: true });
-    await sleep(340);
-    await rig.pressAt(await rig.atLabel("#app .mdm-menu__item", "English"), { settle: 300, size: 110 });
+    // English, from the submenu of Hyphenation. The host writes the header
+    // and answers, and the row of English is ticked once the language is
+    // dividing the prose: waited for, so the hold after it is a hold on
+    // divided words and not on a round trip.
+    await pick(rig, "menu-page", { via: "mdm-hyphenation", label: "English" }, "English");
     await rig.waitFor(
-      () => document.querySelector('#app button[data-type="mdm-hyphenation"]').classList.contains("mdm-btn--on"),
+      () => {
+        const row = document.querySelector('#app button[data-type="mdm-hyphenation-en"]');
+        return !!row && row.getAttribute("aria-pressed") === "true";
+      },
       { timeout: 8000 }
     );
     await sleep(750);
 
-    // The header the choice wrote, opened above the heading, left open for
-    // as long as its two lines take to read, and shut again.
-    await rig.pressAt(await button("mdm-front-matter"), { tip: true });
+    // The header the choice wrote, opened above the heading by the YAML
+    // header row, left open for as long as its two lines take to read, and
+    // put away by the same row.
+    await pick(rig, "menu-page", "mdm-front-matter", "YAML header");
     await sleep(1500);
-    await rig.click();
+    await pick(rig, "menu-page", "mdm-front-matter", "YAML header");
     await sleep(420);
 
     // Three words at once: a double click takes the first, and Alt with a
@@ -836,14 +901,14 @@ const markdown = {
     await sleep(1000);
 
     // Down to the list, and the three lines made one.
-    await rig.smoothScrollTo(await scrollFor(rig, "The list button"), 620);
+    await rig.smoothScrollTo(await scrollFor(rig, "Unordered list, in the Paragraph menu"), 620);
     await sleep(250);
     const first = await atText(rig, "Justified the text");
     await rig.moveTo({ x: first.x + 1, y: first.y }, undefined, { size: 14 });
     await sleep(120);
     await rig.dragTo(await atText(rig, "Made three words bold", { end: true }), undefined, { size: 14, pace: 1.15, hold: 120 });
     await sleep(220);
-    await rig.pressAt(await button("unordered-list"), { tip: true });
+    await pick(rig, "menu-paragraph", "unordered-list", "Unordered list");
     await sleep(700);
 
     // A phrase highlighted.
@@ -853,20 +918,20 @@ const markdown = {
     await sleep(120);
     await rig.dragTo(await atText(rig, phrase, { end: true }), undefined, { size: 14, pace: 1.15, hold: 120 });
     await sleep(220);
-    await rig.pressAt(await button("highlight"), { tip: true });
+    await pick(rig, "menu-format", "highlight", "Highlight");
     await sleep(800);
 
-    // The table. Scrolled first so that its paragraph, the source the button
+    // The table. Scrolled first so that its paragraph, the source the row
     // writes under it and the table drawn under that are all in the pane
     // while it is filled in.
-    await rig.smoothScrollTo(await scrollFor(rig, "The table button"), 600);
+    await rig.smoothScrollTo(await scrollFor(rig, "Table, in the Insert menu"), 600);
     await sleep(250);
     await rig.pressAt(await atText(rig, "after the last one.", { end: true }), { size: 14 });
     await sleep(240);
-    await rig.pressAt(await button("insert-table"), { tip: true });
+    await pick(rig, "menu-insert", "insert-table", "Table");
     await sleep(450);
-    // The pointer to its corner while the keyboard works, so the button's
-    // tooltip goes and nothing stands over the cells. The head of the table
+    // The pointer to its corner while the keyboard works, so nothing stands
+    // over the cells. The head of the table
     // is typed at a pace it can be followed at, and the rows under it, which
     // say nothing new about how a table is filled, as fast as a hand that
     // knows what it is writing.
@@ -1008,13 +1073,7 @@ const markdown = {
   // extension keeps per file, the file reverted, and the picture's folder
   // gone, so the next take pastes image.png again and not image-2.png.
   async after(rig) {
-    const hy = await rig.at('#app button[data-type="mdm-hyphenation"]');
-    await rig.warp(hy.x, hy.y);
-    await rig.click();
-    await sleep(500);
-    const none = await rig.atLabel("#app .mdm-menu__item", "No hyphenation");
-    await rig.warp(none.x, none.y);
-    await rig.click();
+    await pickNow(rig, "menu-page", { via: "mdm-hyphenation", label: "No hyphenation" });
     await sleep(600);
     await revertFile(rig);
     await pinCaret(rig);
@@ -1024,8 +1083,561 @@ const markdown = {
   },
 };
 
+// ---------------------------------------------------------------- score navigation
+
+// Whether the keys of a take are named on screen as they are pressed. On by
+// default, each with a few words on what it does the first time it comes up.
+// MDM_DEMO_KEYS=caps records the same take with the caps and no words, and
+// MDM_DEMO_KEYS=off with nothing named, to set the three side by side.
+const KEYS_NAMED = process.env.MDM_DEMO_KEYS !== "off";
+const KEYS_SAID = process.env.MDM_DEMO_KEYS !== "caps";
+
+// A key pressed with its name on screen: the caps of the chord and, where
+// the press is the first of its kind, a few words on what it does. The mode
+// is worked from the keyboard, and a press leaves nothing in a recording to
+// say which key it was; the tour could do without a caption because its one
+// chord is named by the words of its document (clips.js, at the top), and
+// this take presses seventeen different ones (the owner's pick of the three
+// ways it was recorded, 2026-10-05).
+//
+// A name with words goes up a third of a second before its key, so the eye
+// has it when the staff changes, and stays up for as long as it takes to
+// read (readingTime), which is the hold when none is given: at the pace of
+// the first takes, under a second a name, the owner asked for a pause after
+// each. A key with no words is seen and not read: an arrow, or a key whose
+// words were up a moment ago, and it keeps a hand's pace, a tenth of a
+// second before it and a quarter after, less where the beat says so.
+// opts.lead, in ms, is the wait before the key where that is not wanted.
+//
+// A chord pressed again says how many times it has been, since the name
+// alone does not change between two presses and four steps down read as one
+// (seen on the frames of the third take).
+const CAPS = { Control: "Ctrl", ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
+const pressed = { chord: null, times: 0 };
+// How far the names stand from the foot of the window: by the foot (rig.js)
+// with nothing set, or under the score while its one line leaves room there
+// (namesUnderScore).
+const names = { bottom: undefined };
+
+// How long a name is left up to be read: a beat to find it, the words at
+// about the pace of a subtitle, and a moment for every cap of the chord.
+function readingTime(says, caps) {
+  return 420 + 42 * says.length + 110 * caps;
+}
+
+async function key(rig, chord, says, hold, opts) {
+  const o = opts || {};
+  const parts = chord.split("+");
+  pressed.times = pressed.chord === chord ? pressed.times + 1 : 1;
+  pressed.chord = chord;
+  if (KEYS_NAMED) {
+    const caps = parts.map((k) => `[[${CAPS[k] || (k.length === 1 ? k.toUpperCase() : k)}]]`).join("");
+    const count = pressed.times > 1 ? ` ×${pressed.times}` : "";
+    await rig.caption(says && KEYS_SAID ? `${caps}${count}  ${says}` : caps + count, names.bottom);
+    await sleep(o.lead === undefined ? (says ? 320 : 100) : o.lead);
+  }
+  await rig.press(chord);
+  await sleep(hold === undefined ? (says ? readingTime(says, parts.length) : 250) : hold);
+}
+
+// The names of the keys put away, and the count of presses with them.
+async function keysAway(rig) {
+  pressed.chord = null;
+  if (KEYS_NAMED) await rig.caption(null);
+}
+
+// The names set just under the score, where the eye already is, for as long
+// as the score is one line and the page has room under it: at the foot of
+// the window they stood 150 px from the staff the keys were writing on (the
+// frame of this take is taller than the other two's, see its settings).
+// Measured once, on the empty score, with room for what the drawing grows
+// by as it is written in (16 px, when the pedal of an earlier phrase had a
+// half note on its middle line), so the names do not hop when it does.
+async function namesUnderScore(rig) {
+  const off = await rig.webviewOffset();
+  const foot = await rig.evalFrame(() => document.querySelector("#app .mdm-score code.language-abc svg").getBoundingClientRect().bottom);
+  const height = (await rig.viewport()).h;
+  const bottom = Math.round(height - (off.y + foot + 34 + 38));
+  if (bottom < 9) throw new Error(`no room for the names of the keys under the score: ${bottom} px`);
+  names.bottom = bottom;
+}
+
+// The window point of a place on a staff of the take's score: the staff
+// counted from the top, `of` a selector for what stands there (the nth of
+// them on that staff, left to right, the first with no nth), and the step
+// the point is at, counted as the mode counts it, 2 on the bottom line and 10
+// on the top one. With no step, the middle of the thing itself.
+async function onStaff(rig, staff, of, step, nth) {
+  const off = await rig.webviewOffset();
+  const p = await rig.evalFrame(
+    (staff, of, step, nth) => {
+      const svg = document.querySelector("#app .mdm-score code.language-abc svg");
+      const lines = Array.from(svg.querySelectorAll("g.abcjs-staff")).map((g) => {
+        const ys = Array.from(g.children).map((l) => {
+          const r = l.getBoundingClientRect();
+          return (r.top + r.bottom) / 2;
+        });
+        return { top: Math.min(...ys), bottom: Math.max(...ys) };
+      });
+      const s = lines[staff];
+      if (!s) return null;
+      const space = (s.bottom - s.top) / 4;
+      const here = Array.from(svg.querySelectorAll(of))
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => (r.top + r.bottom) / 2 > s.top - 2 * space && (r.top + r.bottom) / 2 < s.bottom + 2 * space)
+        .sort((a, b) => a.left - b.left)[nth];
+      if (!here) return null;
+      return {
+        x: (here.left + here.right) / 2,
+        y: step === null ? (here.top + here.bottom) / 2 : s.bottom - ((step - 2) * space) / 2,
+      };
+    },
+    staff,
+    of,
+    step === undefined ? null : step,
+    nth || 0
+  );
+  if (!p) throw new Error(`nothing matching ${of} on staff ${staff} of the score`);
+  return { x: Math.round(off.x + p.x), y: Math.round(off.y + p.y) };
+}
+
+// Where the pointer waits over the score's head: beside the heading, right
+// of the text, as far in from the pane's edge as rest() is. From there the
+// toolbar is reached without crossing the score, whose buttons come up
+// under a pointer on it and go as it leaves: on its way from rest() to the
+// toolbar the third take showed the rail and the pair at the line's end for
+// three frames, and a + under the last barline for one.
+async function above(rig) {
+  const off = await rig.webviewOffset();
+  const p = await rig.evalFrame(() => {
+    const pane = document.querySelector("#app .cm-scroller").getBoundingClientRect();
+    const head = document.querySelector("#app .cm-content .cm-line").getBoundingClientRect();
+    return { x: pane.right - 55, y: (head.top + head.bottom) / 2 };
+  });
+  return { x: Math.round(off.x + p.x), y: Math.round(off.y + p.y) };
+}
+
+// Where the pointer waits once the score fills the pane and nowhere on the
+// page is off it: on the bar, right of its last word, where nothing answers
+// a pointer.
+async function aside(rig) {
+  const off = await rig.webviewOffset();
+  const p = await rig.evalFrame(() => {
+    const bar = document.querySelector("#app .mdm-toolbar").getBoundingClientRect();
+    return { x: bar.right - 150, y: (bar.top + bar.bottom) / 2 };
+  });
+  return { x: Math.round(off.x + p.x), y: Math.round(off.y + p.y) };
+}
+
+// The switch of the mode at the head of the side panel, which is up while
+// the mode is on: the way out that stands nearest the score.
+function modeSwitch(rig) {
+  return rig.at('#app .mdm-score-panel__toggle[data-type="mdm-score-navigation"]');
+}
+
+// The caret on the blank line over the score's fence, so that the press
+// that turns the mode on, which starts on the score the caret is at, finds
+// it, and no mark of the prose is shown.
+async function settleOverScore(rig) {
+  const off = await rig.webviewOffset();
+  const c = await rig.evalFrame(() => {
+    const view = window.__mdm.view;
+    const doc = view.state.doc;
+    for (let i = 2; i <= doc.lines; i++) {
+      if (doc.line(i).text.startsWith("```") && doc.line(i - 1).text.trim() === "") {
+        const at = view.coordsAtPos(doc.line(i - 1).from);
+        return at && { x: at.left + 120, y: (at.top + at.bottom) / 2 };
+      }
+    }
+    return null;
+  });
+  if (!c) throw new Error("the blank line over the score is not on screen");
+  await rig.warp(Math.round(off.x + c.x), Math.round(off.y + c.y));
+  await rig.click();
+  await sleep(500);
+}
+
+// The window x of the nth barline of the score's first line, counted from
+// the left on its top staff: where a line's end is dropped to end the line
+// there.
+async function barlineX(rig, nth) {
+  const off = await rig.webviewOffset();
+  const x = await rig.evalFrame((nth) => {
+    const bars = Array.from(document.querySelectorAll("#app .mdm-score code.language-abc svg .abcjs-bar.abcjs-v0"))
+      .map((b) => b.getBoundingClientRect())
+      .sort((a, b) => a.top - b.top || a.left - b.left);
+    const first = bars.filter((b) => Math.abs(b.top - bars[0].top) < 4).sort((a, b) => a.left - b.left)[nth];
+    return first ? (first.left + first.right) / 2 : null;
+  }, nth);
+  if (x === null) throw new Error(`the score's first line has no barline ${nth}`);
+  return Math.round(off.x + x);
+}
+
+// The window point of the button at the end of the score's first line that
+// reads `label` (EDIT_TIPS in main.js), which is on the page only while the
+// pointer is on the score. Null while it is not drawn, or is greyed out.
+async function lineEnd(rig, label) {
+  const off = await rig.webviewOffset();
+  const p = await rig.evalFrame((label) => {
+    const btn = Array.from(document.querySelectorAll("#app .mdm-score .mdm-score-edit .mdm-score-end__btn")).filter(
+      (b) => b.getAttribute("aria-label") === label && b.getAttribute("data-mdm-system") === "0" && b.getBoundingClientRect().width > 0 && !b.classList.contains("mdm-score-edit--off")
+    )[0];
+    if (!btn) return null;
+    const r = btn.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }, label);
+  return p && { x: Math.round(off.x + p.x), y: Math.round(off.y + p.y) };
+}
+
+// What the mode has made of the score: its lines of music, one a part, as
+// the document holds them, and what the mode shows of itself.
+async function scoreState(rig) {
+  return rig.evalFrame(() => {
+    const doc = window.__mdm.view.state.doc.toString();
+    const g = document.querySelector("#app .mdm-score-cursor");
+    return {
+      music: doc.split("\n").filter((l) => /\|/.test(l)),
+      mode: document.getElementById("app").classList.contains("mdm--score-mode"),
+      step: g ? Number(g.getAttribute("data-mdm-step")) : null,
+      picked: document.querySelectorAll("#app .mdm-score svg .mdm-score-picked.abcjs-note, #app .mdm-score svg .mdm-score-picked.abcjs-rest").length,
+      notices: Array.from(document.querySelectorAll("#app .mdm-score-notice")).map((n) => n.textContent),
+    };
+  });
+}
+
+// A beat held to what it should have left in the document: a take whose keys
+// went somewhere else is stopped here and not encoded.
+async function expectMusic(rig, after, lines) {
+  const s = await scoreState(rig);
+  if (s.notices.length) throw new Error(`after ${after} the mode says: ${s.notices.join(" / ")}`);
+  if (s.music.join("\n") !== lines.join("\n")) {
+    throw new Error(`after ${after} the score reads\n  ${s.music.join("\n  ")}\nand not\n  ${lines.join("\n  ")}`);
+  }
+}
+
+// Whether the score's player is sounding, as the editor reads it (isSounding
+// in main.js): the face abcjs gives its play button while the tune runs.
+const sounding = () => {
+  const start = document.querySelector("#app .abcjs-midi-start");
+  return !!start && start.classList.contains("abcjs-pushed");
+};
+
+// The score mode in one take (asked for on 2026-10-05, "the most of it in
+// the least time", on an organ score, whose three staves give the keys that
+// work across parts something to work on). It begins on nothing: four bars
+// of rests on each of the three staves (the owner, 2026-10-06, "empieza el
+// pentagrama desde cero"; the first two versions began with both hands
+// written and only the pedal to write). The take writes two bars in each
+// part with the keys of the figures, selects them in the right hand and the
+// pedal alone, copies them into the two bars after, sets the four bars on
+// two lines by dragging the first line's end to a barline, and plays the
+// second line.
+//
+// What the owner asked of it once the first version had been seen: the
+// names of the keys on screen and each left up long enough to read; a
+// selection of the first and the third staff, copied and pasted; a note put
+// in between two others with Ctrl or Alt and a figure; and, the day after,
+// the end of the line dragged and not pressed.
+//
+// The phrase is the take's own, in D over a held tonic: the right hand
+// falls from G to E and settles on F sharp, the left hand's third, E and G,
+// steps up to F sharp and A under it, and the pedal holds D through both
+// bars. It is written to be written quickly. The cursor keeps its height
+// when it goes from one part to the next, so each part begins a step or
+// none from where the last one ended: the right hand stops on its F sharp,
+// which on the bass staff under it is the A the left hand's second chord
+// has on top; the left hand stops on E, a step over the pedal's D. Of the
+// thirteen arrows the phrase costs, none is pressed more than twice
+// running.
+//
+// The right hand is where a note is put in between two others: the G and
+// the E are written first, a quarter and a half, and the F sharp between
+// them with Ctrl and the figure. Until the bar's last note is in, the bar is
+// short, which a figure written over a longer rest leaves it (the owner's
+// rule of 2026-10-04, nothing takes time from its neighbours), and the
+// editor keeps the barlines of the three parts together all the same
+// (MDM_BARS.evenBars; the first take of all showed a part's final barline
+// in the middle of the system).
+//
+// What is copied is what the selection holds once the left hand is let go
+// of: the first staff and the third. Pasted over the two empty bars chosen
+// in every part, it fills the right hand and the pedal, and the left hand,
+// which the copy has nothing for, stays the two rests it was.
+//
+// `%%stretchlast true` sets the one line to the full measure from the first
+// frame: left to its own width the system grew to the right as it was
+// written. The frame is taller than the other two takes' (settings): two
+// systems of three staves are 508 px, and the pane of the others is 473.
+//
+//   mouse     the Score navigation button; a click on the right hand's first
+//             rest at the height of its G, which is where the cursor stands
+//   3                             a quarter note there
+//   ↓ ↓, Alt+2                    down to E, and a half note after the G
+//   ↑, Ctrl+3                     a quarter on F sharp, put in before the E
+//   → →, 1                        the next bar, a whole note
+//   Ctrl+↓                        the left hand, at the height the cursor had
+//   1, ↓ ↓, Enter                 a whole note, and a third under it
+//   ←, ↑, 1, ↓ ↓, Enter           the bar before, the same a step down
+//   Ctrl+↓, ↓, 1, →, 1            the pedal, a whole note a bar
+//   Ctrl+Shift+← (two)            the two bars chosen in every part
+//   Ctrl+Shift+↑ and Space        the left hand walked to, and left out
+//   Ctrl+C                        the right hand and the pedal copied
+//   → →, Ctrl+Shift+→ (two)       the two empty bars chosen in every part
+//   Ctrl+V                        pasted: the left hand keeps its rests
+//   mouse                         a click on the third bar; the first
+//                                 line's end dragged to its second barline:
+//                                 two bars to a line
+//   Space                         played from the cursor, on the second line
+//   mouse                         the button again, out of the mode
+//
+// Like the other two it ends away from where it began, is put back off
+// camera (after) and dissolves into its first frame.
+const scoreNavigation = {
+  id: "score-navigation",
+  title: "Score navigation in one take",
+  doc: "score-navigation.mdm",
+  alt:
+    "With Score navigation on, a click puts a cursor on an empty organ score and the keys write it: 3, 2 and 1 a quarter, a half and a whole note where the arrows stand, Alt or Ctrl with them a note after or before, Ctrl+↓ the part below and Enter a second note in a chord. Ctrl+Shift with the arrows selects two bars in all three parts and walks up to the left hand, which Space leaves out, and Ctrl+C and Ctrl+V copy the right hand and the pedal into the next two bars. The end of the line, dragged to a barline, sets the four bars on two lines, and Space plays the second as the mode is left.",
+  frameRate: 16,
+  needsPiano: true,
+  dissolve: 0.6,
+  // A frame larger in the editor's own pixels than the other takes' (zoom
+  // level 1 for their 2: 1200x750 for 1000x625, in the same 1440x900
+  // window). Two systems of three staves stand whole in the pane under the
+  // player's row from 1.25 (1146x716), and the side panel, up with the mode
+  // since 2026-10-14 and shown in the take at the owner's word of
+  // 2026-10-15, takes some 290 px of the width: at 1.25 the score was wider
+  // than the column the panel left it, and scrolled. Everything in the
+  // frame is drawn at 83% of the size it has in the other two.
+  settings: { "window.zoomLevel": 1 },
+  // The score before the take, as each part stands once the keys have
+  // written it, and after the paste and the drag, a line of music a line.
+  // The take is held to them on its way (expectMusic), so a key that did
+  // something else stops it, and so are the mode's tests (SM93).
+  before: ["z4 | z4 | z4 | z4 |]", "z4 | z4 | z4 | z4 |]", "z4 | z4 | z4 | z4 |]"],
+  right: "g f e2 | f4 | z4 | z4 |]",
+  left: "[E,G,]4 | [F,A,]4 | z4 | z4 |]",
+  pedal: "D,4 | D,4 | z4 | z4 |]",
+  pasted: ["g f e2 | f4 | g f e2 | f4 |]", "D,4 | D,4 | D,4 | D,4 |]"],
+  written: ["g f e2 | f4 |", "g f e2 | f4 |]", "[E,G,]4 | [F,A,]4 |", "z4 | z4 |]", "D,4 | D,4 |", "D,4 | D,4 |]"],
+  // What the desktop's clipboard held before the take copied onto it, put
+  // back by after(): the rig's VS Code shares the clipboard of the desktop
+  // it is started on.
+  clipboard: null,
+  // The pointer opens the take over the score's head, and not at the foot of
+  // the pane as the other takes do: its first errand is the toolbar.
+  rest: above,
+  async frame(rig) {
+    await rig.scrollTop(0);
+    scoreNavigation.clipboard = await rig.evalFrame(() => navigator.clipboard.readText().catch(() => null));
+    names.bottom = undefined;
+    await namesUnderScore(rig);
+  },
+  settle: settleOverScore,
+  async beats(rig) {
+    const clip = scoreNavigation;
+    const rests = clip.before[0];
+    pressed.chord = null;
+    await expectMusic(rig, "nothing", clip.before);
+    await sleep(450);
+
+    // Into the mode, from its row of the Score menu. The side panel comes up
+    // at the right with the mode's buttons, and the column narrows to make
+    // room for it: the names of the keys are measured again under the score
+    // as it stands now.
+    await pick(rig, "menu-score", "mdm-score-navigation", "Score navigation");
+    await rig.waitFor(() => !!document.querySelector("#app.mdm-score-panel--open .mdm-score-panel"), { timeout: 4000, poll: 40 });
+    await sleep(450);
+    await namesUnderScore(rig);
+
+    // A click on the right hand's first bar, at the height of the G over
+    // its top line (step 11): the cursor stands where the click was made,
+    // bar and pitch. The pointer leaves at once, to the foot of the pane:
+    // left where it clicked, the arrow stood over the cursor it had just
+    // put there.
+    await rig.pressAt(await onStaff(rig, 0, ".abcjs-rest", 11), { size: 30 });
+    await sleep(140);
+    await rig.moveTo(await rest(rig), undefined, { size: 160 });
+    if ((await scoreState(rig)).step !== 11) throw new Error("the click did not put the cursor at the height of the G");
+
+    // The right hand: a quarter, a half after it two steps down, a quarter
+    // put in between them, and a whole note in the next bar.
+    await key(rig, "3", "a quarter note");
+    await key(rig, "ArrowDown", "", 150);
+    await key(rig, "ArrowDown", "", 260);
+    await key(rig, "Alt+2", "a half note, after it");
+    await expectMusic(rig, "Alt+2", ["g e2 | z4 | z4 | z4 |]", rests, rests]);
+    await key(rig, "ArrowUp", "", 260);
+    await key(rig, "Control+3", "a quarter, before it");
+    await key(rig, "ArrowRight", "", 160);
+    await key(rig, "ArrowRight", "", 280);
+    await key(rig, "1", "a whole note");
+    await expectMusic(rig, "the right hand", [clip.right, rests, rests]);
+
+    // The left hand: the cursor comes down at the height it had, which is
+    // the A its second chord has on top, and Enter sets a third under the
+    // whole note written there. The bar before it is the same again, a step
+    // down, and goes faster: nothing in it is new.
+    await key(rig, "Control+ArrowDown", "the part below");
+    await key(rig, "1", "", 300);
+    await key(rig, "ArrowDown", "", 150);
+    await key(rig, "ArrowDown", "", 260);
+    await key(rig, "Enter", "a note into the chord");
+    await key(rig, "ArrowLeft", "", 200);
+    await key(rig, "ArrowUp", "", 190);
+    await key(rig, "1", "", 220);
+    await key(rig, "ArrowDown", "", 130);
+    await key(rig, "ArrowDown", "", 190);
+    await key(rig, "Enter", "", 380);
+    await expectMusic(rig, "the left hand", [clip.right, clip.left, rests]);
+
+    // The pedal, a step under where the left hand stopped: two whole notes,
+    // at the same pace.
+    await key(rig, "Control+ArrowDown", "", 340);
+    await key(rig, "ArrowDown", "", 190);
+    await key(rig, "1", "", 220);
+    await key(rig, "ArrowRight", "", 190);
+    await key(rig, "1", "", 520);
+    await expectMusic(rig, "the pedal", [clip.right, clip.left, clip.pedal]);
+
+    // From the pedal's second note leftwards: its two notes are the two
+    // bars, chosen in every part.
+    await key(rig, "Control+Shift+ArrowLeft", "select, in every part", 340);
+    await key(rig, "Control+Shift+ArrowLeft", "select, in every part", undefined, { lead: 120 });
+    if ((await scoreState(rig)).picked !== 8) throw new Error("the first two bars are not chosen in all three parts");
+
+    // The left hand walked to and left out: the first staff and the third
+    // stay chosen, and are what is copied.
+    await key(rig, "Control+Shift+ArrowUp", "walk the parts");
+    await key(rig, "Control+Shift+Space", "leave this one out");
+    if ((await scoreState(rig)).picked !== 6) throw new Error("the left hand is still among the parts chosen");
+    await key(rig, "Control+c", "copy", 900);
+
+    // The two bars after them, chosen in every part, and the copy pasted
+    // over: the right hand and the pedal take it, and the left hand, which
+    // the copy has nothing for, keeps its rests.
+    await key(rig, "ArrowRight", "", 170);
+    await key(rig, "ArrowRight", "", 300);
+    await key(rig, "Control+Shift+ArrowRight", "select, in every part", 340);
+    await key(rig, "Control+Shift+ArrowRight", "select, in every part", 700, { lead: 120 });
+    await key(rig, "Control+v", "paste", 0);
+    await rig.waitFor((want) => window.__mdm.view.state.doc.toString().includes(want), { timeout: 5000, arg: clip.pasted[0] });
+    await sleep(950);
+    await expectMusic(rig, "the paste", [clip.pasted[0], clip.left, clip.pasted[1]]);
+
+    // The cursor onto the third bar, which is where the music will be
+    // played from once it heads the second line. Put there before the
+    // line's end is moved and not after: the paste leaves the cursor on the
+    // pedal's last bar, and the page goes at once to the bar the cursor is
+    // in when that bar leaves the pane (the sixth take, where a press on
+    // the line's end threw the page up a hundred pixels under the
+    // pointer). On the top staff of the third bar it stays in sight when
+    // that bar becomes the head of a second line.
+    await keysAway(rig);
+    names.bottom = undefined;
+    await rig.pressAt(await onStaff(rig, 0, ".abcjs-notehead", undefined, 4), { size: 24 });
+    await sleep(220);
+
+    // Two bars to a line, with the line's end: the pair of buttons is on
+    // the page while the pointer is on the score, and the tooltip of the
+    // one that takes the end leftwards says that it can be dragged to any
+    // barline as well as pressed, two lines of it, left up long enough to
+    // read. Dragged, the barline the line would end on is washed as the
+    // pointer passes each (the owner's ask of 2026-10-06, where the take
+    // before pressed the button twice); let go on the second, the last two
+    // bars go down to a line of their own.
+    const lineEndButton = async () => {
+      for (let tries = 0; tries < 20; tries++) {
+        const at = await lineEnd(rig, "Move line end left");
+        if (at) return at;
+        await sleep(100);
+      }
+      throw new Error("the button at the end of the first line is not on the page");
+    };
+    const grip = await lineEndButton();
+    await rig.moveTo(grip, undefined, { size: 20 });
+    const said = await rig.readTip();
+    if (!/^Move line end left\n.*drag/.test(said)) throw new Error(`the tooltip of the line's end reads ${JSON.stringify(said)}`);
+    await rig.dragTo({ x: await barlineX(rig, 1), y: grip.y }, undefined, { size: 12, pace: 1.5, hold: 320 });
+    await sleep(260);
+    // Off the score at once: a pointer on it brings up a + at the barline
+    // it is nearest, and the pair at each line's end.
+    await rig.moveTo(await aside(rig), undefined, { size: 120 });
+    await expectMusic(rig, "the line's end", clip.written);
+
+    // The page down to hold both lines: the second is drawn half under the
+    // pane's foot, and a line the pane cut would have the page go to it as
+    // it began to sound (the sixth take, where the page turned as Space was
+    // pressed). The score's head to the head of the pane, and both lines
+    // held to standing whole there with the room the player's row takes.
+    const head = await rig.evalFrame(() => {
+      const sc = document.querySelector("#app .cm-scroller");
+      const block = document.querySelector("#app .mdm-score code.language-abc svg").getBoundingClientRect();
+      return Math.max(0, Math.round(sc.scrollTop + block.top - sc.getBoundingClientRect().top - 4));
+    });
+    await rig.smoothScrollTo(head, 560);
+    await sleep(300);
+    const fits = await rig.evalFrame(() => {
+      const sc = document.querySelector("#app .cm-scroller").getBoundingClientRect();
+      const block = document.querySelector("#app .mdm-score code.language-abc svg").getBoundingClientRect();
+      return { over: Math.round(sc.top - block.top), under: Math.round(sc.bottom - 36 - block.bottom) };
+    });
+    if (fits.over > 6 || fits.under < 0) throw new Error(`the two systems do not stand whole in the pane: ${JSON.stringify(fits)}`);
+
+    // Space, from the head of the second line.
+    await key(rig, "Space", "play from the cursor", 0);
+    await rig.waitFor(sounding, { timeout: 6000, poll: 40 });
+
+    // Out of the mode while it plays, which the music takes no notice of:
+    // the switch at the head of the side panel, named by its tooltip, and
+    // the panel goes with the mode. The text is the reader's again with
+    // everything the keys wrote in it.
+    await sleep(700);
+    await keysAway(rig);
+    await rig.pressAt(await modeSwitch(rig), { tip: true });
+    // The switch is left to its tooltip for about a second, and the phrase
+    // is two bars long: a press that came after its last note would show a
+    // mode left in silence, which is not what this beat is for.
+    if (!(await rig.evalFrame(sounding))) throw new Error("the music had stopped when the mode was left");
+    await sleep(260);
+    await rig.moveTo(await aside(rig), undefined, { size: 120 });
+    // To the end of the phrase, which the player's face says.
+    await rig.waitFor(() => {
+      const start = document.querySelector("#app .abcjs-midi-start");
+      return !!start && !start.classList.contains("abcjs-pushed");
+    }, { timeout: 9000, poll: 40 });
+    await sleep(200);
+    if ((await scoreState(rig)).mode) throw new Error("the take ends inside the mode");
+  },
+  // Off camera: the music stopped, the player shut, the file as it is on
+  // disk again (every change of the mode is a change of the document, sent
+  // to the host as it is made), and the clipboard as the take found it.
+  async after(rig) {
+    await rig.caption(null);
+    names.bottom = undefined;
+    if (await rig.evalFrame(() => !!document.querySelector("#app .abcjs-midi-start"))) {
+      const on = await rig.at("#app .mdm-score", { fy: 0.3 });
+      await rig.warp(on.x, on.y);
+      await sleep(250);
+      await rig.moveTo(await rig.at("#app .mdm-score .mdm-audio-toggle"), 300);
+      await sleep(200);
+      await rig.click();
+      await sleep(900);
+    }
+    // Only a text that was read: an empty one is also what a picture on the
+    // clipboard reads as, and writing it back would be no putting back.
+    if (scoreNavigation.clipboard) {
+      await rig.evalFrame((text) => navigator.clipboard.writeText(text).catch(() => {}), scoreNavigation.clipboard);
+    }
+    await revertFile(rig);
+    await pinCaret(rig);
+    await rig.scrollTop(0);
+    await settleOverScore(rig);
+  },
+};
+
 module.exports = {
-  clips: [tour, markdown],
+  clips: [tour, markdown, scoreNavigation],
   picturesOf,
   clearLayout,
   closeAll,

@@ -73,6 +73,18 @@ strips `muted` from a `<video>` and Chrome then shows only its poster.
   editor's own stylesheet in the test harness, writes
   `vscode-mdm/docs/abc-card.png` and prints the `<img>` line for the README,
   whose alt text is the block itself.
+- `score-navigation.mdm` is the document the take of the score mode is
+  recorded on: an organ score of four empty bars, which the keys write two
+  bars of and copy into the other two. That take works from the
+  keyboard, so it names each key under the score as it is pressed, with a
+  few words on what it does, and leaves each name up long enough to read;
+  `MDM_DEMO_KEYS=caps node record.js ...` records it with the keys and no
+  words, and `MDM_DEMO_KEYS=off` with nothing named. It is recorded at a
+  zoom level of its own (the clip's `settings`), a frame a seventh taller
+  in the editor's pixels, since two systems of three staves do not stand in
+  the pane of the other two. It copies with Ctrl+C, which goes through the
+  clipboard of the desktop VS Code is started on; the text that was there
+  is put back when the take ends, and a picture is not.
 - `rig.js` drives VS Code and encodes; the reasons for the frame size, the
   pointer and the hairline drawn round every frame are in its comments.
 - `motion.js` is how the pointer travels and how typed keys are spaced: the

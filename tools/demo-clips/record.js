@@ -67,6 +67,11 @@ function writeSettings(look, extra) {
     "mdm.followPlayhead": "follow",
     "mdm.textFont": "roman",
     "mdm.textAlign": "justify",
+    // The score mode's side panel, up with the mode as it ships (2026-10-14),
+    // on the face of buttons. The score's take shows it (the owner's word of
+    // 2026-10-15), and no take may inherit it hidden.
+    "mdm.scorePanel": "shown",
+    "mdm.scorePanelFace": "buttons",
     ...LOOKS[look],
     ...(extra || {}),
   };
@@ -108,6 +113,23 @@ async function take(rig, clip, look, keepFrames) {
   process.stdout.write(`\n=== ${tag} ===\n`);
   writeSettings(look, clip.settings);
   await sleep(1600);
+  // The window in the look asked for, and not only its settings. A VS Code
+  // started on a profile whose last take was the dark one writes the theme's
+  // name back into the settings in the form it now gives it ("Dark Modern"
+  // for "Default Dark Modern"), and did so over the light theme this had
+  // just written: a take of 2026-10-05 was recorded as a light page in a
+  // dark window, with nothing here the wiser. Read off the workbench, and
+  // the settings written again until it agrees.
+  for (let i = 0; ; i++) {
+    const dark = await rig.page.evaluate(() => {
+      const bench = document.querySelector(".monaco-workbench");
+      return !!bench && (bench.classList.contains("vs-dark") || bench.classList.contains("hc-black"));
+    });
+    if (dark === /Dark/.test(LOOKS[look]["workbench.colorTheme"])) break;
+    if (i >= 3) throw new Error(`the window is not in the ${look} look after the settings were written ${i + 1} times`);
+    writeSettings(look, clip.settings);
+    await sleep(1600);
+  }
   await rig.overlay();
   await rig.clearToasts();
   await clearLayout(rig);

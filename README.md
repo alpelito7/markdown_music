@@ -534,23 +534,23 @@ What it does:
   another, and puts a selected address where the address goes. These keys
   and the block keys below are the text's while the caret is in it and do
   not reach VS Code (`Ctrl+B` hid the side bar as well); after a click in
-  the margin, with no caret, they are VS Code's. The toolbar
-  has the same three, a link, a heading menu that makes every selected line
-  a heading of any of the six levels, the caret's level ticked and a
-  paragraph again when it is picked twice (it writes no `#` over a list
-  marker or a `>`, and turns a setext
+  the margin, with no caret, they are VS Code's. The menus of the toolbar
+  have the same three, a link, the heading levels, which make every selected
+  line a heading of any of the six, the caret's level ticked and a
+  paragraph again when it is picked twice (they write no `#` over a list
+  marker or a `>`, and turn a setext
   heading into an ATX one), and unordered and ordered lists, which
   turn one kind into the other, come off at a second press, skip blank lines
-  and keep a quote's `>`. A task list button puts a box behind the marker a
+  and keep a quote's `>`. A task list row puts a box behind the marker a
   line has (a numbered item keeps its number) or makes a bulleted task of a
-  line with none, and takes only the box off again; a quote button quotes
+  line with none, and takes only the box off again; a quote row quotes
   the whole of every block the selection touches (a line left out of a
   paragraph would stay in the quote as a lazy line, a fence or a score would
   be cut in two), with the blank lines between them, and takes one level of
   quote off when every line is quoted already. On an empty line the four of
   them write their marker for the caret to type after, and under a line of
   a paragraph they leave a blank line first, since Pandoc lets neither a list
-  nor a quote break into a paragraph. A strikethrough button writes Pandoc's `~~` by
+  nor a quote break into a paragraph. A strikethrough row writes Pandoc's `~~` by
   the rules of bold. After it a pair raises and lowers words, Pandoc's
   `x^2^` and `H~2~O`, and then a highlight writes Pandoc's bracketed span,
   `[word]{.mark}`, which the page writes as `<mark>`: the selection or the
@@ -563,42 +563,40 @@ What it does:
   and was taken off again: a bracketed span shows its own class as text in
   any reader that is not Pandoc, and an underline is the typewriter's italic,
   which a document set in Latin Modern has no use for. What the span means is
-  still read and drawn here, as the page draws it. A small caps button beside
+  still read and drawn here, as the page draws it. A small caps row beside
   the highlight writes the third of those spans, `[word]{.smallcaps}`, its
-  two letters of two sizes stacked rather than set in a row, which is what
-  keeps the button off the heading button's shape. Neither of the two scripts carries a bare space, so a space inside one is written as
+  glyph two shapes of a letter at one height, where the heading's is one
+  shape at two. Neither of the two scripts carries a bare space, so a space inside one is written as
   Pandoc's escaped space (`x^a\ b^`, a no-break space on the page), and
   neither carries a bracket at the head of its content, since `x^[b]^` is an
   inline footnote there. Two tildes are the strikethrough and one is the
-  subscript, and the subscript button never writes a pair: over the whole of
+  subscript, and the subscript row never writes a pair: over the whole of
   a struck word, which Pandoc would read as the subscript alone, it leaves
-  the word as it stands. The bar stands in two rows, and the first
-  closes with seven buttons for what a document holds beside its words: a
-  music symbol, an equation, an equation block, a table, a picture, a
-  footnote and a horizontal rule. The second row begins under the outline
-  button, with
-  everything that switches the document as a whole. The
-  equation button wraps the selection in `$…$` and takes the dollars off again;
+  the word as it stands. The Insert menu has what a document holds beside
+  its words: an equation, an equation block, a table, a picture, a
+  footnote and a horizontal rule. The
+  equation row wraps the selection in `$…$` and takes the dollars off again;
   the equation block, the table (two columns and three rows) and the rule
   (`***`, the one form that may stand under a line of text) are written
-  where the code block button writes its block; the picture button is the link
+  where the code block row writes its block; the picture row is the link
   gesture with a `!` in front, so a selected file name goes where the
-  address goes; and the footnote button writes the reference after the words
+  address goes; and the footnote row writes the reference after the words
   the caret is in, numbered with the lowest number the document has not
   used, and opens its note at the end of the document, the only place Pandoc
-  reads one from. The music symbol button opens a panel of notes from the
+  reads one from. The Music symbol row, the last of the same menu and the
+  one that is the music's, opens a panel of notes from the
   breve to the 128th, dotted notes, two beamed pairs, rests from the whole to
   the 128th and the accidentals from the double flat to the double sharp,
   and writes the one picked at the caret as Unicode text: a figure stands in
   a sentence or a table cell as a letter does, and any other editor reads it
   as text. Until a music face travels with the extension they are drawn in
   whatever face the machine has, and a PDF typeset with TeX leaves them out.
-  Across the bar's separator from inline code, a code block button, also
+  In the Paragraph menu, a code block, also
   `Ctrl+Shift+C` (`⌥⌘C` on a Mac): on an empty line it opens a block with
   the caret after the opening backticks, where the language is typed (`abc`
   makes it a score), under the paragraph the caret is in otherwise, around
   the lines selected, and from inside a block it takes the fences off. A
-  button that acts on the selection leaves the caret in the block it was in.
+  row that acts on the selection leaves the caret in the block it was in.
   What is worth a key has one: `Ctrl+0` to `Ctrl+6` for a paragraph and the
   six heading levels, the digit being the level, and `Ctrl+Shift+C` and
   `Ctrl+Shift+T` for the code block and the task list (all of them under
@@ -611,11 +609,15 @@ What it does:
   so little to type at the head of a line that the chord bought nothing, and
   `Ctrl+Shift+U` is the desktop's on Linux before it is any editor's, where
   fcitx5's unicode addon opens its `U+` prompt on it. Strikethrough, small
-  caps, the superscript and subscript pair and the seven of the Insert group
-  have none either. The bar leads with the outline, then export, then undo
-  and redo, and the second row is the editor's own: multicursor, theme,
-  font, alignment, hyphenation and the YAML header, then score fill, staff
-  lines and score alignment, and the playhead toggle last.
+  caps, the superscript and subscript pair and the seven of the Insert menu
+  have none either. The bar is one row: the outline, then seven words that
+  are each a menu (Edit, Format, Paragraph, Insert, Page, Score and
+  Export), where a row names its key at its far edge and a row that is a
+  switch is ticked while it is on. Page is the editor's own: the outline,
+  the theme, the font, the alignment, the hyphenation and the YAML header;
+  the multicursor's switch is in Edit; and Score is the music's: the score
+  mode and the panel that keeps its keys at the side, what those keys do,
+  the playhead, and the fill, the staff lines and the place of the scores.
 - **The keys of a Markdown editor.** `Enter` continues a list, a task (left
   unchecked) or a quote, ends the list at an empty item with a blank line
   under it so that the next line is a paragraph, unnests an empty nested
@@ -639,8 +641,8 @@ What it does:
   words wraps them and leaves them selected: `*`, `_`, `~`, `^`, `$`, a
   backtick, a quote or a bracket; in a code block or a score, in an
   equation on lines of its own, in the header, and inside code, maths or an
-  address in a line the key types over the selection, and the mark buttons
-  leave those alone. An address pasted over selected words makes them a
+  address in a line the key types over the selection, and the marks of the
+  Format menu leave those alone. An address pasted over selected words makes them a
   link to it, at every selection at once, with the caret after the link;
   over an address, inside a link, code or maths, or with nothing selected,
   it is pasted as text, and a `www.` address is written with the `https://`
@@ -701,8 +703,8 @@ What it does:
   blocks it reaches and keeps the rest: on a file of 22 800 lines that is
   about 25 ms where it was over 100. A line added or taken out still redraws
   the whole, since every number below it moves.
-- **Export from the toolbar**: one button with two branches, named in the
-  panel. *Document* is HTML / PDF / HTML + PDF: each entry saves the document
+- **Export from the toolbar**: the last of its words, with two branches named
+  in its menu. *Document* is HTML / PDF / HTML + PDF: each entry saves the document
   first, so what reaches the output is always what is on screen, and renders
   it with the Lua filter the extension carries, which is what lets a document
   export from wherever it lives with no clone of this repository anywhere. The
@@ -776,7 +778,7 @@ What it does:
   fold brings the page to the head, the page is still while a line of music is
   played (the head does not go down the page inside a system), a page taken
   away from the music comes back at once, and a pause hands it back for good.
-  A toolbar toggle (`mdm.followPlayhead`) turns all of that off, and then the
+  A switch of the Score menu (`mdm.followPlayhead`) turns all of that off, and then the
   music never moves the page at all, which is what it takes to leave a long
   score sounding while the document around it is read.
   Resuming after a pause lands on the beat. What
@@ -807,7 +809,7 @@ What it does:
   the notification, with what to do about it: that same score exports as MIDI,
   which carries the program number and asks for no samples at all. MP3 is not offered: no browser can encode it.
   The exported page has no rail of buttons, so it has no audio export either.
-- **Theme menu**: a toolbar button opens, in this order, *Follow VS Code*
+- **Theme menu**: the Theme row of the Page menu opens, in this order, *Follow VS Code*
   (the default), *MDM Light*, *MDM Dark*, *MDM White* and every colour theme
   installed in VS Code. The first three are the editor's own looks, which is
   what the name says: no theme paints them, so one of them is the same editor
@@ -839,7 +841,7 @@ What it does:
   (191 KB). Nothing is installed for it and no LaTeX is involved: the equations
   beside it were already drawn in those shapes, KaTeX's own faces being
   Computer Modern, so the words and the maths of a page are one design rather
-  than two. A toolbar toggle (`mdm.textFont`) hands the text back to the
+  than two. A switch of the Page menu (`mdm.textFont`) hands the text back to the
   interface sans of the system. Only the text moves: the toolbar, the menus and
   the outline panel stay in the sans, and code, the numbers in the margin and
   the source of an open block keep their monospace.
@@ -862,15 +864,15 @@ What it does:
   the same scale.
 - **Justified prose**: paragraphs, list items and quotations are set to both
   edges of the column, every row but the last, with the spaces widened as the
-  text is typed; a toolbar toggle (`mdm.textAlign`) sets them ragged right.
+  text is typed; a switch of the Page menu (`mdm.textAlign`) sets them ragged right.
   Headings and the source of a block stay ragged. Chromium justifies a row
   after choosing where it breaks, so the words each row ends on are the same
   either way, and the exported page ends them there too, as does the PDF
   printed from it. In a PDF typeset with LaTeX, TeX justifies the whole
   paragraph at once and may take a word more into a row, which it does on two
-  rows of `example.mdm`. The score alignment toggle further
-  along the row draws a quarter note between two lines of text, so the two alignments of
-  the bar do not look alike.
+  rows of `example.mdm`. The row that sets the scores at the left draws a
+  quarter note between two lines of text, so the two alignments of the bar
+  do not look alike.
 
 - **Scores**: no background by default, so a score reads as part of the
   document the way an equation does (`mdm.scoreFill`: `none`, `paper`,
@@ -913,10 +915,10 @@ What it does:
   block under the card follows what is typed. The YAML goes away again as
   the source of a table does: when the caret leaves it, on a click in the
   text, in the margin or on the bar, and on a second click on the block.
-  The YAML button on the second row, after the hyphenation menu, shows the
-  YAML in place of the drawing instead, and what it shows stays until the
-  button is pressed again (disabled if the file has no header). The button
-  is the setting `mdm.frontMatter`, remembered and followed by every
+  The YAML header row of the Page menu, after the hyphenation, shows the
+  YAML in place of the drawing instead, ticked, and what it shows stays until
+  the row is pressed again (greyed if the file has no header). The row is
+  the setting `mdm.frontMatter`, remembered and followed by every
   document: `hidden`, the default, puts the YAML away and draws the block,
   and `shown` keeps the YAML at the head of every document that has a
   header, with the block drawn under it only while the caret is in it, so
@@ -925,7 +927,7 @@ What it does:
   on it, as beside a table, and beside the YAML's card for as long as the
   card is shown; it copies the header as written, `---` fences included.
   A header that prints nothing (only a `lang`, say) draws nothing, and the
-  button is the way to its YAML. The setting changes nothing of an export,
+  row is the way to its YAML. The setting changes nothing of an export,
   which always opens with the block.
   A header that is put away, with the blank line under it, is kept outside
   the editor's text and spliced back on every save (`transforms.js`), so the
@@ -951,7 +953,8 @@ What it does:
   a list it stands in). A score is
   copied without its layout directives (`%%staffwidth` and the like), which
   size it for this document and mean nothing pasted elsewhere.
-- **The buttons remember what they were left on.** Every toolbar button that
+- **The bar remembers what it was left on.** Every button of it and every
+  switch of its menus that
   holds a state writes it as an `mdm.*` setting instead of repainting itself,
   which is what makes a document open showing what it was closed with and
   keeps two editors on two files in step. Also `mdm.multicursorMatch`, which

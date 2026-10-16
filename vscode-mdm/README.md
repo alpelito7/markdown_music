@@ -20,20 +20,45 @@ Repeats, ties, lyrics, several voices and the rest of the notation are in the [A
 
 The text is the file, and the editor reads it as the export does: Pandoc's Markdown, with CommonMark's blank lines. Lists, quotes, callouts, tables, footnotes, numbered equations, figures, tables and sections are drawn in place, and a line shows its source while the caret is on it. With a bibliography in the header and Quarto installed, a citation reads as the page prints it, "Knuth (1984)". A pasted picture is saved in a folder beside the document. `Ctrl+B` and `Ctrl+I` mark words, `Ctrl+1` to `Ctrl+6` set a heading's level and `Ctrl+F` searches.
 
+## Score navigation
+
+**Score navigation**, the first row of the **Score** menu, freezes the text and gives the keys to the scores: a cursor stands on a staff, and what is written there is written into the score's ABC. The row again gives the text back.
+
+| Keys | What they do |
+|---|---|
+| `←` `→`, `↑` `↓` | Walk the cursor along its part, and up and down the staff. A click puts it where it is made. |
+| `Ctrl+↑` `↓`, `Ctrl+Shift+↑` `↓` | The staff above or below; with nothing selected, the same part a line away. |
+| `1` to `7`, `0` | Write a note where the cursor stands, from a whole note down to a sixty-fourth, or a rest. |
+| `Ctrl` or `Alt` with them | Put it in before the cursor's note, or after it. |
+| `Enter`, `Delete`, `Backspace` | Add a note to a chord, and take one or a rest out; `Backspace` steps back. |
+| `Shift+←` `→` | Select in the cursor's part; with `Ctrl`, in every part. |
+| `Ctrl+Shift+↑` `↓` `Space` | With a selection: walk the parts, and leave one out or take it back. |
+| `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z` | Select all, copy, cut, paste, undo. |
+| `Space` | Play from the cursor, or the selection alone. |
+| `Ctrl+←` `→` | Add a bar beside the cursor's, or beside a selection in its parts. |
+
+With the pointer on a score, two arrows at the end of each line send its last bar down or bring the next one up, or drag to any barline, and a `+` under a barline adds a bar.
+
 ## The toolbar
 
-The first row writes: headings, marks on words, blocks, and what a document holds beside its words (a music symbol, an equation, a table, a picture, a footnote, a rule). A tooltip names the button's key where it has one. The two buttons at its left open the outline of the headings and export the document.
+One row. The button at its left opens the outline of the headings, and seven words each open a menu. A row of a menu names its key where it has one, and a row that is a switch is ticked while it is on.
 
-The second row holds settings shared by every document, except the hyphenation, which each file keeps:
-
-- **Multicursor**: `Ctrl+D` adds the next match of the selection, whole words only unless this button is on. `Alt+click` adds a caret.
-- **Theme**: follows VS Code by default; MDM Light, MDM Dark and MDM White are the editor's own.
-- **Font**: Latin Modern Roman, the face of a LaTeX document, which comes with the extension, or the system's sans. Code keeps its monospace.
-- **Justify**: paragraphs justified, or ragged on the right. The lines break on the same words either way.
-- **Hyphenation**: words stay whole until a language is chosen here. It is written into the YAML header as `lang:`, in a new, hidden header if the file had none; the hyphen is only drawn, never saved.
-- **YAML**: a header with a title, an author or an abstract is drawn as the page's title block, and a click on the block opens its YAML, as a table opens. The button shows the YAML in place of the block, in every document, until it is pressed again.
-- **Score fill**, **staff lines** and **score alignment**: a paper, slate or brass ground under the scores, staff lines in gray or in ink, and scores centred or at the left.
-- **Follow**: while a tune plays, the page scrolls to keep the sounding system in view; turned off, it stays where you are reading.
+- **Edit**: undo and redo, find and replace, the carets and the lines. `Ctrl+D` adds the next match of the selection, whole words only unless **Match inside words** is ticked. `Alt+click` adds a caret.
+- **Format**: the marks on words, from bold to a link and inline code.
+- **Paragraph**: the heading levels, the code block, the lists and the quote.
+- **Insert**: an equation, a table, a picture, a footnote, a rule, a music symbol.
+- **Page**: settings shared by every document, except the hyphenation, which each file keeps.
+  - **Theme**: follows VS Code by default; MDM Light, MDM Dark and MDM White are the editor's own.
+  - **LaTeX font**: Latin Modern Roman, the face of a LaTeX document, which comes with the extension; turned off, the system's sans. Code keeps its monospace.
+  - **Justified text**: paragraphs justified, or ragged on the right. The lines break on the same words either way.
+  - **Hyphenation**: words stay whole until a language is chosen here. It is written into the YAML header as `lang:`, in a new, hidden header if the file had none; the hyphen is only drawn, never saved.
+  - **YAML header**: a header with a title, an author or an abstract is drawn as the page's title block, and a click on the block opens its YAML, as a table opens. This row shows the YAML in place of the block, in every document, until it is unticked.
+- **Score**: the music.
+  - **Score navigation** (above), and **Side panel**, on unless you turn it off, which keeps the mode in sight down the right edge while it is on, with both switches at its head, on one of two faces: **Buttons**, the note lengths and what the keys do as buttons, or **Keys**, the keys of the mode, to read beside the score as you write.
+  - **Notes**, **Bars**, **Move and select**: what the keys of Score navigation do, each beside its key.
+  - **Follow the playhead**: the page scrolls to keep the sounding system in view while a tune plays; turned off, it stays where you are reading.
+  - **Score fill**, **Ink staff lines**, **Scores at the left**: a paper, slate or brass ground under the scores, staff lines in ink rather than gray, and scores at the left rather than centred.
+- **Export**: the document, and the audio of its scores (below).
 
 ### Export
 

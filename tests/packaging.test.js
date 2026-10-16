@@ -238,7 +238,8 @@ test("Writing Markdown is kept under half the words it had before its clip", () 
 
 // The two other passages that grew a clause per feature in the same week,
 // cut in the same pass (2026-10-05). The line of the YAML button in the list
-// of the toolbar went from 6 words to 93 as the title block was built, and
+// of the toolbar (the YAML header row under Page since the bar became words
+// over menus) went from 6 words to 93 as the title block was built, and
 // Export from 68 to 152 as the printed PDF got its sheet, its contents and
 // the keys of its header. They are 49 and 102: what a header is drawn as and
 // what the button does with it, and what a PDF needs, what it has and where
@@ -248,9 +249,9 @@ test("Writing Markdown is kept under half the words it had before its clip", () 
 test("the YAML button's line and Export are kept at the words they were cut to", () => {
   const md = read(EXT, "README.md");
   const count = (text) => text.split(/\s+/).filter(Boolean).length;
-  const yaml = md.split("\n").filter((l) => /^- \*\*YAML\*\*:/.test(l));
-  assert.equal(yaml.length, 1, "the toolbar's list does not have one line for the YAML button");
-  const y = count(yaml[0].replace(/^- /, ""));
+  const yaml = md.split("\n").filter((l) => /^\s*- \*\*YAML header\*\*:/.test(l));
+  assert.equal(yaml.length, 1, "the toolbar's list does not have one line for the YAML header row");
+  const y = count(yaml[0].replace(/^\s*- /, ""));
   assert.ok(y <= 51, `the YAML button's line has ${y} words; it was cut from 93 to 49 on 2026-10-05`);
   const from = md.indexOf("\n### Export\n");
   assert.ok(from > 0, "the README has no Export under its toolbar");
@@ -324,4 +325,58 @@ test("the tour's document opens on the title its header names, and says it once"
   assert.ok(!/^#{1,6}\s/.test(first), `the text opens on a heading under the title block: ${first}`);
   const again = m[2].split("\n").filter((l) => /^#{1,6}\s/.test(l) && l.replace(/^#+\s*/, "").trim() === title);
   assert.deepEqual(again, [], "the title is written again as a heading");
+});
+
+// The takes, as tools/demo-clips/clips.js holds them, whether the README
+// shows them or not: the test above reads only the alt texts the README
+// carries, and a take is written before the README marks it.
+test("every take's alt text is at most three sentences", () => {
+  const { clips } = require(path.join(ROOT, "tools", "demo-clips", "clips.js"));
+  assert.ok(clips.length >= 3, "clips.js holds fewer takes than the three recorded");
+  for (const clip of clips) {
+    const sentences = (clip.alt.match(/[.!?](?=\s|$)/g) || []).length;
+    assert.ok(sentences >= 1 && sentences <= 3, `the take ${clip.id} has ${sentences} sentences of alt text`);
+  }
+});
+
+// What the take of the score mode is recorded on, where its document was
+// decided and not only written. An organ score, the owner's choice, for the
+// three staves the keys that work across parts need. Its one line set to the
+// full measure, or the system grows to the right as the take writes in it.
+// Nothing written in it: four bars of rests on each staff, since the take
+// begins from nothing and writes every note (the owner, 2026-10-06, "empieza
+// el pentagrama desde cero"; before that both hands were written and the
+// pedal waited). Four bars, so that what the take copies has two empty ones
+// to go into and the line's end two to send down.
+test("the take of the score mode is recorded on an organ score of four empty bars, and ends with its first and third staff copied into the last two", () => {
+  const { clips } = require(path.join(ROOT, "tools", "demo-clips", "clips.js"));
+  const take = clips.find((c) => c.id === "score-navigation");
+  assert.ok(take, "clips.js has no take of the score mode");
+  const doc = read(ROOT, "tools", "demo-clips", take.doc);
+  const fence = /```\{\.abc[^}]*\}\n([\s\S]*?)\n```/.exec(doc);
+  assert.ok(fence, "the take's document has no score");
+  const abc = fence[1].split("\n");
+  assert.ok(abc.includes("%%score {RH LH} Ped"), "the score is not two manuals in a brace over a pedal");
+  assert.ok(abc.includes("%%stretchlast true"), "the score's one line is not set to the full measure");
+  assert.deepEqual(abc.filter((l) => /^V:/.test(l)), ["V:RH", "V:LH clef=bass", "V:Ped clef=bass"]);
+  const music = abc.filter((l) => /\|/.test(l));
+  assert.deepEqual(music, take.before, "the document and the script disagree on the score the take begins on");
+  const bars = (line) => line.replace(/\s*\|\]?$/, "").split(" | ");
+  for (const part of music) assert.deepEqual(bars(part), ["z4", "z4", "z4", "z4"], "a staff does not wait as four whole rests: " + part);
+  // What the keys write: two bars in every part and nothing in the two
+  // after, with no rest left among the notes.
+  for (const part of [take.right, take.left, take.pedal]) {
+    assert.deepEqual(bars(part).slice(2), ["z4", "z4"], "the take writes past its second bar: " + part);
+    assert.ok(bars(part).slice(0, 2).every((bar) => !/z/.test(bar)), "the take leaves a rest in what it writes: " + part);
+  }
+  // What it is held to at the end: two lines of two bars a part, the right
+  // hand's and the pedal's second line the copy of their first, and the left
+  // hand's second line the two rests it began with.
+  assert.equal(take.written.length, 6);
+  assert.deepEqual(take.written.slice(0, 2).map(bars), [bars(take.right).slice(0, 2), bars(take.right).slice(0, 2)]);
+  assert.deepEqual(take.written.slice(2, 4).map(bars), [bars(take.left).slice(0, 2), ["z4", "z4"]]);
+  assert.deepEqual(take.written.slice(4, 6).map(bars), [bars(take.pedal).slice(0, 2), bars(take.pedal).slice(0, 2)]);
+  // A frame of its own: two systems of three staves do not stand in the
+  // pane the other takes are recorded in.
+  assert.ok(take.settings["window.zoomLevel"] < 2, "the take is framed as the others, where its two systems do not fit");
 });

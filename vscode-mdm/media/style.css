@@ -198,6 +198,147 @@ body {
   color: color-mix(in srgb, var(--mdm-ink) 50%, transparent);
   font-size: 13px;
 }
+
+/* ---------- The score panel ----------
+
+   What Score navigation does, down the right edge of the editor while it is
+   asked for and the mode is on (buildScorePanel and applyScorePanel in
+   main.js; #app carries mdm-score-panel--open then): the twin of the outline
+   down the left, on its ground and behind its rule. As wide as its widest
+   row, so that no key is cut whatever the system's sans measures, but never
+   so wide that the editor is left less than the 200px the outline leaves it
+   (EDITOR_MIN in main.js); in a pane too short for it, it scrolls inside
+   itself. As wide on either of its faces: as wide as the wider, and wider by
+   the room of its scroll bar on both while either is taller than the pane
+   (fitScorePanelWidth in main.js), the room being the rows' on a face that
+   does not scroll, and not a gutter down its right edge. */
+#app .mdm-score-panel {
+  display: none;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  max-width: calc(100% - 200px);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-left: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
+  background: color-mix(in srgb, var(--mdm-ink) 4%, var(--mdm-syn-page));
+  padding: 6px 0 12px;
+}
+#app.mdm-score-panel--open .mdm-score-panel {
+  display: block;
+}
+/* The name over a run of its rows, written as the outline writes its own. */
+#app .mdm-score-panel__title {
+  padding: 10px 14px 4px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* The head of the panel: the two switches that bring it up, Score
+   navigation at its left edge and Side panel at its right, each a button of
+   the bar with its glyph alone and its name in the bar's tip, on the disc
+   while what it names is on (buildScorePanel in main.js; the owner's pick
+   of 2026-10-15, variant 2 of design-score-panel-rest.html, with the glyph
+   alone on both as he asked). The tips open inward (.mdm-tip--s-start and
+   .mdm-tip--s-end, with the tooltips further down). */
+#app .mdm-score-panel__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0 12px;
+}
+/* The two words under the switches at its head that choose the face in sight,
+   Buttons and Keys (buildScorePanel in main.js): one box parted in two, each
+   word in the brass of the chrome, and the face in sight on the disc a
+   button of the bar wears while it holds a state (.mdm-btn--on), with the
+   wash under the pointer of any button. Drawn as variant E of
+   design-score-key-help.html drew them, which the owner picked on
+   2026-10-14: the box and its padding are the drawing's. Named with the
+   button each word is, as a key of the pad is, for the rule of .mdm-btn
+   further down to give way. The box clips nothing: the round of its corners
+   is the end words' own, since a box that clipped them would clip the ring
+   a word with the focus wears as well (found by a second reading of the
+   code: a word reached by the keyboard showed no ring). */
+#app .mdm-score-panel__switch {
+  display: flex;
+  margin: 6px 12px 2px;
+  border: 1px solid color-mix(in srgb, var(--mdm-ink) 18%, transparent);
+  border-radius: 5px;
+}
+#app .mdm-btn.mdm-score-panel__tab {
+  flex: 1;
+  width: auto;
+  height: auto;
+  padding: 3px 0 4px;
+  border-radius: 0;
+  font: 600 12px var(--mdm-sans);
+}
+#app .mdm-btn.mdm-score-panel__tab:first-child {
+  border-radius: 4px 0 0 4px;
+}
+#app .mdm-btn.mdm-score-panel__tab:last-child {
+  border-radius: 0 4px 4px 0;
+}
+#app .mdm-btn.mdm-score-panel__tab + .mdm-btn.mdm-score-panel__tab {
+  border-left: 1px solid color-mix(in srgb, var(--mdm-ink) 18%, transparent);
+}
+/* The face out of sight: laid out all the same, so that the panel is as wide
+   as the wider of the two faces and the text keeps its wrap as the face
+   changes; with no height, and nothing in it to see, to reach or to read. */
+#app .mdm-score-panel__face--away {
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+/* A line of the Keys face: a legend, since nothing on that face is pressed,
+   and in the ink of a row, since on that face every line is read and none
+   has to be told from a row by being quieter (the owner's ask of
+   2026-10-14: the face written as the Buttons face is). Its key keeps the
+   quiet ink of a key. */
+#app .mdm-menu__legend.mdm-score-panel__line {
+  color: var(--mdm-ink);
+}
+/* The pad: the figures in a row, and under them the rest, the chord and what
+   takes a note out. A key of it is a button of the bar with the key of the
+   keyboard that does the same written under its glyph, so it is as tall as
+   the two and as wide as the wider of them; the one that is the figure in
+   use stands on the disc, the mark a button of the bar wears. */
+#app .mdm-score-panel__pads {
+  padding: 0 12px;
+}
+#app .mdm-score-panel__pad {
+  display: flex;
+  gap: 6px;
+}
+#app .mdm-score-panel__pad + .mdm-score-panel__pad {
+  margin-top: 2px;
+}
+/* Named with the button it is: the rule of a button of the bar stands further
+   down this sheet, at the weight a single class has, and would give the key
+   its own 28px square back (it did: the glyph was pressed into 13px of
+   height over its key, measured). */
+#app .mdm-btn.mdm-score-panel__key {
+  flex-direction: column;
+  gap: 4px;
+  width: auto;
+  min-width: 30px;
+  height: 42px;
+  padding: 0 4px;
+}
+#app .mdm-score-panel__cap {
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font: 11px/1 var(--mdm-sans);
+}
+/* The line that names the key under the pointer, as the panel of the music
+   symbols names its cells: blank, and still a line, with none under it. */
+#app .mdm-score-panel__caption {
+  padding: 4px 2px 2px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font-size: 12px;
+  white-space: nowrap;
+}
 #app .cm-editor {
   height: 100%;
   /* The page the document is written on; see --mdm-syn-page below. */
@@ -841,14 +982,39 @@ body {
   margin: 0 4px;
   background: color-mix(in srgb, var(--mdm-ink) 18%, transparent);
 }
-/* The end of a row of buttons (rowBreak in main.js): the toolbar wraps, so
-   a child taking the whole width sends the next button to a row of its own.
-   The player's row does the same with its own width; this one draws nothing
-   and takes no height, so the two rows stand as close as two wrapped rows
-   of buttons would. */
-#app .mdm-toolbar__break {
-  width: 100%;
-  height: 0;
+/* A word of the bar (toolbarButton in main.js): a control that is its own
+   name, seven of them side by side as a menu bar (variant A of
+   design-toolbar.html, the owner's pick of 2026-10-13). In the brass, as
+   every glyph of the chrome is, because a word here is a control and not
+   prose; at the weight the search row writes its Aa and ab in and at the
+   size of a menu's rows. As tall as a button, so a row of words and a row
+   of buttons are one height. */
+#app .mdm-word {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--mdm-chrome-ink);
+  font: 600 13px var(--mdm-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* The ladder of the buttons: the wash under the pointer, and the disc of a
+   held state while the word's menu is open, which is the whole of the mark. */
+#app .mdm-word:hover {
+  background: color-mix(in srgb, var(--mdm-play-accent) 12%, transparent);
+}
+#app .mdm-word:focus {
+  outline: none;
+}
+#app .mdm-word:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-ink) 30%, transparent);
+}
+#app .mdm-toolbar__item--open > .mdm-word {
+  background: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
 }
 /* Every glyph of the chrome is brass, at rest and under the pointer alike:
    the buttons of this bar, the round pair on a block, the transport of the
@@ -891,12 +1057,15 @@ body {
 #app .mdm-btn--on {
   background: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
 }
-/* Nothing to do: undo with no history, the header button of a file without
-   one, the Audio rows of the export panel in a document with no score. One
-   declaration for the three of them, so that a row of a menu greys out at
+/* Nothing to do: undo with no history, the header row of a file without
+   one, the Audio rows of the export panel in a document with no score, and
+   whatever writes into the text while the score mode freezes it (scoreMode
+   in main.js), a button, a row, or a word with nothing but such rows under
+   it. One declaration for all of them, so that a row of a menu greys out at
    exactly the weight a button of the bar does. */
 #app .mdm-btn--off,
-#app .mdm-menu__item--off {
+#app .mdm-menu__item--off,
+#app.mdm--score-mode .mdm-btn--edit {
   opacity: 0.35;
   pointer-events: none;
 }
@@ -1010,7 +1179,10 @@ body {
   background: color-mix(in srgb, var(--mdm-play-accent) 45%, transparent);
   outline: 1px solid var(--mdm-play-accent);
 }
-/* Drop-down panels (export, theme, score fill). */
+/* Drop-down panels: the menu under each word of the bar, and the submenus
+   some of their rows lead to (the themes and the languages under Page, the
+   music symbols under Insert, the runs of the mode's keys and the fills
+   under Score). */
 #app .mdm-menu {
   display: none;
   position: absolute;
@@ -1042,7 +1214,11 @@ body {
      to scroll (the theme names) grew a horizontal bar under it as well. */
   scrollbar-gutter: stable;
 }
-#app .mdm-toolbar__item--open .mdm-menu {
+/* A panel is open with the item it hangs from, and a submenu with the row
+   it hangs from. Their children and not their descendants: a submenu is
+   inside the panel of its item, and is not open because that panel is. */
+#app .mdm-toolbar__item--open > .mdm-menu,
+#app .mdm-menu__group--open > .mdm-menu {
   display: block;
 }
 #app .mdm-menu__item {
@@ -1070,6 +1246,101 @@ body {
   padding-left: 22px;
   color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
   font-size: 12px;
+}
+/* A legend: a line of a menu that only shows keys, a pair of them or a run
+   (menuRow in main.js). Laid out as a row is, so that its name and its keys
+   stand in the columns the rows keep, and written in the quiet ink of what a
+   menu says without being pressed (the headers, the line under Audio): no
+   wash under the pointer, and no hand. */
+#app .mdm-menu__legend {
+  display: flex;
+  align-items: center;
+  padding: 5px 14px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: default;
+}
+/* The glyph of a row, the one its command wore as a button of the bar
+   (fillMenu in main.js): in the brass and at the size the bar draws its
+   glyphs. In a column of its own, kept by every row of a panel in which one
+   row has a glyph, so the names start on one line. */
+#app .mdm-menu__icon {
+  display: inline-flex;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-right: 9px;
+  color: var(--mdm-chrome-ink);
+}
+#app .mdm-menu__icon svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  stroke-width: 0;
+}
+/* A rule between two runs of rows. */
+#app .mdm-menu__rule {
+  height: 1px;
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--mdm-ink) 12%, transparent);
+}
+/* A row that leads to more says so at its far edge, where another row writes
+   its key, and as quietly. */
+#app .mdm-menu__more {
+  display: inline-flex;
+  margin-left: auto;
+  padding-left: 22px;
+  color: color-mix(in srgb, var(--mdm-ink) 55%, transparent);
+}
+#app .mdm-menu__more svg {
+  width: 8px;
+  height: 8px;
+  fill: currentColor;
+}
+/* The submenu it leads to, beside the panel and not under it: lifted by the
+   panel's own padding and border (SUB_RISE in main.js), so its first row
+   stands level with the row it hangs from, and a hair off the panel's edge.
+   To the left where the pane ends before it would (placeSub). The row keeps
+   the wash of a row under the pointer for as long as its submenu is up. */
+#app .mdm-menu__group {
+  position: relative;
+}
+#app .mdm-menu--sub {
+  top: -5px;
+  left: 100%;
+  margin: 0 0 0 2px;
+}
+#app .mdm-menu--sub.mdm-menu--left {
+  left: auto;
+  right: 100%;
+  margin: 0 2px 0 0;
+}
+#app .mdm-menu__group--open > .mdm-menu__item {
+  background: color-mix(in srgb, var(--mdm-ink) 10%, transparent);
+}
+/* The menu under a word keeps no room for a scroll bar it will rarely have,
+   and neither does a submenu of a known length. The room every panel
+   reserves (scrollbar-gutter above) is for a list long enough to scroll,
+   the theme names (mdm-menu--long), and anywhere else it was ten pixels of
+   bare panel down the right side of the menu: the rules between its runs of
+   rows touched the border on the left and stopped short of it on the right
+   (measured in the harness with the bars drawn, under the words, and seen
+   again in the first captures of the Score menu's submenus). In a pane too
+   short for it the menu still scrolls (fitUnderBar and placeSub in main.js
+   give it the room there is), and is then as much wider as its bar is, so
+   the bar covers nothing of a row (256px for 250, measured in the real
+   window). */
+#app .mdm-word + .mdm-menu,
+#app .mdm-menu--sub:not(.mdm-menu--long) {
+  scrollbar-gutter: auto;
+}
+/* A panel that scrolls cuts off whatever hangs outside it, and a submenu
+   hangs outside: the panel that holds one gives up the scrolling, which its
+   few rows never needed, and the submenu keeps its own. */
+#app .mdm-word + .mdm-menu--nest {
+  max-height: none;
+  overflow: visible;
 }
 /* The export panel names its two branches, Document and Audio, and the Audio
    header carries one quiet line saying what a row under it writes: the rail
@@ -1140,7 +1411,8 @@ body {
 /* ---------- Tooltips ----------
 
    Drawn from aria-label on anything carrying .mdm-tip: the toolbar and the
-   player row in it (south), the block chrome (west). A native title never
+   player row in it (south), the block chrome (west), the switches at the
+   head of the score panel (south, opening inward). A native title never
    shows inside the VS Code webview. */
 #app .mdm-tip {
   position: relative;
@@ -1196,6 +1468,27 @@ body {
   right: 100%;
   top: 50%;
   transform: translate(-6px, -50%);
+}
+/* South as well, but from the button's left edge, or to its right edge:
+   for a button at the edge of a box that cuts what hangs past it, the
+   switches at the head of the score panel, which scrolls (the owner's ask
+   of 2026-10-15: their names in a tip). */
+#app .mdm-tip--s-start::after {
+  top: 100%;
+  left: 0;
+  transform: translateY(6px);
+}
+#app .mdm-tip--s-end::after {
+  top: 100%;
+  right: 0;
+  transform: translateY(6px);
+}
+/* Those of the panel put away while a menu of the bar is open, as the bar's
+   own are: a menu or a submenu may stand over the panel (placeSub puts one
+   to the right where the pane has room), and a tip, at z-index 10, would be
+   drawn over it (found by a second reading of the code, 2026-10-15). */
+#app:has(.mdm-toolbar__item--open) .mdm-score-panel .mdm-tip::after {
+  display: none;
 }
 
 /* ---------- The title block ----------
@@ -2917,6 +3210,304 @@ body {
   stroke-width: 1.6px;
   fill: none;
 }
+/* The score mode's cursor (drawScoreCursor in main.js), in the same brass
+   and the same units: a wash over the place it stands on, from the top line
+   to the bottom one, under the ink, and an outline at the step, a staff
+   space tall, where the head of a note written there would sit, drawn at
+   the playing cursor's weight. My pick of design/design-score-mode.html
+   until the owner chooses (2026-09-28). It is chrome, as the rail is, and
+   the exported page draws none. */
+#app code.language-abc svg .mdm-score-cursor__beat {
+  fill: var(--mdm-play-accent);
+  fill-opacity: 0.16;
+  /* Named, because the drawing hands its shapes a stroke to inherit: left
+     to it, the wash came out framed in the ink of the staff, black on the
+     light side and grey on the dark (seen in design-score-mode.html). */
+  stroke: none;
+}
+#app code.language-abc svg .mdm-score-cursor__step {
+  fill: none;
+  stroke: var(--mdm-play-accent);
+  stroke-width: 1.6px;
+}
+/* Off the staff, the ledger lines a note written at the cursor's step would
+   stand on (drawScoreCursor), so the note meant reads off them: in the grey
+   the staff's lines take when they are set grey (mdm.staffLines, below),
+   one value per side, and not in the brass, since they are lines of the
+   staff the note would make and not the cursor. The owner's "rayitas,
+   quizás en gris" (2026-10-02); my pick of the grey until they choose. */
+#app code.language-abc svg .mdm-score-cursor__ledger {
+  fill: #a3a3a3;
+  stroke: none;
+}
+#app.mdm--dark code.language-abc svg .mdm-score-cursor__ledger {
+  fill: #6f6f6f;
+}
+/* A stretch chosen in the mode (drawScoreSelection in main.js): a band of
+   the same brass under the ink, over the staff of each voice it is chosen
+   over, or over every staff of the line, and lighter than the cursor's
+   column, with its corners marked in the brass at the weight of the
+   cursor's outline, each a pair of arms and nothing between them. The
+   band was my pick of design-score-mode.html (2026-09-29) and the corners
+   are the owner's J of its 4 bis (2026-10-06), out of six outlines drawn
+   whole, a dashed one being what he had turned down: the band alone left
+   the ends of a stretch hard to see on the dark side. No fill is named
+   for the corners because a path left to itself is filled, and each
+   would be a black triangle. */
+#app code.language-abc svg .mdm-score-selection__band {
+  fill: var(--mdm-play-accent);
+  fill-opacity: 0.1;
+  stroke: none;
+}
+#app code.language-abc svg .mdm-score-selection__corner {
+  fill: none;
+  stroke: var(--mdm-play-accent);
+  stroke-width: 1.6px;
+  stroke-linejoin: round;
+}
+/* While a stretch is chosen the cursor is not drawn (drawScoreCursor in
+   main.js, the owner's call of 2026-10-04): what is chosen says where the
+   reader is. visibility and not display, as while the music sounds: the
+   notice of a refusal is placed off the column's box (scoreNotice). */
+#app code.language-abc svg .mdm-score-cursor--aside {
+  visibility: hidden;
+}
+/* A copy made in the mode (pulseScoreCopy in main.js): the wash of what
+   was copied, the stretch's band or the cursor's column, starts at the
+   weight the copy button's pulse has over a block (28%, above) and settles
+   back onto its own in the same half second. Kept to what was copied,
+   where the button's pulse is over the whole block it copies. */
+@keyframes mdm-score-copy-band {
+  0% {
+    fill-opacity: 0.28;
+  }
+  100% {
+    fill-opacity: 0.1;
+  }
+}
+@keyframes mdm-score-copy-beat {
+  0% {
+    fill-opacity: 0.28;
+  }
+  100% {
+    fill-opacity: 0.16;
+  }
+}
+#app code.language-abc svg.mdm-score-copied .mdm-score-selection__band {
+  animation: mdm-score-copy-band 0.5s ease-out;
+}
+#app code.language-abc svg.mdm-score-copied .mdm-score-cursor__beat {
+  animation: mdm-score-copy-beat 0.5s ease-out;
+}
+/* What a stretch takes in, in its ink (inkScoreSelection in main.js): in
+   the brass, everything Delete would take with it. The wash alone is one
+   band a staff, and on a staff two voices share it could not say which of
+   them was chosen. Not while the music sounds: the brass is then the
+   sounding note's alone, and the wash still says where the stretch is.
+
+   The class is on what abcjs drew for each thing that would go: the group
+   of a note or a rest, of a barline, of a tuplet, of a dynamic of two
+   letters, and a beam, an arc, a dynamic of one letter or a hairpin by its
+   own shape. All of a group takes the brass: the note's chord symbol and
+   the signs over it along with its heads, and the syllables under it,
+   since Delete takes them all with the note. The owner's rules of
+   2026-10-06, three in an afternoon. On a stretch whose syllables were in
+   the brass, "más nada que no sea el score y las notas debe estar dibujado
+   en la selección": the notes alone. Then, taking that back, "que se
+   señale en latón todo lo que de apretar Delete será borrado", under
+   which the syllables stayed in the score's ink, Delete leaving them
+   written. Then "el delete debe borrarlo todo por lo que debe marcarse
+   todo lo que se borra": Delete takes them (wordsCut in mdm-bars.js), and
+   they are marked. A hairpin and the bracket of an ending are drawn by
+   their stroke, and take the brass in it. */
+#app.mdm--score-mode:not(.mdm--score-sounding) code.language-abc svg .mdm-score-picked,
+#app.mdm--score-mode:not(.mdm--score-sounding) code.language-abc svg .mdm-score-picked * {
+  fill: var(--mdm-play-accent);
+}
+#app.mdm--score-mode:not(.mdm--score-sounding) code.language-abc svg .mdm-score-picked[stroke="currentColor"],
+#app.mdm--score-mode:not(.mdm--score-sounding) code.language-abc svg .mdm-score-picked [stroke="currentColor"] {
+  stroke: var(--mdm-play-accent);
+}
+/* One mark of where the music is at a time (scoreHearsPlayer): while the
+   music sounds on the cursor's score the player's line walks and the cursor
+   steps aside, and while it is still in the mode the cursor is where it
+   will start from, so a paused line is not drawn. visibility and not
+   display, since the pane is brought to the line by its geometry
+   (showPlayhead). */
+#app.mdm--score-sounding code.language-abc svg .mdm-score-cursor,
+#app.mdm--score-mode:not(.mdm--score-sounding) code.language-abc svg .mdm-play-cursor {
+  visibility: hidden;
+}
+/* The end of a line taken by the pointer (the break drag in main.js): the
+   barline it would end on, under a column of the brass (barColumn), the
+   same column the + of the chrome offers its barline with, below. A wash
+   and not a stroke, so it reads as a place offered and not as the playing
+   line; it was a dashed line, which the owner did not like (2026-09-29). */
+#app code.language-abc svg .mdm-score-break {
+  fill: var(--mdm-play-accent);
+  fill-opacity: 0.2;
+  stroke: none;
+}
+/* Why a move of bars was not made (scoreNotice), over the cursor for three
+   seconds: the tooltip's own face, since it is the same kind of word. */
+#app .mdm-score-notice {
+  position: absolute;
+  z-index: 10;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #1f2328;
+  color: #fff;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  font-weight: normal;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* The chrome of a score in the mode (showScoreEdits in main.js): a pair of
+   buttons at every line's end, a bar later and a bar earlier, and a + under
+   the barline nearest the pointer, the owner's pick A of
+   design-score-editing.html (2026-09-29). The rail's buttons in make and
+   state: a brass glyph at rest, the 12% brass wash under the pointer, and
+   greyed at the weight every button of the editor greys out at
+   (.mdm-btn--off) when the engine would refuse the change, but still taking
+   the pointer, since the tip then says why. The ground under the glyph is
+   the one it stands on, the page with the score's fill over it, and opaque:
+   the + stands on the staff's lines, and so does the pair at a pane too
+   narrow for the room past a line's end. A layer of the block with no size,
+   so nothing of it is laid out; shown while the pointer is over the score. */
+#app .mdm-score-edit {
+  --mdm-edit-fill: transparent;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 2;
+  display: none;
+  pointer-events: none;
+}
+#app.mdm-score--filled .mdm-score-edit {
+  --mdm-edit-fill: var(--mdm-score-fill);
+}
+#app.mdm--score-mode .mdm-score-edit.mdm-score-edit--shown {
+  display: block;
+}
+#app .mdm-score-end {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#app .mdm-score-edit [role="button"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--mdm-chrome-ink);
+  background: linear-gradient(var(--mdm-edit-fill), var(--mdm-edit-fill)), var(--mdm-syn-page);
+  pointer-events: auto;
+  cursor: pointer;
+}
+#app .mdm-score-edit .mdm-score-add {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  display: none;
+}
+#app .mdm-score-edit .mdm-score-add.mdm-score-add--shown {
+  display: flex;
+}
+#app .mdm-score-edit [role="button"] svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+#app .mdm-score-edit [role="button"]:hover {
+  background: linear-gradient(
+      color-mix(in srgb, var(--mdm-play-accent) 12%, transparent),
+      color-mix(in srgb, var(--mdm-play-accent) 12%, transparent)
+    ),
+    linear-gradient(var(--mdm-edit-fill), var(--mdm-edit-fill)), var(--mdm-syn-page);
+}
+#app .mdm-score-edit [role="button"].mdm-score-edit--off {
+  cursor: default;
+}
+#app .mdm-score-edit [role="button"].mdm-score-edit--off:hover {
+  background: linear-gradient(var(--mdm-edit-fill), var(--mdm-edit-fill)), var(--mdm-syn-page);
+}
+#app .mdm-score-edit [role="button"].mdm-score-edit--off svg {
+  opacity: 0.35;
+}
+/* Its tip, the face of the editor's own (.mdm-tip), placed by hand inside
+   the block, and shown after the same pause. */
+#app .mdm-score-edit__tip {
+  position: absolute;
+  z-index: 10;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #1f2328;
+  color: #fff;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  font-weight: normal;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+/* The line under the name in the tip of a line's end: that the button can
+   be dragged too, dimmer than the name (EDIT_DRAG_HINT in main.js). */
+#app .mdm-score-edit__tip .mdm-score-edit__hint {
+  display: block;
+  opacity: 0.72;
+}
+#app .mdm-score-edit__tip.mdm-score-edit__tip--shown {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.1s ease 0.2s;
+}
+/* What a button of the chrome would change, drawn in the score while the
+   pointer is on it (drawScoreEditPreview in main.js), under the ink: the
+   bar that would move under a wash of the brass with no edge, a shade
+   stronger than a chosen stretch's (0.1) so it reads over one, and the
+   barline a bar would go in at under the column of the break drag's
+   marker. The owner's A of design/design-score-editing-2.html
+   (2026-09-29), in place of a dashed outline and a dashed line. stroke is
+   named, as the cursor's is, since the drawing hands its shapes one. */
+#app code.language-abc svg .mdm-score-edit-preview {
+  fill: var(--mdm-play-accent);
+  fill-opacity: 0.14;
+  stroke: none;
+}
+#app code.language-abc svg .mdm-score-edit-preview.mdm-score-edit-preview--bar {
+  fill-opacity: 0.2;
+}
+/* The frozen text takes no caret, so it does not offer one, and a drawing
+   in it opens nothing on a click, so it does not offer a hand either: the
+   pointer is the arrow over all of it, a score included, where a click
+   puts the cursor down rather than opening a source (the owner's call,
+   2026-09-29). The rail keeps its hand, and so does a link under Ctrl,
+   since both still do what they did. */
+#app.mdm--score-mode .cm-content,
+#app.mdm--score-mode .cm-content :is(.mdm-score code.language-abc, .mdm-math, .mdm-table, .mdm-figure, .mdm-image, .mdm-task, .mdm-note-ref) {
+  cursor: default;
+}
+/* What holds the keyboard while the mode is on (takeScoreKeys in main.js):
+   focusable, and nothing to see or to lay out. */
+#app .mdm-score-keys {
+  position: fixed;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  outline: none;
+}
 /* No pointer events inside a score: a click means "open the ABC source"
    (the widget hands it to the editor), and letting it reach the SVG fired
    abcjs's own note-selection handler, which flashed the note red. */
@@ -2963,6 +3554,13 @@ body {
 #app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-staff path,
 #app.mdm--dark.mdm-staff--gray code.language-abc svg .abcjs-ledger:not(.mdm-ledger--lit) {
   fill: #6f6f6f;
+}
+/* A ledger line of a note in a stretch of the score mode: out of the note's
+   group since sinkLedgers, it takes the stretch's brass itself
+   (inkScoreSelection), over the grey above, which is as specific as the
+   stretch's own rule and comes after it. */
+#app.mdm--score-mode:not(.mdm--score-sounding) code.language-abc svg path.abcjs-ledger.mdm-score-picked {
+  fill: var(--mdm-play-accent);
 }
 /* A score sits in the text the way an equation does. These are the
    backgrounds available if one is wanted (mdm.scoreFill). */
@@ -3101,9 +3699,13 @@ body {
   border: 1px solid rgba(127, 127, 127, 0.5);
   border-radius: 2px;
 }
+/* No line of its own: the check is not in the face of the chrome, the one
+   it falls back to stands taller, and the row it was on stood 4px taller
+   with it (29px against 25, measured), so a row grew as it was ticked. */
 .mdm-swatch__tick {
   margin-left: 8px;
   opacity: 0.7;
+  line-height: 1;
 }
 
 /* The player bar, which is a row of the toolbar: main.js appends it there

@@ -16,7 +16,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const Module = require("node:module");
-const { open, skip } = require("./webview/helpers.js");
+const { open, skip, pressBar } = require("./webview/helpers.js");
 
 // require("vscode") is the mock, as in extension-host.test.js.
 const MOCK = path.join(__dirname, "mocks", "vscode.js");
@@ -36,7 +36,13 @@ const PROSE = "The representation extraordinarily internationalization continues
 const A = ["---", "title: A", "---", "", PROSE, "", "```abc", "X:1", "K:C", "CDEF|", "```", ""].join("\n");
 const B = ["---", "title: B", "lang: en", "---", "", PROSE, "", "```abc", "X:1", "K:C", "GABc|", "```", ""].join("\n");
 
-// The buttons that light on what was asked for, in the order the bar has them.
+// What the bar says was asked for, in the order the bar had its buttons in
+// while every one of these was a button with a lamp. The outline's button
+// says it with its lamp still. A switch that went into a menu says it with
+// its tick: the three the editor opens with on, the roman, the justified
+// text and the page following the playhead, are asked for when the tick is
+// off, and the division of words when the tick of its menu is on a language.
+// All of it is read with every menu shut.
 const LAMPS = [
   "outline",
   "mdm-match-substring",
@@ -48,32 +54,37 @@ const LAMPS = [
   "mdm-follow",
 ];
 
-const lit = (page) =>
-  page.evaluate(
-    (names) =>
-      names.filter((n) =>
-        document.querySelector('#app button[data-type="' + n + '"]').classList.contains("mdm-btn--on")
+// In the page: the names of LAMPS that are asked for.
+const ASKED = (names) => {
+  const el = (n) => document.querySelector('#app .mdm-toolbar button[data-type="' + n + '"]');
+  const ticked = (n) => !!el(n).querySelector(".mdm-swatch__tick");
+  const says = {
+    "mdm-match-substring": () => ticked("mdm-match-substring"),
+    "mdm-text-font": () => !ticked("mdm-text-font"),
+    "mdm-text-align": () => !ticked("mdm-text-align"),
+    "mdm-hyphenation": () =>
+      Array.from(document.querySelectorAll('#app button[data-type^="mdm-hyphenation-"]')).some(
+        (row) => row.getAttribute("data-type") !== "mdm-hyphenation-none" && row.querySelector(".mdm-swatch__tick")
       ),
-    LAMPS
-  );
+    "mdm-front-matter": () => ticked("mdm-front-matter"),
+    "mdm-staff-lines": () => ticked("mdm-staff-lines"),
+    "mdm-follow": () => !ticked("mdm-follow"),
+  };
+  return names.filter((n) => (says[n] ? says[n]() : el(n).classList.contains("mdm-btn--on")));
+};
 
-// The lamps once they read `want`, or as they are when ten seconds have not
-// brought them there, so that a failure shows the bar it found.
+const lit = (page) => page.evaluate("(" + ASKED + ")(" + JSON.stringify(LAMPS) + ")");
+
+// The bar once it reads `want`, or as it is when ten seconds have not
+// brought it there, so that a failure shows the bar it found.
 async function lampsReach(page, want) {
   try {
     await page.waitForFunction(
-      (names, w) =>
-        JSON.stringify(
-          names.filter((n) =>
-            document.querySelector('#app button[data-type="' + n + '"]').classList.contains("mdm-btn--on")
-          )
-        ) === JSON.stringify(w),
-      { timeout: 10000 },
-      LAMPS,
-      want
+      "JSON.stringify((" + ASKED + ")(" + JSON.stringify(LAMPS) + ")) === " + JSON.stringify(JSON.stringify(want)),
+      { timeout: 10000 }
     );
   } catch (e) {
-    // what they read is the answer
+    // what it reads is the answer
   }
   return lit(page);
 }
@@ -157,12 +168,11 @@ test("the division is each file's own, and the rest of the bar is the editor's",
   const BOTH = ["mdm-hyphenation", "mdm-staff-lines"];
   let a = await openFile(provider, "file:///a.mdm");
   assert.deepEqual(await lit(a.page), [], "a file opened for the first time came up with a lamp lit");
-  await a.page.click('#app button[data-type="mdm-staff-lines"]');
+  await pressBar(a.page, "mdm-staff-lines");
   await new Promise((r) => setTimeout(r, 200));
   settingsChanged();
   assert.deepEqual(await lampsReach(a.page, ["mdm-staff-lines"]), ["mdm-staff-lines"]);
-  await a.page.click('#app button[data-type="mdm-hyphenation"]');
-  await a.page.click('#app button[data-type="mdm-hyphenation-es"]');
+  await pressBar(a.page, "mdm-hyphenation-es");
   assert.deepEqual(await lampsReach(a.page, BOTH), BOTH);
   assert.deepEqual(a.errors, []);
   await a.close();

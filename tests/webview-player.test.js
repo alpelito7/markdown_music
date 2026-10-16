@@ -35,6 +35,8 @@ const {
   settingsMessage,
   postSettings,
   setSettingPosts,
+  pressBar,
+  barState,
 } = require("./webview/helpers.js");
 
 // Shared helpers: the score widgets in document order, and the state the
@@ -1302,40 +1304,40 @@ test("a system showing whole is left where it is, however near an edge", { skip 
 
 // The page keeping up with the music is right until it is not: a score can be
 // longer than the pane and worth listening to while the document around it is
-// read, and there was no way to ask for that. The toolbar toggle is the whole
-// of the choice, on by default, and off it means the music never moves the
-// page: not at a crossing, not at a play made with the score under the fold,
-// and not at a scrub of the progress bar either, which is one rule with no
-// exceptions to remember. In the toolbar and not in the player row, since it
-// says what the editor does with a tune rather than what this tune is doing,
-// and it can be set before a player is open at all.
-test("the follow button says what the page does, and a press asks for the other", { skip }, async () => {
+// read, and there was no way to ask for that. The switch is the whole of the
+// choice, on by default, and off it means the music never moves the page:
+// not at a crossing, not at a play made with the score under the fold, and
+// not at a scrub of the progress bar either, which is one rule with no
+// exceptions to remember. In the Score menu and not in the player row, since
+// it says what the editor does with a tune rather than what this tune is
+// doing, and it can be set before a player is open at all. A row named for
+// what it turns on and ticked while the page follows, as the switches of the
+// menus are; it was a button of the bar, lit on the other state, until the
+// music went under its word (2026-10-13).
+test("the Follow the playhead row says what the page does, and a press asks for the other", { skip }, async () => {
   const h = await open({ text: ONE_SYSTEM_FIXTURE, scores: 1 });
-  const state = () =>
-    h.page.evaluate(() => {
-      const b = document.querySelector('#app button[data-type="mdm-follow"]');
-      return b && { lit: b.classList.contains("mdm-btn--on"), label: b.getAttribute("aria-label") };
-    });
-  const on = await state();
-  assert.ok(on, "the transport carries no follow button");
-  // The lamp marks the setting that was asked for, and following is what the
-  // editor does before anyone asks: unlit is the default state.
-  assert.equal(on.lit, false, "the button is lit on the state the editor opens in");
-  await h.page.evaluate(() =>
-    document.querySelector('#app button[data-type="mdm-follow"]').click()
-  );
+  const state = async () => {
+    const row = await barState(h.page, "mdm-follow");
+    return row && [row.under, row.name, row.on];
+  };
+  // Following is what the editor does before anyone asks, and the row says
+  // so: ticked on the state the editor opens in.
+  assert.deepEqual(await state(), ["menu-score", "Follow the playhead", true]);
+  await pressBar(h.page, "mdm-follow");
   await new Promise((r) => setTimeout(r, 200));
   assert.deepEqual(await setSettingPosts(h.page), [
     { type: "setSetting", key: "followPlayhead", value: "still" },
   ]);
-  // The button paints itself from what the host sends back, the way every
-  // other toggle of this editor does.
-  assert.equal((await state()).lit, false, "the button lit itself before the host answered");
+  // The row is ticked from what the host sends back, the way every other
+  // switch of this editor is.
+  assert.deepEqual(await state(), ["menu-score", "Follow the playhead", true], "the row lost its tick before the host answered");
   await postSettings(h.page, { followPlayhead: "still" });
   await new Promise((r) => setTimeout(r, 300));
-  const off = await state();
-  assert.equal(off.lit, true, "the setting came back and the button did not take its disc");
-  assert.notEqual(off.label, on.label, "the button says the same thing either way");
+  assert.deepEqual(await state(), ["menu-score", "Follow the playhead", false], "the setting came back and the row kept its tick");
+  // And pressed again it asks for the following back.
+  await pressBar(h.page, "mdm-follow");
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual((await setSettingPosts(h.page)).pop(), { type: "setSetting", key: "followPlayhead", value: "follow" });
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1736,12 +1738,12 @@ test("the player keeps the document somebody's, and lets it be put away", { skip
     true,
     "opening the player put the document away: its marks went with it"
   );
-  // The bare strip of the toolbar, past the last button: a press out there is
-  // somebody leaving, player or no player.
+  // The bare strip of the toolbar, past the last of its words: a press out
+  // there is somebody leaving, player or no player.
   const bare = await h.page.evaluate(() => {
-    const items = document.querySelectorAll("#app .mdm-toolbar__item");
-    const last = items[items.length - 1].getBoundingClientRect();
-    return { x: last.right + 40, y: last.top + last.height / 2 };
+    const word = document.querySelector('#app button[data-type="menu-export"]').getBoundingClientRect();
+    const bar = document.querySelector("#app .mdm-toolbar").getBoundingClientRect();
+    return { x: (word.right + bar.right) / 2, y: word.top + word.height / 2 };
   });
   await h.page.mouse.click(bare.x, bare.y);
   await new Promise((r) => setTimeout(r, 400));
@@ -2772,7 +2774,7 @@ test("the player's buttons carry tooltips that name the destination", { skip }, 
   // And they give way to an open drop-down, as the toolbar's own do: a panel
   // hangs over the row, and a tooltip from a control under it would be drawn
   // on top of the panel (the tip is z-index 10 against the menu's 5).
-  await h.page.click('#app button[data-type="mdm-theme"]');
+  await h.page.click('#app button[data-type="menu-page"]');
   await new Promise((r) => setTimeout(r, 200));
   const withMenu = await h.page.evaluate(() => ({
     menus: document.querySelectorAll("#app .mdm-toolbar__item--open").length,
@@ -2785,7 +2787,7 @@ test("the player's buttons carry tooltips that name the destination", { skip }, 
       "::after"
     ).display,
   }));
-  assert.equal(withMenu.menus, 1, "the theme menu did not open");
+  assert.equal(withMenu.menus, 1, "the Page menu did not open");
   assert.equal(withMenu.play, "none", "the play tooltip is drawn over the open panel");
   assert.equal(withMenu.volume, "none", "the mute tooltip is drawn over the open panel");
   await h.page.evaluate(() => document.body.click());
@@ -4272,43 +4274,48 @@ test("the tune can be scrubbed without closing the score that is open", { skip }
   await h.close();
 });
 
-test("the file actions lead the toolbar, and undo/redo wear the rotate arrows", { skip }, async () => {
+test("the outline leads the toolbar, and undo and redo lead the Edit menu in the rotate arrows", { skip }, async () => {
   const h = await open({});
   const bar = await h.page.evaluate(() => {
     const types = Array.from(
       document.querySelectorAll("#app .mdm-toolbar button[data-type]")
     ).map((b) => b.getAttribute("data-type"));
     const undo = document.querySelector(
-      '#app .mdm-toolbar button[data-type="undo"] svg path'
+      '#app .mdm-toolbar button[data-type="undo"] .mdm-menu__icon svg path'
     );
     const redo = document.querySelector(
-      '#app .mdm-toolbar button[data-type="redo"] svg path'
+      '#app .mdm-toolbar button[data-type="redo"] .mdm-menu__icon svg path'
     );
+    const row = document.querySelector('#app .mdm-toolbar button[data-type="undo"]');
     return {
-      first: types.slice(0, 9),
+      first: types.slice(0, 4),
       // The rotate arrows: an open ring whose arc starts at these exact
       // coordinates.
       undoPath: undo ? undo.getAttribute("d").slice(0, 5) : null,
       redoPath: redo ? redo.getAttribute("d").slice(0, 5) : null,
       // Greyed out on a fresh document: nothing to undo yet.
-      undoDisabled: document
-        .querySelector('#app .mdm-toolbar button[data-type="undo"]')
-        .classList.contains("mdm-btn--off"),
+      undoDisabled: row.classList.contains("mdm-menu__item--off") && row.disabled,
     };
   });
-  // Outline leads (its panel opens down the left edge), then export with the
-  // rows of its two branches, the document's and the audio of its scores,
-  // then undo/redo. The headers over them are not buttons and are not here.
-  assert.deepEqual(bar.first, [
-    "outline",
-    "mdm-export",
+  // Outline leads (its panel opens down the left edge), then the first of
+  // the words, Edit, whose menu opens on undo and redo. The export is the
+  // last of the words, the one that leaves the editor, with the rows of its
+  // two branches, the document's and the audio of its scores; the headers
+  // over them are not buttons and are not here. Nothing stands past it.
+  assert.deepEqual(bar.first, ["outline", "menu-edit", "undo", "redo"]);
+  const exporter = await h.page.evaluate(() => {
+    const types = Array.from(document.querySelectorAll("#app .mdm-toolbar > .mdm-toolbar__item button[data-type]")).map((b) =>
+      b.getAttribute("data-type")
+    );
+    return types.slice(-6);
+  });
+  assert.deepEqual(exporter, [
+    "menu-export",
     "mdm-export-html",
     "mdm-export-pdf",
     "mdm-export-both",
     "mdm-export-midi",
     "mdm-export-wav",
-    "undo",
-    "redo",
   ]);
   assert.equal(bar.undoPath, "M3.32");
   assert.equal(bar.redoPath, "M12.6");

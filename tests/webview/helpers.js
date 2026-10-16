@@ -210,15 +210,20 @@ async function open(options) {
     }, opts.platform);
   }
   if (opts.clipboard) {
-    // Headless has no clipboard to write to; what was copied is recorded.
+    // Headless has no clipboard to write to; what was copied is recorded,
+    // and is what a paste reads back (a test puts a text of its own there
+    // through window.__clipboard).
     await page.evaluateOnNewDocument(() => {
       window.__copied = [];
+      window.__clipboard = "";
       Object.defineProperty(navigator, "clipboard", {
         value: {
           writeText: (text) => {
             window.__copied.push(text);
+            window.__clipboard = text;
             return Promise.resolve();
           },
+          readText: () => Promise.resolve(window.__clipboard),
         },
         configurable: true,
       });
@@ -593,6 +598,8 @@ function settingsMessage(overrides) {
         scoreAlign: "center",
         outline: "hidden",
         outlineWidth: 250,
+        scorePanel: "hidden",
+        scorePanelFace: "buttons",
         multicursorMatch: "word",
         followPlayhead: "follow",
         textFont: "roman",
@@ -616,6 +623,159 @@ function setSettingPosts(page) {
   return page.evaluate(() =>
     window.__posts.filter((m) => m.type === "setSetting")
   );
+}
+
+// ---- The bar ----
+
+// A control of the bar pressed by its name (its data-type), the way a hand
+// reaches it. A button of the bar is pressed where it stands. A row of a menu
+// is under a word, and a few are under a row of that menu besides: the word
+// is pressed first, then the row that leads to the submenu, then the row
+// itself, each with the real pointer, so that every press goes through what
+// a press goes through in the editor (the mousedown that must not take the
+// focus off the text, the press outside the text that puts a block away).
+// A menu already open at the row is left open and only the row is pressed.
+// Of the bar only: a name may stand on the score panel as well (pressPanel).
+async function pressBar(page, name) {
+  const selector = '#app .mdm-toolbar button[data-type="' + name + '"]';
+  const way = await page.evaluate((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return null;
+    const steps = [];
+    const item = el.closest(".mdm-toolbar__item");
+    const top = item && item.querySelector(":scope > button");
+    if (top && top !== el && !item.classList.contains("mdm-toolbar__item--open")) steps.push(top.getAttribute("data-type"));
+    const groups = [];
+    for (let g = el.parentNode.closest(".mdm-menu__group"); g; g = g.parentNode.closest(".mdm-menu__group")) groups.unshift(g);
+    groups.forEach((g) => {
+      const row = g.querySelector(":scope > button");
+      if (row !== el && !g.classList.contains("mdm-menu__group--open")) steps.push(row.getAttribute("data-type"));
+    });
+    return steps;
+  }, selector);
+  if (!way) throw new Error("pressBar: nothing on the bar is named " + name);
+  for (const step of way) await page.click('#app .mdm-toolbar button[data-type="' + step + '"]');
+  await page.click(selector);
+}
+
+// What a control of the bar says of itself, open or not: where it stands (a
+// button or a word of the bar, or a row of a menu, with the word it is
+// under), its name as written, the key it names, and its state. A button is
+// lit (mdm-btn--on) and a row ticked while what it stands for is on, and
+// either is greyed while it has nothing to do, by its own state or by the
+// score mode freezing the text it writes into. A legend is a row that only
+// shows keys: it is no button, names no one key to whoever reads the bar
+// without seeing it (`keys`), and its `key` is the pair or the run as
+// written.
+function barState(page, name) {
+  return page.evaluate((name) => {
+    const el = document.querySelector('#app .mdm-toolbar [data-type="' + name + '"]');
+    if (!el) return null;
+    const legend = el.classList.contains("mdm-menu__legend");
+    const row = legend || el.classList.contains("mdm-menu__item");
+    const key = el.querySelector(".mdm-menu__key");
+    const text = Array.from(el.childNodes)
+      .filter((n) => n.nodeType === 3)
+      .map((n) => n.textContent)
+      .join("");
+    const item = el.closest(".mdm-toolbar__item");
+    const style = getComputedStyle(el);
+    return {
+      kind: legend ? "legend" : row ? "row" : el.classList.contains("mdm-word") ? "word" : "button",
+      under: row ? item.querySelector(":scope > button").getAttribute("data-type") : null,
+      name: row || el.classList.contains("mdm-word") ? text : el.getAttribute("aria-label"),
+      key: key ? key.textContent : null,
+      keys: el.getAttribute("aria-keyshortcuts"),
+      on: row ? !!el.querySelector(".mdm-swatch__tick") : el.classList.contains("mdm-btn--on"),
+      off: style.pointerEvents === "none" && Number(style.opacity) < 1,
+      glyph: ((row ? el.querySelector(".mdm-menu__icon svg") : el.querySelector("svg")) || { outerHTML: "" }).outerHTML,
+    };
+  }, name);
+}
+
+// ---- The score panel ----
+
+// A control of the score panel pressed by its name, with the real pointer:
+// a key of its pad or one of its rows.
+async function pressPanel(page, name) {
+  await page.click('#app .mdm-score-panel [data-type="' + name + '"]');
+}
+
+// What a control of the score panel says of itself: a key of the pad (its
+// name is the one the caption line shows, its `key` the one written under its
+// glyph, and it is lit while it is the figure in use), a switch of its head
+// (a button with its glyph, its name in its tip, lit while on), a row (ticked while
+// what it stands for is on) or a legend, each as barState reads the same
+// thing on the bar.
+function panelState(page, name) {
+  return page.evaluate((name) => {
+    const el = document.querySelector('#app .mdm-score-panel [data-type="' + name + '"]');
+    if (!el) return null;
+    const pad = el.classList.contains("mdm-score-panel__key");
+    const lit = pad || el.classList.contains("mdm-score-panel__toggle");
+    const key = el.querySelector(pad ? ".mdm-score-panel__cap" : ".mdm-menu__key");
+    const text = Array.from(el.childNodes)
+      .filter((n) => n.nodeType === 3)
+      .map((n) => n.textContent)
+      .join("");
+    const style = getComputedStyle(el);
+    return {
+      kind: pad ? "key" : lit ? "switch" : el.classList.contains("mdm-menu__legend") ? "legend" : "row",
+      name: lit ? el.getAttribute("aria-label") : text,
+      key: key ? key.textContent : null,
+      keys: el.getAttribute("aria-keyshortcuts"),
+      on: lit ? el.classList.contains("mdm-btn--on") : !!el.querySelector(".mdm-swatch__tick"),
+      off: style.pointerEvents === "none" && Number(style.opacity) < 1,
+      glyph: ((lit ? el.querySelector("svg") : el.querySelector(".mdm-menu__icon svg")) || { outerHTML: "" }).outerHTML,
+    };
+  }, name);
+}
+
+// The score panel's Keys face as it is written, top to bottom, whether it is
+// in sight or not (the face out of sight is laid out all the same): the name
+// of a run as "# Notes", a rule as "|", and a line as what it says, read as
+// panelState reads a row: its name (data-line, the name of the row it is
+// where it is one), its words, its key, and its glyph.
+function keyLines(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('#app .mdm-score-panel [data-face="keys"] > *')].map((el) => {
+      if (el.classList.contains("mdm-score-panel__title")) return "# " + el.textContent;
+      if (el.classList.contains("mdm-menu__rule")) return "|";
+      const key = el.querySelector(".mdm-menu__key");
+      return {
+        line: el.getAttribute("data-line"),
+        name: Array.from(el.childNodes)
+          .filter((n) => n.nodeType === 3)
+          .map((n) => n.textContent)
+          .join(""),
+        key: key ? key.textContent : null,
+        glyph: (el.querySelector(".mdm-menu__icon svg") || { outerHTML: "" }).outerHTML,
+      };
+    })
+  );
+}
+
+// Which face of the score panel is in sight (`shown`: the faces with a height
+// and seen, which is one) and which is away (`away`: with no height, and
+// hidden, so that nothing in it is reached by the focus or read out), and
+// what the two words over them say: on the disc, and pressed for whoever
+// reads the bar without seeing it.
+function panelFace(page) {
+  return page.evaluate(() => {
+    const panel = document.querySelector("#app .mdm-score-panel");
+    const faces = [...panel.querySelectorAll(".mdm-score-panel__face")];
+    const named = (fs) => fs.map((f) => f.getAttribute("data-face"));
+    const word = (which) => {
+      const w = panel.querySelector('[data-type="score-face-' + which + '"]');
+      return { on: w.classList.contains("mdm-btn--on"), pressed: w.getAttribute("aria-pressed") };
+    };
+    return {
+      shown: named(faces.filter((f) => f.getBoundingClientRect().height > 0 && getComputedStyle(f).visibility === "visible")),
+      away: named(faces.filter((f) => f.getBoundingClientRect().height === 0 && getComputedStyle(f).visibility === "hidden")),
+      buttons: word("buttons"),
+      keys: word("keys"),
+    };
+  });
 }
 
 // ---- What the editor draws, row by row ----
@@ -835,6 +995,12 @@ module.exports = {
   settingsMessage,
   postSettings,
   setSettingPosts,
+  pressBar,
+  barState,
+  pressPanel,
+  panelState,
+  keyLines,
+  panelFace,
   rows,
   clickAt,
   dblClickAt,

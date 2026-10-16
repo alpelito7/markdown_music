@@ -94,7 +94,7 @@
             "The YAML header stays in view at the head of every document, as the YAML it is, and is edited in place. What it prints is drawn under it only while the caret is in it."
           ],
           "default": "hidden",
-          "description": "What the editor shows of a document's YAML header: its YAML, or what the header prints at the head of the page. The YAML button of the toolbar switches between the two, and the choice is remembered for every document. It changes nothing of an export, which always opens with the title block the header asks for. A header the hyphenation menu writes into a file that had none comes up put away whatever this says, so that choosing a language never puts YAML on screen."
+          "description": "What the editor shows of a document's YAML header: its YAML, or what the header prints at the head of the page. The YAML header row of the Page menu switches between the two, and the choice is remembered for every document. It changes nothing of an export, which always opens with the title block the header asks for. A header the hyphenation menu writes into a file that had none comes up put away whatever this says, so that choosing a language never puts YAML on screen."
         },
         "mdm.outline": {
           "type": "string",
@@ -113,6 +113,26 @@
           "default": 250,
           "description": "Width of the outline panel in pixels, as the grip beside it was last dragged to. The editor keeps a column of its own, so a panel wider than the pane allows is narrowed to fit while it is open."
         },
+        "mdm.scorePanel": {
+          "type": "string",
+          "enum": ["hidden", "shown"],
+          "enumDescriptions": [
+            "Score navigation brings no panel.",
+            "Score navigation brings its panel up down the right edge, with the switch that turns it off and two faces: its buttons, and every key of the mode."
+          ],
+          "default": "shown",
+          "description": "Whether Score navigation comes with its side panel. The Side panel row of the Score menu writes it; the panel itself is in sight only while Score navigation is on."
+        },
+        "mdm.scorePanelFace": {
+          "type": "string",
+          "enum": ["buttons", "keys"],
+          "enumDescriptions": [
+            "The score panel shows what Score navigation does as buttons: the note lengths with their keys, the bars, the selection and the playing.",
+            "The score panel shows every key of Score navigation, to read beside the score while writing it with the keyboard."
+          ],
+          "default": "buttons",
+          "description": "Which face the score panel shows. The two words at the head of the panel write it, so the panel comes back on the face it was left on."
+        },
         "mdm.multicursorMatch": {
           "type": "string",
           "enum": ["word", "substring"],
@@ -121,7 +141,7 @@
             "Ctrl+D walks every run of the text, inside words too: 'score' also lands in 'scores'."
           ],
           "default": "word",
-          "description": "What Ctrl+D (select next occurrence) matches. The toolbar toggle writes it."
+          "description": "What Ctrl+D (select next occurrence) matches. The Match inside words row of the Edit menu writes it."
         },
         "mdm.followPlayhead": {
           "type": "string",
@@ -131,7 +151,7 @@
             "The page is the reader's: a tune plays on wherever it is and nothing scrolls, so a long score can sound while the document is read."
           ],
           "default": "follow",
-          "description": "Whether the page follows the playhead while a tune sounds. On by default. The toolbar toggle writes it."
+          "description": "Whether the page follows the playhead while a tune sounds. On by default. The Follow the playhead row of the Score menu writes it."
         },
         "mdm.hyphenation": {
           "type": "string",
@@ -141,7 +161,7 @@
             "Keep words whole at line endings.",
             "Divide prose words with a visual hyphen when they wrap, in the language the lang field of the YAML header names. A document whose header names no language keeps its words whole."
           ],
-          "description": "Word division in prose, off by default. The hyphenation menu in the toolbar sets it for the document it is pressed in, and each document keeps the division it was left on, since the language a document is written in is the document's; this setting is where a document starts. Its first entry keeps words whole, and choosing one of its languages turns division on and writes that language into the lang field of the document's YAML header, adding a header when the file has none, which comes up hidden: the button beside the menu is what shows it. The button is lit while a language is dividing the prose. Hyphens are visual: editing, copying and saving keep the original text. Patterns for German, English, Spanish, French, Italian, Dutch, Polish, Portuguese, Russian and Ukrainian come with the extension; a document in any other language keeps its words whole, and so does a document whose header names no language. An export from the toolbar divides the words the editor divides, in HTML and in PDF."
+          "description": "Word division in prose, off by default. Hyphenation, in the Page menu, sets it for the document it is pressed in, and each document keeps the division it was left on, since the language a document is written in is the document's; this setting is where a document starts. Its first entry keeps words whole, and choosing one of its languages turns division on and writes that language into the lang field of the document's YAML header, adding a header when the file has none, which comes up hidden: the button beside the menu is what shows it. The button is lit while a language is dividing the prose. Hyphens are visual: editing, copying and saving keep the original text. Patterns for German, English, Spanish, French, Italian, Dutch, Polish, Portuguese, Russian and Ukrainian come with the extension; a document in any other language keeps its words whole, and so does a document whose header names no language. An export from the toolbar divides the words the editor divides, in HTML and in PDF."
         },
         "mdm.textFont": {
           "type": "string",
@@ -151,7 +171,7 @@
             "The interface font of the system, which is what the rest of VS Code is set in and what Markdown is usually written in."
           ],
           "default": "roman",
-          "description": "The face the text of the document is set in. Code, the numbers in the margin and the toolbar are not affected: they keep the monospace and the sans they have. The toolbar toggle writes it, and an export from the toolbar carries it to the page and to the paper."
+          "description": "The face the text of the document is set in. Code, the numbers in the margin and the toolbar are not affected: they keep the monospace and the sans they have. The LaTeX font row of the Page menu writes it, and an export from the toolbar carries it to the page and to the paper."
         },
         "mdm.textAlign": {
           "type": "string",
@@ -161,7 +181,7 @@
             "Lines start at the left edge and end where their last word does, the way a browser sets text."
           ],
           "default": "justify",
-          "description": "How the prose meets the right edge of the text: paragraphs, list items and quotations. Headings, code, equations, tables and scores are not affected. The toolbar toggle writes it, and an export from the toolbar carries it to the page and to the paper."
+          "description": "How the prose meets the right edge of the text: paragraphs, list items and quotations. Headings, code, equations, tables and scores are not affected. The Justified text row of the Page menu writes it, and an export from the toolbar carries it to the page and to the paper."
         },
         "mdm.pdfEngine": {
           "type": "string",

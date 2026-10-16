@@ -185,6 +185,14 @@ D4. Toolbar: **the MDM buttons plus bold, italic, inline code, link,
   quote the blocks. The bar stands in two rows since it grew that far: what
   a reader writes above, what the document is set in below.
 
+  Revisited again on 2026-10-13, on the branch of the score mode: the bar is one row. The outline leads it still, and what were the text's thirty buttons are six words, each over a menu (Edit, Format, Paragraph, Insert, Page, Export): the owner's pick of variant A of design-toolbar.html, and of it the six words alone. A row of a menu names its key at its far edge, which is what the pick was for, the keys having had nowhere to show but a tip and the commands with a key and no button nowhere at all. The buttons of the music stand at the far end of the row as they stood, until the music has a corner of its own (he liked the side panel of variant D for it). It undoes the Insert buttons spelled out and the bar in two rows, both asked for on 2026-09-19; the sheet said so and the pick was made over it.
+
+  And the same day, the music's corner: a seventh word, Score, beside Page where the owner asked for it (the sheet drew it apart at the far end), over the rows variant A drew and without the three it marked as not existing yet (a metronome, a check of the bars, a fill of one with rests); the music symbols a row of Insert, as the sheet had them; and the side panel of variant D for whoever wants the keys of the score mode in sight, asked for by a row of that menu and kept as a setting (mdm.scorePanel), the twin of the outline down the other edge. What the mode's keys do is written once (scoreRoster in main.js) and read by the menu and by the panel, and a row that names one key runs what the key runs, so neither can say what the other does not. Four other ways of having the panel were drawn and left: design/design-score-panel.html.
+
+  And that evening, once he had tried it: the panel is up only while it is asked for and the mode is on, the row ticked by the asking alone, so that out of the mode it says what the mode will bring (kept up out of the mode, all the panel had to give was its switch). It is the first way and the second of that sheet in one. The row is Side panel, and the rows of the mode's keys took his names: left and right for where a thing goes, a slash between the two halves of a pair of keys, no article. Play/pause wears the triangle and the two bars together. Where the rows that only show keys should stand, so that they are not read as buttons that do nothing, is open: design/design-score-key-help.html.
+
+  And the day after, 2026-10-14, that question answered for the panel: it has two faces, chosen by two words under its switch, Buttons and Keys, the owner's pick of the fifth way of that sheet as he asked for it again (design/design-score-key-help-E.html, E1, with the seven keys of the figures in one line). Buttons is the pad and the rows that are commands, and no legend. Keys is every key of the mode, on lines written as the rows are written, the name first and the key at the far edge, which is what he asked of that drawing ("en buttons aparece text y shortcut al lado, y en keys shortcut y luego texto y además el shortcut diferente"); in the ink of a row, every line being one to read, and with nothing to press. The keys that had no row anywhere have their line there. The face is a setting (mdm.scorePanelFace), so the panel comes back on the face it was left on. The two faces are laid out at once and the one out of sight has no height, so the panel is as wide as the wider; and while either face is taller than the pane the panel is wider by the room of a scroll bar on both (fitScorePanelWidth), the bar's on the face that scrolls and the rows' on the other, since in a real window the Keys face, taller than the pane, scrolled where the Buttons face did not, and its bar took 10px more off the editor as the face changed. Not a gutter kept on both faces, which was the second build and left a bare strip down the right of the face that does not scroll, the strip the menus had been rid of. The lists of the Score menu keep their legends: that half of the question is still open. The same afternoon, on trying it: the panel comes with the mode unless the Side panel row is unticked (mdm.scorePanel defaults to shown, where it had been hidden since the panel was made), and the two sides of a note put in beside the cursor are one line, Note to the left/right with Ctrl/Alt+0…7, as his names write a pair of halves; its twin, Rest to the left/right, went the same way in the same pass. The next morning, 2026-10-15, his picks off the sheet that put the rest of it to him (design/design-score-panel-rest.html): the panel has the Side panel switch at its head beside the mode's, both as buttons of the bar, lit while on, with their glyph alone and their name in the bar's tip, which opens inward from the panel's edge (variant 2, with the asymmetry he asked to be put right: the names kept on both was built first, and on seeing it he chose the other way, "solo con los iconos", the name on hover), and the menu's row wears the same glyph; and the two rests wear abcjs's own outlines, the quarter rest for Rest and the eighth rest for Rest of given length, where the half rest on its line had read as a hat; and Note to the left/right runs from 1, Ctrl or Alt with 0 putting in a rest and no note, which he caught.
+
 D5. Tables: **(a)**, the source as a monospace grid, editable with
   multicursor; no widget. Revisited later: a table is drawn now, a block
   widget under its source lines like a score or a display equation, and the
@@ -243,8 +251,8 @@ D7. Front matter shown: **literal YAML lines at the top, `---` visible and
   it. The setting came back, for the one kind of header that needs it: a
   header that draws nothing has no drawing to stand for it, and a reader may
   want its YAML kept in view, so `mdm.frontMatter` is the word on such a
-  header (`shown` brings it up open), the YAML button writes it when it is
-  pressed in such a document, and every editor on such a header follows it.
+  header (`shown` brings it up open), the YAML header row of the Page menu
+  writes it when it is pressed in such a document, and every editor on such a header follows it.
   A header that draws a block is still this editor's alone and comes up
   drawn whatever the setting says, which is what was asked for it in the
   first place by someone whose setting said `shown`. The host tells the two
@@ -561,6 +569,71 @@ D20. **The keyboard works in layers** (2026-09-27, the owner's model). A key
   at the text) and `webview-player.test.js` (the bar takes the keyboard,
   the keys of the workbench leave the page with the bar focused, a caret
   keeps Space).
+
+D21. **The score mode: a frozen text, and a layer of the keyboard over it**
+  (2026-09-28, the owner's request: a button that freezes the editor and
+  makes the staff navigable "como Guitar Pro", and turned off gives the
+  editor back with the ABC brought up to date; for now only a click on a
+  staff and a cursor walked sideways and up and down). A switch in the
+  toolbar, Score navigation by the owner's name for it (2026-09-29;
+  `mdm-score-navigation`, in a group of its own before the playhead's),
+  makes the text neither editable nor writable (`frozen`, a Compartment
+  over CodeMirror's `editable` and `readOnly`), draws every block as it
+  reads (`somebodyInside` answers no one while the mode lasts), greys the
+  buttons that write into the text (`.mdm-btn--edit`: every button that
+  works on the selection, undo and redo, and the hyphenation menu, which
+  writes a `lang:`), and puts a cursor on the scores. The cursor is a place
+  of one voice (a note, a chord or a rest; not `x` nor `y`, which draw
+  nothing) and a step of the staff; Left and Right walk the voice across
+  bars and systems, Up and Down move a step, three ledger lines past the
+  staff at most. The owner chose the step among three readings of Up and
+  Down offered (the step, the system above or below, the staff of another
+  voice): it is the tablature editor's string, the height a note would be
+  written at, and it is kept as the cursor goes across while it is on the
+  staff (between the outer lines or in the space just past either, where a
+  note needs no ledger line). Off the staff the cursor goes across to the
+  head of the next place nearest its height instead, the owner's rule of
+  2026-09-29: kept, the height left the cursor walking a blank two ledger
+  lines under the partials after their low C, and from a high c it would
+  not come down to the octave beside it. Over the scores, and over every
+  drawing of the frozen text, the pointer is the arrow and not the hand
+  (the owner's call the same day); the rail keeps its hand.
+
+  The layer is not where D20 said it would go. A keymap ahead of the
+  text's only hears a key while the text holds the focus, and a text that
+  cannot be edited cannot hold it (measured: `contenteditable="false"`, no
+  tabindex, `view.focus()` leaves the focus on the body). So the layer is a
+  listener on the window in the capture phase, ahead of the page and of
+  VS Code's bubble listener (D19), active while the mode is on and its own
+  holder has the focus (`takeScoreKeys`), or nothing has. The holder is
+  what hands the page the keyboard at all: VS Code's webview is a frame,
+  and the presses the mode prevents so that the frozen text takes no caret
+  leave the focus wherever it was in the workbench. With the harness in a
+  frame beside a field holding the focus, neither the button nor a click on
+  a head gave the frame the focus, and the arrows went to the field
+  (measured 2026-09-29, emulated and not in VS Code itself); that, and the
+  blank above, are the two causes found for the owner's "sometimes it walks
+  and sometimes it does not". So the holder is focused on entering and on
+  every click on a score. It takes the four arrows,
+  and stops Ctrl+Z and Ctrl+Y without doing anything with them yet: inside
+  VS Code the workbench's own undo of the text model would come back
+  through the host into the frozen text (inferred, as in D20's note on it).
+  The player's bar keeps its arrows while it holds the focus, and a click
+  on a score takes them back. The formatting keys need no switch to disarm
+  them (D19's `if`): with no focus in the text CodeMirror does not hear
+  them, and they go on to VS Code as from anywhere outside the text.
+
+  What the mode changes in a score is staged (`stageScoreEdit`) and goes
+  into the text when the mode is turned off, as one change and one step of
+  the history (`commitScoreEdits`), written as the stretch that differs so
+  a score in a list or a quote keeps its leads; a score the host rewrote
+  in the meantime keeps the host's text. Nothing stages yet: the first
+  thing that changes a note is the next round. The button enters with the
+  caret where it is (`readsCaret`, exempt from `dismissFromOutside` like
+  the buttons that work on the selection), starts the cursor on the score
+  the caret was in, and gives the caret back there. Not a setting, and
+  nothing of it reaches the export. Pinned in `webview-score-mode.test.js`
+  (SM01 to SM22).
 
 Found on the way and settled:
 inside VS Code the workbench replays Ctrl+Z into the page as

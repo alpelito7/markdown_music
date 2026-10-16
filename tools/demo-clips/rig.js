@@ -78,6 +78,11 @@ function overlayFn() {
     "#__mdm_rig .cap .k{display:inline-block;padding:2.5px 8px;border-radius:6px;",
     "background:#303234;border:1px solid #4a4d50;border-bottom-width:2px;",
     "font:600 13px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;color:#f7f4ed}",
+    // An arrow key. At the 13 px of the other caps the arrow is a hairline
+    // four pixels long once the GIF is in the Marketplace's column, and the
+    // take of the score mode names an arrow in half its presses. Larger, in
+    // a line of the same height, so the cap stands level with its neighbours.
+    "#__mdm_rig .cap .k.arrow{font-size:19px;font-weight:700;line-height:15.6px}",
   ].join("");
   document.head.appendChild(style);
 
@@ -202,19 +207,22 @@ function overlayFn() {
       };
     },
     // parts is a list of strings and {k: "Ctrl"} keycaps, so no markup crosses
-    // the boundary and Trusted Types has nothing to object to.
-    caption: function (parts) {
+    // the boundary and Trusted Types has nothing to object to. bottom is how
+    // far the caption's foot stands from the window's, for a take that wants
+    // it beside what its keys work on; 9 px with none given.
+    caption: function (parts, bottom) {
       if (!parts || !parts.length) {
         cap.classList.remove("on");
         return;
       }
+      cap.style.bottom = (typeof bottom === "number" ? bottom : 9) + "px";
       while (cap.firstChild) cap.removeChild(cap.firstChild);
       parts.forEach(function (part) {
         if (typeof part === "string") {
           cap.appendChild(document.createTextNode(part));
         } else if (part && part.k) {
           const k = document.createElement("span");
-          k.className = "k";
+          k.className = /^[\u2190-\u2193]$/.test(part.k) ? "k arrow" : "k";
           k.textContent = part.k;
           cap.appendChild(k);
         }
@@ -309,8 +317,9 @@ class Rig {
   }
 
   // caption("Take the next one with [[Ctrl]][[D]]"), or caption(null) to clear.
-  async caption(text) {
-    await this.page.evaluate((parts) => window.__mdmRig && window.__mdmRig.caption(parts), capParts(text));
+  // With bottom, the caption's foot that many px above the window's.
+  async caption(text, bottom) {
+    await this.page.evaluate((parts, bottom) => window.__mdmRig && window.__mdmRig.caption(parts, bottom), capParts(text), bottom === undefined ? null : bottom);
   }
 
   // ---- VS Code's notifications ----

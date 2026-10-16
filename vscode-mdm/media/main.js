@@ -289,14 +289,13 @@
     );
   }
 
-  // ---------- Staff lines button ----------
+  // ---------- Staff lines ----------
 
-  // Top-level toolbar toggle for the Guitar-Pro-style gray staff lines scores
-  // are drawn with by default. Following the theme button convention, the
-  // tooltip names what the click switches to, not the state in use. The
-  // lit state marks ink, not gray: the button stays quiet for as
-  // long as the default holds, and lights up only once the lines have been
-  // put back in ink.
+  // A switch of the Score menu for the Guitar-Pro-style gray staff lines
+  // scores are drawn with by default. Named for what it turns on, the lines
+  // put back in ink, and ticked while they are, as every switch of the menus
+  // is: the row stays quiet for as long as the default holds. It was a
+  // button of the bar, lit on ink, whose tip named what the click led to.
   //
   // Staff lines closed off by a barline at each end. Rects rather than
   // strokes, since the toolbar stylesheet sets stroke-width 0 and a stroked
@@ -306,19 +305,6 @@
   const STAFF_ICON =
     '<svg viewBox="0 0 16 16"><rect x="1" y="2.4" width="14" height="1" rx=".5"/><rect x="1" y="5.8" width="14" height="1" rx=".5"/><rect x="1" y="9.2" width="14" height="1" rx=".5"/><rect x="1" y="12.6" width="14" height="1" rx=".5"/><rect x="1" y="2.4" width="1" height="11.2" rx=".5"/><rect x="14" y="2.4" width="1" height="11.2" rx=".5"/></svg>';
 
-  function staffTip() {
-    return staffLines === "gray" ? "Ink staff lines" : "Gray staff lines";
-  }
-
-  function updateStaffButton() {
-    const btn = document.querySelector(
-      '#app button[data-type="mdm-staff-lines"]'
-    );
-    if (!btn) return;
-    btn.setAttribute("aria-label", staffTip());
-    btn.classList.toggle("mdm-btn--on", staffLines === "ink");
-  }
-
   // ---------- Following the playhead ----------
 
   // Whether the page keeps up with the playhead: on, it keeps the staff
@@ -327,19 +313,20 @@
   // while the document around it is read, which there was no way to ask for.
   // On by default, which is what the page has always done.
   //
-  // The playhead and not "the music" is what the button says, because the
+  // The playhead and not "the music" is what the row says, because the
   // playhead is the thing that moves and the thing the page is chasing: a
   // tune can sound with the page perfectly still, and it is the mark walking
   // the staff that a reader is asking to keep in front of them.
   //
-  // In the toolbar with the other things that are set once and left, and not
-  // in the player row: it says what this editor does with a tune rather than
-  // what this tune is doing, and it is worth setting before a player is open
-  // at all. Lit while the page is NOT following, which is the convention of
-  // the staff-line, multicursor and text-font toggles rather than the theme
-  // button's (whose glyph names what the click leads to): the lamp marks the
-  // setting that was asked for, and following is what the editor does before
-  // anyone asks for anything.
+  // In the Score menu with the other things that are set once and left, and
+  // not in the player row: it says what this editor does with a tune rather
+  // than what this tune is doing, and it is worth setting before a player is
+  // open at all. "Follow the playhead", ticked while the page follows, which
+  // it does before anyone asks for anything: the switches of the menus are
+  // named for what they turn on and ticked while it is on. As a button of
+  // the bar it was lit while the page was NOT following, a lamp on the
+  // setting that had been asked for, under a tip that named what the click
+  // led to.
   //
   // The page and the head that walks it: three rules of text with the
   // playhead standing across them, which is the one mark of this editor that
@@ -356,31 +343,13 @@
 
   let following = SETTINGS.followPlayhead !== "still";
 
-  // One verb and its negation, so the two states of the button read as one
-  // switch. "Let the page be" said the same thing in better English and named
-  // neither the playhead nor the following, so a reader meeting the off state
-  // first had no way to tell what the button was for.
-  function followTip() {
-    return following ? "Unfollow the playhead" : "Follow the playhead";
-  }
-
-  // Lit while the page is NOT following, which is the convention of the rest
-  // of the bar: the lamp marks the setting that was asked for, and following
-  // is what the editor does before anyone asks for anything. The staff-line,
-  // multicursor and text-font toggles all light this way round.
-  function updateFollowButton() {
-    const btn = document.querySelector('#app button[data-type="mdm-follow"]');
-    if (!btn) return;
-    btn.setAttribute("aria-label", followTip());
-    btn.classList.toggle("mdm-btn--on", !following);
-  }
-
-  // The setting has come back from the host: the button follows it, and a tune
-  // already sounding is brought under the pane at once. Turning it on is a
-  // gesture asking to see the music, and a gesture is answered where it is
-  // made rather than at whatever the tune does next.
+  // The setting has come back from the host: the row follows it, in the menu
+  // and on the score panel, and a tune already sounding is brought under the
+  // pane at once. Turning it on is a gesture asking to see the music, and a
+  // gesture is answered where it is made rather than at whatever the tune
+  // does next.
   function applyFollowPlayhead() {
-    updateFollowButton();
+    syncRow("mdm-follow");
     if (following) revealPlayhead();
   }
 
@@ -487,26 +456,6 @@
     return named ? named.trim() : "";
   }
 
-  // The tip names the face the click leads to, not the one being read, and it
-  // names it by what the reader would call it rather than by the name of the
-  // file: the roman is the face of a LaTeX document, the sans is the face
-  // Markdown is usually written in.
-  function textFontTip() {
-    return textFont === "roman" ? "Usual Markdown font" : "LaTeX font";
-  }
-
-  // Lit on the sans and not on the roman, which is the way round the rest of
-  // the bar works: the roman is the default, and a lamp that is on from the
-  // first time the editor opens says nothing. The staff-line and multicursor
-  // toggles light the same way, on the setting that was asked for rather than
-  // on the one that came with the editor.
-  function updateTextFontButton() {
-    const btn = document.querySelector('#app button[data-type="mdm-text-font"]');
-    if (!btn) return;
-    btn.setAttribute("aria-label", textFontTip());
-    btn.classList.toggle("mdm-btn--on", textFont === "sans");
-  }
-
   // The class the stylesheet hangs the face on, and then a re-measure.
   // CodeMirror keeps the width of a character and the height of a line in a
   // cache it only refills when its resize observer fires, and a face swap
@@ -528,7 +477,7 @@
     const wasFace = scoreFace + "/" + scoreFaceWide;
     scoreFace = readScoreFace("--mdm-score-face");
     scoreFaceWide = readScoreFace("--mdm-score-face-wide");
-    updateTextFontButton();
+    syncRow("mdm-text-font");
     remeasureText();
     // Only when the face really moved, and only when it can be used. This
     // function runs on every settings message the host sends, which is every
@@ -583,16 +532,16 @@
   // (style.css).
   //
   // The glyph is the one a word processor gives the command: three rows out
-  // to both edges and a short last one. It stands apart from the staff lines
-  // toggle, which is the same rows closed by barlines, by the missing
-  // barlines and the short row, and the score alignment toggle no longer
+  // to both edges and a short last one. It stands apart from the glyph of the
+  // staff lines, which is the same rows closed by barlines, by the missing
+  // barlines and the short row, and the glyph of the scores' place no longer
   // draws text at all (ALIGN_ICON below).
   //
-  // It works as the score alignment toggle does, at the owner's request: the
-  // glyph and the tip name what the click leads to, and the button is never
-  // lit, since the glyph that changes already says which way the text is
-  // set. So justified text shows the ragged glyph (TEXT_RAGGED_ICON: the same
-  // four rows, flush left and of four lengths) and ragged text shows this one.
+  // As a button it worked as the button of the scores' place did, the glyph
+  // and the tip naming what the click led to and changing with it (a ragged glyph
+  // while the text was justified). As a row of the Page menu it is named for
+  // what it turns on, Justified text, wears this one glyph and is ticked
+  // while the text is justified (2026-10-13).
   const TEXT_ALIGN_ICON =
     '<svg viewBox="0 0 16 16">' +
     '<rect x="1" y="2.3" width="14" height="1.4" rx=".7"/>' +
@@ -601,31 +550,7 @@
     '<rect x="1" y="12.5" width="8.4" height="1.4" rx=".7"/>' +
     "</svg>";
 
-  const TEXT_RAGGED_ICON =
-    '<svg viewBox="0 0 16 16">' +
-    '<rect x="1" y="2.3" width="14" height="1.4" rx=".7"/>' +
-    '<rect x="1" y="5.7" width="9.6" height="1.4" rx=".7"/>' +
-    '<rect x="1" y="9.1" width="12.4" height="1.4" rx=".7"/>' +
-    '<rect x="1" y="12.5" width="7.2" height="1.4" rx=".7"/>' +
-    "</svg>";
-
   let textAlign = SETTINGS.textAlign || "justify";
-
-  // The glyph of what the click leads to.
-  function textAlignIcon() {
-    return textAlign === "justify" ? TEXT_RAGGED_ICON : TEXT_ALIGN_ICON;
-  }
-
-  function textAlignTip() {
-    return textAlign === "justify" ? "Align text left" : "Justify text";
-  }
-
-  function updateTextAlignButton() {
-    const btn = document.querySelector('#app button[data-type="mdm-text-align"]');
-    if (!btn) return;
-    btn.setAttribute("aria-label", textAlignTip());
-    btn.innerHTML = textAlignIcon();
-  }
 
   // The class the stylesheet justifies the prose by. The carets and the
   // selection are drawn by CodeMirror from where the letters were when it
@@ -639,7 +564,7 @@
     if (!root) return;
     const was = root.classList.contains("mdm-text--justify");
     root.classList.toggle("mdm-text--justify", textAlign === "justify");
-    updateTextAlignButton();
+    syncRow("mdm-text-align");
     if (view && was !== (textAlign === "justify")) {
       view.dispatch({ selection: view.state.selection });
     }
@@ -700,7 +625,8 @@
   // hyphenation" whenever nothing is: division off, a header that names no
   // language (language() in mdm-hyphenation.js says why that one is not taken
   // for English) or a language without patterns. The tick says what the page
-  // is doing, so there is always exactly one.
+  // is doing, so there is always exactly one, and the export divides exactly
+  // when it is on a language (exportHyphenation in extension.js).
   function hyphenationChoice() {
     if (hyphenation !== "auto" || !view) return "none";
     const lang = documentLanguage(view.state).split("-")[0];
@@ -709,31 +635,37 @@
     }) ? lang : "none";
   }
 
-  // Lit while a language is dividing the prose, which is while the tick is on
-  // a language. Off, a header naming no language and a language without
-  // patterns all keep the words whole and leave the button dark: the lamp
-  // marks what was asked for and is being done, as on the rest of the bar.
-  // The export divides exactly when it is lit (exportHyphenation in
-  // extension.js).
-  function updateHyphenationButton() {
-    const btn = document.querySelector('#app button[data-type="mdm-hyphenation"]');
-    if (!btn) return;
-    btn.classList.toggle("mdm-btn--on", hyphenationChoice() !== "none");
+  // The tick moved to where the page is, with every menu shut: a row says
+  // what is so whether or not anybody is looking at it. Asked on every change
+  // of the text, since a `lang:` typed into the header on screen moves the
+  // tick as it moves the cuts, so the entry is worked out once and the rows
+  // are only read again when it is another one. The button these rows hung
+  // from was lit while a language divided the prose; the row of the Page
+  // menu that leads to them says nothing of it, and the tick is where it is
+  // read.
+  let hyphenationTicked = null;
+  function updateHyphenationRows() {
+    const choice = hyphenationChoice();
+    if (choice === hyphenationTicked) return;
+    hyphenationTicked = choice;
+    [{ tag: "none" }].concat(HYPHENATION_LANGUAGES).forEach(function (entry) {
+      syncRow("mdm-hyphenation-" + entry.tag);
+    });
   }
 
-  // Rebuilt each time the panel opens (a `build` panel, see toolbarButton),
-  // so the tick follows a `lang:` typed into the header as well as the
-  // setting.
+  // The rows of the submenu, each ticked while it is the entry the page is
+  // on (hyphenationChoice): read when the menu opens, and whenever the entry
+  // moves (updateHyphenationRows).
   function hyphenationMenuItems() {
-    const choice = hyphenationChoice();
     return [{ tag: "none", label: "No hyphenation" }]
       .concat(HYPHENATION_LANGUAGES)
       .map(function (entry) {
         return {
           name: "mdm-hyphenation-" + entry.tag,
-          label:
-            entry.label +
-            (entry.tag === choice ? '<span class="mdm-swatch__tick">✓</span>' : ""),
+          tip: entry.label,
+          on: function () {
+            return entry.tag === hyphenationChoice();
+          },
           click: function () {
             if (entry.tag === "none") {
               askSetting("hyphenation", "none");
@@ -754,24 +686,27 @@
     const root = app();
     if (!root) return;
     root.classList.toggle("mdm-hyphenation--on", hyphenation === "auto");
-    updateHyphenationButton();
+    updateHyphenationRows();
     if (view) view.dispatch({ effects: refreshHyphenation.of(null) });
     remeasureText();
   }
 
-  // ---------- Score alignment button ----------
+  // ---------- Score alignment ----------
 
   // Where a score sits across the page. Centred by default, like display maths;
   // left aligns it with the text, which is what a run of narrow scores wants so
   // they do not wander from block to block. Only scores narrower than the pane
   // move: a full-width one fills the line either way.
   //
-  // Same convention as the theme button: the icon and the tooltip name what the
-  // click does, not the state in use, so the centred glyph shows while the
-  // scores are left-aligned.
+  // A switch of the Score menu, "Scores at the left", ticked while they are:
+  // named for what it turns on, as the switches of the menus are, and under
+  // the one glyph of that. As a button of the bar it followed the theme
+  // button's convention, a glyph and a tip that named what the click led to,
+  // so it wore the centred note while the scores stood at the left; that
+  // drawing went with the button.
   //
   // A quarter note between a line of text over it and one under it, standing
-  // at the left edge or in the middle. The glyph used to be the bars of a
+  // at the left edge. The glyph used to be the bars of a
   // text-alignment icon, which was unambiguous while nothing else on the bar
   // aligned anything; with the prose justified from the toggle beside the
   // hyphenation menu (TEXT_ALIGN_ICON) two sets of bars would have left a
@@ -780,7 +715,7 @@
   // staff with a head on it ran together into a smudge at 15px, and one
   // closed by barlines read as a box.
   // The two lines of text and the stem are drawn at 1.5, a shade heavier than
-  // the 1.3 rules of the playhead toggle (FOLLOW_ICON). The lines stand at the
+  // the 1.3 rules of the playhead's glyph (FOLLOW_ICON). The lines stand at the
   // very edges of the box so the note takes the room left between them. The
   // owner's corrections, in turn: the first 0.95 drawing was lighter than the
   // rest of the bar, 1.3 made all three marks even with the playhead, and the
@@ -789,34 +724,15 @@
   // 2.1 right of its centre, and runs down to the centre inside it: stood off
   // the head and stopped short, its rounded foot left a notch between head and
   // stem that read as a gap. Head and stem span 2.1 either side of the centre,
-  // so the centred one is at 8 and the left one at 3.1. Filled, since the
-  // toolbar stylesheet sets stroke-width 0.
-  const ALIGN_ICON = {
-    center:
-      '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="1.5" rx=".75"/><ellipse cx="8" cy="11" rx="2.2" ry="1.55" transform="rotate(-25 8 11)"/><rect x="8.6" y="3.4" width="1.5" height="7.6" rx=".75"/><rect x="1" y="13.5" width="14" height="1.5" rx=".75"/></svg>',
-    left:
-      '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="1.5" rx=".75"/><ellipse cx="3.1" cy="11" rx="2.2" ry="1.55" transform="rotate(-25 3.1 11)"/><rect x="3.7" y="3.4" width="1.5" height="7.6" rx=".75"/><rect x="1" y="13.5" width="14" height="1.5" rx=".75"/></svg>',
-  };
-
-  // The other side of the toggle: what the click leads to.
-  function alignTarget() {
-    return scoreAlign === "center" ? "left" : "center";
-  }
-
-  function alignTip() {
-    return alignTarget() === "left" ? "Align scores left" : "Centre scores";
-  }
+  // which is at 3.1. Filled, since the toolbar stylesheet sets stroke-width 0.
+  const ALIGN_ICON =
+    '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="1.5" rx=".75"/><ellipse cx="3.1" cy="11" rx="2.2" ry="1.55" transform="rotate(-25 3.1 11)"/><rect x="3.7" y="3.4" width="1.5" height="7.6" rx=".75"/><rect x="1" y="13.5" width="14" height="1.5" rx=".75"/></svg>';
 
   function applyScoreAlign() {
     const root = document.getElementById("app");
     if (!root) return;
     root.classList.toggle("mdm-score--left", scoreAlign === "left");
-    const btn = document.querySelector(
-      '#app button[data-type="mdm-score-align"]'
-    );
-    if (!btn) return;
-    btn.setAttribute("aria-label", alignTip());
-    btn.innerHTML = ALIGN_ICON[alignTarget()];
+    syncRow("mdm-score-align");
   }
 
   // ---------- Front matter button ----------
@@ -855,32 +771,23 @@
   let headerText = "";
   const FM_BUTTON = '#app button[data-type="mdm-front-matter"]';
 
-  // Whether the source in the text is the button's doing, or the setting's,
+  // Whether the source in the text is the row's doing, or the setting's,
   // and so there to stay: the host says so with the text (`pinned`).
   function headerShown() {
     return editorFrontMatter && headerPinned;
   }
 
-  // The button is lit while it is what keeps the source in view. A source
-  // opened by a click on the title leaves it dark, since the button did not
-  // open it and a press now does something else: it keeps the source and
-  // takes the drawing away. A header typed into a document that had none
-  // stays in the text (the host says so with the update that follows the
-  // edit): the button is lit for one that draws nothing, which stays as
-  // typed, and dark for one that draws a title, which is open as a click
-  // would have left it.
-  function fmTip() {
-    if (headerText === "") return "No YAML header in this file";
-    return headerShown() ? "Hide YAML header" : "Show YAML header";
-  }
-
+  // The row of the Page menu is ticked while it is what keeps the source in
+  // view. A source opened by a click on the title leaves it unticked, since
+  // the row did not open it and a press now does something else: it keeps
+  // the source and takes the drawing away. A header typed into a document
+  // that had none stays in the text (the host says so with the update that
+  // follows the edit): the row is ticked for one that draws nothing, which
+  // stays as typed, and not for one that draws a title, which is open as a
+  // click would have left it. Greyed for a file without one, which has
+  // nothing to show (the row's own `on` and `off`, in buildToolbar).
   function updateFrontMatter() {
-    const btn = document.querySelector(FM_BUTTON);
-    if (!btn) return;
-    btn.setAttribute("aria-label", fmTip());
-    btn.classList.toggle("mdm-btn--on", headerShown() && headerText !== "");
-    // Nothing to show for a file without a header, so the button greys out.
-    btn.classList.toggle("mdm-btn--off", headerText === "");
+    syncRow("mdm-front-matter");
   }
 
   // The host is asked for the header's source, or to put it away, and the
@@ -1085,7 +992,7 @@
       );
       if (btn) btn.innerHTML = fillMenuLabel(key);
     });
-    updateStaffButton();
+    syncRow("mdm-staff-lines");
   }
 
   function applyScoreFill() {
@@ -1095,11 +1002,10 @@
     root.classList.toggle("mdm-score--filled", !!color);
     root.classList.toggle("mdm-staff--gray", staffLines === "gray");
     root.style.setProperty("--mdm-score-fill", color || "transparent");
+    // The row that leads to the fills says nothing of which is on, as the
+    // row that leads to the languages does not: the tick is in its submenu.
+    // As a button it was lit while a fill was on.
     updateFillMenu();
-    // The menu lights while a fill is on, the way the hyphenation menu does
-    // while a language divides: None is the default, and dark.
-    const btn = document.querySelector('#app button[data-type="mdm-score-fill"]');
-    if (btn) btn.classList.toggle("mdm-btn--on", !!color);
   }
 
   function fillMenuItems() {
@@ -1375,7 +1281,7 @@
             filter: false,
           });
           target.update([tr, back]);
-          updateUndoButtons();
+          updateUndoRows();
         },
       });
     };
@@ -1508,10 +1414,16 @@
   // nothing reads the selection, so it is undone right after abcjs writes it. Restore
   // black rather than clearing the attribute: that is the value abcjs itself
   // returns to, and the one the dark recolouring looks for.
+  //
+  // The player's ink wears the same class, written with PLAY_HIGHLIGHT and
+  // not with abcjs's red, and is left alone: a click on a sounding score is
+  // a gesture of the score mode (it sends the music there), and clearing
+  // every mark took the note sounding out of ink until the next one came.
   function clearScoreSelection() {
     document
       .querySelectorAll("code.language-abc .abcjs-note_selected")
       .forEach(function (el) {
+        if (el.getAttribute("fill") === PLAY_HIGHLIGHT) return;
         el.setAttribute("fill", "#000000");
         el.setAttribute(
           "class",
@@ -1987,6 +1899,7 @@
     let announced = -1;
     let asked = null; // a position waiting for the engine to be free
     let seeking = false;
+    let scrubbed = false; // the seek asked for came from a hand on the bar
 
     // The fill starts empty and is written from paint() thereafter. Set here
     // as well so the track is painted from a value of its own from the first
@@ -2041,6 +1954,11 @@
     if (player && player.bar === bar) {
       player.repaint = function () {
         if (!dragging) paint(head, totalMs());
+      };
+      // The score mode plays from its cursor by asking for the same seek a
+      // hand on the head asks for (playFromScoreCursor).
+      player.seekTo = function (percent) {
+        seek(clampPercent(percent));
       };
     }
 
@@ -2098,6 +2016,10 @@
           const percent = asked;
           asked = null;
           controller.seek(percent);
+          // Where the music was put, kept for the playing line: the clock
+          // of a tune started from here reads a frame short of it
+          // (cursorFrame).
+          if (player && player.controller === controller) player.from = percent;
           // The seek moves the timer and the sound; the reading the widget is
           // drawn from is a field of its own on the controller. The timer
           // does write it back, but only when the new position falls in
@@ -2113,6 +2035,13 @@
           // pointermove: the arrow keys, Home and End, and a plain click on
           // the track.
           revealPlayhead();
+          // A hand on the head moves the score mode's cursor with it while
+          // the tune stands still: in that mode the cursor is where the
+          // music is when nothing sounds (scoreCursorToMusic).
+          if (scrubbed) {
+            scrubbed = false;
+            scoreCursorToMusic();
+          }
           return Promise.resolve();
         }, null)
         .then(done, done);
@@ -2143,6 +2072,7 @@
       // this clear and light a note the head has left.
       clearResumeHold();
       clearPlayingHighlight();
+      scoreRun = null;
       if (isSounding(bar) && audioMute && audioCtx) {
         try {
           audioMute.gain.cancelScheduledValues(audioCtx.currentTime);
@@ -2170,6 +2100,7 @@
     track.addEventListener("pointerup", function (e) {
       if (!dragging) return;
       dragging = false;
+      scrubbed = true;
       seek(pointerPercent(e.clientX));
     });
     track.addEventListener("pointercancel", function () {
@@ -2204,6 +2135,7 @@
       }
       if (percent === null) return;
       e.preventDefault();
+      scrubbed = true;
       seek(percent);
     });
   }
@@ -2248,7 +2180,15 @@
     button.innerHTML = STOP_ICON;
     button.addEventListener("click", function () {
       const start = bar.querySelector(".abcjs-midi-start");
-      if (start && start.classList.contains("abcjs-pushed")) start.click();
+      // A stop takes the score mode's cursor back to where the playing
+      // began, as the end of the tune does: when the pause lands if the tune
+      // is sounding (scoreHearsPlayer), and at once if it stands paused.
+      if (start && start.classList.contains("abcjs-pushed")) {
+        scoreStopKind = "start";
+        start.click();
+      } else {
+        scoreCursorToStart();
+      }
       // The rewind waits a microtask on that pause. abcjs finishes pausing
       // after the click returns and writes down where the sound stopped as it
       // does, so a restart in the same tick was undone by it: the clock, the
@@ -2323,6 +2263,7 @@
     // watched, so writing the labels back cannot feed the observer.
     new MutationObserver(function () {
       syncWidgetLabels(bar);
+      scoreHearsPlayer();
     }).observe(widget, {
       attributes: true,
       attributeFilter: ["class"],
@@ -2422,6 +2363,20 @@
     return ranges;
   }
 
+  // The number abcjs's synth counts a voice by (voicesOff, synthParams): the
+  // staves of a line from the top, and the voices of each in turn. Checked on
+  // a chorale of two voices on the first staff and one on each of two more:
+  // 0 to 3 silenced the first staff's upper voice, its lower one, and the
+  // voices of the second and third staves.
+  function voiceNumber(group, voice) {
+    const staff = group.staffs.indexOf(voice.staff);
+    let before = 0;
+    group.voices.forEach(function (other) {
+      if (group.staffs.indexOf(other.staff) < staff) before++;
+    });
+    return before + (voice.voicenumber || 0);
+  }
+
   // What the engraver's own rangeHighlight does (walk the engraved elements,
   // light the ones whose chars intersect a sounding range), but with a colour
   // of ours: highlight() hardwires its default to the selection red. And with
@@ -2433,8 +2388,11 @@
     const ranges = soundingRanges(ev);
     clearEngraverSelection(engraver);
     let root = null;
+    const off = (player && player.off) || [];
     engraver.staffgroups.forEach(function (group) {
       group.voices.forEach(function (voice) {
+        // A voice the synth leaves out sounds nothing, and lights nothing.
+        if (off.length && off.indexOf(voiceNumber(group, voice)) >= 0) return;
         voice.children.forEach(function (child) {
           const elem = child.abcelem;
           if (
@@ -2704,9 +2662,26 @@
 
   let cursorLoop = 0; // the rAF handle while a player is open
 
+  // Where a player's timer has the music by its own start, in ms, for a
+  // reading of `ms` on its clock. Running, that is the time since the start
+  // it keeps (startTime, taken off performance.now() by a start and by a
+  // seek); paused, the place the pause was made at, which abcjs works out
+  // from that same start; and with neither kept, stopped and rewound, the
+  // reading itself.
+  function playerClock(timer, ms) {
+    if (!timer) return ms;
+    if (timer.isRunning && typeof timer.startTime === "number") return performance.now() - timer.startTime;
+    if (!timer.isRunning && typeof timer.pausedPercent === "number") return timer.pausedPercent * timer.lastMoment;
+    return ms;
+  }
+
   function cursorFrame() {
     cursorLoop = requestAnimationFrame(cursorFrame);
     if (!player) return;
+    // The score mode's share of every frame: the end of a stretch being
+    // played, and whether the music has started or stopped under it.
+    if (scoreRun) scoreRunFrame();
+    scoreHearsPlayer();
     const block = playerBlock();
     const code = block && block.querySelector("code.language-abc");
     const svg = code && code.querySelector("svg");
@@ -2745,10 +2720,38 @@
       followPlayhead(null);
       return;
     }
-    const at =
+    let at =
       cursorDrag !== null
         ? cursorDrag * timing.total
         : (ms * timing.total) / total;
+    // The music does not stand before the place it was put at. The clock
+    // read here is abcjs's, which counts from the stamp of the frame it is
+    // asked in, and a frame is stamped when it is begun and not when its
+    // turn comes: the first frame after a tune is started from where a seek
+    // left it was begun before the start, and reads short of the seek by
+    // however long the page was busy. 16 ms in the harness (3982.7 to
+    // 3985.2 for a seek to 4000) and 76 in a VS Code that was being
+    // recorded (3923.9). A moment before a note is the tail of the note
+    // before it: with the seek on the first note of a line, which is where
+    // the score mode's Space puts it, the line was drawn for that frame at
+    // the end of the line above, a system away, and the page was told the
+    // music was up there (one frame of the README's take, 2026-10-06, and
+    // again the same day through a hold of 50 ms either side of the seek,
+    // which the harness's 16 fitted in and the window's 76 did not).
+    //
+    // What tells such a frame from music taken back by some other road is
+    // the timer's own start, kept by the clock of the page and not by a
+    // frame's stamp (playerClock). While that has the music at the place
+    // or past it, a reading short of the place is a frame begun too early,
+    // however short, and the line holds to the place; when that has the
+    // music before the place, it is, and the place is let go of.
+    if (cursorDrag === null && typeof player.from === "number") {
+      const from = player.from * timing.total;
+      if (at < from) {
+        if ((playerClock(timer, ms) * timing.total) / total >= from - 1) at = from;
+        else player.from = null;
+      }
+    }
     const place = cursorPlace(timing, at);
     followPlayhead(place);
     const el = line || cursorEl(svg);
@@ -3012,6 +3015,52 @@
     mountSynth(bar);
   }
 
+  // What the synth is told of a tune: how it sounds, and the voices it
+  // leaves out (`off`, by the numbers abcjs counts them in, a line's staves
+  // from the top and each staff's voices in turn), which is how the score
+  // mode plays a stretch in the voices it was chosen over and no other
+  // (playFromScoreCursor). A voice left out is still in the tune's clock:
+  // abcjs keeps its notes at no volume, so the playing line walks as it did.
+  function synthParams(off) {
+    return {
+      soundFontUrl: window.MDM_SOUNDFONT,
+      // The boost abcjs applies to this same soundfont when fetched from
+      // its own CDN: MusyngKite is rendered quiet, and the URL check that
+      // triggers the boost never matches a local copy.
+      soundFontVolumeMultiplier: 3,
+      // What is written is what sounds: left on, abcjs turns the chord
+      // symbols ("Dm7") into a strummed accompaniment of its own, four
+      // quarters filling the measure under a written whole note.
+      chordsOff: true,
+      voicesOff: off,
+    };
+  }
+
+  // The voices the open player leaves out, changed: the tune is set on the
+  // synth again, which stops it and takes it back to its start, and primed
+  // at once (40 to 100 ms on the scores measured for the mode's Space; the
+  // seek and the press that follow wait for it, runWhenReady). Asked for
+  // here and not left to the next press: abcjs keeps the buffer it has for
+  // as long as it believes the tune loaded, whatever it has been told since
+  // (setTune leaves isLoaded as it was; seen in the harness, where the
+  // second stretch sounded in the voices of the first). It also lets go of
+  // the repeat, which is put back. True when the tune was set again.
+  function setPlayerVoices(off) {
+    if (!player || !player.controller || !player.tune) return false;
+    if ((player.off || []).join() === off.join()) return false;
+    player.off = off.slice();
+    const controller = player.controller;
+    const looping = !!controller.isLooping;
+    try {
+      const primed = controller.setTune(player.tune, true, synthParams(off));
+      if (primed && typeof primed.catch === "function") primed.catch(function () {});
+      if (looping && typeof controller.toggleLoop === "function") controller.toggleLoop();
+    } catch (e) {
+      // a synth that will not take the tune plays what it had
+    }
+    return true;
+  }
+
   function mountSynth(bar) {
     loadAbcjs6()
       .then(function (A) {
@@ -3032,7 +3081,7 @@
         document.body.appendChild(scratch);
         let visual = null;
         try {
-          visual = A.renderAbc(scratch, player.source, {})[0];
+          visual = A.renderAbc(scratch, player.source, { afterParsing: evenScoreBars })[0];
         } finally {
           document.body.removeChild(scratch);
         }
@@ -3055,6 +3104,10 @@
                 // transport runs on underneath: the notes passing under the
                 // old position sound nothing and must light nothing.
                 if (cursorDrag !== null) return;
+                // The note after a stretch the score mode is playing, which
+                // the timer reports a moment before the stretch is stopped
+                // on it: it is not heard, and is not lit (pastScoreRun).
+                if (pastScoreRun(ev)) return;
                 // Inside a resume gap the sound is muted and this event is the
                 // one the timer reported early: abcjs advances its pointer the
                 // moment it is told to move, so what it hands over is the note
@@ -3082,6 +3135,10 @@
               } catch (e) {
                 // same
               }
+              // The end of the tune: the score mode's cursor goes back to
+              // where the playing began (scoreHearsPlayer), unless a key has
+              // already said where it goes.
+              if (!scoreStopKind) scoreStopKind = "start";
             },
             // How often the controller is told where it has got to. abcjs
             // reports once per beat by default, and that number is also what
@@ -3100,18 +3157,40 @@
             displayLoop: true,
           }
         );
-        controller.setTune(visual, false, {
-          soundFontUrl: window.MDM_SOUNDFONT,
-          // The boost abcjs applies to this same soundfont when fetched from
-          // its own CDN: MusyngKite is rendered quiet, and the URL check that
-          // triggers the boost never matches a local copy.
-          soundFontVolumeMultiplier: 3,
-          // What is written is what sounds: left on, abcjs turns the chord
-          // symbols ("Dm7") into a strummed accompaniment of its own, four
-          // quarters filling the measure under a written whole note.
-          chordsOff: true,
-        });
+        // Kept for the tune to be set again with voices left out
+        // (setPlayerVoices).
+        player.tune = visual;
+        player.off = [];
+        controller.setTune(visual, false, synthParams([]));
         decorateWidget(bar, controller);
+        // abcjs waits out a priming already under way in steps of half a
+        // second: runWhenReady looks again every 500 ms while isLoading, so
+        // a press of play that arrives while the tune is being primed (by a
+        // seek, or by another press) sounds up to half a second after the
+        // tune is ready. The score mode's Space seeks and then presses, and
+        // it met that on every score not played yet: 512 ms from the key to
+        // the first note, of which the priming itself was 40 to 100. The
+        // wait is put on the priming instead, so whatever was asked for
+        // while it ran is served the moment it ends.
+        const controllerGo = controller.go;
+        const controllerRunWhenReady = controller.runWhenReady;
+        let priming = null;
+        controller.go = function () {
+          priming = controllerGo.apply(controller, arguments);
+          return priming;
+        };
+        controller.runWhenReady = function (fn, arg) {
+          if (!controller.isLoading || !priming) {
+            return controllerRunWhenReady.apply(controller, arguments);
+          }
+          // Asked again once it ends, so a priming that failed goes back to
+          // abcjs's own way of waiting and nothing is played on a tune that
+          // never loaded.
+          const again = function () {
+            return controllerRunWhenReady.call(controller, fn, arg);
+          };
+          return priming.then(again, again);
+        };
         // A seek is a scrub, and a scrub lands inside a note as often as not.
         // Left alone the engine would start the sound on that note's tail with
         // no attack, an echo of the chord that was going, and paint the ink on
@@ -3392,7 +3471,37 @@
   // button, observes, and never swallows the click.
   function watchPlayPresses(e) {
     const button = e.target.closest && e.target.closest(".abcjs-midi-start");
-    if (!button || !player || !player.controller) return;
+    if (!button || !player) return;
+    // Under the score mode, play on the cursor's score plays from the
+    // cursor, or the stretch chosen, whichever of its buttons asked
+    // (playFromScoreCursor); the press is taken here, before abcjs's own
+    // handler on the button hears it, and made again from there. A turn
+    // later: the press made again is a click() on this same button, and a
+    // button does not take a click() while one is still being dispatched on
+    // it (the HTML click-in-progress flag), which is the case when the press
+    // was itself a click() (Space with the bar focused, togglePlayback).
+    if (
+      scoreMode &&
+      !scorePressing &&
+      !button.classList.contains("abcjs-pushed") &&
+      scoreCursor &&
+      player.pos === scoreCursor.pos
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      Promise.resolve().then(toggleScorePlayback);
+      return;
+    }
+    if (!player.controller) return;
+    // A press that is the bar's own plays every voice: the ones the score
+    // mode left out for a stretch (playFromScoreCursor) come back, and the
+    // tune goes on from where it stood.
+    if (!scorePressing && !button.classList.contains("abcjs-pushed") && player.off && player.off.length) {
+      const stood = player.controller.percent || 0;
+      setPlayerVoices([]);
+      if (stood > 0 && player.seekTo) player.seekTo(stood);
+      return;
+    }
     const timer = player.controller.timer;
     if (!timer || typeof timer.currentMillisecond !== "function") return;
     if (button.classList.contains("abcjs-pushed")) return; // this press pauses
@@ -3703,6 +3812,8 @@
     const options = MDM_AUDIO.synthOptions(window.MDM_SOUNDFONT);
     const tune = (A.parseOnly(source) || [])[0];
     if (!tune) return Promise.resolve({ reason: "empty" });
+    // The file holds what the player sounds, a short bar's gap included.
+    evenScoreBars(tune);
     const title = (tune.metaText && tune.metaText.title) || null;
     const flattened = tune.setUpAudio(options);
     // Nothing to play is not the same as nothing to last: a bar of rests has
@@ -4523,6 +4634,10 @@
   function somebodyInside() {
     const active = document.activeElement;
     if (!view || !active) return false;
+    // The score mode freezes the text, and a frozen text is nobody's
+    // whatever holds the focus: the search row's field may, and a match it
+    // finds would open its block under a reader who cannot edit it.
+    if (scoreMode) return false;
     // The bar is asked first, and by identity rather than by where it sits:
     // it lives in the toolbar, outside the view, so the containment test
     // below would answer "nobody" for a focus resting on the player and put
@@ -10019,28 +10134,32 @@
     };
   }
 
-  // The rows of the heading menu: Paragraph and the six levels, the one the
-  // caret's line is on ticked, each naming its key. The Paragraph row was
-  // taken off when the ticked level picked again started taking the heading
-  // off, and it is back with the keys (2026-09-19): at the keyboard there is
-  // no tick to read, so a hand that cannot see what level the line is needs
-  // one key that says paragraph whatever it was.
+  // The rows of the levels, which open the Paragraph menu and were the
+  // heading button's own menu while the bar was buttons: Paragraph and the
+  // six levels, the one the caret's line is on ticked (read each time the
+  // menu opens), each naming its key. The Paragraph row was taken off when
+  // the ticked level picked again started taking the heading off, and it is
+  // back with the keys (2026-09-19): at the keyboard there is no tick to
+  // read, so a hand that cannot see what level the line is needs one key
+  // that says paragraph whatever it was. The glyph that was the button's
+  // stands on the first of the six.
   function headingMenuItems() {
-    const current = headingAtCaret(view && view.state);
     return [0, 1, 2, 3, 4, 5, 6].map(function (level) {
       return {
         name: level ? "heading-" + level : "paragraph",
-        label:
-          (level ? "Heading " + level : "Paragraph") +
-          (level === current ? '<span class="mdm-swatch__tick">✓</span>' : "") +
-          '<span class="mdm-menu__key">' +
-          shortcutLabel(String(level), LEVEL_MOD) +
-          "</span>",
+        icon: level === 1 ? HEADING_ICON : "",
+        tip: level ? "Heading " + level : "Paragraph",
+        key: String(level),
+        also: LEVEL_MOD,
+        on: function () {
+          return level === headingAtCaret(view && view.state);
+        },
         click: function () {
           if (!view) return;
           applyHeading(level)(view);
           view.focus();
         },
+        caret: true,
       };
     });
   }
@@ -11093,6 +11212,20 @@
     caption.className = "mdm-menu__caption";
     caption.textContent = "\u00a0";
     panel.appendChild(caption);
+    // The caption names the cell under the pointer or the focus, and is
+    // blank over anything else.
+    const name = function (cell) {
+      caption.textContent = (cell && cell.getAttribute("aria-label")) || "\u00a0";
+    };
+    panel.addEventListener("mouseover", function (e) {
+      name(e.target.closest(".mdm-menu__glyph"));
+    });
+    panel.addEventListener("focusin", function (e) {
+      name(e.target.closest(".mdm-menu__glyph"));
+    });
+    panel.addEventListener("mouseleave", function () {
+      name(null);
+    });
   }
 
   // Ctrl+Enter: out of the block the caret is in (a fence, an equation, a
@@ -12244,10 +12377,11 @@
   // ---------- Ctrl+D: next occurrence ----------
 
   // Ctrl+D matches whole words, the way VS Code does: a caret in "score" walks
-  // the standalone "score"s and steps over "scores". The toolbar toggle turns
-  // on substring matching, where "score" also lands inside "scores",
-  // "scoreboard" and the like. Which of the two is in force is a setting
-  // (mdm.multicursorMatch), so the toggle comes back lit as it was left.
+  // the standalone "score"s and steps over "scores". The switch in the Edit
+  // menu turns on substring matching, where "score" also lands inside
+  // "scores", "scoreboard" and the like. Which of the two is in force is a
+  // setting (mdm.multicursorMatch), so the row comes back ticked as it was
+  // left.
   let matchSubstring = SETTINGS.multicursorMatch === "substring";
 
   // The substring form of selectNextOccurrence. The first press, on an empty
@@ -12310,23 +12444,6 @@
   // own whole-word selectNextOccurrence otherwise.
   function selectNextOccurrenceMaybe(v) {
     return matchSubstring ? selectNextSubstring(v) : CM.selectNextOccurrence(v);
-  }
-
-  // Both sides of the toggle get their own text, the way the header button has
-  // one for each state: what the tooltip names is what the click switches to,
-  // not the state in use (the convention of the staff, alignment and header
-  // buttons).
-  function matchTip() {
-    return matchSubstring
-      ? "Multicursor matches whole words"
-      : "Multicursor matches inside words";
-  }
-
-  function updateMatchButton() {
-    const btn = document.querySelector('#app button[data-type="mdm-match-substring"]');
-    if (!btn) return;
-    btn.setAttribute("aria-label", matchTip());
-    btn.classList.toggle("mdm-btn--on", matchSubstring);
   }
 
   // ---------- Tooltips ----------
@@ -12408,12 +12525,63 @@
   // the modifier state afresh. Nothing reads that state in between but the
   // alternative actions some toolbars show while Alt is held.
   let altUsedWithMouse = false;
+  // Alt as the workbench last heard of it from this page: the Alt of the
+  // last key that came to the window on its way up, which is where the
+  // preload listens and what it sends on (the workbench writes the keys held
+  // off every event it is sent, `this._keyStatus.altKey = e.altKey`).
+  //
+  // A release of Alt can be lost. Alt+Tab takes the window away with Alt
+  // held, and the key is let go where no page hears it; the workbench, which
+  // resets what it knows of the keys when its own window loses the focus,
+  // does not when the focus was in a webview (its window lost it when the
+  // focus came in here), and goes on believing Alt is down, with Alt the
+  // last key pressed. The first release it is sent after that, of any key,
+  // has no Alt in it, and reads as Alt let go cleanly: the focus goes to the
+  // File menu and the keyboard with it.
+  //
+  // The owner's report of 2026-10-03, "hago Alt Tab para cambiar de ventana,
+  // al regresar las flechas de teclado no me sirven", and again the same day
+  // after the first answer to it (takeScoreKey, which tells the workbench
+  // with the first key the mode takes). Measured in VS Code 1.133.0 under
+  // kwin_x11 5.27.11, the owner's desktop, with the switcher's own Alt+Tab:
+  // Alt let go before Tab on the way back, which is what a hand does as often
+  // as not, and the release of Tab is the first thing the window is sent.
+  // It went to the workbench, the focus went to the menu bar, and the three
+  // arrows after it walked the menus; the same with the caret in the text,
+  // out of the score mode. With Tab let go first nothing comes in before the
+  // next press, and that order had always worked.
+  //
+  // So a release with no Alt in it, of a key that is not Alt, is kept from
+  // the host while the host believes Alt is down: it would learn of Alt from
+  // a key that is not Alt's. It learns from the next press, which writes the
+  // keys held afresh and is a press of something else (lastKeyPressed is no
+  // longer "alt").
+  let hostAlt = false;
+  // Alt was down when the window was left. Where the window comes back with
+  // the key still held (a switcher that changes window before the key is let
+  // go, or a window that takes the focus by itself and gives it back), its
+  // release comes here, and is no tap: the press was used to leave. It is
+  // held back as the release of an Alt used with the mouse is. Measured the
+  // same day with Alt held down, another window opened over VS Code and
+  // closed, and Alt let go: the focus went to the menu bar.
+  let altAway = false;
+
+  // The key is Alt's own, by its name or by its place: with Shift held the
+  // left Alt of an X11 keyboard is named Meta, the second level of the key
+  // (seen in VS Code under kwin_x11: `key: "Meta", code: "AltLeft"`, with
+  // Alt in the event all the same).
+  function isAltKey(e) {
+    return e.key === "Alt" || e.code === "AltLeft" || e.code === "AltRight";
+  }
 
   function watchAltPresses() {
     document.addEventListener(
       "keydown",
       function (e) {
-        if (e.key === "Alt" && !e.repeat) altUsedWithMouse = false;
+        if (e.key === "Alt" && !e.repeat) {
+          altUsedWithMouse = false;
+          altAway = false;
+        }
       },
       true
     );
@@ -12428,10 +12596,26 @@
     // Bubble at the document, the last stop before the window: the editor and
     // every other listener in the page see this release, the host does not.
     document.addEventListener("keyup", function (e) {
-      if (e.key !== "Alt" || !altUsedWithMouse) return;
-      altUsedWithMouse = false;
-      e.stopPropagation();
+      if (e.key === "Alt" && (altUsedWithMouse || altAway)) {
+        altUsedWithMouse = false;
+        e.stopPropagation();
+        return;
+      }
+      if (hostAlt && !e.altKey && !isAltKey(e)) e.stopPropagation();
     });
+    // Whatever Alt is doing as the window is left, its next release is not
+    // a tap's; the next press of it is a new one (the keydown above).
+    window.addEventListener("blur", function () {
+      altAway = true;
+    });
+    // Bubble at the window, beside the preload's own listener: what comes
+    // here is what the host is sent, and it takes no key of the page's
+    // making (the host drops what is not the reader's own).
+    const heard = function (e) {
+      if (e.isTrusted) hostAlt = e.altKey;
+    };
+    window.addEventListener("keydown", heard);
+    window.addEventListener("keyup", heard);
   }
 
   // Inside VS Code, Ctrl+Z reaches this editor twice: once as the keydown,
@@ -12840,6 +13024,28 @@
       e.preventDefault();
       return;
     }
+    // The text frozen under the score mode takes no caret and no selection,
+    // a double or a triple click included. A link is still followed, which
+    // reads nothing into the text and writes nothing out of it. A press on a
+    // score puts the mode's cursor down, and a drag from it chooses a
+    // stretch (pressScore).
+    if (scoreMode && !(e.button === 0 && e.target.closest(".mdm-link") && followsLink(e))) {
+      e.preventDefault();
+      // A button of a score's chrome puts no cursor down: it is answered on
+      // its click (handleChromeClick), or carries the line's end away when
+      // dragged. The press is marked as a score's all the same, so that the
+      // click of a drag let go elsewhere on the score puts none down either.
+      const edit = e.button === 0 && e.target.closest(".mdm-score-edit [role=button]");
+      if (edit) {
+        scorePressed = true;
+        takeScoreKeys();
+        pressScoreEdit(edit, e);
+        return;
+      }
+      const score = e.button === 0 && e.target.closest(".mdm-score");
+      if (score) pressScore(score, e);
+      return;
+    }
     if (repeatedPress(e) || !view) return;
     const link = e.button === 0 && e.target.closest(".mdm-link");
     if (link && followsLink(e)) {
@@ -13056,6 +13262,37 @@
     });
   }
 
+  // The room abcjs is asked to leave over the highest ink of a score and
+  // under its lowest, in its units. By name because the score mode gives
+  // its cursor the room a note would be given (roomForScoreCursor).
+  const SCORE_PAD = 2;
+
+  // A bar that is shorter in one voice than in the others is given the time
+  // it is missing as a rest nobody sees, in what abcjs has parsed and before
+  // it draws or plays it (MDM_BARS.evenBars, which says why and where it
+  // keeps its hands off): the barlines of a line stand together on the
+  // staff, and the voices are together after the gap in the sound. One
+  // function for the three readings the editor makes of a score, the
+  // drawing (renderScore), the engraving the synth plays (mountSynth) and
+  // the tune an audio file is written from (scoreBytes), which have to
+  // agree to the millisecond: the playhead is the synth's clock laid over
+  // the drawing's timings.
+  //
+  // The exported page reads the score without this, as abcjs alone does,
+  // so a score saved with a short bar in one voice is drawn there with that
+  // voice's barline where its notes end, and the rest of its line early.
+  // Not matched yet (tests/README.md, Pending).
+  function evenScoreBars(tune) {
+    try {
+      if (tune && window.MDM_BARS && typeof window.MDM_BARS.evenBars === "function") {
+        window.MDM_BARS.evenBars(tune);
+      }
+    } catch (e) {
+      // A tune this cannot count is drawn and played as abcjs reads it.
+    }
+    return tune;
+  }
+
   // Engraves one score into its <code>. abcjs is loaded by the page before
   // this script (vendor/abcjs), so the engraving is synchronous; what needs
   // the block to be on screen (fitScores measures it) runs afterwards, from
@@ -13071,10 +13308,11 @@
       code.innerHTML = "";
       const params = {
         add_classes: true,
-        paddingtop: 2,
-        paddingbottom: 2,
+        paddingtop: SCORE_PAD,
+        paddingbottom: SCORE_PAD,
         paddingleft: 0,
         paddingright: 0,
+        afterParsing: evenScoreBars,
       };
       const format = scoreFormat();
       if (format) params.format = format;
@@ -13126,6 +13364,8 @@
       fitScores();
       syncPlayer();
       syncCards();
+      // The cursor goes back onto a drawing made anew, once it is fitted.
+      if (scoreMode) drawScoreCursor();
     } catch (e) {
       // never break editing
     }
@@ -13726,12 +13966,25 @@
     // no block is put away by it now, the owner's word on 2026-10-05, for
     // tables, equations, scores and the header alike.
     if (onScrollbar(e)) return;
+    // Nothing is open under the score mode, and the selection it would move
+    // is the one the text is given back with when the mode ends.
+    if (scoreMode) return;
     dismissOpenBlock();
     // And the header's source, where a click on the drawn title opened it:
     // it is not in the text to be closed by a caret moving out, so it is
-    // asked of the host (leaveHeader). Not from its own button, whose press
-    // is about that source and says what becomes of it.
-    if (!e.target.closest(FM_BUTTON)) leaveHeader(false);
+    // asked of the host (leaveHeader). Not from its own row, whose press is
+    // about that source and says what becomes of it, nor from the word of
+    // the bar that opens the row's menu, which is the way to the row: the
+    // row was a button of the bar until the bar became words over menus,
+    // and a press on the word put the source away before the row could be
+    // reached (found putting the bar of the branch over main, 2026-10-15).
+    if (!e.target.closest(FM_BUTTON) && !opensMenuOf(e.target, FM_BUTTON)) leaveHeader(false);
+  }
+
+  // Whether a press is on the word of the bar whose menu holds `row`.
+  function opensMenuOf(target, row) {
+    const word = target.closest(".mdm-toolbar__item > button");
+    return !!word && !!word.parentNode.querySelector(row);
   }
 
   // Whether a press is on a scrollbar of the document, which stands past
@@ -14128,6 +14381,23 @@
     // throw a caret that is editing the tune back to the head of its source.
     if (e.target.closest(".mdm-chrome")) {
       e.preventDefault();
+      return;
+    }
+    // Under the score mode the press on a score has put the cursor down
+    // already (pressScore), and a click on any other drawing opens nothing,
+    // the text being frozen. A click that came with no press, a script's,
+    // puts it down here.
+    if (scoreMode) {
+      e.preventDefault();
+      const edit = e.target.closest(".mdm-score-edit [role=button]");
+      if (edit) {
+        scorePressed = false;
+        clickScoreEdit(edit);
+        return;
+      }
+      const score = e.target.closest(".mdm-score");
+      if (score && !scorePressed) placeScoreCursor(score, e.clientX, e.clientY);
+      scorePressed = false;
       return;
     }
     // A box in a table's cell is ticked and the table stays as it is drawn;
@@ -14588,6 +14858,4836 @@
     }
   }
 
+  // ---------- The score mode ----------
+  //
+  // A switch in the toolbar that freezes the text and hands the scores the
+  // keyboard, the way a tablature editor works: the owner asked for it "como
+  // Guitar Pro" on 2026-09-28, and for this much of it to begin with, a click
+  // on a staff and a cursor walked over it sideways and up and down. The
+  // button is Score navigation, the owner's name for it (2026-09-29); the
+  // mode it turns on is called the score mode here, since the editing that
+  // is to come will live in it as well.
+  //
+  // While it is on, nothing can be typed, pasted, dropped or formatted
+  // (`frozen`, CodeMirror's editable and readOnly), every block is drawn as
+  // it reads, since the text can hold no focus to open one with
+  // (somebodyInside), and the buttons that write into the text grey out
+  // (.mdm-btn--edit in style.css). The rail keeps working: a score can still
+  // be copied, played and exported, and a link still followed.
+  //
+  // The cursor stands on a place of one voice, a note, a chord or a rest,
+  // and at a step of the staff, a line or the space beside it. A click puts
+  // it on the staff nearest the pointer, at the place nearest across and the
+  // step nearest down; Left and Right go to the place before and after in
+  // the same voice, across bars and systems, and Up and Down a step. That is
+  // the owner's choice between a step, the system above or below, and the
+  // staff of another voice: the step is what a tablature editor's string
+  // is, the height at which a note is written (a note written on the
+  // cursor, below). It is kept as the cursor goes across while it stands
+  // on the staff, as the string is. Off the staff, where a note needs ledger lines, the
+  // cursor goes to the head of the next place instead: a height that far
+  // out is the note's and not the reader's, and kept, it left the cursor
+  // walking a blank two ledger lines under the partials after their low C
+  // (the owner's report, 2026-09-29; moveScoreCursor).
+  //
+  // The third round (asked for 2026-09-29, the decisions taken here and
+  // left for the owner to review) gives the mode the player and a first
+  // edit:
+  //
+  //  - Space plays from the cursor and pauses (toggleScorePlayback),
+  //    opening the player's row on the cursor's score if it is not open.
+  //    While the music sounds on the cursor's score the cursor steps aside
+  //    and the player's line walks, one mark of where the music is at a
+  //    time; when it stops, the cursor comes back where it stopped for a
+  //    pause, and where the playing began for the end of the tune or the
+  //    player's stop (scoreHearsPlayer). An arrow or an edit of its score
+  //    while it sounds stops it first, from the note that was sounding.
+  //  - A drag over a score, or Shift with a click or an arrow, chooses a
+  //    stretch of it (the cursor's `anchor`), washed under the ink; play
+  //    then plays that stretch alone and stops at its end, or goes round it
+  //    while the player's repeat is on (scoreRunFrame).
+  //  - Dragging the end of a line to another barline moves bars from line
+  //    to line (the break drag): the music is untouched, only where its
+  //    lines end (media/mdm-bars.js does the text). Ctrl+Z and Ctrl+Y take
+  //    such moves back and forth inside the mode.
+  //
+  // The fourth (2026-09-29) puts the editing on the staff, where the owner
+  // asked for it, and takes it off the keys: Alt+Up and Alt+Down, which the
+  // third round had moving bars, are gone, so that the mode's keys stay the
+  // ones every player and editor has until there is more to edit and they
+  // can be decided together. In their place, the owner's pick of
+  // design-score-editing.html (A): every line's end wears a pair of buttons,
+  // a bar later and a bar earlier, and the barline nearest the pointer a +
+  // that adds an empty bar there (the chrome on a score, below).
+  //
+  // The fifth (2026-10-02) writes notes: Enter and the keys of the figures
+  // put a head on the cursor's place at its step, making a chord on a note,
+  // and Delete takes a head off, makes a note a rest, and takes a rest or a
+  // bar out (a note written on the cursor, below). The sixth, the evening
+  // after, gives Ctrl to the arrows, to walk from line to line and from
+  // voice to voice and to add bars, and Ctrl and Alt to the figures, to put
+  // notes and rests in beside the cursor's place (the keys, below). The
+  // seventh (2026-10-03) gives a voice no barline closes a place past its
+  // last note to go on writing at (endStop), makes room in the drawing for
+  // a cursor past its ink (roomForScoreCursor), and gives the stretch its
+  // voices, the cursor's alone, every one, or the ones picked, and Ctrl+C
+  // to copy it (selectionParts, copyScoreSelection).
+  //
+  // Every change the mode makes to a score is a change of the text, made
+  // as it is asked for (writeScoreEdit): the owner's call of 2026-09-29.
+  // The mode began by holding its changes back and writing them all as the
+  // switch went off, and that left VS Code's tab unmarked while the score
+  // on screen had changed and Ctrl+S writing the file without them (both
+  // measured in VS Code), so that a tab closed in the mode would have lost
+  // them without a word.
+  // The text stays frozen to everything else. The tests take the same road
+  // from window.__mdm (editScore).
+  //
+  // Not a setting: it is where the reader is and not how the editor is set,
+  // and a document reopened in it would open frozen for no reason it shows.
+  // It is chrome besides, like the rail, and the exported page has nothing
+  // of it.
+  let scoreMode = false;
+  // { pos, track, stop, step, anchor, voices, home }: the score by the
+  // position its widget hangs on, kept mapped through every change as the
+  // player's is; the voice and the place in it as indexes into scoreTracks;
+  // the step as abcjs counts them (verticalPos); and the place a stretch
+  // was chosen from, or null when none is. The stretch runs from the anchor
+  // to the cursor, both included, in the cursor's voice, and takes in what
+  // sounds with it in the voices it was chosen over: the cursor's alone
+  // (nothing named), every voice ("all"), or the ones picked one by one (a
+  // list of them as indexes into scoreTracks). While the cursor walks the
+  // voices to pick among them, the stretch stays in the voice it was drawn
+  // out in: `home` is the place the cursor left there, { track, stop, step },
+  // which is the stretch's other end until the cursor is back
+  // (scoreCursorPlace's `head`). And `whole` is the stretch Ctrl+A chooses,
+  // every place of the score in the voices it is chosen over, wherever the
+  // cursor stands (chooseScoreWhole); it is one for as long as there is an
+  // anchor, which is what Escape takes away.
+  let scoreCursor = null;
+  const frozen = new CM.Compartment();
+  // The frozen text scrolls the pane to nothing of its own: a step of the
+  // history taken in the mode (Ctrl+Z) asks for its selection, the caret
+  // the text was left with, to be brought into view, which carried the
+  // page away from the score being edited. The mode keeps its own cursor
+  // on the pane (showScoreCursor).
+  const NO_SCROLL = EditorView.scrollHandler.of(function () {
+    return true;
+  });
+  const READ_ONLY = CM.EditorState.readOnly.of(true);
+  const FROZEN = [EditorView.editable.of(false), READ_ONLY, NO_SCROLL];
+  // The same for the length of an undo or a redo, bar the readOnly
+  // CodeMirror will not take one on (thawedStep).
+  const FROZEN_STEP = FROZEN.filter(function (extension) {
+    return extension !== READ_ONLY;
+  });
+
+  // abcjs 6.7.0 sets the steps of a staff 3.875 units apart (its
+  // spacing.STEP, 93/24), and every staff it hands back carries the y of
+  // step 0 as absoluteY: the head of a note at verticalPos v is drawn at
+  // absoluteY - 3.875 v, measured to the thousandth on a treble and a bass
+  // staff, and the five lines are the even steps from 2 to 10 whatever the
+  // clef, since verticalPos counts on the staff and not in pitch.
+  const ABC_STEP = 3.875;
+  // How far past the outer lines the cursor may go: three ledger lines. A
+  // place with a note further out takes the reach out to it (stepRange).
+  const LEDGER_REACH = 6;
+  // Half the width of the cursor's column, in the score's units: a notehead
+  // is about ten across, and the column stands a little wider than one so
+  // that it reads as the place and not as the note.
+  const CURSOR_HALF = 7;
+  // A stretch chosen (drawScoreSelection): its band stands a step off the
+  // staff's outer lines, half a staff space, where neither the staff nor a
+  // ledger line ever draws a line, since the marks at its corners run along
+  // its edge: on the edge the band had while it was a wash alone, 2 units
+  // off, a mark along it read as a sixth line of the staff (4 bis of
+  // design/design-score-mode.html; 2 px and 3.9 px off the line at a pane
+  // of 900). It is that much wider than the cursor's column on either side
+  // as well, which clears the end of a ledger line at the stretch's end
+  // (6.9 from the middle of its note). The arms of a corner are 5 long: on
+  // one note chosen, the narrowest band there is, 7.75 are left between
+  // the two.
+  const STRETCH_ROOM = ABC_STEP;
+  const STRETCH_HALF = CURSOR_HALF + ABC_STEP - 2;
+  const STRETCH_ARM = 5;
+  // A ledger line as abcjs draws one: two units past a head of 9.8 on either
+  // side, 13.8 across, and as thick as a staff line, 0.7, centred on its
+  // step (measured on its own, over and under a treble staff).
+  const LEDGER_HALF = 6.9;
+  const LEDGER_THICK = 0.7;
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  // The places of one engraving, voice by voice, each voice's systems one
+  // after the other. A voice is known across systems by the staff it is
+  // drawn on and its number on that staff, which is what abcjs keeps for
+  // it: its index among the voices of a system would move the cursor onto
+  // the other part of a duet wherever a system left a voice out. Computed
+  // once per engraving; an edit or a change of face engraves a new visual.
+  const SCORE_TRACKS = new WeakMap();
+  function scoreTracks(visual) {
+    if (SCORE_TRACKS.has(visual)) return SCORE_TRACKS.get(visual);
+    const byKey = new Map();
+    const tracks = [];
+    // What each voice's music ends on, while no barline has closed it since
+    // (endStop).
+    const open = new Map();
+    // The number the synth counts each voice by, and how many it counts: a
+    // voice with nothing drawn has no track, and is counted all the same.
+    const numbers = new Map();
+    let voices = 0;
+    visual.engraver.staffgroups.forEach(function (group) {
+      voices = Math.max(voices, group.voices.length);
+      group.voices.forEach(function (voice) {
+        const key = group.staffs.indexOf(voice.staff) + "/" + (voice.voicenumber || 0);
+        let track = byKey.get(key);
+        if (!track) {
+          track = [];
+          byKey.set(key, track);
+          tracks.push(track);
+          numbers.set(track, voiceNumber(group, voice));
+        }
+        // When each place begins, counted from the head of the line in
+        // whole notes, the notes of a tuplet by the multiplier abcjs puts on
+        // the first of them: what tells the places of two voices that sound
+        // together (soundingWith, selectionParts). Every line begins at one
+        // moment for all its voices, so the count starts again with each.
+        let at = 0;
+        let factor = 1;
+        voice.children.forEach(function (child) {
+          const stop = scoreStop(child, voice.staff, group);
+          const elem = child.abcelem;
+          let span = 0;
+          if (elem && elem.el_type === "note") {
+            if (elem.startTriplet && elem.tripletMultiplier) factor = elem.tripletMultiplier;
+            span = (elem.duration || 0) * factor;
+            if (elem.endTriplet) factor = 1;
+          }
+          if (stop) {
+            stop.at = at;
+            stop.span = span;
+            track.push(stop);
+          }
+          at += span;
+          if (elem && elem.el_type === "note" && voice.staff) {
+            open.set(track, { after: elem.startChar, to: elem.endChar, staff: voice.staff, group: group, at: at });
+          } else if (elem && elem.el_type === "bar") {
+            open.delete(track);
+          }
+        });
+      });
+    });
+    const out = tracks.filter(function (track) {
+      return track.length > 0;
+    });
+    out.forEach(function (track) {
+      if (open.has(track)) track.push(endStop(open.get(track)));
+    });
+    out.numbers = out.map(function (track) {
+      return numbers.get(track);
+    });
+    out.voices = voices;
+    SCORE_TRACKS.set(visual, out);
+    return out;
+  }
+
+  // The open end of a voice: one place more, after the last of its music,
+  // where no barline closes its last bar, for the cursor to walk onto and a
+  // note to be written at (the owner's ask of 2026-10-03: "en compases que
+  // no cierran ... el cuadradito camine y entonces uno pueda moverse arriba
+  // o abajo y seleccionar la nota que quiera"). Until then the cursor
+  // stopped on the last note, and the tune went on only by Alt with a
+  // figure. Nothing is written there: it has no steps, lasts nothing, and
+  // names the element a place is put in after (`after`, which may be a rest
+  // nobody sees) and where in the text that is.
+  //
+  // It stands where the note will: abcjs draws a note added to a line no
+  // barline closes with the left of its head on the end the staff had
+  // (measured on fourteen lines, quarters to sixteenths, a chord, a sharp:
+  // 0.03 off at most), so the middle of a head, 9.8 across, is 4.9 past it,
+  // and the cursor does not move across when the note is written. A whole
+  // note's head is wider (7.5) and a rest narrower (3.3).
+  const END_AFTER = 4.9;
+  function endStop(open) {
+    return {
+      x: open.group.w + END_AFTER,
+      at: open.at,
+      span: 0,
+      staff: open.staff,
+      group: open.group,
+      steps: [],
+      from: open.to,
+      to: open.to,
+      duration: 0,
+      rest: false,
+      end: true,
+      after: open.after,
+    };
+  }
+
+  // A place is anything that takes time and draws something. Not a spacer
+  // (`y`) nor an invisible rest (`x`), which hold time and draw nothing, so
+  // that a cursor on one would stand on bare staff. The column stands on the
+  // heads, their middle for a chord whose second pushes one aside, and not
+  // on the middle of the element, which takes in an accidental or a chord
+  // symbol wider than the note (a half note under "Am": 17.2 wide, its head
+  // 5.1 from the left, measured).
+  const UNDRAWN_RESTS = /^(?:spacer|invisible|invisible-multimeasure)$/;
+  function scoreStop(child, staff, group) {
+    const elem = child.abcelem;
+    if (!elem || elem.el_type !== "note" || !staff) return null;
+    if (elem.rest && UNDRAWN_RESTS.test(elem.rest.type)) return null;
+    const heads = child.notePositions || [];
+    const x = heads.length
+      ? heads.reduce(function (sum, head) {
+          return sum + head.x;
+        }, 0) / heads.length
+      : child.x + (child.w || 0) / 2;
+    // The steps of its notes, or of its glyph for a rest, which has none.
+    const steps = elem.pitches
+      ? elem.pitches.map(function (pitch) {
+          return pitch.verticalPos;
+        })
+      : heads.map(function (head) {
+          return Math.round((staff.absoluteY - head.y) / ABC_STEP);
+        });
+    return {
+      x: x,
+      staff: staff,
+      group: group,
+      steps: steps,
+      from: elem.startChar,
+      to: elem.endChar,
+      // How long it lasts, in whole notes as abcjs counts, and whether it is
+      // a rest: what the figure the mode writes with is read from (below).
+      duration: elem.duration || 0,
+      rest: !!elem.rest,
+      // What abcjs drew for it (its elemset), for the ink of a stretch.
+      child: child,
+    };
+  }
+
+  // The steps of a staff's outer lines. abcjs hands their y, not their step.
+  function lineSteps(staff) {
+    const top = Math.round((staff.absoluteY - staff.topLine) / ABC_STEP);
+    const bottom = Math.round((staff.absoluteY - staff.bottomLine) / ABC_STEP);
+    return isFinite(top) && isFinite(bottom) ? { top: top, bottom: bottom } : { top: 10, bottom: 2 };
+  }
+
+  function clampStep(stop, step) {
+    const lines = lineSteps(stop.staff);
+    const lo = Math.min.apply(null, [lines.bottom - LEDGER_REACH].concat(stop.steps));
+    const hi = Math.max.apply(null, [lines.top + LEDGER_REACH].concat(stop.steps));
+    return Math.max(lo, Math.min(hi, step));
+  }
+
+  function stepY(staff, step) {
+    return staff.absoluteY - step * ABC_STEP;
+  }
+
+  // Whether a step is on the staff: between the outer lines, or in the
+  // space just past either, where a note hangs on the outer line and needs
+  // no ledger line. Past that a note is written on ledger lines.
+  function onStaff(staff, step) {
+    const lines = lineSteps(staff);
+    return step >= lines.bottom - 1 && step <= lines.top + 1;
+  }
+
+  // The step of the head nearest a height, among a place's heads.
+  function nearestStep(steps, step) {
+    return steps.reduce(function (best, s) {
+      return Math.abs(s - step) < Math.abs(best - step) ? s : best;
+    });
+  }
+
+  // The step the cursor takes on arriving at `target` from `from` at
+  // `step`: the same height while it stands on the staff, and the nearest
+  // head of the new place when it was out on ledger lines (moveScoreCursor).
+  function stepOnto(from, step, target) {
+    const follows = !onStaff(from.staff, step) && target.steps.length > 0;
+    return clampStep(target, follows ? nearestStep(target.steps, step) : step);
+  }
+
+  // The step the cursor takes on arriving in another voice, at `target`.
+  // On a staff of its own it goes as it goes across (stepOnto). On a staff
+  // the two voices share it goes to the head of the voice's note nearest it:
+  // two voices written on one staff (`%%score (S A)`) are two staves to the
+  // keys, the owner's rule of 2026-10-06 ("deben tratarse como si fueran
+  // partituras diferentes en el sentido por ejemplo de que para moverse de S
+  // a A hay que hacerlo con Ctrl down/up"), and a height kept from one to
+  // the other is the same place on the page. Until that day Ctrl+Down there
+  // changed the voice and nothing on screen (two pictures of a real window
+  // the same to the pixel), so that a stretch chosen after it was the lower
+  // voice's with the cursor still drawn on the upper one's note. That is my
+  // reading of the owner's question of the same day, "por qué la selección
+  // en SA solo dibuja las notas de abajo?", asked with no steps: with the
+  // keys and with the pointer a stretch took the voice the cursor was in,
+  // every time it was tried. On the note of the voice come to, the cursor
+  // says whose place it is; and on its rest at the sign, which abcjs draws
+  // high on the staff for the upper of two voices and low for the lower
+  // (the step it gives the sign).
+  function stepIntoVoice(from, step, target) {
+    if (target.staff !== from.staff || !target.steps.length) return stepOnto(from, step, target);
+    return clampStep(target, nearestStep(target.steps, step));
+  }
+
+  // The widget of the score at a position, when CodeMirror has one drawn.
+  function scoreBlockAt(pos) {
+    const blocks = scoreBlocks();
+    for (let i = 0; i < blocks.length; i++) {
+      if (blockPos(blocks[i]) === pos) return blocks[i];
+    }
+    return null;
+  }
+
+  function blockVisual(block) {
+    const code = block && block.querySelector("code.language-abc");
+    const visual = code && SCORE_VISUALS.get(code);
+    return visual && visual.engraver && visual.engraver.staffgroups ? visual : null;
+  }
+
+  // Where the cursor stands on what is drawn now, or null while its score
+  // has no drawing (out of CodeMirror's reach). A voice or a place the
+  // engraving no longer has, the source having changed under the mode, is
+  // read as the nearest one it does.
+  function scoreCursorPlace() {
+    if (!scoreCursor) return null;
+    const block = scoreBlockAt(scoreCursor.pos);
+    const visual = blockVisual(block);
+    const tracks = visual ? scoreTracks(visual) : [];
+    if (!tracks.length) return null;
+    const track = Math.min(scoreCursor.track, tracks.length - 1);
+    const last = tracks[track].length - 1;
+    const index = Math.min(scoreCursor.stop, last);
+    const stop = tracks[track][index];
+    const step = clampStep(stop, scoreCursor.step);
+    // The head of the stretch, which the anchor is counted in the voice of:
+    // the cursor's own place, or the one it left to walk the voices.
+    const home = scoreCursor.home && scoreCursor.home.track < tracks.length ? scoreCursor.home : null;
+    const head = home ? { track: home.track, index: Math.min(home.stop, tracks[home.track].length - 1), step: home.step } : { track: track, index: index, step: step };
+    const anchor = typeof scoreCursor.anchor === "number" ? Math.min(scoreCursor.anchor, tracks[head.track].length - 1) : null;
+    let voices = null;
+    if (scoreCursor.voices === "all") voices = "all";
+    else if (Array.isArray(scoreCursor.voices)) {
+      voices = scoreCursor.voices.filter(function (t) {
+        return t < tracks.length;
+      });
+    }
+    return {
+      block: block,
+      tracks: tracks,
+      track: track,
+      index: index,
+      stop: stop,
+      step: step,
+      anchor: anchor,
+      voices: voices,
+      head: head,
+      whole: anchor !== null && !!scoreCursor.whole,
+    };
+  }
+
+  // The stretch chosen, as the first and the last of its places in the
+  // voice of its head, or null while there is none. An anchor on the head's
+  // own place is a stretch of that one place: a single note can be chosen,
+  // to be copied, played alone or pasted over (the owner's report of
+  // 2026-10-04, "la selección de una única nota (e.g., una negra) no está
+  // implementada", and their pick of how: the first Shift with an arrow
+  // chooses the place the cursor stands on, moveScoreCursor). Until then it
+  // was a stretch of nothing, but where voices had been picked one by one.
+  // The open end alone is one still: nothing stands there to choose.
+  //
+  // The whole of the score (Ctrl+A, chooseScoreWhole) is from the first
+  // place of that voice to its last, to whoever asks for it as two places
+  // of one voice. What it takes in is not counted from those two
+  // (selectionParts).
+  function scoreSelection(place) {
+    if (place === undefined) place = scoreCursorPlace();
+    if (!place || place.anchor === null) return null;
+    if (place.whole) return { from: 0, to: place.tracks[place.head.track].length - 1 };
+    const from = Math.min(place.anchor, place.head.index);
+    const to = Math.max(place.anchor, place.head.index);
+    if (from === to && place.tracks[place.head.track][from].end) return null;
+    return { from: from, to: to };
+  }
+
+  // What a stretch takes in, voice by voice: [{ track, stops }], each with
+  // the places of that voice inside it, in the order of scoreTracks. In the
+  // voice of its head they are the places from one end to the other. In
+  // another they are the ones that sound while the stretch does: on its
+  // first line the ones that begin when its first place does or later,
+  // and the one still sounding as it begins; on its last the ones that
+  // begin before its last place ends; and the whole of a line between the
+  // two. The open end is no place of it.
+  //
+  // The one still sounding as it begins is the owner's call of 2026-10-06,
+  // "ctrl shift -> debe seleccionar la primera nota de cada parte". Until
+  // then a place of another voice was in the stretch for beginning inside
+  // it, and a voice holding a longer note under the cursor's place had
+  // nothing chosen by the first Ctrl+Shift with an arrow, which chooses
+  // that one place: over a bass in half notes, three places of the upper
+  // voice out of four left the bass with no ink (listed in the test
+  // browser that day), and nothing on the page said the stretch was over
+  // it. A note that began inside the stretch and sounds on past its end was
+  // in it already, so the two ends are told the same way now: by what
+  // sounds.
+  //
+  // When, and not where across: until 2026-10-04 a place was told by where
+  // abcjs set it (its x, the same for every voice at one moment of a line,
+  // measured to the tenth), and that is not so of a rest that is all its
+  // bar, which abcjs draws in the middle of the bar, where nothing of
+  // another voice begins. On the owner's chorale, the empty third bar of
+  // the upper voices chosen over every voice left out the whole note the
+  // fourth voice plays in it, written at the head of the bar (seen in the
+  // pictures of that day's round, in a real window). The time is counted
+  // from the head of each line (scoreTracks), and a millionth of a whole
+  // note is let pass.
+  const SPAN_SLACK = 1e-6;
+
+  // The voices a stretch is chosen over: every one, the ones picked one by
+  // one, which may be none, or the voice it was drawn out in.
+  function chosenTracks(place) {
+    if (place.voices === "all") {
+      return place.tracks.map(function (track, t) {
+        return t;
+      });
+    }
+    return Array.isArray(place.voices) ? place.voices : [place.head.track];
+  }
+
+  function selectionParts(place, range) {
+    const own = place.tracks[place.head.track];
+    let last = range.to;
+    if (own[last].end) last -= 1;
+    const chosen = chosenTracks(place);
+    // The whole of the score (Ctrl+A): every place of each voice, and none
+    // of them in part. Not what sounds while the voice of its head does,
+    // which leaves out what another voice plays after that one has ended,
+    // or on a line it is not written for: a score half written has voices
+    // of every length.
+    if (place.whole) {
+      const all = [];
+      chosen.forEach(function (t) {
+        const stops = place.tracks[t].filter(function (stop) {
+          return !stop.end;
+        });
+        const out = stops.map(function () {
+          return { before: 0, after: 0 };
+        });
+        if (stops.length) all.push({ track: t, stops: stops, out: out });
+      });
+      return all;
+    }
+    const groups = blockVisual(place.block).engraver.staffgroups;
+    const first = groups.indexOf(own[range.from].group);
+    const final = groups.indexOf(own[last].group);
+    const from = own[range.from].at;
+    const until = own[last].at + own[last].span;
+    const parts = [];
+    chosen.forEach(function (t) {
+      let stops = [];
+      if (t === place.head.track) {
+        stops = own.slice(range.from, last + 1);
+      } else {
+        stops = place.tracks[t].filter(function (stop) {
+          if (stop.end) return false;
+          const g = groups.indexOf(stop.group);
+          if (g < first || g > final) return false;
+          // Begun before the stretch: out where it has ended by then, and
+          // in while it still sounds.
+          if (g === first && stop.at < from - SPAN_SLACK && stop.at + stop.span <= from + SPAN_SLACK) return false;
+          return g !== final || stop.at < until - SPAN_SLACK;
+        });
+      }
+      // How much of each stands outside the stretch (`out`, beside `stops`,
+      // each { before, after }): nothing, but for a place of another voice
+      // begun before the stretch or sounding on past its end, which the
+      // stretch takes a part of (wholeInStretch).
+      const out = stops.map(function (stop) {
+        if (t === place.head.track) return { before: 0, after: 0 };
+        const g = groups.indexOf(stop.group);
+        return {
+          before: g === first ? Math.max(0, from - stop.at) : 0,
+          after: g === final ? Math.max(0, stop.at + stop.span - until) : 0,
+        };
+      });
+      if (stops.length) parts.push({ track: t, stops: stops, out: out });
+    });
+    return parts;
+  }
+
+  // Whether a place of a part of a stretch is in it whole. The two that
+  // may not be are the first of a voice other than the one the stretch
+  // was drawn out in, where it began before the stretch, and its last,
+  // where it sounds on past the end.
+  function wholeInStretch(part, i) {
+    return !part.out || part.out[i].before + part.out[i].after <= SPAN_SLACK;
+  }
+
+  // A part of a stretch as the engine is asked to take it out
+  // (MDM_BARS.pasteMusic): its slices line by line (`over`); which of its
+  // ends stays, being a place the stretch takes a part of (`keep`, or null
+  // where neither does); and the length each of those is left with
+  // (`lengths`), the part of it outside the stretch. The first stays for
+  // having begun before the stretch, and is left its head: music pasted
+  // over the stretch goes in after it. The last stays for sounding on past
+  // the end, and is left its tail, which the music goes in before. One
+  // place that is both is one note still, and the music goes after it.
+  // The owner's call of
+  // 2026-10-06, on the whole note of a bass under one quarter chosen above
+  // it: "yo lo veo como que hay parte de la redonda que se seleccionó y se
+  // le dio delete, por lo que la redonda debe reducirse en la duración que
+  // se le quitó (sin agregar silencios)".
+  function stretchCutOf(part) {
+    const n = part.stops.length;
+    const out = part.out || [];
+    const first = !!out[0] && out[0].before > SPAN_SLACK;
+    const last = !!out[n - 1] && out[n - 1].after > SPAN_SLACK;
+    const left = function (i) {
+      return out[i].before + out[i].after;
+    };
+    const lengths = [];
+    if (first) lengths.push({ at: part.stops[0].from, length: left(0) });
+    if (last && (n > 1 || !first)) lengths.push({ at: part.stops[n - 1].from, length: left(n - 1) });
+    return { over: stretchSlices(part.stops), keep: first || last ? { first: first, last: last } : null, lengths: lengths };
+  }
+
+  // What is chosen, voice by voice (selectionParts), and nothing where no
+  // stretch is, or where every voice of one was let go: what wears the ink
+  // of a stretch, and what the keys that act on one act on.
+  function scoreChosen(place) {
+    const range = place ? scoreSelection(place) : null;
+    return range ? selectionParts(place, range) : [];
+  }
+
+  // A key for where the cursor stands, stretch included, to tell whether it
+  // has moved since the music last stopped under it (playFromScoreCursor).
+  function scoreCursorKey() {
+    if (!scoreCursor) return "";
+    return [scoreCursor.pos, scoreCursor.track, scoreCursor.stop, scoreCursor.anchor].join(",");
+  }
+
+  // How far a height is from a staff's lines, nothing inside them.
+  function lineDistance(staff, y) {
+    if (y < staff.topLine) return staff.topLine - y;
+    if (y > staff.bottomLine) return y - staff.bottomLine;
+    return 0;
+  }
+
+  // The place under a pointer on a score: the staff whose lines are
+  // nearest the pointer, over every system of the score, then the place on
+  // it nearest across, then the step nearest down. Two voices on one staff
+  // stand at the same x where they sound together, and the one whose heads
+  // are nearer the pointer is the one meant. Within one voice when `only`
+  // names one, which is how a drag keeps to the voice it began in.
+  function scoreHit(block, clientX, clientY, only) {
+    const visual = blockVisual(block);
+    const svg = block.querySelector("code.language-abc svg");
+    const matrix = svg && svg.getScreenCTM();
+    if (!visual || !matrix) return null;
+    const tracks = scoreTracks(visual);
+    const at = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
+    const wanted = function (t) {
+      return typeof only !== "number" || t === only;
+    };
+    let staff = null;
+    let far = Infinity;
+    tracks.forEach(function (track, t) {
+      if (!wanted(t)) return;
+      track.forEach(function (stop) {
+        const d = lineDistance(stop.staff, at.y);
+        if (d < far) {
+          far = d;
+          staff = stop.staff;
+        }
+      });
+    });
+    let best = null;
+    tracks.forEach(function (track, t) {
+      if (!wanted(t)) return;
+      track.forEach(function (stop, s) {
+        if (stop.staff !== staff) return;
+        const across = Math.abs(stop.x - at.x);
+        const down = Math.min.apply(
+          null,
+          stop.steps.map(function (step) {
+            return Math.abs(stepY(stop.staff, step) - at.y);
+          }).concat([Infinity])
+        );
+        const nearer = !best || across < best.across - 0.5 || (across <= best.across + 0.5 && down < best.down);
+        if (nearer) best = { track: t, stop: s, across: across, down: down };
+      });
+    });
+    if (!best) return null;
+    const stop = tracks[best.track][best.stop];
+    return {
+      track: best.track,
+      stop: best.stop,
+      step: clampStep(stop, Math.round((stop.staff.absoluteY - at.y) / ABC_STEP)),
+    };
+  }
+
+  // A click on a score that came without its press (one made by a script):
+  // the cursor goes down where it points, as a press puts it (pressScore).
+  function placeScoreCursor(block, clientX, clientY) {
+    const hit = scoreHit(block, clientX, clientY);
+    if (!hit) return;
+    scoreCursor = { pos: blockPos(block), track: hit.track, stop: hit.stop, step: hit.step, anchor: null };
+    takeScoreFigure(scoreTracks(blockVisual(block))[hit.track][hit.stop]);
+    // The keys come to the score from here, from whatever held them (the
+    // player's bar, a field of the search row, the workbench), which is how
+    // a click takes them back in every other layer (D20).
+    takeScoreKeys();
+    scoreCursorMoved();
+    showScoreCursor();
+  }
+
+  // ---- The pointer on a score ----
+  //
+  // A press puts the cursor down where it points, and holding it down and
+  // moving chooses a stretch, from the place pressed to the place the
+  // pointer is over, in the voice the press began in: the cursor follows
+  // the pointer and the anchor stays where the press was.
+  //
+  // One place is chosen as the first Shift with an arrow chooses it
+  // (moveScoreCursor), by a drag that begins: the pointer drawn sideways on
+  // the place pressed, by more than a hand shakes on a click (DRAG_ACROSS),
+  // chooses that place, and drawn on, a place more at each one it comes
+  // over. The owner's call of 2026-10-06 ("la selección de 1 sola nota
+  // shift -> debe funcionar también haciendo la selección con el mouse"):
+  // until then a drag chose nothing before it reached the next place, and
+  // two when it did, so that one place took a drag there and back, or the
+  // double click, which chooses it still (my pick of 2026-10-04). Drawn up
+  // or down on the place pressed, the press moves the cursor's height as
+  // it did, and chooses nothing.
+  //
+  // Shift with a press let go where it was made stretches from where the
+  // cursor already was, as Shift with an arrow does, and with Ctrl as well
+  // over every voice, or the ones picked, as Ctrl+Shift with one. Held and
+  // moved, a press with Shift is a drag like any other, from the place
+  // pressed, and with Ctrl a drag over every voice: the owner's ask of
+  // 2026-10-04, "ctrl shift y selección arrastrando el cursor debería
+  // seleccionar todas las partituras como mismo ctrl shift -> -> las
+  // selecciona". So a press with Shift does nothing until it moves or lets
+  // go (`held`): stretched at once from the cursor, as it used to be, a
+  // drag begun away from the cursor showed a stretch nobody asked for on
+  // its way to the one being drawn.
+  //
+  // A press that does not move, while the music on that score sounds, sends
+  // the music there (seekScoreToCursor), the way a press on the progress
+  // bar does.
+  let scoreDrag = null; // { block, pos, track, anchor, x, y, moved, sounding, every, held }
+  let scorePressed = false; // a press on a score is waiting for its click
+  // How far across the place pressed the pointer is drawn before the place
+  // is chosen, in pixels of the screen: past what a hand moves between the
+  // press and the release of a click (the three or four that browsers wait
+  // for before they call a press a drag), so that a click chooses nothing,
+  // and the keys that write go on writing where it was made.
+  const DRAG_ACROSS = 4;
+
+  function pressScore(block, e) {
+    if (e.button !== 0) return;
+    scorePressed = true;
+    const pos = blockPos(block);
+    const hit = scoreHit(block, e.clientX, e.clientY);
+    if (!hit) return;
+    const sounding = !!(player && player.bar && player.pos === pos && isSounding(player.bar));
+    scoreDrag = {
+      block: block,
+      pos: pos,
+      track: hit.track,
+      anchor: hit.stop,
+      x: e.clientX,
+      y: e.clientY,
+      moved: false,
+      sounding: sounding,
+      every: e.shiftKey && (e.ctrlKey || e.metaKey),
+      held: null,
+    };
+    window.addEventListener("mousemove", dragScore, true);
+    window.addEventListener("mouseup", releaseScoreDrag, true);
+    takeScoreKeys();
+    if (e.shiftKey && scoreCursor && scoreCursor.pos === pos) {
+      scoreDrag.held = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    // The second press of a double click is on the place the first put the
+    // cursor on.
+    const twice = e.detail >= 2;
+    if (twice) scoreDrag.moved = true;
+    scoreCursor = { pos: pos, track: hit.track, stop: hit.stop, step: hit.step, anchor: twice ? hit.stop : null };
+    takeScoreFigure(scoreTracks(blockVisual(block))[hit.track][hit.stop]);
+    scoreCursorMoved();
+    showScoreCursor();
+  }
+
+  function dragScore(e) {
+    const drag = scoreDrag;
+    if (!drag) return;
+    // A button let go outside the page sends no mouseup here.
+    if (!(e.buttons & 1)) {
+      releaseScoreDrag(e);
+      return;
+    }
+    if (!document.contains(drag.block)) {
+      const block = scoreBlockAt(drag.pos);
+      if (!block) return;
+      drag.block = block;
+    }
+    const hit = scoreHit(drag.block, e.clientX, e.clientY, drag.track);
+    if (!hit || !scoreCursor) return;
+    if (!drag.moved) {
+      // Still on the place pressed. Drawn sideways it is chosen, the stretch
+      // begun on it; until then its height follows the pointer, and none is.
+      const across = Math.abs(e.clientX - drag.x);
+      if (hit.stop === drag.anchor && (across < DRAG_ACROSS || across < Math.abs(e.clientY - drag.y))) {
+        if (!drag.held && hit.step !== scoreCursor.step) {
+          scoreCursor = { pos: drag.pos, track: drag.track, stop: hit.stop, step: hit.step, anchor: null };
+          scoreCursorMoved();
+          drawScoreCursor();
+        }
+        return;
+      }
+      drag.moved = true;
+      drag.held = null;
+    } else if (hit.stop === scoreCursor.stop) {
+      return;
+    }
+    // The place the pointer takes the cursor onto gives the figure kept, as
+    // one an arrow takes it onto does: it is where the cursor is found when
+    // the stretch is let go.
+    takeScoreFigure(scoreTracks(blockVisual(drag.block))[drag.track][hit.stop]);
+    scoreCursor = {
+      pos: drag.pos,
+      track: drag.track,
+      stop: hit.stop,
+      step: hit.step,
+      anchor: drag.anchor,
+      voices: drag.every ? "all" : null,
+    };
+    scoreCursorMoved();
+    drawScoreCursor();
+  }
+
+  function releaseScoreDrag() {
+    const drag = scoreDrag;
+    scoreDrag = null;
+    window.removeEventListener("mousemove", dragScore, true);
+    window.removeEventListener("mouseup", releaseScoreDrag, true);
+    if (!drag || !scoreCursor) return;
+    if (drag.held) {
+      stretchScoreTo(drag);
+      return;
+    }
+    if (!drag.moved && drag.sounding) seekScoreToCursor();
+    showScoreCursor();
+  }
+
+  // Shift with a click: the stretch drawn out from where it was anchored, or
+  // from the cursor where there was none, to the place clicked, in the
+  // voice it is drawn out in; with Ctrl as well over every voice, or the
+  // ones picked one by one (moveScoreCursor).
+  function stretchScoreTo(drag) {
+    const place = scoreCursorPlace();
+    if (!place || scoreCursor.pos !== drag.pos) return;
+    const head = place.head;
+    const hit = scoreHit(place.block, drag.held.x, drag.held.y, head.track);
+    if (!hit) return;
+    let voices = null;
+    if (drag.every) voices = Array.isArray(place.voices) && place.voices.length ? place.voices : "all";
+    takeScoreFigure(place.tracks[head.track][hit.stop]);
+    scoreCursor = {
+      pos: drag.pos,
+      track: head.track,
+      stop: hit.stop,
+      step: hit.step,
+      anchor: place.anchor !== null ? place.anchor : head.index,
+      voices: voices,
+      home: null,
+    };
+    scoreCursorMoved();
+    showScoreCursor();
+  }
+
+  // ---- The end of a line, taken by the pointer ----
+  //
+  // A drag begun on a button of a line's pair (the chrome on a score, below;
+  // dragScoreEdit) takes the line's end to another barline, of the same
+  // line or of the next, where the line then ends. Dropped on a barline of
+  // its own line it sends the bars after that barline down to the next;
+  // dropped on one of the next line it brings the bars up to it; the end of
+  // the last line sends its bars to a line of their own. Several bars in one
+  // gesture, for the owner's "coger una partitura y mover los compases de
+  // línea", where a click on the pair moves one. The barline the line ends
+  // on was a handle of its own, with the sideways arrows over it, until the
+  // pair said the drag in its tip (EDIT_DRAG_HINT): the owner took the
+  // arrows off and then the handle, the pair being the button for it
+  // (2026-09-30).
+  let scoreBreak = null; // { block, pos, from, target, marker }
+
+  // The barlines of a system as the engraving draws them, in its first
+  // voice, each with the first note of the bar it closes: a move is asked
+  // for with a character of that note (MDM_BARS.moveBars).
+  function engravedBars(group) {
+    const voice = group.voices[0];
+    const bars = [];
+    let note = null;
+    (voice ? voice.children : []).forEach(function (child) {
+      const elem = child.abcelem;
+      if (!elem) return;
+      if (elem.el_type === "note" && note === null) note = elem.startChar;
+      if (elem.el_type === "bar" && note !== null) {
+        bars.push({ x: child.x + (child.w || 0) / 2, right: child.x + (child.w || 0), note: note });
+        note = null;
+      }
+    });
+    return bars;
+  }
+
+  function groupBand(group) {
+    return {
+      top: group.staffs[0].topLine,
+      bottom: group.staffs[group.staffs.length - 1].bottomLine,
+    };
+  }
+
+  // The places a line can end at (and a bar go in at, addSpots, which has
+  // a barline that closes no bar besides): its barlines, and, where no
+  // barline closes its last bar (a tune written with none, or a
+  // line that stops without one), the end of its staff, where that barline
+  // would be drawn (measured: the staff of `C D | E F` ends where the last
+  // barline of `C D | E F |` begins), with the first note of that bar. A
+  // tune with no barline had nowhere to be given a bar but its head, and
+  // the last barline of a line left open was taken for its end (the owner's
+  // report, 2026-09-30).
+  function lineStops(group) {
+    const stops = engravedBars(group);
+    const notes = barNotes(group);
+    if (notes.length > stops.length) stops.push({ x: group.w, right: group.w, note: notes[notes.length - 1], open: true });
+    return stops;
+  }
+
+  // A barline offered as a place, where a line would end (the break drag)
+  // or a bar would go in (the + of the chrome, below): a rect over it as
+  // tall as a stretch's band, style.css washes it. Ten units across, as the
+  // design sheet drew it, a little narrower than the cursor's column, which
+  // stands on a note and not between two.
+  const BAR_HALF = 5;
+  function barColumn(rect, x, band) {
+    rect.setAttribute("x", x - BAR_HALF);
+    rect.setAttribute("y", band.top - 2);
+    rect.setAttribute("width", 2 * BAR_HALF);
+    rect.setAttribute("height", band.bottom - band.top + 4);
+    rect.setAttribute("rx", 1.5);
+  }
+
+  // Where the line would end if the pointer let go here: the barline
+  // nearest it, on the line taken or on the next one.
+  function breakTarget(drag, clientX, clientY) {
+    const visual = blockVisual(drag.block);
+    const svg = drag.block.querySelector("code.language-abc svg");
+    const matrix = svg && svg.getScreenCTM();
+    if (!visual || !matrix) return null;
+    const at = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
+    const groups = visual.engraver.staffgroups;
+    let best = null;
+    [drag.from, drag.from + 1].forEach(function (g) {
+      if (g >= groups.length) return;
+      const band = groupBand(groups[g]);
+      const down = at.y < band.top ? band.top - at.y : at.y > band.bottom ? at.y - band.bottom : 0;
+      lineStops(groups[g]).forEach(function (bar, b) {
+        const d = down * 4 + Math.abs(bar.x - at.x);
+        if (!best || d < best.d) best = { d: d, group: g, bar: b, x: bar.x, band: band, count: 0 };
+      });
+    });
+    if (best) best.count = lineStops(groups[best.group]).length;
+    return best;
+  }
+
+  function dragBreak(e) {
+    const drag = scoreBreak;
+    if (!drag) return;
+    if (!(e.buttons & 1)) {
+      releaseBreak(e);
+      return;
+    }
+    const target = breakTarget(drag, e.clientX, e.clientY);
+    drag.target = target;
+    const svg = drag.block.querySelector("code.language-abc svg");
+    if (!svg || !target) return;
+    if (!drag.marker || drag.marker.ownerSVGElement !== svg) {
+      drag.marker = document.createElementNS(SVG_NS, "rect");
+      drag.marker.setAttribute("class", "mdm-score-break");
+      svg.insertBefore(drag.marker, svg.firstChild);
+    }
+    barColumn(drag.marker, target.x, target.band);
+  }
+
+  function releaseBreak() {
+    const drag = scoreBreak;
+    scoreBreak = null;
+    window.removeEventListener("mousemove", dragBreak, true);
+    window.removeEventListener("mouseup", releaseBreak, true);
+    if (!drag) return;
+    if (drag.marker && drag.marker.parentNode) drag.marker.parentNode.removeChild(drag.marker);
+    const target = drag.target;
+    if (!target) return;
+    const visual = blockVisual(drag.block);
+    if (!visual) return;
+    const groups = visual.engraver.staffgroups;
+    let at = null;
+    let direction = null;
+    if (target.group === drag.from) {
+      // On its own line: the bars after that barline go down.
+      if (target.bar >= target.count - 1) return; // back where it was
+      at = lineStops(groups[target.group])[target.bar + 1].note;
+      direction = "down";
+    } else {
+      // On the next line: the bars up to that barline come up.
+      at = lineStops(groups[target.group])[target.bar].note;
+      direction = "up";
+    }
+    moveScoreBarsAt(drag.pos, at, direction);
+  }
+
+  // The chrome of the score under the pointer (showScoreEdits): asked on
+  // every move of the pointer over the text while the mode is on, a frame
+  // at a time, and drawn for where the pointer is when the frame comes. A
+  // move that came before the frame used to be dropped, place and all, so
+  // the chrome was drawn for where the pointer had been and stayed there
+  // until it moved again: what SM48 met now and then on a busy machine,
+  // pointing at the end of a bar a moment after a click (SM79).
+  let hoverPending = false;
+  function hoverScore(e) {
+    if (!scoreMode || scoreDrag || scoreBreak) return;
+    scoreEditPointer = { x: e.clientX, y: e.clientY };
+    if (hoverPending) return;
+    hoverPending = true;
+    requestAnimationFrame(function () {
+      hoverPending = false;
+      // Gone from the text since (the mouseleave put the chrome away).
+      const p = scoreEditPointer;
+      if (!p || !scoreMode || scoreDrag || scoreBreak) return;
+      const under = document.elementFromPoint(p.x, p.y);
+      const block = under && under.closest ? under.closest("#app .mdm-score") : null;
+      showScoreEdits(block, p.x, p.y, under);
+    });
+  }
+
+  // What holds the keyboard for the mode: an element of its own, out of the
+  // view and of the flow, focused as the mode is entered and on every click
+  // on a score. Being focused is what makes the layer active (scoreKeys),
+  // and what hands the page the keyboard in the first place: VS Code's
+  // webview is a frame, and the presses the mode prevents, so that the
+  // frozen text takes no caret, leave the focus wherever it was in the
+  // workbench. Measured with the harness in a frame beside a field that
+  // held the focus: after the toolbar's button, and after a click on a
+  // head, the frame still had no focus and the arrows went to the field.
+  // That is one of the two causes found for the owner's report that the
+  // cursor sometimes walked and sometimes did not (2026-09-29), measured in
+  // that emulation and not in VS Code itself; the other is the blank that
+  // moveScoreCursor no longer walks into.
+  let scoreKeysHolder = null;
+  function takeScoreKeys() {
+    if (!scoreKeysHolder) {
+      scoreKeysHolder = document.createElement("div");
+      scoreKeysHolder.className = "mdm-score-keys";
+      scoreKeysHolder.tabIndex = -1;
+      scoreKeysHolder.setAttribute("aria-label", "Score navigation");
+      app().appendChild(scoreKeysHolder);
+    }
+    scoreKeysHolder.focus({ preventScroll: true });
+  }
+
+  // The cursor put down on entering, or on the first arrow when none is
+  // down: on the score the main caret was in, when that one is on screen,
+  // then on the score the player is open on, and otherwise on the first
+  // score the pane shows, at its first place and its highest note. With no
+  // score on screen there is none, and a click puts one down.
+  function startScoreCursor() {
+    if (!view) return;
+    const pane = view.scrollDOM.getBoundingClientRect();
+    const shown = scoreBlocks().filter(function (block) {
+      const box = block.getBoundingClientRect();
+      return box.bottom > pane.top && box.top < pane.bottom;
+    });
+    const node = openNodeAt(view.state, view.state.selection.main.head);
+    const caretAt = node && node.name === "FencedCode" ? scoreEnd(view.state.doc, node, node.to) : -1;
+    const playing = player ? playerBlock() : null;
+    const block =
+      shown.filter(function (b) {
+        return blockPos(b) === caretAt;
+      })[0] ||
+      (playing && shown.indexOf(playing) >= 0 ? playing : null) ||
+      shown[0];
+    const visual = blockVisual(block);
+    const tracks = visual ? scoreTracks(visual) : [];
+    if (!tracks.length) return;
+    const first = tracks[0][0];
+    const lines = lineSteps(first.staff);
+    scoreCursor = {
+      pos: blockPos(block),
+      track: 0,
+      stop: 0,
+      step: first.steps.length ? Math.max.apply(null, first.steps) : (lines.top + lines.bottom) / 2,
+      anchor: null,
+    };
+    takeScoreFigure(first);
+    scoreCursorMoved();
+    showScoreCursor();
+  }
+
+  // An arrow: `across` places along the voice, `up` steps up the staff,
+  // and with `extend` (Shift) a stretch is begun, or the one there is drawn
+  // out, rather than let go. A stretch is the cursor's voice alone, and
+  // with `every` (Ctrl as well) every voice, or the ones picked one by one
+  // before it (toggleScoreVoice): the owner's keys of 2026-10-03, "Shift
+  // apretado + -> debe seleccionar el current v, Ctrl Shift apretado + ->
+  // debe seleccionar todas las v".
+  //
+  // The first Shift with an arrow across chooses the place the cursor
+  // stands on and goes nowhere, and every one after it takes one place
+  // more: the owner's pick of 2026-10-04 (A), so that one note can be
+  // chosen, where the first press used to take the place beside it as
+  // well. From the open end, where nothing stands, it is the last place of
+  // the voice going back, and nothing going on. Drawn out, a stretch stops
+  // at the last place of the voice and not at the open end past it, which
+  // would add nothing to it.
+  //
+  // An arrow across with no Shift lets a stretch go and leaves the cursor
+  // on its end that side, the first of its places for Left and the last for
+  // Right, as a caret is left by an arrow at the end of a selection of
+  // text: the cursor is out of sight while a stretch is chosen
+  // (drawScoreCursor), and one place on from where it could not be seen
+  // would be anywhere. Up and down, with no Shift, it comes back where it
+  // was, a step up or down; with Shift and a stretch chosen they do
+  // nothing, a height nobody sees being nothing to move, and with none
+  // chosen they are the arrow alone.
+  //
+  // At either end of the voice the cursor stays where it is. A score
+  // scrolled out of CodeMirror's reach has no drawing to walk: the pane is
+  // taken to it and the move is made a frame later, when the drawing is
+  // back.
+  function moveScoreCursor(across, up, tries, extend, every) {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) {
+        startScoreCursor();
+        return;
+      }
+      if (tries) {
+        // Still nothing where the score was: it has left the document.
+        scoreCursor = null;
+        return;
+      }
+      if (!bringScoreBack()) return;
+      requestAnimationFrame(function () {
+        if (scoreMode) moveScoreCursor(across, up, 1, extend, every);
+      });
+      return;
+    }
+    const chosen = scoreSelection(place);
+    if (extend && !across && chosen) return;
+    if (across && chosen && !extend) {
+      const own = place.tracks[place.head.track];
+      let index = across < 0 ? chosen.from : chosen.to;
+      if (own[index].end && index > 0) index -= 1;
+      takeScoreFigure(own[index]);
+      scoreCursor = {
+        pos: scoreCursor.pos,
+        track: place.head.track,
+        stop: index,
+        step: stepOnto(own[place.head.index], place.head.step, own[index]),
+        anchor: null,
+      };
+      scoreCursorMoved();
+      showScoreCursor();
+      return;
+    }
+    if (across && extend && !chosen) {
+      const own = place.tracks[place.track];
+      let index = place.index;
+      if (place.stop.end) {
+        if (across > 0 || index === 0) return;
+        index -= 1;
+        takeScoreFigure(own[index]);
+      }
+      scoreCursor = {
+        pos: scoreCursor.pos,
+        track: place.track,
+        stop: index,
+        step: index === place.index ? place.step : stepOnto(place.stop, place.step, own[index]),
+        anchor: index,
+        voices: every ? "all" : null,
+        home: null,
+      };
+      scoreCursorMoved();
+      showScoreCursor();
+      return;
+    }
+    // A stretch is drawn out from its head: the cursor comes back to it
+    // from the voice it had walked to (walkScoreVoices).
+    const from = extend && across ? place.head : { track: place.track, index: place.index, step: place.step };
+    const track = place.tracks[from.track];
+    const last = extend && track[track.length - 1].end ? track.length - 2 : track.length - 1;
+    const index = Math.max(0, Math.min(last, from.index + across));
+    const target = track[index];
+    // Across, a step on the staff is kept, and one out on ledger lines
+    // follows the music: the cursor goes to the head of the next place
+    // nearest it (the nearest of a chord's), from a low C to the C beside it
+    // and from a high c to the octave under it, where the kept height would
+    // have been a blank.
+    const moved = index !== from.index;
+    if (moved || from.track !== place.track) takeScoreFigure(target);
+    let anchor = null;
+    let voices = null;
+    if (extend) {
+      anchor = place.anchor;
+      // The voices picked, or with none picked every one: a walk over the
+      // voices that picked none leaves a list with nothing in it.
+      if (every) voices = Array.isArray(place.voices) && place.voices.length ? place.voices : "all";
+    }
+    scoreCursor = {
+      pos: scoreCursor.pos,
+      track: from.track,
+      stop: index,
+      step: moved ? stepOnto(track[from.index], from.step, target) : clampStep(target, from.step + up),
+      anchor: anchor,
+      voices: voices,
+      home: null,
+    };
+    scoreCursorMoved();
+    showScoreCursor();
+  }
+
+  // Ctrl+Down and Ctrl+Up: the staff under the cursor's, or over it, as the
+  // page has them, whoever plays on it and whichever line it is on (the
+  // owner's change of 2026-10-06: "Ctrl [down/up] siempre va a pasar al
+  // pentagrama que tenga literalmente abajo (da igual si es de otra clave o
+  // de otra línea)"). On the cursor's own line that is the voice below or
+  // above, V:1 to V:2 and back, in the order abcjs keeps them, staff by
+  // staff from the top (scoreTracks); past the last of them it is the top
+  // staff of the line below, and going up the bottom staff of the line
+  // above. Nowhere past the last staff of the score, or the first. Until
+  // that day Ctrl walked the lines in one voice, and Ctrl+Shift the voices
+  // of one line.
+  //
+  // Voice by voice where two share a staff, the upper and then the lower: a
+  // voice the keys cannot come to is one they cannot write in (my reading
+  // of "pentagrama" there). The cursor keeps its height on the way, which
+  // on one staff leaves it drawn where it was: the voice changes and
+  // nothing on screen does (two pictures of a real window the same to the
+  // pixel, 2026-10-06; as old as the walk over the voices, and put to the
+  // owner with three ways out, S4 in tests/README.md).
+  //
+  // On its own line the place is the one sounding with the cursor's and not
+  // the nearest across (soundingWith): past the last note of a voice no
+  // barline closes the nearest was its open end, where a whole note under it
+  // was what sounded. On another line nothing sounds with it, and the place
+  // is the nearest across, as a caret goes down a line of text. The height
+  // goes as it goes across (stepOnto), and a stretch is let go.
+  function moveScoreStaff(down) {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    const way = down ? 1 : -1;
+    const voices = lineVoices(place, place.stop);
+    const beside = voices[voices.indexOf(place.track) + way];
+    if (beside !== undefined) {
+      moveScoreCursorTo(place, beside, soundingWith(place.tracks[beside], place.stop));
+      return;
+    }
+    const groups = blockVisual(place.block).engraver.staffgroups;
+    const group = groups[groups.indexOf(place.stop.group) + way];
+    if (!group) return;
+    for (let t = down ? 0 : place.tracks.length - 1; t >= 0 && t < place.tracks.length; t += way) {
+      const best = nearestAcross(place.tracks[t], group, place.stop.x);
+      if (best >= 0) {
+        moveScoreCursorTo(place, t, best);
+        return;
+      }
+    }
+  }
+
+  // The voices with a place on the line a place is on, in the order of
+  // scoreTracks: the order abcjs first meets them in, which on every score
+  // tried is from the top staff down. A voice written for one line alone is
+  // none of the other lines' (a third voice on the first staff, SM65), and
+  // an overlay (`&`) a later line brings in stands under its staff's own
+  // voice and over the staff below, abcjs giving it a voice on every line
+  // from the first (seen in the test browser, 2026-10-06, where a reading of
+  // its code had it met only on the line that writes it, after the staff
+  // below).
+  function lineVoices(place, stop) {
+    const voices = [];
+    place.tracks.forEach(function (track, t) {
+      if (soundingWith(track, stop) >= 0) voices.push(t);
+    });
+    return voices;
+  }
+
+  // Ctrl+Shift+Down and Ctrl+Shift+Up with no stretch chosen: the line of
+  // staves below or above, in the same voice, over the staves between (the
+  // rest of the owner's change of 2026-10-06, "cuando se haga Ctrl Shift
+  // [down/up] entonces sí se salta la clave de fa o el pedal del órgano y
+  // baja a la próxima línea"; Ctrl alone did this until then). At the
+  // voice's place nearest across, as a caret goes down a line of text;
+  // nowhere where there is no line, or the voice has no place on it (the
+  // owner's "si no hay nadie, no hace nada"). The height goes as it goes
+  // across (stepOnto). With a stretch chosen the two keys are the stretch's
+  // (walkScoreVoices).
+  function moveScoreSystem(down) {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    const groups = blockVisual(place.block).engraver.staffgroups;
+    const group = groups[groups.indexOf(place.stop.group) + (down ? 1 : -1)];
+    const best = group ? nearestAcross(place.tracks[place.track], group, place.stop.x) : -1;
+    if (best >= 0) moveScoreCursorTo(place, place.track, best);
+  }
+
+  // The place of a voice on a line of staves nearest across to `x`, or -1
+  // for a voice with none there.
+  function nearestAcross(track, group, x) {
+    let best = -1;
+    track.forEach(function (stop, i) {
+      if (stop.group !== group) return;
+      if (best < 0 || Math.abs(stop.x - x) < Math.abs(track[best].x - x)) best = i;
+    });
+    return best;
+  }
+
+  // Ctrl+Shift+Down and Ctrl+Shift+Up with a stretch chosen: the voice below
+  // or above on the stretch's line, with the stretch kept as it is, in the
+  // voice it was drawn out in. The cursor walks the others from the
+  // stretch's head and back to it (scoreCursor.home), at the place that
+  // sounds with the head (soundingWith), and the voices the stretch was
+  // chosen over become a list to pick among (pickedVoices), which Space
+  // under the same two keys adds the cursor's voice to or takes it from
+  // (toggleScoreVoice). Nowhere past the last voice of the line.
+  //
+  // The walk was Ctrl+Shift+Alt with Up and Down ("Ctrl Shift Alt apretado
+  // down debe ir pasando por los v y se seleccionan con espacio",
+  // 2026-10-03) until the owner took Alt out of it, on 2026-10-06: "Ctrl
+  // Shift -> -> [down] Espacio ->: seleccionó dos veces a la derecha, quitó
+  // el pentagrama del medio, y luego siguió seleccionando a la derecha, es
+  // decir, que realmente no hace falta Alt". A stretch being chosen is what
+  // says the two arrows are its own, which Alt said before, and Ctrl+Shift
+  // stays down from the first arrow of a stretch to the last. It leaves Up
+  // and Down two errands under Ctrl+Shift, the line with nothing chosen
+  // (moveScoreSystem, asked the same day) and the voice with a stretch: my
+  // reading of the two asks together, put to the owner. A stretch is there
+  // while its anchor is, with every voice let go of as well, so a walk that
+  // lets go of the last voice goes on to pick another.
+  function walkScoreVoices(place, down) {
+    const head = place.head;
+    const origin = place.tracks[head.track][head.index];
+    const voices = lineVoices(place, origin);
+    const next = voices[voices.indexOf(place.track) + (down ? 1 : -1)];
+    if (next === undefined) return;
+    const index = soundingWith(place.tracks[next], origin);
+    const target = place.tracks[next][index];
+    takeScoreFigure(target);
+    scoreCursor = {
+      pos: scoreCursor.pos,
+      track: next,
+      stop: index,
+      step: stepIntoVoice(place.stop, place.step, target),
+      anchor: place.anchor,
+      voices: pickedVoices(place),
+      home: { track: head.track, stop: head.index, step: head.step },
+      whole: place.whole,
+    };
+    scoreCursorMoved();
+    showScoreCursor();
+  }
+
+  // The place of a voice that sounds with a place of another on its line:
+  // the last of the voice's places to begin when it does or before (by the
+  // time counted from the head of the line, scoreTracks), or the voice's
+  // first on the line where it begins after; -1 for a voice with no place
+  // on that line.
+  function soundingWith(track, stop) {
+    let first = -1;
+    let best = -1;
+    track.forEach(function (other, i) {
+      if (other.group !== stop.group) return;
+      if (first < 0) first = i;
+      if (other.at <= stop.at + SPAN_SLACK) best = i;
+    });
+    return best >= 0 ? best : first;
+  }
+
+  // The voices of the stretch as a list to pick among: the ones picked
+  // already; or what the stretch was drawn out over, its own voice or every
+  // one; or none where there is no stretch yet.
+  function pickedVoices(place) {
+    if (Array.isArray(place.voices)) return place.voices.slice();
+    if (!scoreSelection(place)) return [];
+    if (place.voices !== "all") return [place.head.track];
+    return place.tracks.map(function (track, t) {
+      return t;
+    });
+  }
+
+  // Space under Ctrl+Shift: the cursor's voice put among the voices of the
+  // stretch, or taken from them. With no stretch yet, the cursor's place is
+  // where it begins, to be drawn out with the arrows, Ctrl+Shift still
+  // down. Under Ctrl+Shift+Alt until 2026-10-06, as the walk was
+  // (walkScoreVoices), when Alt had to be let go before the stretch could
+  // be drawn out ("luego al soltar alt y dejar el control shift puede
+  // moverse uno hacia los lados").
+  function toggleScoreVoice() {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    // Nothing sounds at the open end, and no stretch begins there. With a
+    // stretch kept it is a voice that is picked and not a place, at the open
+    // end as anywhere: the walk lands there on a voice that has ended before
+    // the stretch's head sounds, and until 2026-10-06 that voice could then
+    // not be picked, though notes of it begin inside the stretch (`c d e f |
+    // g2` over `C,4 | G, A, B, C |`, the stretch drawn out in the lower
+    // voice to its last C: read off the code by a review, and seen in the
+    // test browser). As old as the walk.
+    if (place.stop.end && !scoreSelection(place)) return;
+    const voices = pickedVoices(place);
+    const at = voices.indexOf(place.track);
+    if (at >= 0) voices.splice(at, 1);
+    else voices.push(place.track);
+    voices.sort(function (a, b) {
+      return a - b;
+    });
+    scoreCursor = {
+      pos: scoreCursor.pos,
+      track: place.track,
+      stop: place.index,
+      step: place.step,
+      anchor: place.anchor !== null ? place.anchor : place.head.index,
+      voices: voices,
+      home: scoreCursor.home || null,
+      whole: place.whole,
+    };
+    drawScoreCursor();
+  }
+
+  // Ctrl+C: the stretch chosen, as it is written, to the clipboard ("al
+  // final uno puede hacer control C y se copia al portapapeles"), or the
+  // place the cursor stands on where none is chosen. Each voice's music
+  // line by line as the score has it, from its first place inside the
+  // stretch to its last, with what is written between them (the barlines,
+  // a chord symbol, a decoration); one voice as its music alone, and
+  // several each under the `V:` it is written under, in their order. My
+  // pick of what is copied. The score says it has with a pulse of the brass
+  // over what was copied (pulseScoreCopy), as the copy button says it over
+  // the block it copies.
+  // The last copy the mode made: its text, and the unit each of its parts
+  // was written under (`L:`). The clipboard carries the text alone.
+  let scoreCopied = null;
+  function copyScoreSelection() {
+    const place = scoreCursorPlace();
+    if (!place) return;
+    const clip = scoreClip(place, scoreTaken(place));
+    if (!clip) return;
+    // What a paste of this same text is checked against (pasteIntoScore).
+    scoreCopied = clip;
+    copyPlain(clip.text);
+    pulseScoreCopy(place.block);
+  }
+
+  // What Ctrl+C and Ctrl+X take: the stretch chosen, voice by voice, or the
+  // place the cursor stands on where nothing is chosen, or where every
+  // voice of a stretch was let go, which is all the drawing shows as chosen
+  // then.
+  function scoreTaken(place) {
+    const parts = scoreChosen(place);
+    return parts.length ? parts : [{ track: place.track, stops: [place.stop], out: [{ before: 0, after: 0 }] }];
+  }
+
+  // Those parts as the clipboard carries them, { text, units }: the text,
+  // and the unit each of its parts was written under. Null where there is
+  // nothing written to take, which is the open end.
+  function scoreClip(place, parts) {
+    const source = scoreSource(place.block);
+    const texts = [];
+    parts.forEach(function (part) {
+      const text = stretchSlices(part.stops)
+        .map(function (line) {
+          return source.slice(line.from, line.to).trim();
+        })
+        .join("\n");
+      if (text) {
+        texts.push({
+          text: text,
+          voice: voiceFieldBefore(source, part.stops[0].from),
+          unit: window.MDM_BARS && window.ABCJS ? window.MDM_BARS.unitAt(window.ABCJS, source, part.stops[0].from) : null,
+        });
+      }
+    });
+    if (!texts.length) return null;
+    const text =
+      texts.length === 1
+        ? texts[0].text
+        : texts
+            .map(function (t) {
+              return (t.voice ? "V:" + t.voice + "\n" : "") + t.text;
+            })
+            .join("\n");
+    return {
+      text: text,
+      units: texts.map(function (t) {
+        return t.unit;
+      }),
+    };
+  }
+
+  // Ctrl+X: what Ctrl+C copies, on the clipboard, and taken out of the
+  // score as Delete takes a stretch (the owner's ask of 2026-10-06, "Aplica
+  // Ctrl X y Ctrl A"). With nothing chosen that is the place the cursor
+  // stands on, the whole of it, a chord with every head, since that is what
+  // Ctrl+C copies there: Delete alone takes the one head the cursor is on.
+  // Nothing at the open end, where nothing stands. The cursor is left as
+  // Delete leaves it, on what comes into the place.
+  //
+  // What cannot go says why, and the clipboard is left with what it held
+  // (cutScoreStretch puts the text on it once the engine has let the cut):
+  // a cut that copied and took nothing out would be a copy nobody asked
+  // for. A place the stretch takes a part of is copied whole, as Ctrl+C
+  // copies it, and left shorter, as Delete leaves it. My pick of each.
+  function cutScoreSelection() {
+    let place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    let chosen = scoreChosen(place);
+    if (!chosen.length) {
+      chosen = scoreTaken(place);
+      // The cursor's own place, wherever a stretch nobody sees has its
+      // ends: the cursor comes back to where it stood.
+      place = Object.assign({}, place, { anchor: null, head: { track: place.track, index: place.index, step: place.step } });
+    }
+    // Nothing is written at the open end, and there is no text to take.
+    const clip = scoreClip(place, chosen);
+    if (clip) cutScoreStretch(place, chosen, false, clip);
+  }
+
+  // Ctrl+A: the whole score chosen, every place of every voice (the same
+  // ask). The cursor stays where it stands, out of sight as it is under any
+  // stretch, and the page where it is: Escape gives the cursor back on the
+  // place it was writing at, and an arrow across lets the stretch go at
+  // that end of the cursor's voice, as it lets any other go. The keys of a
+  // stretch are its keys: Ctrl+C, Ctrl+X, Delete and 0, Space, Ctrl+V over
+  // it, and Ctrl+Shift with Up, Down and Space to let voices go.
+  //
+  // A stretch of a kind of its own (`whole`), and not one drawn out from
+  // the first place of the cursor's voice to its last: that one takes of
+  // the other voices what sounds while the cursor's does (selectionParts),
+  // which is not all of a voice that goes on after it or is written on a
+  // line it has nothing on, and a score being written has such voices.
+  // Shift with an arrow after it draws a stretch out from the cursor again.
+  // Every voice, where the cursor's alone would have been as true to the
+  // key: my pick.
+  function chooseScoreWhole() {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    scoreCursor = {
+      pos: scoreCursor.pos,
+      track: place.track,
+      stop: place.index,
+      step: place.step,
+      // Where a stretch drawn out of it afterwards begins.
+      anchor: place.index,
+      voices: "all",
+      home: null,
+      whole: true,
+    };
+    drawScoreCursor();
+  }
+
+  // What was copied, said where it is: the wash of the stretch, or the
+  // column of the cursor where its place was all there was to copy, goes
+  // for half a second to the weight the copy button's pulse has over a
+  // block (style.css, mdm-copy-pulse), and settles back. The owner's call
+  // of 2026-10-04, in the place of the word "Copied" over the cursor: "que
+  // haga algo parecido a cuando se usa el botón de copiar que hace un
+  // flashazo". Kept to what was copied and not the whole score, which is
+  // what the button copies and this does not.
+  function pulseScoreCopy(block) {
+    const svg = block.querySelector("code.language-abc svg");
+    if (!svg) return;
+    svg.classList.remove("mdm-score-copied");
+    void svg.getBoundingClientRect(); // restart the animation
+    svg.classList.add("mdm-score-copied");
+    clearTimeout(svg.mdmCopied);
+    svg.mdmCopied = setTimeout(function () {
+      svg.classList.remove("mdm-score-copied");
+    }, 600);
+  }
+
+  // A voice's places inside a stretch as the text has them, line by line:
+  // from where the first of each line begins to where its last ends, with
+  // whatever is written between them. What a copy takes, and what a paste
+  // over the stretch, or Delete, takes out (MDM_BARS.pasteMusic).
+  function stretchSlices(stops) {
+    const lines = [];
+    stops.forEach(function (stop) {
+      const line = lines[lines.length - 1];
+      if (line && line.group === stop.group) line.to = stop.to;
+      else lines.push({ group: stop.group, from: stop.from, to: stop.to });
+    });
+    return lines.map(function (line) {
+      return { from: line.from, to: line.to };
+    });
+  }
+
+  // Ctrl+V: what the clipboard holds, put in at the cursor (the owner's ask
+  // of 2026-10-04, "implementa el pegar"). Music with no `V:` over it, which
+  // is what the copy of one voice is, goes into the cursor's voice; the
+  // copy of several goes into the voices of those names. What a place does
+  // with the music is the owner's and the engine's to write
+  // (MDM_BARS.pasteMusic):
+  //
+  //   nothing chosen    after the cursor's place, a note or a rest alike,
+  //                     and after the last of a voice at its open end. In a
+  //                     voice other than the cursor's, after the place that
+  //                     sounds as the cursor's ends: the last of its line to
+  //                     begin before that, in the bar the cursor's is in;
+  //                     or before its first where none does
+  //   a stretch chosen  in the place of the stretch, in each voice it is
+  //                     chosen over that music comes for. A voice chosen
+  //                     that none comes for keeps its stretch, and music
+  //                     for a voice not chosen goes in before the place
+  //                     that begins where the stretch does (my pick of both)
+  //
+  // After the place, the owner's call of 2026-10-06 once they had tried it
+  // the other way ("ctrl v sobre nota entra detrás"): for two days the music
+  // went in before the place, their word of 2026-10-04 for a design sheet
+  // that said "delante", and the note the cursor stood on was pushed along
+  // by what was pasted, so that nothing could be pasted after the last note
+  // of a line a barline closes. A rest takes it as a note does, their rule
+  // of the first day ("copiar sobre un silencio funciona igual que copiar
+  // sobre una nota").
+  //
+  // The cursor goes onto the last place of the music it pasted in its own
+  // voice, any stretch let go, so that a second paste goes on from the
+  // first; at an open end it stays at the end. One step of the history.
+  function pasteIntoScore(text) {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    // While the music sounds on the cursor's score the key stops it, as the
+    // keys that write do.
+    if (scoreSoundingHere()) {
+      scoreTakeFromPlayer();
+      return;
+    }
+    const refuse = function (reason) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(reason));
+    };
+    const parts = window.MDM_BARS.clipParts(text);
+    if (parts.refused) {
+      // An empty clipboard is nothing to say anything about.
+      if (parts.refused !== "pasteNothing") refuse(parts.refused);
+      return;
+    }
+    const source = scoreSource(place.block);
+    const names = place.tracks.map(function (track) {
+      return voiceFieldBefore(source, track[0].end ? track[0].after : track[0].from);
+    });
+    const chosen = scoreChosen(place);
+    // What the music is put in beside, in a voice no stretch is taken out
+    // of: before the first place of the stretch, in the voice it was drawn
+    // out in, or after the cursor's.
+    const beside = chosen.length
+      ? { track: place.head.track, stop: place.tracks[place.head.track][scoreSelection(place).from], after: false }
+      : { track: place.track, stop: place.stop, after: true };
+    const pastes = [];
+    const lengths = [];
+    const into = [];
+    for (let i = 0; i < parts.length; i++) {
+      const t = parts[i].voice === null ? place.track : names.indexOf(parts[i].voice);
+      if (t < 0) return refuse("pasteVoice");
+      // Two parts for one voice: a text this was not written to read.
+      if (into.indexOf(t) >= 0) return refuse("pasteText");
+      const over = chosen.filter(function (part) {
+        return part.track === t;
+      })[0];
+      let paste = null;
+      if (over) {
+        // In the place of the stretch as Delete would leave it: a place it
+        // takes a part of stays, shorter, and the music goes in beside it,
+        // after one begun before the stretch and before one that sounds on
+        // past its end (stretchCutOf).
+        const cut = stretchCutOf(over);
+        paste = { over: cut.over, text: parts[i].text, keep: cut.keep };
+        cut.lengths.forEach(function (one) {
+          lengths.push(one);
+        });
+      } else {
+        const target = pasteTarget(place, t, beside);
+        if (!target) return refuse("notePlace");
+        paste = { at: target.at, text: parts[i].text, where: target.where };
+      }
+      // Music the mode copied under another unit would be pasted as other
+      // lengths, a half for every quarter: it says so and pastes nothing.
+      // A text from elsewhere says nothing of its unit, and is read in the
+      // one it lands in.
+      const unit = scoreCopied && scoreCopied.text === text ? scoreCopied.units[i] : null;
+      if (unit && parts.length === scoreCopied.units.length) {
+        const here = window.MDM_BARS.unitAt(window.ABCJS, source, over ? paste.over[0].from : paste.at);
+        if (here && Math.abs(here - unit) > 1e-9) return refuse("pasteUnit");
+      }
+      into.push(t);
+      pastes.push(paste);
+    }
+    const result = scoreEditRun(source, { kind: "paste", pastes: pastes.concat(lengths) });
+    if (result.refused) return refuse(result.refused);
+    const change = scoreEditChange(scoreCursor.pos, source, result.source);
+    if (!change) return;
+    const was = Object.assign({}, scoreCursor);
+    const entry = recordScoreEdit(scoreCursor.pos, scoreCursor, false);
+    const now = writeScoreEdit(scoreCursor.pos, change);
+    const visual = blockVisual(scoreBlockAt(now));
+    const tracks = visual ? scoreTracks(visual) : [];
+    const track = Math.min(place.track, tracks.length - 1);
+    const list = tracks[track];
+    if (list && list.length) {
+      let index = Math.min(place.index, list.length - 1);
+      const own = into.indexOf(place.track);
+      if (own >= 0) {
+        // The first place of the voice at or past the element after the
+        // music (that element is a barline as often as a note), or the open
+        // end where there is none: the place before it is the last of the
+        // music. At the open end the cursor stays on the end, where the
+        // next note is written.
+        const after = result.after[own];
+        const end = list[list.length - 1].end ? list.length - 1 : -1;
+        let next = end >= 0 ? end : list.length;
+        for (let i = 0; after >= 0 && i < list.length; i++) {
+          if (!list[i].end && list[i].from >= after) {
+            next = i;
+            break;
+          }
+        }
+        index = place.stop.end && next === end ? end : Math.max(0, next - 1);
+      }
+      scoreCursor = { pos: now, track: track, stop: index, step: clampStep(list[index], was.step), anchor: null };
+    }
+    entry.cursorAfter = scoreCursor ? Object.assign({}, scoreCursor) : null;
+    scoreCursorMoved();
+    settleScoreEdit();
+  }
+
+  // Where a voice is pasted into beside a place, `beside` naming that
+  // place, its voice, and the side the music goes in on: after it (the
+  // cursor's place) or before it (the first place of a stretch). In that
+  // voice, the place itself, its open end being after its last element.
+  //
+  // In another voice, on the same line, it goes in on the same side of
+  // what sounds there. After the cursor's place: after the last of the
+  // voice's places to begin before that place ends, which is the one
+  // sounding as it ends, and before the voice's first where none begins
+  // that early. Not before the first place to begin once it has ended:
+  // where the cursor's place closes its bar that one is past the barline,
+  // and the music of the two voices would go into two bars (seen with a
+  // quarter pasted from a bar's whole rest over four quarters: the bar
+  // after the rest, and the bar of the four). Before a stretch: before the
+  // first place to begin when the stretch does or later, and after the
+  // voice's last where none is left. Null for a voice with no place on the
+  // line.
+  function pasteTarget(place, t, beside) {
+    const stop = beside.stop;
+    if (t === beside.track) {
+      if (stop.end) return { at: stop.after, where: "after" };
+      return { at: stop.from, where: beside.after ? "after" : "on" };
+    }
+    const when = beside.after ? stop.at + stop.span : stop.at;
+    let first = null;
+    let last = null;
+    const track = place.tracks[t];
+    for (let i = 0; i < track.length; i++) {
+      const other = track[i];
+      if (other.group !== stop.group || other.end) continue;
+      if (other.at >= when - SPAN_SLACK) {
+        if (!beside.after) return { at: other.from, where: "on" };
+        if (!last) first = other;
+        break;
+      }
+      last = other;
+    }
+    if (last) return { at: last.from, where: "after" };
+    return first ? { at: first.from, where: "on" } : null;
+  }
+
+  // Delete with a stretch chosen: the stretch taken out of every voice it
+  // is chosen over, with the time it held (the owner's call of 2026-10-04,
+  // "se borra toda la selección"; MDM_BARS.pasteMusic with nothing to put
+  // in). A place of another voice that the stretch takes a part of stays,
+  // shorter by that part (stretchCutOf). The cursor comes back where the
+  // stretch began, on whatever now
+  // stands there, or on the last place of the voice; under Backspace
+  // (`back`) on the place to the left of that, as it goes for one place
+  // taken out (takeScoreOut), where the stretch went from the voice the
+  // cursor comes back to: in a voice it was not chosen over every place is
+  // where it was, the cursor's with them. One step of the history, which
+  // gives the stretch back chosen as it was.
+  //
+  // With `clip`, what goes is put on the clipboard as the engine lets it go
+  // and before it is written: Ctrl+X (cutScoreSelection), which may hand in
+  // the cursor's own place where no stretch is chosen.
+  function cutScoreStretch(place, chosen, back, clip) {
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    const source = scoreSource(place.block);
+    // Every voice's cut first, and then the lengths the places that stay
+    // are left with: each is asked of the source the one before it left.
+    const pastes = [];
+    const lengths = [];
+    chosen.forEach(function (part) {
+      const cut = stretchCutOf(part);
+      pastes.push({ over: cut.over, text: null, keep: cut.keep });
+      cut.lengths.forEach(function (one) {
+        lengths.push(one);
+      });
+    });
+    const result = scoreEditRun(source, { kind: "paste", pastes: pastes.concat(lengths) });
+    if (result.refused) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    const change = scoreEditChange(scoreCursor.pos, source, result.source);
+    if (!change) return;
+    if (clip) {
+      scoreCopied = clip;
+      copyPlain(clip.text);
+    }
+    const head = place.head;
+    const own = chosen.some(function (part) {
+      return part.track === head.track;
+    });
+    const range = scoreSelection(place);
+    const first = own ? (range ? range.from : head.index) - (back ? 1 : 0) : head.index;
+    const entry = recordScoreEdit(scoreCursor.pos, scoreCursor, false);
+    const now = writeScoreEdit(scoreCursor.pos, change);
+    const visual = blockVisual(scoreBlockAt(now));
+    const tracks = visual ? scoreTracks(visual) : [];
+    const track = Math.min(head.track, tracks.length - 1);
+    const list = tracks[track];
+    if (list && list.length) {
+      const index = Math.max(0, Math.min(first, list.length - 1));
+      takeScoreFigure(list[index]);
+      scoreCursor = { pos: now, track: track, stop: index, step: clampStep(list[index], head.step), anchor: null };
+    }
+    entry.cursorAfter = scoreCursor ? Object.assign({}, scoreCursor) : null;
+    scoreCursorMoved();
+    settleScoreEdit();
+  }
+
+  // 0 with a stretch chosen: every note of it made a rest as long as it
+  // was, the rests among them left as they are (the owner's call of
+  // 2026-10-04, "al marcar 0 todas las notas del tramo elegido se sustituyen
+  // por su silencio"; MDM_BARS.restMusic). The stretch stays chosen: its
+  // places are the ones they were. A note the stretch takes a part of is
+  // left as it is (wholeInStretch): half a note cannot be made a rest, and
+  // all of it would be silence the stretch did not reach. My pick of
+  // 2026-10-06, once the owner had said such a note is chosen in part; for
+  // an hour that day, and before it for one sounding on past the end, it
+  // was made a rest whole.
+  function restScoreStretch(place, chosen) {
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    const ats = [];
+    chosen.forEach(function (part) {
+      part.stops.forEach(function (stop, i) {
+        if (!stop.rest && !stop.end && wholeInStretch(part, i)) ats.push(stop.from);
+      });
+    });
+    if (!ats.length) return;
+    const source = scoreSource(place.block);
+    const result = scoreEditRun(source, { kind: "rests", ats: ats });
+    if (result.refused) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    const change = scoreEditChange(scoreCursor.pos, source, result.source);
+    if (!change) return;
+    const was = Object.assign({}, scoreCursor);
+    const entry = recordScoreEdit(scoreCursor.pos, scoreCursor, false);
+    const now = writeScoreEdit(scoreCursor.pos, change);
+    scoreCursor = Object.assign(was, { pos: now });
+    entry.cursorAfter = Object.assign({}, scoreCursor);
+    scoreCursorMoved();
+    settleScoreEdit();
+  }
+
+  // The clipboard read for a paste. Asked of the browser by the key itself:
+  // the paste a webview is handed by VS Code is a command run on what holds
+  // the focus, and in the mode that is no text to paste into.
+  function pasteScoreClipboard() {
+    if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") return;
+    navigator.clipboard.readText().then(
+      function (text) {
+        if (scoreMode) pasteIntoScore(text);
+      },
+      function () {
+        // a clipboard this page is not let read: nothing to paste
+      }
+    );
+  }
+
+  // The voice a character of a score's source is written under: the last
+  // `V:` field before it, on a line of its own or inline, or null in a tune
+  // that names none.
+  function voiceFieldBefore(source, at) {
+    const field = /(?:^|\n)V:[ \t]*([^\s\]%]+)|\[V:[ \t]*([^\s\]]+)/g;
+    let id = null;
+    let m;
+    while ((m = field.exec(source)) && m.index < at) id = m[1] || m[2];
+    return id;
+  }
+
+  // The cursor taken from `place` to a place of a voice, at the height it
+  // was at as an arrow takes it, with its figure, and any stretch let go.
+  function moveScoreCursorTo(place, track, index) {
+    const target = place.tracks[track][index];
+    takeScoreFigure(target);
+    scoreCursor = { pos: scoreCursor.pos, track: track, stop: index, step: stepIntoVoice(place.stop, place.step, target), anchor: null };
+    scoreCursorMoved();
+    showScoreCursor();
+  }
+
+  // The pane taken to the cursor's score when CodeMirror has let its
+  // drawing go; false when the score is not in the document any more.
+  function bringScoreBack() {
+    try {
+      view.dispatch({ effects: EditorView.scrollIntoView(scoreCursor.pos, { y: "center" }) });
+      return true;
+    } catch (e) {
+      scoreCursor = null;
+      return false;
+    }
+  }
+
+  function showScoreCursor() {
+    drawScoreCursor();
+    revealScoreCursor();
+  }
+
+  // The cursor is three shapes inside the score's own SVG, in its units, so
+  // the scale that fits a wide score to the pane moves it with the notes
+  // (as the playing cursor, cursorEl): a column over the place, from the
+  // top line to the bottom one, a box one staff space tall at the step,
+  // the size of the head a note written there would have, and off the
+  // staff the ledger lines that note would stand on, in grey, so that the
+  // note meant is read off them as off a note (the owner's ask of
+  // 2026-10-02, "rayitas, quizás en gris"). First in the
+  // drawing, so that the ink is laid over them. Made once and moved after,
+  // since this runs from afterRender and a node added here would call
+  // afterRender again; and made again whenever CodeMirror builds the widget
+  // anew, which it does as the score comes back into the pane.
+  //
+  // A stretch chosen is a wash of its own, from the column of the first
+  // place it takes in on a line to the column of the last: over the staff
+  // of each voice it was chosen over, and where that is every voice, one
+  // band across every staff of the line (drawScoreSelection). While one is
+  // chosen the cursor is not drawn (the owner's call of 2026-10-04: "al
+  // seleccionar con shift (o cualquiera de sus variantes) o arrastrando el
+  // cursor, el cuadradito debe desaparecer durante la selección"): what is
+  // chosen says where the reader is, and a box on one of its notes read as
+  // one note more chosen than the rest. But while it walks the voices with
+  // the stretch kept (walkScoreVoices, scoreCursor.home): there it is what
+  // says which voice Space would pick, and nothing else does. The owner
+  // took that with the note that it is an asymmetry to come back to.
+  let scoreEndedLine = null; // the line the cursor stands at the open end of, as last drawn
+  function drawScoreCursor() {
+    const place = scoreMode ? scoreCursorPlace() : null;
+    const svg = place ? place.block.querySelector("code.language-abc svg") : null;
+    document.querySelectorAll("#app .mdm-score-cursor, #app .mdm-score-selection").forEach(function (el) {
+      if (el.parentNode !== svg) el.parentNode.removeChild(el);
+    });
+    document.querySelectorAll("#app code.language-abc svg .mdm-score-picked").forEach(function (el) {
+      if (el.ownerSVGElement !== svg) el.classList.remove("mdm-score-picked");
+    });
+    roomForScoreCursor(svg, place);
+    // The pair of a line stands past the cursor while the cursor is at the
+    // line's open end (scoreEditLines): placed again as it comes there and
+    // as it leaves.
+    const ended = place && place.stop.end ? place.stop.group : null;
+    if (ended !== scoreEndedLine) {
+      scoreEndedLine = ended;
+      refreshScoreEdits();
+    }
+    tellScoreFigure(place);
+    if (!svg) return;
+    let group = svg.querySelector(":scope > .mdm-score-cursor");
+    if (!group) {
+      group = document.createElementNS(SVG_NS, "g");
+      group.setAttribute("class", "mdm-score-cursor");
+      ["beat", "ledger", "step"].forEach(function (part) {
+        const shape = document.createElementNS(SVG_NS, part === "ledger" ? "path" : "rect");
+        shape.setAttribute("class", "mdm-score-cursor__" + part);
+        // The outline keeps its screen width while the SVG is scaled to fit.
+        if (part !== "ledger") shape.setAttribute("vector-effect", "non-scaling-stroke");
+        group.appendChild(shape);
+      });
+      svg.insertBefore(group, svg.firstChild);
+    }
+    const stop = place.stop;
+    const y = stepY(stop.staff, place.step);
+    const top = Math.min(stop.staff.topLine, y - ABC_STEP) - 2;
+    const bottom = Math.max(stop.staff.bottomLine, y + ABC_STEP) + 2;
+    const beat = group.querySelector(".mdm-score-cursor__beat");
+    const box = group.querySelector(".mdm-score-cursor__step");
+    beat.setAttribute("x", stop.x - CURSOR_HALF);
+    beat.setAttribute("y", top);
+    beat.setAttribute("width", 2 * CURSOR_HALF);
+    beat.setAttribute("height", bottom - top);
+    beat.setAttribute("rx", 1.5);
+    box.setAttribute("x", stop.x - CURSOR_HALF + 1);
+    box.setAttribute("y", y - ABC_STEP);
+    box.setAttribute("width", 2 * CURSOR_HALF - 2);
+    box.setAttribute("height", 2 * ABC_STEP);
+    box.setAttribute("rx", 1.5);
+    // A line at every other step from the staff out to the cursor's: the
+    // steps of the staff's own lines are even, whatever the clef.
+    const lines = lineSteps(stop.staff);
+    let ledgers = "";
+    const ledger = function (step) {
+      const ly = stepY(stop.staff, step) - LEDGER_THICK / 2;
+      ledgers += "M" + (stop.x - LEDGER_HALF) + " " + ly + "h" + 2 * LEDGER_HALF + "v" + LEDGER_THICK + "h" + -2 * LEDGER_HALF + "Z";
+    };
+    for (let step = lines.top + 2; step <= place.step; step += 2) ledger(step);
+    for (let step = lines.bottom - 2; step >= place.step; step -= 2) ledger(step);
+    // At the open end the cursor stands past the last ink of the staff: its
+    // five lines go on under it, as far as a ledger line would reach, so
+    // that the height is read off them there as it is on the staff.
+    if (stop.end) {
+      const from = stop.group.w;
+      const across = stop.x + LEDGER_HALF - from;
+      for (let step = lines.bottom; step <= lines.top; step += 2) {
+        const ly = stepY(stop.staff, step) - LEDGER_THICK / 2;
+        ledgers += "M" + from + " " + ly + "h" + across + "v" + LEDGER_THICK + "h" + -across + "Z";
+      }
+    }
+    const ledgerPath = group.querySelector(".mdm-score-cursor__ledger");
+    if (ledgers) ledgerPath.setAttribute("d", ledgers);
+    else ledgerPath.removeAttribute("d");
+    // What the tests and a curious reader can ask of the drawing: the source
+    // the place was written from, and the step.
+    group.setAttribute("data-mdm-from", stop.from);
+    group.setAttribute("data-mdm-to", stop.to);
+    group.setAttribute("data-mdm-step", place.step);
+    // The figure a key would write with, for the tests and a curious reader:
+    // it is not drawn (a note written on the cursor, below).
+    group.setAttribute("data-mdm-figure", figureOf(place));
+    const chosen = drawScoreSelection(svg, place);
+    group.classList.toggle("mdm-score-cursor--aside", chosen.length > 0 && !scoreCursor.home);
+  }
+
+  // The room a drawing makes for the cursor. abcjs gives its drawing the
+  // height of its ink and no more, and the box cuts what falls outside it,
+  // so a cursor three ledger lines over a bare staff was drawn cut off, and
+  // the staff moved down "un poquito" as the note was written there (the
+  // owner's pictures of 2026-10-03, and their ask: "cuando el cuadradito
+  // llegue a esa altura el pentagrama ajusta su desplazamiento vertical,
+  // aunque no se ponga la nota, y si no se pone la nota y vuelvo a bajar el
+  // pentagrama vuelve a su posición original"). So the drawing the cursor
+  // stands in is given, for as long as it stands there, the room abcjs
+  // would give a note written at its step, and takes its own box back when
+  // the cursor comes in again, goes to another score, or the mode is left.
+  //
+  // The room is the one measured on a bare staff (paddingtop and
+  // paddingbottom at SCORE_PAD), with a note written at every step from 13
+  // to 16 and from 0 to -4: the head of the highest note is drawn with its
+  // middle 13.607 under the top edge of the drawing, which is three steps
+  // and the padding (13.625) less a hair, and the head of the lowest with
+  // its middle 6.047 over the bottom edge, a step and the padding and a
+  // hair more. The hairs are under a twentieth of a unit, which is no room
+  // to make (ROOM_LEAST): the note written, the drawing is abcjs's own
+  // again and the staff has not moved (SM70). Where a title or a chord
+  // symbol stands over the staff the cursor has room already and nothing
+  // is made, though abcjs will still push the staff down under them for
+  // the note.
+  //
+  // Across, the open end of a line that fills the drawing's width takes the
+  // column past its right edge, and the drawing is made that much wider.
+  // For the open end alone: the column of the last note of such a line runs
+  // a few units past the edge as well, as it always has, and a drawing that
+  // changed its width under every visit to that note would be worse than
+  // the sliver of wash it loses.
+  const ROOM_ABOVE = 3 * ABC_STEP + SCORE_PAD;
+  const ROOM_BELOW = ABC_STEP + SCORE_PAD + 0.175;
+  const ROOM_LEAST = 0.05;
+  const SCORE_ROOM = new WeakMap(); // a drawing made room in, and the box it had
+
+  function drawingBox(svg) {
+    const box = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+    if (box.length === 4 && box.every(isFinite) && box[2] > 0 && box[3] > 0) return { x: box[0], y: box[1], w: box[2], h: box[3] };
+    const w = parseFloat(svg.getAttribute("width"));
+    const h = parseFloat(svg.getAttribute("height"));
+    return w > 0 && h > 0 ? { x: 0, y: 0, w: w, h: h } : null;
+  }
+
+  // As fitScores writes one: the box, and the size it is drawn at.
+  function setDrawingBox(svg, box) {
+    svg.setAttribute("viewBox", box.x + " " + box.y + " " + box.w + " " + box.h);
+    svg.setAttribute("width", box.w);
+    svg.setAttribute("height", box.h);
+  }
+
+  function roomForScoreCursor(svg, place) {
+    let changed = false;
+    document.querySelectorAll("#app code.language-abc svg[data-mdm-room]").forEach(function (other) {
+      if (other === svg) return;
+      if (SCORE_ROOM.has(other)) setDrawingBox(other, SCORE_ROOM.get(other));
+      SCORE_ROOM.delete(other);
+      other.removeAttribute("data-mdm-room");
+      changed = true;
+    });
+    const base = svg ? SCORE_ROOM.get(svg) || drawingBox(svg) : null;
+    if (base) {
+      const stop = place.stop;
+      const y = stepY(stop.staff, place.step);
+      const wanting = function (room) {
+        return room > ROOM_LEAST ? room : 0;
+      };
+      const above = wanting(base.y - (y - ROOM_ABOVE));
+      const below = wanting(y + ROOM_BELOW - (base.y + base.h));
+      const right = stop.end ? wanting(stop.x + CURSOR_HALF + 1 - (base.x + base.w)) : 0;
+      const box = { x: base.x, y: base.y - above, w: base.w + right, h: base.h + above + below };
+      const now = drawingBox(svg);
+      if (!now || now.y !== box.y || now.w !== box.w || now.h !== box.h) {
+        setDrawingBox(svg, box);
+        changed = true;
+      }
+      if (above > 0 || below > 0 || right > 0) {
+        SCORE_ROOM.set(svg, base);
+        svg.setAttribute("data-mdm-room", "1");
+      } else {
+        SCORE_ROOM.delete(svg);
+        svg.removeAttribute("data-mdm-room");
+      }
+    }
+    if (!changed || !view) return;
+    // The line the score is on is another height now, which CodeMirror
+    // reads again only when told to (the same flag a picture sets as it
+    // loads, ImageWidget), and the chrome under the pointer follows the
+    // staff to where it now is.
+    if (view.viewState) view.viewState.mustMeasureContent = true;
+    view.requestMeasure();
+    refreshScoreEdits();
+  }
+
+  // The stretch, washed: on every line it runs over, from the column of
+  // the first place it takes in there to the column of the last, whichever
+  // voices they are in. Chosen over every voice it is one band across every
+  // staff of the line, as it was while a stretch had no voices to it (every
+  // voice sounds when it is played); chosen over the cursor's voice, or
+  // over voices picked one by one, a band over the staff of each (the
+  // owner's keys of 2026-10-03, moveScoreCursor). A stretch no voice is
+  // picked for draws nothing. Returns what it drew for, voice by voice.
+  //
+  // Each band is marked at its corners, in the brass at the weight of the
+  // cursor's outline: the owner's J of design/design-score-mode.html
+  // (2026-10-06), where the band alone left the ends of a stretch hard to
+  // see on the dark side, and a dashed outline was what he had turned down.
+  // Where the stretch goes on into the line below, its band on this line
+  // has no corners on that side, nor the one below on the side it comes in
+  // by ("el mismo J pero que quede abierta"): so the two read as one
+  // stretch and not as two, and a line the stretch only passes through has
+  // the band and no corner.
+  function drawScoreSelection(svg, place) {
+    let wash = svg.querySelector(":scope > .mdm-score-selection");
+    const range = scoreSelection(place);
+    const parts = range ? selectionParts(place, range) : [];
+    inkScoreSelection(svg, parts, blockVisual(place.block), scoreSource(place.block));
+    if (!parts.length) {
+      if (wash) wash.parentNode.removeChild(wash);
+      return parts;
+    }
+    if (!wash) wash = document.createElementNS(SVG_NS, "g");
+    wash.setAttribute("class", "mdm-score-selection");
+    // Under the cursor and the ink, whatever was drawn first.
+    if (svg.firstChild !== wash) svg.insertBefore(wash, svg.firstChild);
+    const groups = blockVisual(place.block).engraver.staffgroups;
+    const lines = [];
+    // The band says when and the ink says what. A note of another voice
+    // still sounding as the stretch begins is in it (selectionParts) and
+    // wears its ink where it was written, which is to the left of where the
+    // stretch begins: the band is not drawn out to it, or it would lie over
+    // the notes of the other voices written there, which are not chosen and
+    // wear none. Where a line has nothing of the stretch but such notes (the
+    // voice it was drawn out in let go of), the band is over them.
+    const head = place.tracks[place.head.track][range.from];
+    parts.forEach(function (part) {
+      part.stops.forEach(function (stop) {
+        const g = groups.indexOf(stop.group);
+        const held = !place.whole && stop.group === head.group && stop.at < head.at - SPAN_SLACK;
+        let line = lines[g];
+        if (!line) line = lines[g] = { group: stop.group, left: Infinity, right: -Infinity, heldLeft: Infinity, heldRight: -Infinity, staffs: [] };
+        if (held) {
+          line.heldLeft = Math.min(line.heldLeft, stop.x);
+          line.heldRight = Math.max(line.heldRight, stop.x);
+        } else {
+          line.left = Math.min(line.left, stop.x);
+          line.right = Math.max(line.right, stop.x);
+        }
+        if (line.staffs.indexOf(stop.staff) < 0) line.staffs.push(stop.staff);
+      });
+    });
+    lines.forEach(function (line) {
+      if (line.left > line.right) {
+        line.left = line.heldLeft;
+        line.right = line.heldRight;
+      }
+    });
+    // The lines the stretch is on, the first and the last of them: `lines`
+    // has a hole for every line of the score it is not on.
+    let firstLine = -1;
+    let lastLine = -1;
+    lines.forEach(function (line, g) {
+      if (firstLine < 0) firstLine = g;
+      lastLine = g;
+    });
+    const bands = [];
+    lines.forEach(function (line, g) {
+      // Whether the stretch begins on this line, and whether it ends on it.
+      const sides = { begins: g === firstLine, ends: g === lastLine };
+      if (place.voices === "all") {
+        const all = groupBand(line.group);
+        bands.push(Object.assign({ left: line.left, right: line.right, top: all.top, bottom: all.bottom }, sides));
+        return;
+      }
+      line.staffs
+        .slice()
+        .sort(function (a, b) {
+          return a.topLine - b.topLine;
+        })
+        .forEach(function (staff) {
+          bands.push(Object.assign({ left: line.left, right: line.right, top: staff.topLine, bottom: staff.bottomLine }, sides));
+        });
+    });
+    // A corner is two arms from the band's own: [x, y, the way its arm
+    // across runs, the way its arm down the side runs].
+    const corners = [];
+    bands.forEach(function (band) {
+      band.x = band.left - STRETCH_HALF;
+      band.y = band.top - STRETCH_ROOM;
+      band.w = band.right - band.left + 2 * STRETCH_HALF;
+      band.h = band.bottom - band.top + 2 * STRETCH_ROOM;
+      if (band.begins) corners.push([band.x, band.y, 1, 1], [band.x, band.y + band.h, 1, -1]);
+      if (band.ends) corners.push([band.x + band.w, band.y, -1, 1], [band.x + band.w, band.y + band.h, -1, -1]);
+    });
+    // As many shapes of a kind as there is to draw, whatever stood there
+    // from the stretch drawn last. Which of the two kinds lies over the
+    // other is all one: a band over a corner is a tenth of the brass over
+    // the brass.
+    const shapes = function (name, tag, count) {
+      const cls = "mdm-score-selection__" + name;
+      const have = wash.getElementsByClassName(cls);
+      while (have.length > count) wash.removeChild(have[have.length - 1]);
+      while (have.length < count) {
+        const shape = document.createElementNS(SVG_NS, tag);
+        shape.setAttribute("class", cls);
+        // The corners keep their screen weight while the SVG is scaled to
+        // fit, as the cursor's outline does.
+        if (tag === "path") shape.setAttribute("vector-effect", "non-scaling-stroke");
+        wash.appendChild(shape);
+      }
+      return have;
+    };
+    const rects = shapes("band", "rect", bands.length);
+    bands.forEach(function (band, i) {
+      const rect = rects[i];
+      rect.setAttribute("x", band.x);
+      rect.setAttribute("y", band.y);
+      rect.setAttribute("width", band.w);
+      rect.setAttribute("height", band.h);
+      rect.setAttribute("rx", 1.5);
+    });
+    const marks = shapes("corner", "path", corners.length);
+    corners.forEach(function (corner, i) {
+      const x = corner[0];
+      const y = corner[1];
+      marks[i].setAttribute("d", "M" + (x + corner[2] * STRETCH_ARM) + " " + y + "H" + x + "V" + (y + corner[3] * STRETCH_ARM));
+    });
+    const own = place.tracks[place.head.track];
+    wash.setAttribute("data-mdm-from", own[range.from].from);
+    wash.setAttribute("data-mdm-to", own[range.to].to);
+    return parts;
+  }
+
+  // The shapes an engraving draws beside the notes of a voice, each with
+  // what it hangs on: [{ notes, shape }]. A beam, on the notes it joins; a
+  // tie and a slur, on the two they run between; a tuplet's bracket and its
+  // number, on its first note and its last; a dynamic, on the note it is
+  // written at, and a hairpin on the two it runs between; the bracket of an
+  // ending, on two barlines. `notes` names each by what it was read from, a
+  // note's element or a barline's. What a stretch chosen marks along with
+  // its notes, once all a shape hangs on would go (inkScoreSelection).
+  //
+  // abcjs keeps all of them but the beams among a voice's other children,
+  // with their anchors and, save for a tuplet, with the shapes it drew for
+  // them (read on abcjs 6.7.0, 2026-10-06).
+  //
+  // An arc cut by the end of a line is kept in pieces, a line each: the
+  // one it begins with has its first anchor and no other, the one it ends
+  // with its second, and a line it only crosses has a piece with neither
+  // (a tie has no such line: it ends on the next note). The pieces of an
+  // arc are put together again, voice by voice down the lines: a piece
+  // that ends takes the first arc left open above it that can end there, a
+  // tie where the note it began on is tied on and this one tied to, and a
+  // slur by the number abcjs gives it on both its notes; a piece with no
+  // anchor goes to an arc still open past the line, in the order they were
+  // opened. Where one note begins a tie and a slur, abcjs does not say
+  // which of its two pieces is which, and the first is given to whichever
+  // of the two ends first. An arc whose end is not found is left out, and
+  // so is a hairpin cut by the end of a line, which says less of itself.
+  //
+  // The beams of a voice (voice.beams, each with the elements
+  // it joins) and its tuplets have no link to their shapes: abcjs draws one
+  // for each in the order it keeps them, tagged with the line and the voice
+  // as the notes are, and they are paired here by that order (the beams
+  // checked on six tunes, one with two voices on a staff and one with
+  // ornaments: as many shapes as beams on every line of every voice, each
+  // lying over its notes). A voice whose shapes are not as many as its
+  // beams, or as its tuplets, gets none of that kind. The beam of an
+  // ornament joins grace notes abcjs makes up elements for, and names the
+  // note the ornament is on (mainNote).
+  const SCORE_JOINS = new WeakMap();
+  function scoreJoins(visual, svg) {
+    const kept = SCORE_JOINS.get(visual);
+    if (kept && kept.svg === svg) return kept.list;
+    const list = [];
+    const shapesIn = function (other) {
+      return (other.elemset || []).filter(function (shape) {
+        return shape && shape.classList;
+      });
+    };
+    // What a note says of the slurs that begin or end on it, by their
+    // numbers, and whether one of its heads is tied on, or tied to.
+    const slurs = function (el, key) {
+      const out = [];
+      [el].concat(el.pitches || []).forEach(function (of) {
+        (of[key] || []).forEach(function (slur) {
+          out.push(typeof slur === "object" ? slur.label : slur);
+        });
+      });
+      return out;
+    };
+    const tied = function (el, key) {
+      return (el.pitches || []).some(function (pitch) {
+        return !!pitch[key];
+      });
+    };
+    // The arcs left open at the end of a line, for each voice.
+    const open = {};
+    visual.engraver.staffgroups.forEach(function (group) {
+      group.voices.forEach(function (voice) {
+        let tags = null;
+        let number = null;
+        for (let i = 0; i < voice.children.length && !tags; i++) {
+          const drawn = voice.children[i].elemset && voice.children[i].elemset[0];
+          const cls = drawn && drawn.getAttribute ? drawn.getAttribute("class") || "" : "";
+          const line = /(?:^| )(abcjs-l\d+)(?: |$)/.exec(cls);
+          number = /(?:^| )(abcjs-v\d+)(?: |$)/.exec(cls);
+          if (line && number) tags = "." + line[1] + "." + number[1];
+        }
+        const tuplets = [];
+        const pieces = { begun: [], crossing: [], ended: [] };
+        (voice.otherchildren || []).forEach(function (other) {
+          // abcjs marks each barline among them with a word of its own.
+          if (!other || typeof other !== "object") return;
+          const ends = "anchor1" in other || "anchor2" in other ? [other.anchor1, other.anchor2] : [other.anchor];
+          const notes = ends.map(function (end) {
+            return end ? (end.parent || end).abcelem : null;
+          });
+          if (other.type === "TieElem" && !(notes[0] && notes[1])) {
+            pieces[notes[0] ? "begun" : notes[1] ? "ended" : "crossing"].push(other);
+            return;
+          }
+          if (
+            notes.some(function (note) {
+              return !note;
+            })
+          ) {
+            return;
+          }
+          if (other.type === "TripletElem") tuplets.push(notes);
+          shapesIn(other).forEach(function (shape) {
+            list.push({ notes: notes, shape: shape });
+          });
+        });
+        const above = (tags && open[number[1]]) || [];
+        pieces.ended.forEach(function (piece) {
+          const to = piece.anchor2.parent.abcelem;
+          const ends = slurs(to, "endSlur");
+          for (let i = 0; i < above.length; i++) {
+            const arc = above[i];
+            const tie = tied(arc.from, "startTie") && tied(to, "endTie");
+            const slur = slurs(arc.from, "startSlur").some(function (label) {
+              return ends.indexOf(label) >= 0;
+            });
+            if (!tie && !slur) continue;
+            arc.shapes.concat(shapesIn(piece)).forEach(function (shape) {
+              list.push({ notes: [arc.from, to], shape: shape });
+            });
+            above.splice(i, 1);
+            break;
+          }
+        });
+        pieces.crossing.forEach(function (piece, i) {
+          if (above[i]) above[i].shapes = above[i].shapes.concat(shapesIn(piece));
+        });
+        if (tags) {
+          open[number[1]] = above.concat(
+            pieces.begun.map(function (piece) {
+              return { from: piece.anchor1.parent.abcelem, shapes: shapesIn(piece) };
+            })
+          );
+        }
+        const beams = (voice.beams || []).filter(function (beam) {
+          return beam.elems && beam.elems.length > 0;
+        });
+        if (!beams.length && !tuplets.length) return;
+        // The shapes of a kind on this line of this voice, when they are as
+        // many as abcjs keeps of it.
+        const shapesOf = function (selector, count) {
+          const shapes = tags && count ? svg.querySelectorAll(selector + tags) : [];
+          return shapes.length === count ? shapes : [];
+        };
+        const beamed = shapesOf(".abcjs-beam-elem", beams.length);
+        beams.forEach(function (beam, i) {
+          if (!beamed[i]) return;
+          list.push({
+            notes: beam.mainNote
+              ? [beam.mainNote.abcelem]
+              : beam.elems.map(function (elem) {
+                  return elem.abcelem;
+                }),
+            shape: beamed[i],
+          });
+        });
+        const bracketed = shapesOf(".abcjs-triplet", tuplets.length);
+        tuplets.forEach(function (notes, i) {
+          if (bracketed[i]) list.push({ notes: notes, shape: bracketed[i] });
+        });
+      });
+    });
+    SCORE_JOINS.set(visual, { svg: svg, list: list });
+    return list;
+  }
+
+  // The ink of a stretch: in the brass, everything Delete would take with
+  // it (.mdm-score-picked, style.css). The owner's rule of 2026-10-06, "que
+  // se señale en latón todo lo que de apretar Delete será borrado". An hour
+  // before, "más nada que no sea el score y las notas debe estar dibujado
+  // en la selección" had kept the brass to the notes alone, and this took
+  // it back ("perdón, vira para atrás").
+  //
+  // Why the notes are marked at all, and not the band alone: the wash is
+  // one band a staff, and two voices written on one staff (`%%score (S A)
+  // T`) share theirs, so which of the two was chosen the drawing did not
+  // say. The owner's try of 2026-10-03 on a chorale of four voices on three
+  // staves, "intentando copiar el primer compás de la primera y tercera ...
+  // seleccionándolas con espacio excluyendo la segunda pero no funcionó":
+  // with real keys the first and the third were chosen and copied, and the
+  // picture was the one the first and the second make.
+  //
+  // What takes the class, then. The notes and the rests chosen, by what
+  // abcjs drew for each place, which is one group and nothing of the
+  // staff's (its elemset, read on 84 notes of six tunes: every one a single
+  // group tagged abcjs-note or abcjs-rest). The group holds what is written
+  // on the note as well, its chord symbol, an annotation, a fingering, the
+  // signs over it, the syllables under it, and Delete takes those with the
+  // note. Whatever else the
+  // cut takes out of the text, which the engine names from the reckoning
+  // the cut itself is made by (MDM_BARS.cutTakes): the barlines inside the
+  // stretch, the one that goes with whole bars, a part's label or a key
+  // written between two of its notes. And the shapes that hang on those,
+  // once all a shape hangs on would go (scoreJoins): a beam, a tie, a slur,
+  // a tuplet's bracket, a dynamic, a hairpin.
+  //
+  // The syllables under the notes are in the note's group and take the
+  // brass with it. For an hour of that afternoon they did not: Delete left
+  // them then (over a verse it was refused, or at the end of a line it
+  // left them written), so the stylesheet kept them in the score's ink.
+  // The owner's answer to that: "el delete debe borrarlo todo por lo que
+  // debe marcarse todo lo que se borra". Delete takes them since
+  // (wordsCut in mdm-bars.js), and they are marked.
+  //
+  // What Delete reaches for is marked whether or not it would then be let
+  // (half a slur inside the stretch, one note of a tuplet): a stretch is
+  // also what Ctrl+C copies and what Space plays, and has to show. Where
+  // the engine has no cut to name (whole bars with a field written inside
+  // them, a line of symbols under the stretch), the places chosen are
+  // marked, what is written between them on each line, and what hangs on
+  // them.
+  //
+  // A place the stretch takes a part of wears the ink as well, though
+  // Delete leaves it, shorter (stretchCutOf): it is what says the stretch
+  // is over its voice, and Delete does change it. What it would have taken
+  // with it had it gone wears none: the barline of the bar it is all of.
+  function inkScoreSelection(svg, parts, visual, source) {
+    const picked = new Set();
+    const gone = new Set();
+    const take = function (child) {
+      if (!child || !child.abcelem) return;
+      gone.add(child.abcelem);
+      (child.elemset || []).forEach(function (el) {
+        if (el && el.classList) picked.add(el);
+        // Its ledger lines, which sinkLedgers moved out of the group to draw
+        // them under the notes: Delete takes them with the note, and the
+        // group's brass no longer reaches them (found putting the branch
+        // over main, 2026-10-15: SM78, SM99 and SM100 saw them in the ink).
+        ((el && el.mdmLedgers) || []).forEach(function (line) {
+          picked.add(line);
+        });
+      });
+    };
+    parts.forEach(function (part) {
+      part.stops.forEach(function (stop) {
+        take(stop.child);
+      });
+    });
+    if (gone.size && visual) {
+      const cuts = parts.map(stretchCutOf);
+      const slices = cuts.map(function (cut) {
+        return cut.over;
+      });
+      const keeps = cuts.map(function (cut) {
+        return cut.keep;
+      });
+      const told = typeof source === "string" && window.MDM_BARS && window.ABCJS ? window.MDM_BARS.cutTakes(window.ABCJS, source, slices, keeps) : null;
+      // The runs of the text that go: each line of each voice from its
+      // first place chosen to its last, and what the engine says the cut
+      // takes, which is that and whatever it takes besides.
+      const runs = [].concat.apply([], slices).concat((told && told.taken) || []);
+      // An element goes when the text it was read from does: its first
+      // character, past the space abcjs counts into it.
+      const goes = function (el) {
+        if (typeof el.startChar !== "number" || typeof el.endChar !== "number") return false;
+        let at = el.startChar;
+        while (at < el.endChar - 1 && /\s/.test(source.charAt(at))) at++;
+        return runs.some(function (run) {
+          return at >= run.from && at < run.to;
+        });
+      };
+      if (typeof source === "string") {
+        visual.engraver.staffgroups.forEach(function (group) {
+          group.voices.forEach(function (voice) {
+            voice.children.forEach(function (child) {
+              if (child.abcelem && !gone.has(child.abcelem) && goes(child.abcelem)) take(child);
+            });
+          });
+        });
+      }
+      scoreJoins(visual, svg).forEach(function (join) {
+        if (
+          join.notes.every(function (note) {
+            return gone.has(note);
+          })
+        ) {
+          picked.add(join.shape);
+        }
+      });
+    }
+    svg.querySelectorAll(".mdm-score-picked").forEach(function (el) {
+      if (!picked.has(el)) el.classList.remove("mdm-score-picked");
+    });
+    picked.forEach(function (el) {
+      el.classList.add("mdm-score-picked");
+    });
+  }
+
+  // The cursor is kept on the pane, with the lines of its whole system
+  // when they fit, as the playing system is (showPlayhead), and the page is
+  // left alone while it shows. Across first: a score wider than its box is
+  // pushed sideways inside it at a narrow pane, not scaled (style.css,
+  // `.mdm-score code.language-abc`), and its box is scrolled to the column.
+  const CURSOR_ROOM = 8;
+  // The cursor's column brought into the box of its score, where the score
+  // is wider than the box and scrolls inside it.
+  function revealScoreCursorAcross() {
+    const beat = scoreMode ? document.querySelector("#app .mdm-score-cursor__beat") : null;
+    const code = beat && beat.closest("code.language-abc");
+    if (!code || code.scrollWidth <= code.clientWidth) return;
+    const box = beat.getBoundingClientRect();
+    const left = code.getBoundingClientRect().left;
+    if (box.left < left) code.scrollLeft -= left - box.left + CURSOR_ROOM;
+    else if (box.right > left + code.clientWidth) code.scrollLeft += box.right - (left + code.clientWidth) + CURSOR_ROOM;
+  }
+
+  function revealScoreCursor() {
+    const place = scoreMode ? scoreCursorPlace() : null;
+    const svg = place && place.block.querySelector("code.language-abc svg");
+    const beat = svg && svg.querySelector(".mdm-score-cursor__beat");
+    const matrix = svg && svg.getScreenCTM();
+    if (!beat || !matrix || !view) return;
+    revealScoreCursorAcross();
+    const box = beat.getBoundingClientRect();
+    const staffs = place.stop.group.staffs;
+    const lines = {
+      top: matrix.d * staffs[0].topLine + matrix.f,
+      bottom: matrix.d * staffs[staffs.length - 1].bottomLine + matrix.f,
+    };
+    const pane = view.scrollDOM.getBoundingClientRect();
+    const height = view.scrollDOM.clientHeight;
+    let top = Math.min(box.top, lines.top) - CURSOR_ROOM;
+    let bottom = Math.max(box.bottom, lines.bottom) + CURSOR_ROOM;
+    if (bottom - top > height) {
+      top = box.top - CURSOR_ROOM;
+      bottom = box.bottom + CURSOR_ROOM;
+    }
+    if (top < pane.top) view.scrollDOM.scrollTop -= pane.top - top;
+    else if (bottom > pane.top + height) view.scrollDOM.scrollTop += bottom - (pane.top + height);
+  }
+
+  // ---- The music under the mode ----
+  //
+  // One rule for where the music starts: from the cursor, or from the head
+  // of the stretch chosen. Paused and asked to play again without the
+  // cursor having moved, it takes up where it stopped instead, which is
+  // what a pause is for (scorePause).
+  let scorePressing = false; // a press of play made by the mode itself
+  let scorePlayFrom = null; // { pos, track, stop, step } where the playing began
+  let scorePause = null; // { pos, key } the cursor where the music was paused
+  // The stretch being played, as fractions of the tune: where it begins,
+  // where it ends, the audio clock's reading at the tune's nought (to stop
+  // the sound on the very sample the stretch ends), and whether that stop
+  // has been set on the clock yet.
+  let scoreRun = null; // { from, to, zero, armed, ending, seen }
+  // Why the music is about to stop, which says where the cursor goes when
+  // it does: "start" back to where the playing began (the end of the tune,
+  // the player's stop, the end of a stretch), "keep" where a key has just
+  // put it, and null where the music stopped (a pause).
+  let scoreStopKind = null;
+  let scoreSounding = false; // what scoreHearsPlayer last heard
+  // How early the sound is faded out ahead of the end of a stretch, in
+  // seconds: long enough to land without a click, short enough that the
+  // last note loses nothing anybody hears.
+  const RUN_FADE = 0.012;
+
+  // The moments each place of a voice is heard at, on the clock of the
+  // engraving on screen, in the order they are heard: a place inside a
+  // repeat is heard twice. Read off the same timing the playing cursor
+  // walks (cursorTimings), by the source each event names.
+  const SCORE_TIMELINES = new WeakMap();
+  function scoreTimeline(visual, trackIndex) {
+    let byTrack = SCORE_TIMELINES.get(visual);
+    if (!byTrack) {
+      byTrack = new Map();
+      SCORE_TIMELINES.set(visual, byTrack);
+    }
+    if (byTrack.has(trackIndex)) return byTrack.get(trackIndex);
+    const timing = cursorTimings(visual);
+    const track = scoreTracks(visual)[trackIndex];
+    let out = null;
+    if (timing && track) {
+      const index = new Map();
+      track.forEach(function (stop, i) {
+        index.set(stop.from, i);
+      });
+      out = [];
+      timing.events.forEach(function (ev) {
+        const chars = ev.startCharArray && ev.startCharArray.length ? ev.startCharArray : [ev.startChar];
+        chars.forEach(function (c) {
+          if (index.has(c)) out.push({ ms: ev.milliseconds, index: index.get(c) });
+        });
+      });
+    }
+    byTrack.set(trackIndex, out);
+    return out;
+  }
+
+  // When a place is first heard, or null for one never heard.
+  function timeOfPlace(line, index) {
+    for (let i = 0; i < line.length; i++) if (line[i].index === index) return line[i].ms;
+    return null;
+  }
+
+  // Where a stretch played from `t0` ends: the first moment after it that
+  // the voice is heard outside the stretch, which is its next place, or the
+  // head of a repeat it goes back to; null when that is the end of the tune.
+  function stretchEnd(line, from, to, t0) {
+    for (let i = 0; i < line.length; i++) {
+      const e = line[i];
+      if (e.ms > t0 && (e.index < from || e.index > to)) return e.ms;
+    }
+    return null;
+  }
+
+  // The place of the voice being heard at a moment: the last one to begin
+  // at or before it.
+  function placeAtTime(line, ms) {
+    let best = null;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i].ms <= ms + 1) best = line[i];
+      else break;
+    }
+    return best ? best.index : line.length ? line[0].index : null;
+  }
+
+  function scoreSoundingHere() {
+    return !!(player && player.bar && scoreCursor && player.pos === scoreCursor.pos && isSounding(player.bar));
+  }
+
+  // Space: a pause while anything sounds, whichever score it is, and play
+  // from the cursor otherwise.
+  function toggleScorePlayback() {
+    if (player && player.bar && isSounding(player.bar)) {
+      togglePlayback();
+      return;
+    }
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) {
+        startScoreCursor();
+        return;
+      }
+      if (!bringScoreBack()) return;
+      requestAnimationFrame(function () {
+        const back = scoreMode ? scoreCursorPlace() : null;
+        if (back) playFromScoreCursor(back);
+      });
+      return;
+    }
+    playFromScoreCursor(place);
+  }
+
+  // The player is opened on the cursor's score when it is not open there
+  // (inside the key's press, which is what lets the output wake), and once
+  // its synth is mounted the music is sent to the cursor and played. The
+  // seek goes through the progress bar's own (player.seekTo), which primes
+  // a tune never played and serves the last of any gestures made meanwhile,
+  // and the press through the play button, so that everything the button
+  // does on a press of the mouse (its face, the resume in silence) is done.
+  function playFromScoreCursor(place) {
+    const pos = scoreCursor.pos;
+    ensureAudioGraph();
+    if (!player || player.pos !== pos || !player.bar || !document.contains(player.bar)) openPlayer(place.block);
+    if (!player || !player.bar) return;
+    const bar = player.bar;
+    const resume = !!scorePause && scorePause.pos === pos && scorePause.key === scoreCursorKey();
+    scorePause = null;
+    whenPlayerReady(bar, 0, function () {
+      if (!scoreMode || !player || player.bar !== bar || !scoreCursor || scoreCursor.pos !== pos) return;
+      const here = scoreCursorPlace();
+      const visual = here && blockVisual(here.block);
+      const timing = visual && cursorTimings(visual);
+      // A stretch sounds in the voices it is chosen over, the ones that wear
+      // its ink, wherever the cursor has walked to, and in no other (the
+      // owner's call of 2026-10-04: "que haga sonar todas las pintadas esté
+      // el cursor en la partitura que esté ... que suene solo la selección";
+      // until then every voice sounded for as long as the stretch ran). One
+      // every voice was let go of is no stretch to play: the music goes from
+      // the cursor, in every voice, as it does with none chosen.
+      const chosen = here && scoreSelection(here) ? chosenTracks(here) : [];
+      const range = chosen.length ? scoreSelection(here) : null;
+      const off = [];
+      if (range) {
+        for (let n = 0; n < here.tracks.voices; n++) {
+          const t = here.tracks.numbers.indexOf(n);
+          if (t < 0 || chosen.indexOf(t) < 0) off.push(n);
+        }
+      }
+      // Set again for other voices, the tune is back at its start: there is
+      // no pause left to take up.
+      const again = setPlayerVoices(off);
+      // A stretch is timed in the voice it was drawn out in, which is the
+      // cursor's but while it walks the voices.
+      const line = timing ? scoreTimeline(visual, range ? here.head.track : here.track) : null;
+      scoreRun = null;
+      if (line && line.length) {
+        // From the open end, the last place of the voice: there is nothing
+        // after the end to play from, and the cursor comes back to the end.
+        const first = range ? range.from : here.stop.end ? here.index - 1 : here.index;
+        // The whole of the score is played from its top, where the voice of
+        // its head may come in later.
+        const t0 = range && here.whole ? 0 : timeOfPlace(line, first);
+        if (t0 !== null) {
+          // A stretch is played from its head every time, where the music
+          // stopped inside it or not (the owner's call of 2026-10-04: "si
+          // hay un pedazo seleccionado y la reproducción se para por la
+          // mitad, al reproducir de nuevo debe empezar desde el principio");
+          // with none chosen a pause is taken up where it was left.
+          if (!resume || again || range) player.seekTo(t0 / timing.total);
+          scorePlayFrom = { pos: pos, track: range ? here.head.track : here.track, stop: range ? first : here.index, step: here.step };
+          if (range) {
+            const t1 = stretchEnd(line, range.from, range.to, t0);
+            scoreRun = {
+              from: t0 / timing.total,
+              to: t1 === null ? 1 : t1 / timing.total,
+              zero: null,
+              armed: false,
+              ending: false,
+              seen: false,
+            };
+          }
+        }
+      }
+      pressPlay(bar);
+    });
+  }
+
+  // A synth is mounted a moment after its bar is opened (mountSynth); a
+  // tune abcjs cannot play never gets one, and the wait gives up.
+  function whenPlayerReady(bar, tries, fn) {
+    if (player && player.bar === bar && player.controller && player.seekTo) {
+      fn();
+      return;
+    }
+    if (!player || player.bar !== bar || tries > 120) return;
+    requestAnimationFrame(function () {
+      whenPlayerReady(bar, tries + 1, fn);
+    });
+  }
+
+  function pressPlay(bar) {
+    const start = bar.querySelector(".abcjs-midi-start");
+    if (!start) return;
+    wakeAudio();
+    scorePressing = true;
+    try {
+      start.click();
+    } finally {
+      scorePressing = false;
+    }
+  }
+
+  // Every frame while a stretch is being played (cursorFrame): its end set
+  // on the audio clock as soon as the sound has begun, a fade into silence
+  // on the sample it ends, since a frame is too coarse a clock for that and
+  // the note after it would be heard starting; and on the frame after the
+  // end, the pause, or with the repeat on, the head of the stretch again.
+  function scoreRunFrame() {
+    const run = scoreRun;
+    const controller = player && player.controller;
+    const timer = controller && controller.timer;
+    if (!run || run.ending || !timer || !isSounding(player.bar)) return;
+    const total = timer.lastMoment || 0;
+    if (!(total > 0)) return;
+    const end = run.to * total;
+    let ms = timer.currentMillisecond();
+    if (typeof ms !== "number" || !isFinite(ms)) return;
+    if (ms >= run.from * total - 5) run.seen = true;
+    // The repeat of the whole tune, which abcjs goes round itself, from the
+    // top: a stretch running to the end is taken back to its own head.
+    if (run.seen && controller.isLooping && ms + 50 < run.from * total) {
+      restartRun(run, controller, total);
+      return;
+    }
+    if (!run.armed && audioCtx && audioMute && run.to < 1) {
+      const buffer = controller.midiBuffer;
+      if (run.zero === null && buffer && typeof buffer.startTimeSec === "number") run.zero = buffer.startTimeSec;
+      if (run.zero !== null) {
+        const endAt = run.zero + end / 1000;
+        if (endAt > audioCtx.currentTime + RUN_FADE) {
+          try {
+            audioMute.gain.setValueAtTime(1, endAt - RUN_FADE);
+            audioMute.gain.linearRampToValueAtTime(0, endAt);
+          } catch (e) {
+            // a context torn down mid-flight: the pause below still stops it
+          }
+        }
+        run.armed = true;
+      }
+    }
+    if (run.to >= 1 || ms < end) return;
+    if (controller.isLooping) {
+      restartRun(run, controller, total);
+      return;
+    }
+    run.ending = true;
+    scoreStopKind = "start";
+    togglePlayback();
+  }
+
+  // Whether an event of the player falls on the end of the stretch being
+  // played, or past it. abcjs's timer hands an event over 16 ms before it is
+  // due, and the stretch is stopped on the frame after its end
+  // (scoreRunFrame), so the notes that follow a stretch were lit for that
+  // frame and then, the music paused on them, for as long as nothing else
+  // was pressed: the right hand's whole note and the left hand's half note
+  // after a first bar chosen and played, in the brass of what is chosen, as
+  // though they were chosen too (seen while the README's take of the mode
+  // was recorded, 2026-10-05). With the repeat on the same event came once
+  // a lap. The event's moment is on the synth's clock, as the stretch's end
+  // is once it is laid over that clock's length.
+  function pastScoreRun(ev) {
+    const run = scoreRun;
+    const timer = player && player.controller && player.controller.timer;
+    if (!run || run.to >= 1 || !timer || !(timer.lastMoment > 0)) return false;
+    return typeof ev.milliseconds === "number" && ev.milliseconds >= run.to * timer.lastMoment - 1;
+  }
+
+  function restartRun(run, controller, total) {
+    controller.seek(run.from);
+    controller.setProgress(run.from, total);
+    run.zero = audioCtx ? audioCtx.currentTime - (run.from * total) / 1000 : null;
+    run.armed = false;
+  }
+
+  // The music started or stopped: heard on every change of the play
+  // button's face and on every frame of the cursor loop, and answered once
+  // per change. While it sounds on the cursor's score the cursor steps
+  // aside (.mdm--score-sounding in style.css). When it stops, the stretch
+  // being played lets go of the output's fade, now that nothing sounds
+  // through it, and the cursor goes where the reason for the stop says.
+  function scoreHearsPlayer() {
+    const sounding = !!(player && player.bar && isSounding(player.bar));
+    const root = app();
+    if (root) root.classList.toggle("mdm--score-sounding", sounding && scoreMode && scoreSoundingHere());
+    if (sounding === scoreSounding) return;
+    scoreSounding = sounding;
+    if (sounding) return;
+    const kind = scoreStopKind;
+    scoreStopKind = null;
+    if (scoreRun) {
+      if (scoreRun.armed || scoreRun.ending) clearResumeHold();
+      // A stretch played to its end leaves nothing lit. The playhead's ink
+      // is the ink of what is chosen, and what it stood on last were the
+      // stretch's own last notes, which would stay in it after the stretch
+      // was let go; the music is stopped past them, on notes never heard.
+      if (scoreRun.ending) clearPlayingHighlight();
+      scoreRun = null;
+    }
+    if (!scoreMode || !scoreCursor || !player || player.pos !== scoreCursor.pos) return;
+    if (kind === "keep") return;
+    if (kind === "start") scoreCursorToStart();
+    else scoreCursorToMusic();
+  }
+
+  // The cursor onto the place of its voice the music is at, which is where
+  // a pause leaves it, and where a hand on the progress bar leaves it while
+  // nothing sounds. A stretch chosen is left as it is: the cursor is one
+  // end of it, and it is the stretch that is being played.
+  function scoreCursorToMusic() {
+    if (!scoreMode || !player || !scoreCursor || player.pos !== scoreCursor.pos) return;
+    const place = scoreCursorPlace();
+    const visual = place && blockVisual(place.block);
+    const timing = visual && cursorTimings(visual);
+    const timer = player.controller && player.controller.timer;
+    if (!timing || !timer || !(timer.lastMoment > 0)) return;
+    if (!scoreSelection(place)) {
+      const ms = timer.currentMillisecond();
+      if (typeof ms !== "number" || !isFinite(ms)) return;
+      // The timer runs 16 ms ahead of the music on purpose (abcjs adds them
+      // so its callbacks come early), and the cursor wants the music.
+      const at = (Math.max(0, ms - 16) / timer.lastMoment) * timing.total;
+      const line = scoreTimeline(visual, place.track);
+      const index = line && line.length ? placeAtTime(line, at) : null;
+      if (index !== null && index !== place.index) {
+        const target = place.tracks[place.track][index];
+        scoreCursor = {
+          pos: scoreCursor.pos,
+          track: place.track,
+          stop: index,
+          step: stepOnto(place.stop, place.step, target),
+          anchor: null,
+        };
+      }
+    }
+    scorePause = { pos: scoreCursor.pos, key: scoreCursorKey() };
+    showScoreCursor();
+  }
+
+  // The cursor back to where the playing began: the end of the tune, the
+  // player's stop, the end of a stretch. A stretch chosen stays as it was.
+  function scoreCursorToStart() {
+    scorePause = null;
+    const from = scorePlayFrom;
+    if (!scoreMode || !scoreCursor || !from || from.pos !== scoreCursor.pos) return;
+    if (!scoreSelection()) {
+      scoreCursor = { pos: from.pos, track: from.track, stop: from.stop, step: from.step, anchor: null };
+    }
+    showScoreCursor();
+  }
+
+  // A press that did not move, on the score that sounds: the music goes on
+  // from the place pressed.
+  function seekScoreToCursor() {
+    const place = scoreCursorPlace();
+    if (!place || !player || !player.seekTo || player.pos !== scoreCursor.pos) return;
+    const visual = blockVisual(place.block);
+    const timing = visual && cursorTimings(visual);
+    const line = timing ? scoreTimeline(visual, place.track) : null;
+    const t = line ? timeOfPlace(line, place.index) : null;
+    if (t === null) return;
+    // A stretch being played is let go: the press chose a place, not it.
+    scoreRun = null;
+    scorePlayFrom = { pos: scoreCursor.pos, track: place.track, stop: place.index, step: place.step };
+    player.seekTo(t / timing.total);
+  }
+
+  // A key that moves the cursor, or the bars, while the music sounds on
+  // its score stops the music first, and acts from the note that was
+  // sounding, which is where the reader was looking.
+  function scoreTakeFromPlayer() {
+    if (!scoreSoundingHere()) return;
+    scoreCursorToMusic();
+    scoreStopKind = "keep";
+    togglePlayback();
+  }
+
+  // The cursor has moved by the reader's hand: what a pause left behind is
+  // no longer where the music will take up from, and the ink it left on the
+  // note it stopped on would mark a place nothing will play from.
+  function scoreCursorMoved() {
+    scorePause = null;
+    if (player && player.bar && scoreCursor && player.pos === scoreCursor.pos && !isSounding(player.bar)) {
+      try {
+        clearPlayingHighlight();
+      } catch (e) {
+        // a score re-engraved out from under the ink
+      }
+    }
+  }
+
+  // ---- Moving bars from line to line, and adding them ----
+
+  // What the engine says to a change asked of a source: a move of bars
+  // (MDM_BARS.moveBars), a bar added (MDM_BARS.addBar), a note written
+  // (MDM_BARS.writeNote), a place put in (MDM_BARS.insertPlace) or taken
+  // out (MDM_BARS.takeOut), music pasted or a stretch taken out
+  // (MDM_BARS.pasteMusic), or a stretch made rests (MDM_BARS.restMusic).
+  // Asked of every button of the chrome while the page is idle
+  // (askScoreEdit), or when the pointer comes onto one first, to grey it
+  // out before any click, and asked again by the click, so the answer is
+  // kept by the source and the change.
+  const SCORE_EDIT_RUNS = new Map();
+  function scoreRunKey(source, action) {
+    const more = action.pastes ? JSON.stringify(action.pastes) : action.ats ? action.ats.join() : "";
+    return [source, action.kind, action.at, action.direction || action.where, action.step, action.duration, action.rest, action.own, more].join("\u0000");
+  }
+  function scoreEditRun(source, action) {
+    const key = scoreRunKey(source, action);
+    if (SCORE_EDIT_RUNS.has(key)) return SCORE_EDIT_RUNS.get(key);
+    let result = null;
+    try {
+      if (action.kind === "note") {
+        const note = action.rest ? { rest: true, duration: action.duration } : { step: action.step, duration: action.duration };
+        result = window.MDM_BARS.writeNote(window.ABCJS, source, action.at, note);
+      } else if (action.kind === "out") {
+        result = window.MDM_BARS.takeOut(window.ABCJS, source, action.at, action.step);
+      } else if (action.kind === "insert") {
+        const what = action.rest ? { rest: true, duration: action.duration } : { step: action.step, duration: action.duration };
+        result = window.MDM_BARS.insertPlace(window.ABCJS, source, action.at, what, action.where);
+      } else if (action.kind === "add") {
+        result = window.MDM_BARS.addBar(window.ABCJS, source, action.at, action.where, Array.isArray(action.own) ? action.own : !!action.own);
+      } else if (action.kind === "paste") {
+        result = window.MDM_BARS.pasteMusic(window.ABCJS, source, action.pastes);
+      } else if (action.kind === "rests") {
+        result = window.MDM_BARS.restMusic(window.ABCJS, source, action.ats);
+      } else {
+        result = window.MDM_BARS.moveBars(window.ABCJS, source, action.at, action.direction);
+      }
+    } catch (e) {
+      result = null;
+    }
+    if (!result || (typeof result.source !== "string" && !result.refused)) {
+      result = { refused: /^(?:note|out|insert|paste|rests)$/.test(action.kind) ? "noteUnsafe" : action.kind === "add" ? "addUnsafe" : "unsafe" };
+    }
+    if (SCORE_EDIT_RUNS.size >= 64) SCORE_EDIT_RUNS.clear();
+    SCORE_EDIT_RUNS.set(key, result);
+    return result;
+  }
+
+  // A move asked for by a character of the source inside a bar that goes
+  // (the break drag): written, drawn at once, and kept for Ctrl+Z. A move
+  // the text cannot be made to say without changing the music is not made,
+  // and the score says why (scoreNotice).
+  function moveScoreBarsAt(pos, at, direction) {
+    const block = scoreBlockAt(pos);
+    if (!block || !window.MDM_BARS || !window.ABCJS) return;
+    const source = scoreSource(block);
+    const result = scoreEditRun(source, { kind: "move", at: at, direction: direction });
+    if (result.refused) {
+      scoreNotice(block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    stopScoreAt(pos);
+    commitScoreMove(pos, source, result.source);
+  }
+
+  // A move written. The cursor stays on its note, wherever the note's line
+  // now is: a move keeps every note of every voice at its index, and the
+  // cursor's position follows the score through the change as every place
+  // the mode keeps does (mapScorePlaces).
+  function commitScoreMove(pos, before, after) {
+    const change = scoreEditChange(pos, before, after);
+    if (!change) return false;
+    const here = scoreCursor && scoreCursor.pos === pos;
+    const entry = recordScoreEdit(pos, here ? scoreCursor : null, false);
+    writeScoreEdit(pos, change);
+    entry.cursorAfter = here && scoreCursor ? Object.assign({}, scoreCursor) : null;
+    settleScoreEdit();
+    return true;
+  }
+
+  // A bar added, written, and the cursor put on it, on the rest of the
+  // voice the + was asked in (the first voice of the line), or the cursor's
+  // own voice for a key (addScoreBarBeside): where a note of that bar is
+  // written next (writeScoreNote). On the middle line from the +, and from
+  // a key at the `step` the cursor was at, as an arrow keeps it.
+  function commitScoreBar(pos, before, result, step) {
+    const change = scoreEditChange(pos, before, result.source);
+    if (!change) return;
+    const entry = recordScoreEdit(pos, scoreCursor, true);
+    const now = writeScoreEdit(pos, change);
+    const onBar = cursorAtSource(now, result.rest);
+    if (onBar && typeof step === "number") {
+      const tracks = scoreTracks(blockVisual(scoreBlockAt(now)));
+      onBar.step = clampStep(tracks[onBar.track][onBar.stop], step);
+    }
+    if (onBar) scoreCursor = onBar;
+    entry.cursorAfter = onBar ? Object.assign({}, onBar) : null;
+    scoreCursorMoved();
+    settleScoreEdit();
+  }
+
+  // The cursor on the place a character of a score's source was written
+  // at, on the middle line of its staff.
+  function cursorAtSource(pos, char) {
+    const visual = blockVisual(scoreBlockAt(pos));
+    const tracks = visual ? scoreTracks(visual) : [];
+    for (let t = 0; t < tracks.length; t++) {
+      for (let i = 0; i < tracks[t].length; i++) {
+        const stop = tracks[t][i];
+        if (stop.from <= char && char < stop.to) {
+          const lines = lineSteps(stop.staff);
+          return { pos: pos, track: t, stop: i, step: clampStep(stop, (lines.top + lines.bottom) / 2), anchor: null };
+        }
+      }
+    }
+    return null;
+  }
+
+  // The music of a score about to change stops first: the tune it plays is
+  // not the tune it will be. From the note sounding when the cursor is on
+  // it, as an arrow does (scoreTakeFromPlayer); from wherever else, the
+  // cursor staying where it is.
+  function stopScoreAt(pos) {
+    if (!player || !player.bar || player.pos !== pos || !isSounding(player.bar)) return;
+    if (scoreSoundingHere()) {
+      scoreTakeFromPlayer();
+      return;
+    }
+    scoreStopKind = "keep";
+    togglePlayback();
+  }
+
+  // A score just written, fitted here and not a frame later in
+  // afterRender, since the cursor is revealed off its geometry. CodeMirror
+  // has drawn the new widget by now: a change of its source makes it anew
+  // (ScoreWidget.updateDOM), inside the dispatch. The chrome under the
+  // pointer follows the lines to where they now end.
+  function settleScoreEdit() {
+    fitScores();
+    showScoreCursor();
+    refreshScoreEdits();
+  }
+
+  // The changes made inside the mode, for Ctrl+Z and Ctrl+Y (and
+  // Ctrl+Shift+Z, as the text has them): the score each was made to, and
+  // where the cursor stood before it and after. Each is a step of
+  // CodeMirror's history, and the text is what an undo takes back; these
+  // only say how many of the steps are the mode's, which are all an undo
+  // in the mode may take (scoreKeys), and where the cursor goes with each.
+  // Gone with the mode; its changes stay in the history, one step apiece.
+  let scoreUndo = [];
+  let scoreRedo = [];
+
+  // An entry for a change about to be written, in the stack before the
+  // text changes, so that the change moves the positions it holds with
+  // every other the mode keeps (mapScorePlaces). A new change is a new
+  // branch of the history, as it is of CodeMirror's.
+  function recordScoreEdit(pos, cursor, added) {
+    const entry = { pos: pos, cursor: cursor ? Object.assign({}, cursor) : null, cursorAfter: null, added: added };
+    scoreUndo.push(entry);
+    scoreRedo = [];
+    return entry;
+  }
+
+  // Every place the mode keeps by a score's position, through a change of
+  // the text, the mode's own or the host's (the file changed on disk): the
+  // cursor, where the playing began and where it paused, and the scores
+  // and the cursors of the changes Ctrl+Z and Ctrl+Y can reach.
+  function mapScorePlaces(changes) {
+    const map = function (place) {
+      if (place) place.pos = changes.mapPos(place.pos, 1);
+    };
+    map(scoreCursor);
+    map(scorePlayFrom);
+    map(scorePause);
+    scoreUndo.concat(scoreRedo).forEach(function (entry) {
+      map(entry);
+      map(entry.cursor);
+      map(entry.cursorAfter);
+    });
+  }
+
+  // CodeMirror's undo and redo refuse a read-only state, and the frozen
+  // text is one: the step is taken with the text writable for the length
+  // of it, and frozen again after. Nobody can type in the meantime, the
+  // text staying out of the reader's reach throughout (editable off). The
+  // step is the editor's own (mdmUndo, mdmRedo), which the bar and the
+  // keys run outside the mode.
+  function thawedStep(command) {
+    view.dispatch({ effects: frozen.reconfigure(FROZEN_STEP) });
+    try {
+      return command(view);
+    } finally {
+      view.dispatch({ effects: frozen.reconfigure(FROZEN) });
+    }
+  }
+
+  // A change of the mode taken back, with the cursor where it stood before
+  // it; false when there was none to take back.
+  function undoScoreEdit() {
+    const entry = scoreUndo[scoreUndo.length - 1];
+    if (!entry || !view) return false;
+    stopScoreAt(entry.pos);
+    scoreUndo.pop();
+    scoreRedo.push(entry);
+    if (!thawedStep(mdmUndo)) {
+      // The history has no step left for it (it keeps so many): nothing
+      // the mode made can be taken back safely from here.
+      scoreUndo = [];
+      scoreRedo = [];
+      return false;
+    }
+    // A bar taken back that the cursor was put on, with no cursor before
+    // it: none, rather than one left on whatever now has the bar's index.
+    if (entry.added && !entry.cursor) scoreCursor = null;
+    else if (entry.cursor) scoreCursor = Object.assign({}, entry.cursor);
+    if (entry.added) scoreCursorMoved();
+    settleScoreEdit();
+    return true;
+  }
+
+  function redoScoreEdit() {
+    const entry = scoreRedo[scoreRedo.length - 1];
+    if (!entry || !view) return false;
+    stopScoreAt(entry.pos);
+    scoreRedo.pop();
+    scoreUndo.push(entry);
+    if (!thawedStep(mdmRedo)) {
+      scoreUndo = [];
+      scoreRedo = [];
+      return false;
+    }
+    const cursor = entry.cursorAfter || entry.cursor;
+    if (cursor) scoreCursor = Object.assign({}, cursor);
+    if (entry.added) scoreCursorMoved();
+    settleScoreEdit();
+    return true;
+  }
+
+  // ---- A note written on the cursor ----
+  //
+  // The mode writes (the owner's ask of 2026-10-02, "presionar Enter y que
+  // se dibuje una nota", the same evening the chords, and the next the way
+  // notes, rests and bars are taken out). The cursor stands at a step of a
+  // place, which is the height of a head; what is left to say is how long
+  // it lasts, and that is the figure the mode keeps:
+  //
+  //   1 to 7            on a rest, a note at the cursor's step, of the key's
+  //                     figure: 1 a whole note, 2 a half, 3 a quarter, 4 an
+  //                     eighth and on to the sixty-fourth (the owner's
+  //                     numbering); on a note, a head at the cursor's step
+  //                     put on it, making a chord, and the figure given to
+  //                     the whole place (a C quarter, the cursor up at G and
+  //                     4: `[CG]` an eighth, the owner's example); the
+  //                     figure is kept after
+  //   0                 a rest of the figure kept
+  //   Shift+1 to 7      a rest of the key's figure, which is kept after
+  //   Enter             a head at the cursor's step at the place's own
+  //                     length: put on a note, making a chord, and on a rest
+  //                     a note written as long as the rest
+  //   Delete, Backspace the head at the cursor's step taken off a chord,
+  //                     which keeps the others; a note taken out, or a rest,
+  //                     with the time it held, and one that is all its bar
+  //                     with its bar; nothing at a step with no head. The
+  //                     cursor stays where it stands under Delete, and goes
+  //                     a place to the left under Backspace (takeScoreOut)
+  //
+  // Delete is the one way anything is taken out, "por simetría" (the
+  // owner's call of the second evening, when Enter took a head off as well),
+  // and what it takes goes with its time: a note as a rest does, since
+  // 2026-10-04, when 0 became the key that makes a rest of a note and
+  // Delete the one that takes it away, on one place as on a stretch ("para
+  // que quede la simetría, cambia también el delete sobre una nota, que la
+  // borra en vez de poner un silencio"). For two days a note left a rest as
+  // long and went on a second press.
+  // What a key writes changes the place it writes on and nothing beside it
+  // (MDM_BARS.writeNote): a note made shorter by a figure leaves the bar
+  // that much shorter and no rest after it, one made longer leaves it that
+  // much longer than its meter, a note written on a rest takes the rest's
+  // place whole, and nothing is said. The bar is the reader's to settle
+  // (the owner's calls of 2026-10-02, "no quiero que se añada silencio", of
+  // 2026-10-03, "Deja que el usuario pueda modificar el compás aunque
+  // termine pasado o por debajo", and of 2026-10-04, "el tiempo no se lo
+  // debe quitar a nadie"), what is done with a bar badly filled being still
+  // to decide.
+  //
+  // Enter takes the length of the place it is pressed on, a note's or a
+  // rest's, and so writes nothing where there is none to take, at the open
+  // end. For a day it wrote a note of the figure kept on a rest, and the
+  // owner took the key out on 2026-10-03 to try the figures' keys alone
+  // ("para probar solo las notas con los números"). What went with it was a
+  // head put on a note no key says the length of, a dotted one or one of a
+  // broken rhythm, where a figure's key gives the place its own figure
+  // (`d3` and the quarter's key at f, `[df]2`) or is refused, and the owner
+  // brought it back the same day, first for that alone ("vamos a retomar el
+  // enter pero solo servirá cuando hay una nota ya dibujada que fija la
+  // duración, por ejemplo, si sobre C se da enter en G, ese G sale con la
+  // duración de C") and then on a rest too, at the rest's own length: "si
+  // hay un silencio y se da enter, la nota debe salir con la duración del
+  // silencio". The note written there is the last one written, so its
+  // length is the figure kept after it, and 0 on it gives the rest back.
+  //
+  // The figure kept is the last one written, or the one of the note the
+  // cursor was last walked or clicked onto, as a tablature editor takes the
+  // length of the beat it stands on; a rest gives none, so that a run of
+  // eighths goes on being eighths over the rests it is written into. Before
+  // either, it is the figure the meter counts in (a quarter in 4/4, an
+  // eighth in 6/8), which is what a 0 pressed first writes a rest of. It is
+  // not drawn: the cursor is the box it always was, and the note is seen
+  // when a key writes it (the owner's call; the first version wore the note
+  // on the cursor, in brass).
+  //
+  // A rest of a figure has a key of its own since 2026-10-06, Shift with
+  // the figure's: "shift [numero] añade silencio con la duración del
+  // número", and with Ctrl or Alt held as well "añade silencio a la
+  // izquierda/derecha" (insertScorePlace). Until then it took two, the
+  // figure's key, which wrote a note, and 0 on the note; Shift had been my
+  // answer of 2026-10-04 to the owner's question, put off that day. The key
+  // makes a rest of the place it is pressed on, of a note as of a rest, as
+  // 0 does, and the bar is as much longer or shorter for it: that it writes
+  // over a note, where "añade" could have meant a rest put in beside it, is
+  // my reading, the two keys of the sides being the ones that put one in.
+  //
+  // The cursor stays on the place it wrote on, at its step, whatever was
+  // written there, and goes on by the arrows (the owner's call of the
+  // second evening: the first version took it on to the next place after a
+  // note written on a rest). A place taken out leaves it on the place that
+  // comes into its index. What the text is made to say, and what it will
+  // not, is MDM_BARS.writeNote's and MDM_BARS.takeOut's (media/mdm-bars.js).
+  let scoreFigure = null; // in whole notes; null until one is chosen or met
+  const FIGURE_KEYS = { 1: 1, 2: 1 / 2, 3: 1 / 4, 4: 1 / 8, 5: 1 / 16, 6: 1 / 32, 7: 1 / 64 };
+
+  // The figure a key would write with on a place: the one kept, or the one
+  // the score's meter counts in, which abcjs gives as 4/4 where the tune
+  // names none.
+  function figureOf(place) {
+    if (scoreFigure) return scoreFigure;
+    const visual = blockVisual(place.block);
+    let den = 4;
+    try {
+      const meter = visual.getMeterFraction();
+      if (meter && meter.den > 0) den = meter.den;
+    } catch (e) {
+      // a tune abcjs gives no meter for: a quarter
+    }
+    return 1 / den;
+  }
+
+  // The cursor put on a place by the reader's hand takes the figure of its
+  // note.
+  function takeScoreFigure(stop) {
+    if (stop && !stop.rest && stop.duration > 0) scoreFigure = stop.duration;
+  }
+
+  // The figure in use, where a reader can see it: ticked among the figures
+  // of the Score menu and lit among those of the score panel. It is the one
+  // a key would write with on the cursor's place (figureOf), which nothing
+  // on the staff says since the figure drawn on the cursor went (2026-10-02),
+  // and there is none while the mode has no cursor down. Told as the cursor
+  // is drawn (drawScoreCursor), which is when its place may have changed (on
+  // a score that opens with a rest no figure is kept yet, and the one in use
+  // is the one its meter counts in) and which every change of the figure
+  // kept is followed by: a key the score refuses draws the cursor again for
+  // that alone (writeScoreNote). `place` is the cursor's, null with none
+  // down.
+  let scoreInUse = null;
+  function tellScoreFigure(place) {
+    const figure = place ? figureOf(place) : null;
+    if (figure === scoreInUse) return;
+    scoreInUse = figure;
+    Object.keys(FIGURE_KEYS).forEach(function (digit) {
+      syncRow("score-note-" + digit);
+    });
+  }
+
+  // A key of the mode that writes, as `kind`: "figure" (a key of a figure,
+  // which is the one kept by now), "rest" (0, and Shift with a figure's key,
+  // whose figure is the one kept by now) or "head" (Enter). What the score
+  // cannot take is said over the cursor (scoreNotice), and the score left as
+  // it was.
+  function writeScoreNote(kind) {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    const stop = place.stop;
+    const rest = kind === "rest";
+    // Enter takes its length from the place it is pressed on: the open end
+    // has none to give, and nothing is written there.
+    if (kind === "head" && stop.end) return;
+    // At the open end there is no place to write on: one is put in.
+    if (stop.end) {
+      insertScorePlace("after", rest);
+      return;
+    }
+    const action = {
+      kind: "note",
+      at: stop.from,
+      step: rest ? null : place.step,
+      // With none, the place keeps its own (MDM_BARS.writeNote).
+      duration: kind === "head" ? 0 : figureOf(place),
+      rest: rest,
+    };
+    const source = scoreSource(place.block);
+    const result = scoreEditRun(source, action);
+    if (result.refused) {
+      // A key of a figure has changed the one kept, whatever the score said,
+      // and the drawing names it.
+      drawScoreCursor();
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    // Already what the place reads: nothing to write.
+    if (result.same) {
+      drawScoreCursor();
+      return;
+    }
+    // A rest made a note by Enter: its length is the last one written.
+    if (kind === "head" && stop.rest) scoreFigure = result.duration;
+    commitScoreNote(scoreCursor.pos, source, result);
+  }
+
+  // Delete and Backspace: what is under the cursor taken out, a head at
+  // its step or a rest, and nothing where a note has no head there
+  // (MDM_BARS.takeOut). The two part over where the cursor is left, the
+  // owner's call of 2026-10-06 ("uno deja el cursor donde está (Delete) y el
+  // otro lo mueve hacia la nota de atrás (Backspace)"); until then they
+  // were one key. Delete leaves it standing where it is, on whatever comes
+  // into the place that went, which is the place that was on its right.
+  // Backspace (`back`) takes it to the place on the left of the one that
+  // went, so that it takes back a note put in after the cursor's (Alt and
+  // a figure's key, which leaves the cursor on the note it put in) as
+  // Delete takes back one put in before it (Ctrl and the key). Where the
+  // place stays, a head taken off a chord, the cursor stays on it under
+  // either key, which is how a head put on with Enter is taken back; and
+  // the first place of a voice has nothing on its left, so the cursor is
+  // left on what came into it.
+  function takeScoreOut(back) {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    // Nothing stands at the open end.
+    if (place.stop.end) return;
+    const source = scoreSource(place.block);
+    const result = scoreEditRun(source, { kind: "out", at: place.stop.from, step: place.step });
+    if (result.refused) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    // Nothing to take out is a source as it was, and nothing to write.
+    commitScoreNote(scoreCursor.pos, source, result, 0, back ? place.tracks[place.track].length : null);
+    // The cursor stands on another place where its own went: the figure
+    // kept is that place's, as it is for a place walked onto, so that 0
+    // there makes a rest as long as the note it is pressed on.
+    const landed = result.same ? null : scoreCursorPlace();
+    if (!landed) return;
+    takeScoreFigure(landed.stop);
+    // The drawing names the figure kept, and was made as the change was
+    // written, before this one was taken: left so, it named the figure of
+    // the note that went until something drew the cursor again, two frames
+    // on, and a test reading it with the machine loaded read the old one
+    // (SM101, once in a run of the whole file, 2026-10-06).
+    drawScoreCursor();
+  }
+
+  // A change of a place written, and the cursor put on the place at the
+  // step it was at; where the place is gone, on whatever comes into its
+  // index, or on the last of the voice; and `shift` places on from it, for
+  // a place put in after it (insertScorePlace). Every change the keys make
+  // keeps the place at its index in its voice (MDM_BARS.writeNote and
+  // takeOut), or puts a place in at the index it says, so the index is
+  // where it is: the source the engine hands back for it found the same
+  // place every time (a mutation of 2026-10-02, the lookup taken out,
+  // passed every test).
+  //
+  // With `had`, the places the cursor's voice had before the change, the
+  // cursor goes a place back where the voice has fewer of them now:
+  // Backspace (takeScoreOut). Counted, and not asked of the engine, since
+  // fewer places is what a place gone is, whether a note went, a rest, or
+  // the bar it was all of; a chord a head came off is a place still, and
+  // its voice has as many as it had.
+  function commitScoreNote(pos, before, result, shift, had) {
+    const change = scoreEditChange(pos, before, result.source);
+    if (!change) return;
+    const was = Object.assign({}, scoreCursor);
+    const entry = recordScoreEdit(pos, scoreCursor, false);
+    const now = writeScoreEdit(pos, change);
+    const visual = blockVisual(scoreBlockAt(now));
+    const tracks = visual ? scoreTracks(visual) : [];
+    const track = Math.min(was.track, tracks.length - 1);
+    const list = tracks[track];
+    if (list && list.length) {
+      const back = typeof had === "number" && list.length < had ? 1 : 0;
+      const index = Math.max(0, Math.min(was.stop + (shift || 0) - back, list.length - 1));
+      scoreCursor = { pos: now, track: track, stop: index, step: clampStep(list[index], was.step), anchor: null };
+    }
+    entry.cursorAfter = scoreCursor ? Object.assign({}, scoreCursor) : null;
+    scoreCursorMoved();
+    settleScoreEdit();
+  }
+
+  // Ctrl or Alt and a figure's key, or 0: a note of that figure at the
+  // cursor's step, or with 0 a rest of the figure kept, put in before the
+  // cursor's place (Ctrl) or after it (Alt), in the same bar, and the
+  // cursor on it (MDM_BARS.insertPlace). The owner's ask of 2026-10-02, the
+  // third evening, and their keys of the day after; that evening every one
+  // of them put a rest in, my misreading of "inserta un silencio redonda
+  // blanca etc", which the owner's Alt+4 beside a `[CE]` set right. With
+  // Shift held as well the figure's key puts a rest of its figure in (the
+  // owner's keys of 2026-10-06).
+  //
+  // With `own`, which is 0, the rest is as long as what the cursor stands
+  // on, a note, a chord or a rest: the owner's call of 2026-10-06, "ctrl/alt
+  // 0 inserta silencio izquierda/derecha con la duración de lo haya donde
+  // está el cursor (ya sea nota o silencio), no de la última nota que se
+  // puso". Until then it was a rest of the figure kept, which is the last
+  // note's the cursor was on and no rest's (takeScoreFigure): on a half
+  // rest come to from a quarter note, the key put a quarter rest in. The
+  // open end lasts nothing, and there the rest is of the figure kept
+  // still.
+  function insertScorePlace(side, rest, own) {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    const source = scoreSource(place.block);
+    // The open end has one side to it: after the last of the voice, and the
+    // place put in takes the index the end stood at.
+    const end = !!place.stop.end;
+    const where = end ? "after" : side;
+    const result = scoreEditRun(source, {
+      kind: "insert",
+      at: end ? place.stop.after : place.stop.from,
+      step: rest ? null : place.step,
+      duration: own && place.stop.duration > 0 ? place.stop.duration : figureOf(place),
+      rest: rest,
+      where: where,
+    });
+    if (result.refused) {
+      drawScoreCursor();
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    commitScoreNote(scoreCursor.pos, source, result, where === "after" && !end ? 1 : 0);
+  }
+
+  // Ctrl+Right and Ctrl+Left: a bar of rest added after the cursor's bar,
+  // or before it, in the cursor's voice alone, and the cursor on its rest
+  // (MDM_BARS.addBar): the owner's ask of 2026-10-02, the third evening, and
+  // their call of the day after for the one voice.
+  //
+  // With a stretch chosen, beside the stretch: after the bar of its last
+  // place, or before the bar of its first, in the voices it is chosen over.
+  // Every voice of the line where it was drawn out over them all, as the +
+  // adds a bar, and else the ones that wear its ink. The owner's call of
+  // 2026-10-06, "quita el ctrl alt -> y sustituyelo por: una vez estén
+  // marcadas con ctrl shift, se hace ctrl -> y debe añadirse el compás de
+  // silencio al lado". Until then Ctrl+Alt with the arrow added the bar to
+  // every voice, and with a stretch chosen the key did nothing, the cursor
+  // being out of sight then.
+  //
+  // The stretch is let go and the cursor is on the new bar's rest, as the
+  // key leaves it with no stretch and as Ctrl+Alt left it: in the voice the
+  // stretch was drawn out in, or the first of the others where that one was
+  // let go of. Undo gives the stretch back chosen.
+  function addScoreBarBeside(side) {
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    const source = scoreSource(place.block);
+    let at = place.stop.end ? place.stop.after : place.stop.from;
+    let own = true;
+    let step = place.step;
+    const chosen = scoreChosen(place);
+    if (chosen.length) {
+      const range = scoreSelection(place);
+      const track = place.tracks[place.head.track];
+      let last = range.to;
+      if (track[last].end) last -= 1;
+      const edge = track[side === "after" ? last : range.from];
+      // A place of each voice chosen on the line of that bar, to name the
+      // voice by: any will do, the bar being told by `at` alone.
+      const marks = [];
+      chosen.forEach(function (part) {
+        const there = part.stops.filter(function (stop) {
+          return stop.group === edge.group;
+        });
+        if (there.length) marks.push({ track: part.track, from: there[0].from });
+      });
+      if (!marks.length) return;
+      const home = marks.some(function (mark) {
+        return mark.track === place.head.track;
+      });
+      at = home ? edge.from : marks[0].from;
+      own =
+        place.voices === "all"
+          ? false
+          : marks.map(function (mark) {
+              return mark.from;
+            });
+      step = place.head.step;
+    }
+    const result = scoreEditRun(source, { kind: "add", at: at, where: side, own: own });
+    if (result.refused) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    commitScoreBar(scoreCursor.pos, source, result, step);
+  }
+
+  // ---- The chrome on a score: bars moved and added with the pointer ----
+  //
+  // The owner's pick of design-score-editing.html (A, 2026-09-29). While the
+  // pointer is over a score in the mode, every line's end wears a pair of
+  // round buttons just past its last barline, in the margin of the card
+  // where nothing of the music is drawn: the upper ends the line a bar
+  // later (the first bar of the next line comes up), the lower a bar
+  // earlier (its last bar goes down, to the head of the next line or to a
+  // line of its own under the last). One bar a click, which is the owner's
+  // example in one ("1 | 2 |" over "3 | 4 | 5 |]"); a drag begun on either
+  // is the break drag, for several at once. And the barline nearest the
+  // pointer, or the head of a line, or the end of one no barline closes
+  // (addSpots), wears a + under the staff, which adds an
+  // empty bar there in every voice (MDM_BARS.addBar), and puts the cursor on
+  // it. One pair per line and one + at a time, whatever the voices: every
+  // move and every bar added takes all of them.
+  //
+  // Pointing at a button asks the engine what the click would do before it
+  // is made: the bar that would move is washed in brass, or the barline a
+  // bar would go in at gets a column of it, and the tip names it; a change
+  // the engine refuses greys the button out and the tip says why, where the
+  // keys used to get the three-second notice after the fact (the break drag
+  // still does).
+  //
+  // The chrome is a layer of the block and not of the drawing's box: that
+  // box scrolls sideways at a narrow pane and clips what hangs out of it,
+  // and a tip, or a + under the last staff, would be cut off or would grow
+  // its scrollbar. It is placed off the engraving each time it is shown, and
+  // a line whose end the box has scrolled away from shows no pair; where the
+  // box has no room past the end of a line (a pane narrower than the drawing,
+  // scrolled to its end), the pair stands over the end of the staff instead.
+  const EDIT_GAP = 5; // px from the end of a staff to its pair
+  const EDIT_SIZE = 20; // px, a button of the pair
+  const ADD_SIZE = 18; // px, the +
+  const ADD_DROP = 14; // px from a system's lowest line to the middle of its +
+  const ADD_REACH = 9; // px either side of a barline that bring its + up
+  const ADD_ABOVE = 10; // px over a system's top line that do
+  const ADD_BELOW = 30; // and under its lowest line, where the + itself is
+  const HEAD_BEFORE = 6; // units before a line's first note, where its + goes
+  const EDIT_LATER = '<svg viewBox="0 0 16 16"><path d="M5 2.6L6.4 1.2L13.2 8L6.4 14.8L5 13.4L10.4 8Z"/></svg>';
+  const EDIT_EARLIER = '<svg viewBox="0 0 16 16"><path d="M11 2.6L9.6 1.2L2.8 8L9.6 14.8L11 13.4L5.6 8Z"/></svg>';
+  const EDIT_ADD = '<svg viewBox="0 0 16 16"><path d="M7.25 2.2H8.75V13.8H7.25ZM2.2 7.25H13.8V8.75H2.2Z"/></svg>';
+  // The names the tips give. "Add bar" is the owner's pick of the short
+  // ones in design/design-score-editing-2.html (2026-09-29). The pair name
+  // what its arrow moves, the end of the line, because ‹ read on its own
+  // looked like the music pushed left and the line squeezed, when it takes
+  // a bar off the line (the owner's report, and their pick, A of
+  // design-score-editing-4.html, 2026-09-30; "Next bar up" and "Last bar
+  // down" before). A refusal names what stands in the way instead
+  // (MDM_BARS.reasonText).
+  const EDIT_TIPS = {
+    later: "Move line end right",
+    earlier: "Move line end left",
+    add: "Add bar",
+  };
+  // What the tip of a line's end says under its name while the button can
+  // act: that it can be dragged as well as clicked, which nothing else on
+  // the staff says (the owner's pick, A of design-score-editing-3.html,
+  // 2026-09-30).
+  const EDIT_DRAG_HINT = "Or drag to any barline";
+  let scoreEditPointer = null; // { x, y }: the pointer, last seen over the text
+  let scoreEditPointed = ""; // what the pointer is on, as last drawn
+  let scoreEditPress = null; // { block, pos, line, x, y }: a press on a pair
+  let scoreEditDragged = false; // that press became the break drag
+
+  // The first note of every bar of a line, in its first voice, the last bar
+  // whether a barline closes it or not: what the engine is asked with.
+  function barNotes(group) {
+    const voice = group.voices[0];
+    const out = [];
+    let note = null;
+    (voice ? voice.children : []).forEach(function (child) {
+      const elem = child.abcelem;
+      if (!elem) return;
+      if (elem.el_type === "note" && note === null) note = elem.startChar;
+      if (elem.el_type === "bar" && note !== null) {
+        out.push(note);
+        note = null;
+      }
+    });
+    if (note !== null) out.push(note);
+    return out;
+  }
+
+  // The barlines a bar can be added at on a line, in the score's units, each
+  // with what the engine is asked with (MDM_BARS.addBar): every barline the
+  // engraving draws, and the end of a bar no barline closes, as lineStops
+  // has them. A barline that closes no bar, the second of `C | | G`, is a
+  // barline the reader sees all the same, and had no + (the owner's report,
+  // 2026-10-02): it adds the bar before the bar after it, past itself, and
+  // after the line's last bar it adds it after that bar, as the barline
+  // that closes it does. One that opens the line (`|:` at its head) is the
+  // line's head, which has its + already.
+  function addSpots(group) {
+    const voice = group.voices[0];
+    const spots = [];
+    let note = null; // the first note of the bar being read
+    let closed = null; // the first note of the last bar a barline closed
+    let waiting = []; // barlines that closed none, for the bar after them
+    (voice ? voice.children : []).forEach(function (child) {
+      const elem = child.abcelem;
+      if (!elem) return;
+      if (elem.el_type === "note" && note === null) {
+        note = elem.startChar;
+        waiting.forEach(function (x) {
+          spots.push({ x: x, at: note, where: "before" });
+        });
+        waiting = [];
+      }
+      if (elem.el_type !== "bar") return;
+      const x = child.x + (child.w || 0) / 2;
+      if (note !== null) {
+        spots.push({ x: x, at: note, where: "after" });
+        closed = note;
+        note = null;
+      } else if (closed !== null) {
+        waiting.push(x);
+      }
+    });
+    waiting.forEach(function (x) {
+      spots.push({ x: x, at: closed, where: "after" });
+    });
+    if (note !== null) spots.push({ x: group.w, at: note, where: "after" });
+    return spots;
+  }
+
+  // Where a line's first note is drawn, in the score's units.
+  function headX(group) {
+    const voice = group.voices[0];
+    const children = voice ? voice.children : [];
+    for (let i = 0; i < children.length; i++) {
+      if (children[i].abcelem && children[i].abcelem.el_type === "note") return children[i].x;
+    }
+    return null;
+  }
+
+  // The lines of a score in the page's pixels: the band from the top line
+  // of each to the lowest line of its last staff, where its staff ends (the
+  // staffgroup's width: abcjs lays a line out from x 0, measured equal to
+  // the drawn staff on a line closed by a barline and on one that is not),
+  // its head, and the barlines a bar can be added at (addSpots).
+  //
+  // A line the cursor stands at the open end of ends past the cursor, which
+  // is drawn on the staff's lines carried on under it (drawScoreCursor), and
+  // says so (`open`): its pair stood on the cursor otherwise, five pixels
+  // from the staff's own end (the owner's picture of 2026-10-03, "solapa con
+  // los botones de mover el final del compás").
+  function scoreEditLines(block) {
+    const visual = blockVisual(block);
+    const svg = block.querySelector("code.language-abc svg");
+    const m = svg && svg.getScreenCTM();
+    if (!visual || !m) return null;
+    // The cursor's place at an open end: its line is one of this drawing's
+    // or of none of them.
+    const place = scoreCursorPlace();
+    const ended = place && place.stop.end ? place.stop : null;
+    return visual.engraver.staffgroups.map(function (group) {
+      const band = groupBand(group);
+      const head = headX(group);
+      const open = !!ended && ended.group === group;
+      return {
+        top: m.d * band.top + m.f,
+        bottom: m.d * band.bottom + m.f,
+        end: m.a * (open ? ended.x + CURSOR_HALF : group.w) + m.e,
+        open: open,
+        head: head === null ? null : m.a * (head - HEAD_BEFORE) + m.e,
+        bars: addSpots(group).map(function (spot) {
+          return m.a * spot.x + m.e;
+        }),
+      };
+    });
+  }
+
+  // What a button of the chrome asks the engine for, read off the drawing
+  // as it is now: { kind, at, direction | where }, or a reason there is
+  // nothing to ask.
+  function scoreEditAction(block, btn) {
+    const visual = blockVisual(block);
+    if (!visual) return null;
+    const groups = visual.engraver.staffgroups;
+    const line = Number(btn.getAttribute("data-mdm-system"));
+    const group = groups[line];
+    if (!group) return null;
+    if (btn.classList.contains("mdm-score-add")) {
+      const bar = Number(btn.getAttribute("data-mdm-bar"));
+      if (bar < 0) {
+        const notes = barNotes(group);
+        return notes.length ? { kind: "add", at: notes[0], where: "head", line: line, bar: bar } : null;
+      }
+      const spot = addSpots(group)[bar];
+      return spot ? { kind: "add", at: spot.at, where: spot.where, line: line, bar: bar } : null;
+    }
+    if (btn.getAttribute("data-mdm-way") === "later") {
+      if (line + 1 >= groups.length) return { kind: "none", reason: "next", line: line };
+      const next = barNotes(groups[line + 1]);
+      return next.length ? { kind: "move", at: next[0], direction: "up", line: line } : null;
+    }
+    const notes = barNotes(group);
+    return notes.length ? { kind: "move", at: notes[notes.length - 1], direction: "down", line: line } : null;
+  }
+
+  function editButton(cls, icon, label) {
+    const btn = document.createElement("span");
+    btn.setAttribute("role", "button");
+    btn.className = cls;
+    btn.setAttribute("aria-label", label);
+    btn.innerHTML = icon;
+    return btn;
+  }
+
+  // The layer of a score's chrome: made once for a block and kept, since
+  // what is drawn inside it is only ever moved and switched on and off
+  // (a node added in the content is a render pass, watchContent).
+  function scoreEditLayer(block, make) {
+    let layer = block.querySelector(":scope > .mdm-score-edit");
+    if (!layer && make) {
+      layer = document.createElement("div");
+      layer.className = "mdm-score-edit";
+      layer.appendChild(editButton("mdm-score-add", EDIT_ADD, EDIT_TIPS.add));
+      const tip = document.createElement("div");
+      tip.className = "mdm-score-edit__tip";
+      tip.setAttribute("aria-hidden", "true");
+      layer.appendChild(tip);
+      block.appendChild(layer);
+    }
+    return layer;
+  }
+
+  // The chrome of the score under the pointer, placed on its lines as they
+  // are drawn now, and every other score's put away.
+  function showScoreEdits(block, x, y, under) {
+    document.querySelectorAll("#app .mdm-score-edit.mdm-score-edit--shown").forEach(function (layer) {
+      if (layer.parentNode !== block) hideScoreEdits(layer);
+    });
+    const lines = scoreMode && block ? scoreEditLines(block) : null;
+    if (!lines || !lines.length) return;
+    const code = block.querySelector("code.language-abc");
+    const layer = scoreEditLayer(block, true);
+    const frame = block.getBoundingClientRect();
+    const box = code.getBoundingClientRect();
+    const add = layer.querySelector(":scope > .mdm-score-add");
+    let ends = layer.querySelectorAll(":scope > .mdm-score-end");
+    for (let n = ends.length; n < lines.length; n++) {
+      const pair = document.createElement("div");
+      pair.className = "mdm-score-end";
+      pair.appendChild(editButton("mdm-score-end__btn", EDIT_LATER, EDIT_TIPS.later));
+      pair.appendChild(editButton("mdm-score-end__btn", EDIT_EARLIER, EDIT_TIPS.earlier));
+      pair.firstChild.setAttribute("data-mdm-way", "later");
+      pair.lastChild.setAttribute("data-mdm-way", "earlier");
+      layer.insertBefore(pair, add);
+    }
+    for (let n = ends.length - 1; n >= lines.length; n--) layer.removeChild(ends[n]);
+    ends = layer.querySelectorAll(":scope > .mdm-score-end");
+    // What the buttons were greyed out for is the source they were asked
+    // about; a new one asks again, one button while the page is idle
+    // (askScoreEdit). The last line's upper button needs no asking.
+    const source = scoreSource(block);
+    if (layer.getAttribute("data-mdm-for") !== source) {
+      layer.setAttribute("data-mdm-for", source);
+      layer.querySelectorAll("[role=button]").forEach(function (btn) {
+        btn.removeAttribute("data-mdm-asked");
+        markScoreEdit(btn, null);
+      });
+      markScoreEdit(ends[ends.length - 1].firstChild, "next");
+      scoreEditPointed = "";
+    }
+    lines.forEach(function (line, n) {
+      const pair = ends[n];
+      pair.firstChild.setAttribute("data-mdm-system", n);
+      pair.lastChild.setAttribute("data-mdm-system", n);
+      // Where the box has no room past the cursor at a line's open end, the
+      // pair would stand over the cursor: it is put away until the cursor
+      // leaves, and the line's end is moved from there.
+      if (line.end < box.left || line.end > box.right + 1 || (line.open && line.end + EDIT_GAP > box.right - EDIT_SIZE)) {
+        pair.style.display = "none";
+        return;
+      }
+      pair.style.display = "";
+      pair.style.left = Math.min(line.end + EDIT_GAP, box.right - EDIT_SIZE) - frame.left + "px";
+      pair.style.top = (line.top + line.bottom) / 2 - frame.top - EDIT_SIZE - 1 + "px";
+    });
+    // The +, where the pointer is near a barline or a line's head, or on
+    // the + itself; not while it is on a line's pair, whose left edge is a
+    // few pixels from the barline the line ends on, and which lit the + of
+    // that barline with it (seen in the harness).
+    const onAdd = !!under && !!under.closest && under.closest(".mdm-score-add") === add;
+    const onEnd = !!under && !!under.closest && !!under.closest(".mdm-score-end");
+    if (onEnd) add.classList.remove("mdm-score-add--shown");
+    else if (!onAdd) {
+      let best = null;
+      lines.forEach(function (line, n) {
+        if (y < line.top - ADD_ABOVE || y > line.bottom + ADD_BELOW) return;
+        const spots = line.bars.map(function (bx, j) {
+          return { x: bx, bar: j };
+        });
+        if (line.head !== null) spots.unshift({ x: line.head, bar: -1 });
+        spots.forEach(function (spot) {
+          const d = Math.abs(spot.x - x);
+          if (d > ADD_REACH || spot.x < box.left || spot.x > box.right) return;
+          if (!best || d < best.d) best = { d: d, line: n, bar: spot.bar, x: spot.x, bottom: line.bottom };
+        });
+      });
+      add.classList.toggle("mdm-score-add--shown", !!best);
+      if (best) {
+        add.setAttribute("data-mdm-system", best.line);
+        add.setAttribute("data-mdm-bar", best.bar);
+        add.style.left = best.x - ADD_SIZE / 2 - frame.left + "px";
+        add.style.top = best.bottom + ADD_DROP - ADD_SIZE / 2 - frame.top + "px";
+      }
+    }
+    layer.classList.add("mdm-score-edit--shown");
+    const btn = under && under.closest ? under.closest(".mdm-score-edit [role=button]") : null;
+    pointScoreEdit(block, btn && layer.contains(btn) ? btn : null);
+    scheduleScoreAsks(block);
+  }
+
+  function hideScoreEdits(layer) {
+    layer.classList.remove("mdm-score-edit--shown");
+    const add = layer.querySelector(":scope > .mdm-score-add");
+    if (add) add.classList.remove("mdm-score-add--shown");
+    const tip = layer.querySelector(":scope > .mdm-score-edit__tip");
+    if (tip) tip.classList.remove("mdm-score-edit__tip--shown");
+    clearScoreEditPreview();
+    scoreEditPointed = "";
+  }
+
+  function hideAllScoreEdits() {
+    document.querySelectorAll("#app .mdm-score-edit").forEach(hideScoreEdits);
+  }
+
+  // The chrome drawn again where the pointer last was: after a change to a
+  // score, whose lines now end elsewhere, and when a drawing's box scrolls.
+  function refreshScoreEdits() {
+    if (!scoreMode || !scoreEditPointer || scoreDrag || scoreBreak) return;
+    const p = scoreEditPointer;
+    const under = document.elementFromPoint(p.x, p.y);
+    const block = under && under.closest ? under.closest("#app .mdm-score") : null;
+    if (block) showScoreEdits(block, p.x, p.y, under);
+    else hideAllScoreEdits();
+  }
+
+  // The pointer on a button of the chrome, or on none of them: the engine
+  // asked what the click would do, the button greyed out with the reason
+  // when it would do nothing, and the tip and the preview drawn. Only when
+  // something changed, the button or the score's source: the preview is a
+  // node of the drawing, and a node added in the content is a render pass.
+  function pointScoreEdit(block, btn) {
+    const layer = scoreEditLayer(block, false);
+    const tip = layer && layer.querySelector(":scope > .mdm-score-edit__tip");
+    const action = btn ? scoreEditAction(block, btn) : null;
+    const key = btn && action ? [scoreSource(block), action.kind, action.at, action.direction || action.where, action.line, action.bar].join("\u0000") : "";
+    if (key === scoreEditPointed) return;
+    scoreEditPointed = key;
+    clearScoreEditPreview();
+    if (!btn || !action) {
+      if (tip) tip.classList.remove("mdm-score-edit__tip--shown");
+      return;
+    }
+    const refused = scoreEditRefusal(scoreSource(block), action);
+    btn.setAttribute("data-mdm-asked", scoreRunKey(scoreSource(block), action));
+    const text = markScoreEdit(btn, refused);
+    const hint = !refused && btn.classList.contains("mdm-score-end__btn") ? EDIT_DRAG_HINT : null;
+    if (tip) showScoreEditTip(block, tip, btn, text, hint);
+    if (!refused) drawScoreEditPreview(block, action);
+  }
+
+  // Why the engine would not make a button's change, or null.
+  function scoreEditRefusal(source, action) {
+    if (action.kind === "none") return action.reason;
+    if (!window.MDM_BARS || !window.ABCJS) return null;
+    return scoreEditRun(source, action).refused || null;
+  }
+
+  // A button of the chrome as the engine answered it: greyed, and named by
+  // why, or lit and named by what it does. The words it says, for its tip.
+  function markScoreEdit(btn, refused) {
+    const name = btn.classList.contains("mdm-score-add") ? EDIT_TIPS.add : EDIT_TIPS[btn.getAttribute("data-mdm-way")];
+    const text = refused && window.MDM_BARS ? window.MDM_BARS.reasonText(refused) : name;
+    btn.classList.toggle("mdm-score-edit--off", !!refused);
+    btn.setAttribute("aria-disabled", refused ? "true" : "false");
+    btn.setAttribute("aria-label", text);
+    return text;
+  }
+
+  // The buttons of a score's chrome asked about before the pointer comes to
+  // them, so that one the engine would refuse is grey when the chrome comes
+  // up, and not only once pointed at: on a line whose bar goes on into the
+  // next both buttons were lit, and each went grey under the pointer (the
+  // owner's report, 2026-09-30). One button while the page is idle, the +
+  // that is up first: a move is read back by abcjs twice over, 2 to 25 ms
+  // each, and the eight lines of duet.mdm asked at once took 263 ms
+  // (measured in Node), which the pointer would have waited out.
+  let scoreAskBlock = null;
+  let scoreAskPending = false;
+  function scheduleScoreAsks(block) {
+    scoreAskBlock = block;
+    if (scoreAskPending) return;
+    scoreAskPending = true;
+    const ask = window.requestIdleCallback ? window.requestIdleCallback.bind(window) : function (fn) { return setTimeout(fn, 1); };
+    ask(askScoreEdit, { timeout: 200 });
+  }
+
+  function askScoreEdit() {
+    scoreAskPending = false;
+    const block = scoreAskBlock;
+    if (!scoreMode || scoreDrag || scoreBreak || !block || !block.isConnected || !window.MDM_BARS || !window.ABCJS) return;
+    const layer = scoreEditLayer(block, false);
+    if (!layer || !layer.classList.contains("mdm-score-edit--shown")) return;
+    const source = scoreSource(block);
+    const add = layer.querySelector(":scope > .mdm-score-add.mdm-score-add--shown");
+    const buttons = (add ? [add] : []).concat(Array.from(layer.querySelectorAll(":scope > .mdm-score-end > [role=button]")));
+    for (let i = 0; i < buttons.length; i++) {
+      const action = scoreEditAction(block, buttons[i]);
+      if (!action) continue;
+      const key = scoreRunKey(source, action);
+      if (buttons[i].getAttribute("data-mdm-asked") === key) continue;
+      buttons[i].setAttribute("data-mdm-asked", key);
+      markScoreEdit(buttons[i], scoreEditRefusal(source, action));
+      scheduleScoreAsks(block);
+      return;
+    }
+  }
+
+  // The tip of a button of the chrome, the face of the editor's own tips
+  // (.mdm-tip), placed by hand: over the upper button of a pair, under the
+  // lower one and under the +, clear of the whole system the button stands
+  // at (a pair stands at the middle of a system, which in a duet is between
+  // its staves, and a tip over it covered the end of the upper one), and
+  // kept inside the block. The name, and under it the hint of a line's end
+  // when there is one, go in before the tip is measured, so that a tip of
+  // two lines over the upper button stands as clear of the system as one
+  // of one line.
+  function showScoreEditTip(block, tip, btn, text, hint) {
+    tip.textContent = "";
+    const name = document.createElement("span");
+    name.className = "mdm-score-edit__name";
+    name.textContent = text;
+    tip.appendChild(name);
+    if (hint) {
+      const more = document.createElement("span");
+      more.className = "mdm-score-edit__hint";
+      more.textContent = hint;
+      tip.appendChild(more);
+    }
+    const frame = block.getBoundingClientRect();
+    const b = btn.getBoundingClientRect();
+    const lines = scoreEditLines(block);
+    const line = lines && lines[Number(btn.getAttribute("data-mdm-system"))];
+    const above = btn.getAttribute("data-mdm-way") === "later";
+    const width = tip.offsetWidth;
+    const left = Math.max(0, Math.min(frame.width - width, b.left + b.width / 2 - width / 2 - frame.left));
+    const top = above ? Math.min(b.top, line ? line.top : b.top) - tip.offsetHeight - 6 : Math.max(b.bottom, line ? line.bottom : b.bottom) + 6;
+    tip.style.left = left + "px";
+    tip.style.top = top - frame.top + "px";
+    tip.classList.add("mdm-score-edit__tip--shown");
+  }
+
+  // What the click would change, drawn in the score's own units and under
+  // the ink, as the cursor and a chosen stretch are: the bar that would
+  // move under a wash of the brass, a shade stronger than a stretch's, or
+  // the barline a bar would go in at under a column of it (barColumn). The
+  // owner's A of design/design-score-editing-2.html (2026-09-29), in place
+  // of a dashed outline and a dashed line.
+  function drawScoreEditPreview(block, action) {
+    const visual = blockVisual(block);
+    const svg = block.querySelector("code.language-abc svg");
+    if (!visual || !svg || action.kind === "none") return;
+    const groups = visual.engraver.staffgroups;
+    let group = groups[action.line];
+    const shape = document.createElementNS(SVG_NS, "rect");
+    if (action.kind === "add") {
+      const spots = addSpots(group);
+      const x = action.bar < 0 ? headX(group) - HEAD_BEFORE : spots[action.bar] && spots[action.bar].x;
+      if (typeof x !== "number") return;
+      barColumn(shape, x, groupBand(group));
+      shape.setAttribute("class", "mdm-score-edit-preview mdm-score-edit-preview--bar");
+    } else {
+      // Up: the first bar of the next line. Down: the last bar of this one,
+      // from the barline before it, or from the head of the line.
+      if (action.direction === "up") group = groups[action.line + 1];
+      if (!group) return;
+      const bars = engravedBars(group);
+      const head = headX(group);
+      const closed = barNotes(group).length === bars.length;
+      let from;
+      let to;
+      if (action.direction === "up") {
+        from = head - CURSOR_HALF;
+        to = bars.length ? bars[0].right + 2 : group.w;
+      } else {
+        const last = closed ? bars.length - 1 : bars.length;
+        from = last > 0 ? bars[last - 1].x + 2 : head - CURSOR_HALF;
+        to = closed ? bars[bars.length - 1].right + 2 : group.w;
+      }
+      // As far past the lines as the band of a stretch.
+      const band = groupBand(group);
+      shape.setAttribute("x", from);
+      shape.setAttribute("y", band.top - 2);
+      shape.setAttribute("width", Math.max(0, to - from));
+      shape.setAttribute("height", band.bottom - band.top + 4);
+      shape.setAttribute("rx", 1.5);
+      shape.setAttribute("class", "mdm-score-edit-preview");
+    }
+    svg.insertBefore(shape, svg.firstChild);
+  }
+
+  function clearScoreEditPreview() {
+    document.querySelectorAll("#app .mdm-score-edit-preview").forEach(function (el) {
+      el.parentNode.removeChild(el);
+    });
+  }
+
+  // A press on a button of a line's end: a click, or, moved far enough
+  // with the button held, the break drag of that line's end.
+  function pressScoreEdit(btn, e) {
+    scoreEditDragged = false;
+    if (!btn.classList.contains("mdm-score-end__btn")) return;
+    const block = btn.closest(".mdm-score");
+    scoreEditPress = { block: block, pos: blockPos(block), line: Number(btn.getAttribute("data-mdm-system")), x: e.clientX, y: e.clientY };
+    window.addEventListener("mousemove", dragScoreEdit, true);
+    window.addEventListener("mouseup", releaseScoreEdit, true);
+  }
+
+  function dragScoreEdit(e) {
+    const press = scoreEditPress;
+    if (!press) return;
+    if (!(e.buttons & 1)) {
+      releaseScoreEdit();
+      return;
+    }
+    if (Math.abs(e.clientX - press.x) + Math.abs(e.clientY - press.y) < 5) return;
+    releaseScoreEdit();
+    scoreEditDragged = true;
+    hideAllScoreEdits();
+    scoreBreak = { block: press.block, pos: press.pos, from: press.line, target: null, marker: null };
+    window.addEventListener("mousemove", dragBreak, true);
+    window.addEventListener("mouseup", releaseBreak, true);
+    dragBreak(e);
+  }
+
+  function releaseScoreEdit() {
+    scoreEditPress = null;
+    window.removeEventListener("mousemove", dragScoreEdit, true);
+    window.removeEventListener("mouseup", releaseScoreEdit, true);
+  }
+
+  // A click on a button of the chrome: the change it names, when the engine
+  // makes it; a greyed button does nothing, its tip having said why.
+  function clickScoreEdit(btn) {
+    if (scoreEditDragged) {
+      scoreEditDragged = false;
+      return;
+    }
+    const block = btn.closest(".mdm-score");
+    if (!block || !window.MDM_BARS || !window.ABCJS) return;
+    const action = scoreEditAction(block, btn);
+    if (!action || action.kind === "none") return;
+    const pos = blockPos(block);
+    const source = scoreSource(block);
+    const result = scoreEditRun(source, action);
+    if (result.refused) return;
+    takeScoreKeys();
+    stopScoreAt(pos);
+    if (action.kind === "add") commitScoreBar(pos, source, result);
+    else commitScoreMove(pos, source, result.source);
+  }
+
+  // Why a move was not made, said on the score it was asked of, over the
+  // cursor, for three seconds: feedback kept to its block, as the copy
+  // button's pulse is.
+  function scoreNotice(block, text, ms) {
+    let note = block.querySelector(":scope > .mdm-score-notice");
+    if (!note) {
+      note = document.createElement("div");
+      note.className = "mdm-score-notice";
+      note.setAttribute("role", "status");
+      block.appendChild(note);
+    }
+    note.textContent = text;
+    // Over the cursor's column, or under it where the score has no room
+    // above (a first line with no title over it).
+    const beat = block.querySelector("code.language-abc svg .mdm-score-cursor__beat");
+    const frame = block.getBoundingClientRect();
+    const box = beat ? beat.getBoundingClientRect() : frame;
+    const tall = note.offsetHeight + 4;
+    note.style.left = Math.max(0, box.left - frame.left) + "px";
+    note.style.top = (box.top - frame.top >= tall ? box.top - frame.top - tall : box.bottom - frame.top + 4) + "px";
+    clearTimeout(note.mdmTimer);
+    note.mdmTimer = setTimeout(function () {
+      if (note.parentNode) note.parentNode.removeChild(note);
+    }, ms || 3000);
+  }
+
+  // ---- In and out of the mode ----
+
+  function toggleScoreMode() {
+    if (scoreMode) leaveScoreMode();
+    else enterScoreMode();
+  }
+
+  function enterScoreMode() {
+    if (!view || scoreMode || !hasScores(view.state)) return;
+    scoreMode = true;
+    closeMenus();
+    // The text lets go of the focus before it stops being able to hold it,
+    // and the document is nobody's from here to the end of the mode.
+    leaveDocument();
+    view.dispatch({ effects: [frozen.reconfigure(FROZEN), setFocused.of(false)] });
+    app().classList.add("mdm--score-mode");
+    updateScoreRows();
+    startScoreCursor();
+    // The score panel comes up with the mode where it is asked for. After
+    // the cursor is down: the cursor starts on a score the pane shows, read
+    // as the pane was when the mode was asked for, and that score is then
+    // held where it stands while the panel takes its width from the column.
+    applyScorePanel();
+    takeScoreKeys();
+    scoreHearsPlayer();
+  }
+
+  // The text given back, with the mode's changes in it already, each a
+  // step of the history (writeScoreEdit). The toolbar puts the focus back
+  // into it (toolbarButton), so the caret is where it was before the mode,
+  // and so is the block it opens. The music goes on sounding: the mode was
+  // only where it was started from.
+  function leaveScoreMode() {
+    if (!scoreMode) return;
+    // The score the reader is on, to be held where it stands as the panel
+    // goes with the mode (applyScorePanel): read now, since the cursor that
+    // says which score it is has been put away by then.
+    const held = scoreInSight();
+    releaseScoreDrag();
+    releaseBreak();
+    releaseScoreEdit();
+    hideAllScoreEdits();
+    scoreEditPointer = null;
+    scoreEditDragged = false;
+    SCORE_EDIT_RUNS.clear();
+    if (scoreRun) {
+      // The fade set at the end of a stretch would silence a tune that now
+      // plays on to its own end.
+      if (scoreRun.armed) clearResumeHold();
+      scoreRun = null;
+    }
+    scoreMode = false;
+    scoreCursor = null;
+    scoreFigure = null;
+    scorePause = null;
+    scorePlayFrom = null;
+    scoreStopKind = null;
+    scoreUndo = [];
+    scoreRedo = [];
+    view.dispatch({ effects: frozen.reconfigure([]) });
+    app().classList.remove("mdm--score-mode", "mdm--score-sounding");
+    document.querySelectorAll("#app .mdm-score-notice").forEach(function (el) {
+      el.parentNode.removeChild(el);
+    });
+    drawScoreCursor();
+    updateScoreRows();
+    applyScorePanel(held);
+  }
+
+  // A score in the document, read off the tree that is there already, so
+  // that asking on every update costs a walk of the top level. A document
+  // longer than the parse has reached may have a score further down: the
+  // row of the mode stops being greyed when the parse gets there, which
+  // comes back through the update listener as a tree of its own.
+  function hasScores(state) {
+    return anyScore(CM.syntaxTree(state), state.doc);
+  }
+
+  // The switch of the mode, pressed: the first row of the Score menu, and
+  // the button at the head of the score panel. The focus is handed back to the
+  // text as a button of the bar hands it back (toolbarButton), which is what
+  // puts the caret back where it was as the mode is left; while the mode is
+  // on the text cannot take it, and the keyboard stays the mode's.
+  function pressScoreMode() {
+    toggleScoreMode();
+    if (view) view.focus();
+  }
+
+  // What the bar says of the mode, in the Score menu and on the score panel:
+  // its switch, "Score navigation" (the owner's name, 2026-09-29), ticked
+  // while it is on (lit, at the head of the panel) and greyed in a document with no score to walk, as the
+  // Audio rows of the export menu are, never while the mode is on, the row
+  // being the way out of it; and what the mode's keys do, each greyed while
+  // the mode is off and its key is the text's (scoreRoster).
+  function updateScoreRows() {
+    syncRow("mdm-score-navigation");
+    scoreRosterNames().forEach(syncRow);
+  }
+
+  // The keys of the mode. On the window and in the capture phase, ahead of
+  // everything in the page and of VS Code's own listener, which hears the
+  // page's keys in the bubble phase (D19): a key answered here goes no
+  // further. The layer is active while the mode is on and its holder has
+  // the focus (takeScoreKeys), or nothing has: the player's bar keeps the
+  // keys it walks its progress with once it has been pressed, and a field
+  // of the search row its own, until a click on a score takes them back.
+  //
+  //   Left, Right       the place before or after, in the cursor's voice,
+  //                     the open end of the voice among them; with a stretch
+  //                     chosen, the stretch let go and the cursor on its
+  //                     first place, or its last
+  //   Up, Down          a step of the staff
+  //   Shift+Left, Right the place the cursor stands on chosen, and then one
+  //                     place more at each press, in the cursor's voice
+  //   Ctrl+Shift+Left,  the same over every voice, or over the ones picked
+  //     Right
+  //   Ctrl+Shift+Up,    with a stretch chosen, the voice above or below with
+  //     Down, Space     the stretch kept, and Space to pick the cursor's
+  //                     voice for it, or let it go
+  //   Ctrl+C            the stretch, or the cursor's place, to the clipboard
+  //   Ctrl+V            the clipboard's music put in after the cursor's
+  //                     place, or in the place of the stretch chosen
+  //   Ctrl+Up, Down     the staff above or below: the next voice of the
+  //                     line, and past its last the line above or below
+  //   Ctrl+Shift+Up,    with no stretch chosen, the line of staves above or
+  //     Down            below, in the same voice
+  //   Ctrl+Left, Right  a bar of rest added before or after the cursor's
+  //                     bar, in its voice; with a stretch chosen, beside
+  //                     the stretch, in the voices it is chosen over
+  //   Ctrl+1 to 7       a note of that figure at the cursor's step, put in
+  //   Alt+1 to 7        before the cursor's place (Ctrl) or after it (Alt)
+  //   Ctrl+0, Alt+0     the same with a rest, as long as the cursor's place
+  //   Shift+1 to 7      a rest of that figure: the cursor's place made one,
+  //                     and with Ctrl or Alt as well one put in before it or
+  //                     after it
+  //   the numeric pad   its digits are the figures' keys as the top row's
+  //                     are, alone and with Shift, Ctrl or Alt, while they
+  //                     are digits: with NumLock on (shiftedPad). With it
+  //                     off they are the arrows, Home and End
+  //   Space             play from the cursor, or the stretch in the voices
+  //                     it is chosen over, and pause
+  //   Escape            the stretch let go
+  //   Ctrl+Z, Ctrl+Y    a change to a score taken back, and made again
+  //   1 to 7, 0         a head put on the cursor's place, or a rest; with
+  //                     a stretch chosen, 0 makes rests of its notes and the
+  //                     figures' keys write nothing
+  //   Enter             a head put on a note, as long as the note, or a
+  //                     note written on a rest, as long as the rest
+  //   Delete, Backspace a head, a note, a rest or a bar taken out (a note
+  //                     written on the cursor, above), or the stretch chosen:
+  //                     Delete leaves the cursor where it stands, on what
+  //                     comes into the place, and Backspace takes it to the
+  //                     place on the left of what went
+  //
+  // Nothing else, on purpose: moving bars is done on the staff (the chrome
+  // on a score), and adding them there and with Ctrl, and Alt+Up and
+  // Alt+Down, which moved bars
+  // in the third round, went with the owner's call to keep the mode's keys
+  // to these until there was more to edit (2026-09-29); the keys that write
+  // came with the notes (2026-10-02), and the owner's keys with Ctrl and
+  // Alt the evening after and the day after it, which VS Code's own (Ctrl+1
+  // to a group of editors, Ctrl+0 to the side bar, Alt+1 to the first tab,
+  // Ctrl+Up and Down to scroll a line) give way to while the mode holds the
+  // keyboard; the keys of a stretch over several voices, and the copy, the
+  // same day (2026-10-03), and the paste the day after, with what Delete, 0
+  // and the paste do to a stretch chosen; and Shift with the figures' keys,
+  // for a rest of a figure, on 2026-10-06 (Shift+Alt+1 is VS Code's for an
+  // editor moved to its first group). That day as well the owner gave Ctrl
+  // with Up and Down the staves one by one, and Ctrl+Shift the lines, and
+  // took Alt out of the keys of a stretch: Ctrl+Shift+Alt with an arrow or
+  // with Space is no key of the mode's since. And out of the key that adds a
+  // bar to every voice, the same afternoon: the voices are chosen first,
+  // with Ctrl+Shift and an arrow, and Ctrl with Left or Right adds the bar
+  // to the ones chosen, so Ctrl+Alt with them is no key of the mode's
+  // either. The rest reach the workbench like any key the mode does not
+  // take.
+  const SCORE_KEYS = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, 1],
+    ArrowDown: [0, -1],
+  };
+
+  // ---- What the keys of the mode do, as commands ----
+  //
+  // Each is what its key does once the key has been taken (scoreKeys), so
+  // that the row of the Score menu and the button of the score panel that
+  // name a key do what the key does, by the same road (scoreRoster).
+
+  // A key that writes on the cursor's place. `kind` is "figure" (a key of a
+  // figure, which `figure` is, in whole notes), "rest" (0), "head" (Enter),
+  // or one of the two that take out: "out" (Delete) and "back" (Backspace,
+  // which takes the cursor a place back with what it takes: takeScoreOut).
+  function scoreWrites(kind, figure) {
+    // While the music sounds on the cursor's score the key stops it, as an
+    // arrow does, and writes nothing: the place the music was at is not one
+    // the reader chose to write on.
+    if (scoreSoundingHere()) {
+      scoreTakeFromPlayer();
+      return;
+    }
+    const takesOut = kind === "out" || kind === "back";
+    // With a stretch chosen the keys are the stretch's: Delete takes it out
+    // and 0 makes rests of its notes (the owner's calls of 2026-10-04). The
+    // keys that write on one place write nothing then: the place they would
+    // write on is the cursor's, which is out of sight while a stretch is
+    // chosen (drawScoreCursor).
+    const place = scoreCursorPlace();
+    const chosen = scoreChosen(place);
+    if (chosen.length) {
+      if (takesOut) cutScoreStretch(place, chosen, kind === "back");
+      else if (kind === "rest") restScoreStretch(place, chosen);
+      return;
+    }
+    if (figure) scoreFigure = figure;
+    if (takesOut) takeScoreOut(kind === "back");
+    else writeScoreNote(kind);
+  }
+
+  // Ctrl with Left or Right: a bar of rest beside the cursor's bar, or
+  // beside the stretch chosen (addScoreBarBeside). While the music sounds on
+  // the cursor's score the key stops it, as the keys that write do.
+  function scoreAddsBar(side) {
+    if (scoreSoundingHere()) {
+      scoreTakeFromPlayer();
+      return;
+    }
+    addScoreBarBeside(side);
+  }
+
+  // Ctrl+X. While the music sounds on the cursor's score the key stops it,
+  // as the keys that write do, and takes nothing out.
+  function scoreCuts() {
+    if (scoreSoundingHere()) {
+      scoreTakeFromPlayer();
+      return;
+    }
+    cutScoreSelection();
+  }
+
+  // Ctrl+A.
+  function scoreChoosesAll() {
+    scoreTakeFromPlayer();
+    chooseScoreWhole();
+  }
+
+  // Escape: the stretch chosen let go, and the cursor seen again where it
+  // was.
+  function scoreLetsGo() {
+    if (!scoreSelection()) return;
+    scoreCursor.anchor = null;
+    scoreCursor.voices = null;
+    scoreCursor.home = null;
+    scoreCursorMoved();
+    drawScoreCursor();
+  }
+
+  // A key the mode answers, kept from VS Code: stopped here, so that the
+  // listener its preload has on the window never hears of it (D19).
+  //
+  // Not one pressed with Alt held. VS Code takes the focus into its File
+  // menu on a clean press and release of Alt, and a key stopped here is one
+  // the workbench never saw, so Alt with it read as a tap whenever Alt was
+  // let go before the key: measured in VS Code 1.133.0 (2026-10-03), Alt
+  // down, 3 down, Alt up, 3 up put the rest in and left the keyboard in the
+  // File menu, where the arrows walked the menus and not the score. Holding
+  // the release of Alt back, as is done for an Alt used with the mouse
+  // (watchAltPresses), did not do here: the workbench reads the keys held
+  // off every event it is sent, the next release with no Alt in it told it
+  // Alt was up, and under the mode the next event is a release more often
+  // than not, the mode stopping the presses and not the releases (seen: the
+  // 3 let go took the focus all the same).
+  //
+  // So the key goes on to the workbench, as a key and no key in particular:
+  // its name, its code and its number are written over on the event itself,
+  // which is where the preload reads them when the event comes to it
+  // (`key: e.key, keyCode: e.keyCode, code: e.code` in its handleInnerKeydown,
+  // workbench/contrib/webview/browser/pre/index.html), and the event is
+  // still the reader's own, which the host asks of what it forwards. The
+  // workbench then knows Alt was used with a key, which is true, and has no
+  // name to look a binding of its own up by: Alt+3 is its third tab, and
+  // Shift+Alt+1 its editor moved to the first group. The page's own
+  // listeners on the way read a key they have no use for.
+  //
+  // Nor the first key after an Alt whose release never came, while the
+  // workbench still believes it down (hostAlt, where the whole of it is
+  // told): the releases that come in before a press are kept from the
+  // workbench there, and the mode stops its presses here, so with nothing
+  // more the workbench would believe Alt down for as long as the mode held
+  // the keyboard. Measured in VS Code 1.133.0 with another window raised
+  // over it while Alt was down, before either was done: back in the mode,
+  // the first arrow walked the cursor, its release, the first event the
+  // workbench had been sent since Alt went down, was read as Alt let go
+  // cleanly, the focus went to the File menu, and every arrow after it
+  // walked the menus (Escape left the focus on the workbench's body, and
+  // the arrows dead until a click). So that key goes on as the ones with
+  // Alt do, with no name: a press with no Alt in it is what tells the
+  // workbench Alt is up. Going on, it comes to the listener that keeps
+  // hostAlt (watchAltPresses), which reads Alt as up off it, so the key
+  // after it stops here again.
+  function takeScoreKey(e) {
+    e.preventDefault();
+    if (!e.altKey && !hostAlt) {
+      e.stopPropagation();
+      return;
+    }
+    Object.defineProperty(e, "key", { value: "Unidentified" });
+    Object.defineProperty(e, "code", { value: "" });
+    Object.defineProperty(e, "keyCode", { value: 0 });
+    Object.defineProperty(e, "which", { value: 0 });
+  }
+
+  // A state of the keyboard the event carries beside its four modifiers:
+  // NumLock, and AltGraph where the right Alt is the key of a third level.
+  function keyState(e, name) {
+    return typeof e.getModifierState === "function" && e.getModifierState(name);
+  }
+
+  // A digit of the numeric pad pressed with Shift while NumLock is on. The
+  // key then comes by its other name, the one it has with NumLock off: 4
+  // is ArrowLeft, 2 is ArrowDown, 1 is End. Under X11 Shift is in the event
+  // all the same; Windows lets go of Shift for as long as the key is down,
+  // and sends the key with none (its own way of giving the key its other
+  // meaning; known of Windows and not seen here, there being no Windows on
+  // this machine to press it on). Read as it came, Shift with the pad's 4
+  // walked the cursor to the left, or chose a place with it, where Shift
+  // with the 4 of the top row writes a rest, and on Windows Ctrl+Shift with
+  // it would have added a bar. NumLock on is what tells it from the same
+  // key with NumLock off, which is an arrow in earnest and is left one.
+  function shiftedPad(e) {
+    return /^Numpad[0-9]$/.test(e.code || "") && !/^[0-9]$/.test(e.key) && keyState(e, "NumLock");
+  }
+
+  function scoreKeys(e) {
+    if (!scoreMode) return;
+    const active = document.activeElement;
+    if (active && active !== scoreKeysHolder && active !== document.body && active !== document.documentElement) return;
+    const pad = shiftedPad(e);
+    const move = pad ? undefined : SCORE_KEYS[e.key];
+    const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (move && bare) {
+      takeScoreKey(e);
+      scoreTakeFromPlayer();
+      moveScoreCursor(move[0], move[1], 0, e.shiftKey, false);
+      return;
+    }
+    if ((e.key === " " || e.key === "Spacebar") && bare && !e.shiftKey) {
+      takeScoreKey(e);
+      // Held down is one press, not a stutter of plays and pauses.
+      if (!e.repeat) toggleScorePlayback();
+      return;
+    }
+    const figure = FIGURE_KEYS[e.key];
+    const takesOut = e.key === "Delete" || e.key === "Backspace";
+    if ((e.key === "Enter" || e.key === "0" || figure || takesOut) && bare && !e.shiftKey) {
+      // Read before the key is taken, which may write its name over. Of the
+      // two keys that take out, Backspace is the one that takes the cursor a
+      // place back with what it takes.
+      const kind = e.key === "Enter" ? "head" : figure ? "figure" : e.key === "Backspace" ? "back" : takesOut ? "out" : "rest";
+      takeScoreKey(e);
+      // Held down is one press: a bar is not filled by a key left down.
+      if (e.repeat) return;
+      scoreWrites(kind, figure);
+      return;
+    }
+    // A stretch over more voices than the cursor's (the owner's keys of
+    // 2026-10-03, and of 2026-10-06, when they took Alt out of them).
+    // Ctrl+Shift with Left and Right draws it out over every voice, or over
+    // the ones picked; with Up and Down, further on, it walks the voices
+    // with the stretch kept, and with Space it picks the cursor's or lets it
+    // go. Ctrl+C copies what is chosen. With Alt held as well none of them
+    // is the mode's, and the key goes on to VS Code as it is.
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && e.shiftKey && !e.altKey && move && move[0]) {
+      takeScoreKey(e);
+      scoreTakeFromPlayer();
+      moveScoreCursor(move[0], 0, 0, true, true);
+      return;
+    }
+    if (ctrl && e.shiftKey && !e.altKey && e.code === "Space") {
+      takeScoreKey(e);
+      if (!e.repeat) toggleScoreVoice();
+      return;
+    }
+    if (ctrl && !e.shiftKey && !e.altKey && /^c$/i.test(e.key)) {
+      takeScoreKey(e);
+      if (!e.repeat) copyScoreSelection();
+      return;
+    }
+    if (ctrl && !e.shiftKey && !e.altKey && /^v$/i.test(e.key)) {
+      takeScoreKey(e);
+      if (!e.repeat) pasteScoreClipboard();
+      return;
+    }
+    // Ctrl+X takes out what Ctrl+C copies, and Ctrl+A chooses the whole
+    // score (the owner's ask of 2026-10-06). Left to go on, the two were
+    // VS Code's, a cut and a select-all of the page under the mode.
+    if (ctrl && !e.shiftKey && !e.altKey && /^x$/i.test(e.key)) {
+      takeScoreKey(e);
+      if (!e.repeat) scoreCuts();
+      return;
+    }
+    if (ctrl && !e.shiftKey && !e.altKey && /^a$/i.test(e.key)) {
+      takeScoreKey(e);
+      if (!e.repeat) scoreChoosesAll();
+      return;
+    }
+    // Ctrl and Alt with the arrows and with the keys of the figures (the
+    // owner's asks of 2026-10-02, the third evening, and their keys of the
+    // day after). Across, Ctrl adds a bar in the cursor's voice, or in the
+    // voices a stretch is chosen over (addScoreBarBeside); Ctrl+Alt added
+    // it in every voice until the owner took Alt out of that as well
+    // (2026-10-06), and with an arrow across is no key of the mode's since:
+    // it goes on to VS Code as it is, whose own it is (an editor moved into
+    // the next group). Up and down, Ctrl walks the staves one by one, into
+    // the next line past the last of a line, and Ctrl+Shift the lines in
+    // one voice (the owner's change of 2026-10-06: until then Ctrl walked
+    // the lines and Ctrl+Shift the voices of one line); but with a stretch
+    // chosen Ctrl+Shift walks the voices with the stretch kept, which was
+    // Ctrl+Shift+Alt until that day. With Alt, Up and Down are not the
+    // mode's, and go on to VS Code.
+    if (move && ctrl && !e.altKey && !(move[0] && e.shiftKey)) {
+      takeScoreKey(e);
+      if (move[0]) {
+        // A bar put in is one press, as a note written is.
+        if (!e.repeat) scoreAddsBar(move[0] > 0 ? "after" : "before");
+        return;
+      }
+      scoreTakeFromPlayer();
+      const place = scoreCursorPlace();
+      if (!e.shiftKey) moveScoreStaff(move[1] < 0);
+      else if (place && scoreSelection(place)) walkScoreVoices(place, move[1] < 0);
+      else moveScoreSystem(move[1] < 0);
+      return;
+    }
+    // A note put in before the cursor's place with Ctrl and after it with
+    // Alt, or a rest with 0: Ctrl is the key on the left of the two, and
+    // Alt the one on the right (the owner's, 2026-10-03; the evening before
+    // it was Ctrl after and Ctrl+Shift before, my pick). And Shift makes a
+    // rest of what a figure's key writes, of the key's own figure (the
+    // owner's keys of 2026-10-06): with Ctrl or Alt a rest put in on that
+    // side, and with neither the cursor's place made one, as 0 makes it one
+    // of the figure kept. By the key's place and not by what it types, which
+    // Shift changes (`!` and `"` for 1 and 2 on the owner's keyboard). 0 has
+    // no figure for Shift to make a rest of, and goes on to VS Code with it.
+    // A key of the numeric pad is a figure's while it is a digit: typing
+    // one, or held with Shift under NumLock, when it comes by its other
+    // name (shiftedPad). With NumLock off it is End or PageDown, and Ctrl
+    // with it is not Ctrl with a figure (read by its place alone, as it was
+    // until 2026-10-06, Ctrl+End put a whole note in). And a key pressed
+    // with AltGr is another key, the one of its third level (`#` and `~` on
+    // the 3 and the 4 of a Spanish keyboard), and is nobody's here: Windows
+    // names AltGr as Ctrl and Alt together, which is no side, and X11 as
+    // neither, which with Shift read as Shift alone.
+    const code = e.code || "";
+    const digit = /^Digit([0-7])$/.exec(code) || (pad || /^[0-9]$/.test(e.key) ? /^Numpad([0-7])$/.exec(code) : null);
+    const figured = digit ? FIGURE_KEYS[digit[1]] : 0;
+    const side = ctrl === e.altKey ? "" : e.altKey ? "after" : "before";
+    const shift = e.shiftKey || pad;
+    if (digit && !keyState(e, "AltGraph") && (shift ? figured && (side || bare) : side)) {
+      takeScoreKey(e);
+      if (e.repeat) return;
+      if (scoreSoundingHere()) {
+        scoreTakeFromPlayer();
+        return;
+      }
+      if (scoreChosen(scoreCursorPlace()).length) return;
+      if (figured) scoreFigure = figured;
+      if (side) insertScorePlace(side, shift || !figured, !figured);
+      else writeScoreNote("rest");
+      return;
+    }
+    if (e.key === "Escape" && bare && !e.shiftKey && scoreSelection()) {
+      takeScoreKey(e);
+      scoreLetsGo();
+      return;
+    }
+    // Undo and redo take back and make again the changes of the mode, and
+    // go no further back: a change made before the mode would come into the
+    // frozen text under a reader who cannot see it made. Inside VS Code the
+    // workbench undoes the text model under the custom editor on the same
+    // key, as it does out of the mode (Ctrl+Z answered twice,
+    // tests/README.md), and every change of the mode is a step of its own
+    // on both sides (writeScoreEdit), so the key goes on to VS Code when a
+    // change of the mode was taken back or made again, for the two to take
+    // the same step, and stops here when there was none.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && /^[zy]$/i.test(e.key)) {
+      e.preventDefault();
+      const done = e.key.toLowerCase() === "y" || e.shiftKey ? redoScoreEdit() : undoScoreEdit();
+      if (!done) e.stopPropagation();
+    }
+  }
+
+  // ---- What the mode writes into the text ----
+
+  // A change to a score as a change of the document: `after` is the whole
+  // source as it should read, and `before` the source it was made from,
+  // which has to be the one the text holds still. Written as the stretch of
+  // source it changes, so the lines of a score it did not touch are left
+  // as they were, and in a list item or a quote every line written keeps
+  // the `> ` or the indent fenceSource left out of the source
+  // (scoreChange). Null when there is nothing to write.
+  function scoreEditChange(pos, before, after) {
+    if (!view || !scoreMode) return null;
+    const state = view.state;
+    const node = scoreFenceAt(state, pos);
+    if (!node || fenceSource(state.doc, node) !== before) return null;
+    return scoreChange(state.doc, node, before, after);
+  }
+
+  // The change written: a step of its own in the history, as "input.score",
+  // which CodeMirror never joins to the step before it (it joins typing and
+  // deleting only), and sent to the host at once rather than after the
+  // 300 ms a keystroke waits (queueEdit), so that VS Code's undo stack has
+  // a step of its own for it too and a Ctrl+Z answered by both takes out
+  // the same change on either side (scoreKeys). The frozen text takes it:
+  // readOnly stops the reader and the commands, not a dispatch. Returns
+  // where the score's widget hangs once it is written.
+  function writeScoreEdit(pos, change) {
+    const tr = view.state.update({ changes: change, userEvent: "input.score" });
+    view.dispatch(tr);
+    flushEdit();
+    return tr.changes.mapPos(pos, 1);
+  }
+
+  // The fenced block a score widget hangs from, the one ending at `pos`.
+  function scoreFenceAt(state, pos) {
+    const tree = CM.ensureSyntaxTree(state, pos, 2000) || CM.syntaxTree(state);
+    let node = tree.resolveInner(Math.max(0, pos - 1), -1);
+    while (node && node.name !== "FencedCode") node = node.parent;
+    return node && scoreEnd(state.doc, node, node.to) === pos ? node : null;
+  }
+
+  // The one stretch that differs between two sources, as a change of the
+  // document: what they share at either end is left where it is.
+  function scoreChange(doc, node, before, after) {
+    if (before === after) return null;
+    const most = Math.min(before.length, after.length);
+    let head = 0;
+    while (head < most && before.charCodeAt(head) === after.charCodeAt(head)) head++;
+    let tail = 0;
+    while (
+      tail < most - head &&
+      before.charCodeAt(before.length - 1 - tail) === after.charCodeAt(after.length - 1 - tail)
+    ) {
+      tail++;
+    }
+    const from = sourcePos(doc, node, head);
+    const to = sourcePos(doc, node, before.length - tail);
+    if (from === null || to === null) return null;
+    // The lead of every line of the document the stretch covers: what stands
+    // before the part Lezer starts on it, `> ` or the item's indent, and
+    // nothing on a line no part starts on (the lines of a fence at the top
+    // level, which is one part). The stretch's own lines are written back
+    // each with the lead of the line it replaces, and a line it adds with
+    // the lead of the last, so a quote keeps its bare `>` on a blank line
+    // the change runs across (SM09). A stretch that puts a line in the
+    // middle of lines kept would pair the leads one line off; inside one
+    // container the leads differ by the space after a bare `>` at most.
+    const parts = node.getChildren("CodeText");
+    const leads = [];
+    for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) {
+      const line = doc.line(n);
+      const lead = parts.filter(function (part) {
+        return part.from >= line.from && part.from <= line.to;
+      })[0];
+      leads.push(lead ? doc.sliceString(line.from, lead.from) : "");
+    }
+    const insert = after
+      .slice(head, after.length - tail)
+      .split("\n")
+      .map(function (text, i) {
+        return i === 0 ? text : leads[Math.min(i, leads.length - 1)] + text;
+      })
+      .join("\n");
+    return { from: from, to: to, insert: insert };
+  }
+
+  // Where a character of fenceSource's text stands in the document: the
+  // same walk, part by part. A part ends on its line break, but for the
+  // last, so an offset at the end of one is the head of the next, which is
+  // past the `> ` or the indent of its line: text put there goes inside the
+  // container, and a break taken out there takes the lead of the line it
+  // joins with it. A line of the block with no part at all (a blank line
+  // in a list item) is a line break fenceSource writes itself, and stands
+  // at the end of that line.
+  function sourcePos(doc, node, offset) {
+    const parts = node.getChildren("CodeText");
+    if (!parts.length) return null;
+    const marks = node.getChildren("CodeMark");
+    const end = marks.length > 1 ? doc.lineAt(marks[1].from).number : doc.lineAt(node.to).number + 1;
+    let at = 0;
+    let n = doc.lineAt(parts[0].from).number;
+    let broken = true;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const line = doc.lineAt(part.from).number;
+      for (; n < line; n++, at++) if (offset === at) return doc.line(n).to;
+      if (offset < at + part.to - part.from) return part.from + offset - at;
+      at += part.to - part.from;
+      const last = doc.lineAt(part.to).number;
+      broken = doc.sliceString(part.to - 1, part.to) === "\n";
+      n = broken ? last : last + 1;
+    }
+    if (offset === at) return parts[parts.length - 1].to;
+    // The breaks fenceSource writes after the last part: the first of them
+    // ends the last part's own line when that part ended on no break.
+    for (; n < end; n++, at++) if (offset === at) return doc.line(broken ? n : n - 1).to;
+    return offset === at ? doc.line(Math.min(doc.lines, end - 1)).to : null;
+  }
+
   // ---------- The editor ----------
 
   // Reading the modifier setting once at build time would pin it: the click
@@ -14926,6 +20026,20 @@
     return true;
   }
 
+  // The search row opened from outside the text's own keymap: by Ctrl+F with
+  // the focus anywhere else in the page, and by the Find and Replace rows of
+  // the Edit menu.
+  // The panel is inside the view, so the field it focuses makes the document
+  // somebody's, and a match inside a hidden block opens it. Said ahead of the
+  // opening: the field is focused inside the update that mounts the panel,
+  // where syncFocus cannot dispatch it.
+  function openSearch(replace) {
+    if (!view) return;
+    if (!view.state.field(focusField, false)) view.dispatch({ effects: setFocused.of(true) });
+    if (replace) openReplace(view);
+    else CM.openSearchPanel(view);
+  }
+
   function buildEditor(text) {
     // ---- The layers of the keyboard ----
     //
@@ -15131,6 +20245,8 @@
         }),
         CM.EditorView.inputHandler.of(surroundSelection),
         CM.EditorView.domEventObservers({ scroll: notePlace, keydown: noteKey }),
+        // Empty but under the score mode, which freezes the text.
+        frozen.of([]),
         CM.search({ top: true, createPanel: searchPanel }),
         CM.keymap.of(
           mdmKeymap.concat(
@@ -15166,9 +20282,13 @@
             // changes no text and comes back through here without it.
             if (definitionsChanged(update)) view.dispatch({ effects: language.reconfigure(markdownLanguage()) });
             if (player) player.pos = update.changes.mapPos(player.pos, 1);
-            // A `lang:` typed into the header on screen lights or darkens
-            // the hyphenation button at once, as it moves the cuts.
-            updateHyphenationButton();
+            // What the score mode keeps by a score's position follows the
+            // score as the player does, through the mode's own changes and
+            // the host's (the file changed on disk).
+            mapScorePlaces(update.changes);
+            // A `lang:` typed into the header on screen moves the tick of
+            // the hyphenation menu at once, as it moves the cuts.
+            updateHyphenationRows();
           }
           // The citations the host is asked about (askCites), once the text
           // has rested, and again when a longer document's parse reaches
@@ -15181,8 +20301,13 @@
           clearOpenDrawings();
           placeAfterUpdate(update);
           watchHeaderCaret(update.state);
+          // A score written or taken out, or one the parse has just
+          // reached: the switch of the mode is greyed with none to walk.
+          if (update.docChanged || CM.syntaxTree(update.state) !== CM.syntaxTree(update.startState)) {
+            syncRow("mdm-score-navigation");
+          }
           if (update.docChanged || update.selectionSet) {
-            updateUndoButtons();
+            updateUndoRows();
             // The outline follows the document and the caret while it is
             // open; the parse it follows on its own (parseForOutline).
             if (outlineOpen) {
@@ -15200,7 +20325,7 @@
     });
     startSync(text);
     // applyHyphenation ran above with no view to read the header from.
-    updateHyphenationButton();
+    updateHyphenationRows();
     // The citations of the document as it opens.
     askCitesSoon();
     // For the test harness and for poking at a live editor: the view itself,
@@ -15227,6 +20352,22 @@
       },
       get player() {
         return player;
+      },
+      // The score mode's cursor as the model holds it, the road a change to
+      // a score takes to the text, and the stretch being played.
+      get scoreCursor() {
+        return scoreCursor ? Object.assign({}, scoreCursor) : null;
+      },
+      // A score's source changed as a move of the mode changes it: into the
+      // text, kept for Ctrl+Z, with the cursor left on its note. `before`,
+      // when given, is the source the change was made from, and a text that
+      // no longer holds it is left alone.
+      editScore: function (pos, after, before) {
+        const block = scoreBlockAt(pos);
+        return !!block && commitScoreMove(pos, typeof before === "string" ? before : scoreSource(block), after);
+      },
+      get scoreRun() {
+        return scoreRun ? Object.assign({}, scoreRun) : null;
       },
     };
     watchContent();
@@ -15311,11 +20452,38 @@
     view.scrollDOM.addEventListener("mousemove", followKeys);
     window.addEventListener("keydown", followKeys, true);
     window.addEventListener("keyup", followKeys, true);
+    window.addEventListener("keydown", scoreKeys, true);
     window.addEventListener("blur", function () {
       const el = app();
       if (el) el.classList.remove("mdm--follow");
     });
     view.contentDOM.addEventListener("click", handleChromeClick, true);
+    view.contentDOM.addEventListener("mousemove", hoverScore);
+    // The chrome of a score goes with the pointer out of the text, and
+    // follows a drawing's box scrolled sideways under it (scroll does not
+    // bubble; it is caught on its way down).
+    view.contentDOM.addEventListener("mouseleave", function () {
+      scoreEditPointer = null;
+      hideAllScoreEdits();
+    });
+    view.contentDOM.addEventListener(
+      "scroll",
+      function (e) {
+        if (scoreMode && e.target && e.target.matches && e.target.matches("code.language-abc")) refreshScoreEdits();
+      },
+      true
+    );
+    // The page scrolled under a pointer that has not moved (the wheel, or the
+    // playhead taking the pane along): what is under it now has the chrome.
+    let editScrollPending = false;
+    view.scrollDOM.addEventListener("scroll", function () {
+      if (!scoreMode || editScrollPending) return;
+      editScrollPending = true;
+      requestAnimationFrame(function () {
+        editScrollPending = false;
+        refreshScoreEdits();
+      });
+    });
     // On the scroller and not the text, so that the pointer going out into the
     // margin lets a rail down as well as the pointer going onto another block.
     view.scrollDOM.addEventListener("mousemove", handleRailPointer);
@@ -15415,10 +20583,12 @@
 
   // ---------- Toolbar ----------
 
-  // The bar is ours: a row of buttons, some with a drop-down panel. Each
-  // button carries a data-type (what the stylesheet, the tests and the update
-  // functions above look it up by), an aria-label the CSS tooltip is drawn
-  // from, and a fill-only SVG.
+  // The bar is ours: a row of words, each over a menu, and of buttons, some
+  // with a drop-down panel. Every control carries a data-type, a word, a
+  // button and a row of a menu alike (what the stylesheet, the tests and the
+  // update functions above look it up by). A button has an aria-label the CSS
+  // tooltip is drawn from and a fill-only SVG; a row has its name written out
+  // and, where it had one as a button, the same SVG in front of it.
 
   // An arrow leaving an open tray, drawn like the other icons: fill only.
   const EXPORT_ICON =
@@ -15508,7 +20678,7 @@
   // design/design-smallcaps-icon-2.html), and it replaces the stacked pair
   // of T that shipped unreleased before it.
   //
-  // The pair is in a row, which is the heading button's arrangement, so what
+  // The pair is in a row, which is the heading glyph's arrangement, so what
   // has to keep the two apart is no longer the arrangement but the letters:
   // the heading sets one shape at two heights and this sets two shapes at
   // one height, 6.93 of the 16 box each, since a small cap IS a capital at
@@ -15549,11 +20719,11 @@
     '<svg viewBox="0 0 16 16"><rect x="1" y="8.6" width="8.4" height="1.9" rx="0.95"/><path d="M10.63 6.8H11.91V3.18L10.6 3.45V2.47L11.9 2.2H13.27V6.8H14.55V7.8H10.63Z"/></svg>';
   const RULE_ICON =
     '<svg viewBox="0 0 16 16"><rect x="1" y="1.3" width="14" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="4" width="10.5" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="7.2" width="14" height="2.1" rx="1.05"/><rect x="1" y="11.4" width="14" height="1.4" rx="0.7" fill-opacity="0.45"/><rect x="1" y="14.1" width="8.5" height="1.4" rx="0.7" fill-opacity="0.45"/></svg>';
-  // The music symbols, which open the Insert group: two eighth notes under
-  // one beam, the ♫ every set of music glyphs draws. The heads and stems are
-  // the score-align note's own (ALIGN_ICON: a head of 2.2 by 1.55 tilted 25
-  // degrees, a stem of 1.5), and the beam is what keeps the pair from being
-  // read as that lone quarter note on the second row. A of the four in
+  // The music symbols: two eighth notes under one beam, the ♫ every set of
+  // music glyphs draws. The heads and stems are the score-align note's own
+  // (ALIGN_ICON: a head of 2.2 by 1.55 tilted 25 degrees, a stem of 1.5), and
+  // the beam is what keeps the pair from being read as that lone quarter
+  // note, which stands three buttons along the same row now. A of the four in
   // design/design-symbol-icon.html, applied as my pick until the owner
   // chooses (2026-09-23).
   const SYMBOL_ICON =
@@ -15574,11 +20744,11 @@
   // seen at 15px). The mark is drawn at the bars' 1.45 weight.
   const TASK_ICON =
     '<svg viewBox="0 0 16 16"><path d="M1.71 3.79 2.8 4.88 5.34 1.84 6.46 2.76 2.9 7.02 .69 4.81Z"/><path d="M8.2 3.3H13.8A.7 .7 0 0 1 14.5 4V4A.7 .7 0 0 1 13.8 4.7H8.2A.7 .7 0 0 1 7.5 4V4A.7 .7 0 0 1 8.2 3.3Z"/><path d="M2 9.6H4.8A1 1 0 0 1 5.8 10.6V13.4A1 1 0 0 1 4.8 14.4H2A1 1 0 0 1 1 13.4V10.6A1 1 0 0 1 2 9.6ZM2.3 11.2V12.8A.3 .3 0 0 0 2.6 13.1H4.2A.3 .3 0 0 0 4.5 12.8V11.2A.3 .3 0 0 0 4.2 10.9H2.6A.3 .3 0 0 0 2.3 11.2Z"/><path d="M8.2 11.3H13.8A.7 .7 0 0 1 14.5 12V12A.7 .7 0 0 1 13.8 12.7H8.2A.7 .7 0 0 1 7.5 12V12A.7 .7 0 0 1 8.2 11.3Z"/></svg>';
-  // The Ctrl+D toggle: two text carets standing on a word, drawn as a faint
-  // bar. What the icon names is the family the button belongs to, the
-  // multicursor, and not the mode in force: which of the two modes is on is
-  // said by the disc of mdm-btn--on and by the tooltip, as it is on the staff,
-  // alignment and header buttons. The drawing before this one was a selection
+  // The multicursor: two text carets standing on a word, drawn as a faint
+  // bar. What the icon names is the family, and not the mode Ctrl+D is in,
+  // which is why it could go from the switch it was the button of to the
+  // first row of the family in the Edit menu: which of the two modes is on
+  // is said by the tick on the switch. The drawing before this one was a selection
   // box around the middle of the bar, for "a part inside a word", and at the
   // 15px the toolbar draws at it read as a code block, or as a minus sign shut
   // in a box. Fill only, since the toolbar stylesheet zeroes strokes: each
@@ -15586,10 +20756,103 @@
   // drawn faint with fill-opacity.
   const MULTICURSOR_ICON =
     '<svg viewBox="0 0 16 16"><rect x="1.5" y="11.6" width="13" height="2" rx="1" fill-opacity="0.4"/><rect x="3.2" y="2.4" width="3.6" height="1.3" rx=".65"/><rect x="4.35" y="2.4" width="1.3" height="7.8" rx=".2"/><rect x="3.2" y="8.9" width="3.6" height="1.3" rx=".65"/><rect x="9.2" y="2.4" width="3.6" height="1.3" rx=".65"/><rect x="10.35" y="2.4" width="1.3" height="7.8" rx=".2"/><rect x="9.2" y="8.9" width="3.6" height="1.3" rx=".65"/></svg>';
+  // The search: a magnifying glass, the glyph every editor gives it. It came
+  // with the Find row of the Edit menu (2026-10-13), drawn for the sheet the
+  // menus were picked from and not yet through a round of its own. A ring
+  // and its handle as one filled path, since the toolbar stylesheet zeroes
+  // strokes.
+  const FIND_ICON =
+    '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M6.8 1.4a5.4 5.4 0 0 1 4.3 8.7l3.5 3.5-1 1-3.5-3.5A5.4 5.4 0 1 1 6.8 1.4Zm0 1.4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg>';
   // A stack of headings, longest at the top: the document's own table of
   // contents, the glyph an outline has always carried.
   const OUTLINE_ICON =
     '<svg viewBox="0 0 16 16"><rect x="1" y="2.4" width="10" height="1.6" rx=".8"/><rect x="3.5" y="6.2" width="9.5" height="1.6" rx=".8"/><rect x="3.5" y="10" width="6.5" height="1.6" rx=".8"/><circle cx="1.6" cy="7" r="1"/><circle cx="1.6" cy="10.8" r="1"/></svg>';
+  // Score navigation: the whole note abcjs draws, alone inside the box of
+  // the cursor. The owner's call on 2026-09-29, the third round: the wide
+  // box of E in design/design-score-mode.html (the box of C, the owner's
+  // first idea) with the line of the staff taken out, so the note is the
+  // only thing in it. The note is abcjs's own outline (the head of `B` at
+  // L:1/1, 6.7.0), scaled into the path; the box carries the weight of the
+  // other glyphs.
+  const SCORE_MODE_ICON =
+    '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M3 2.6H13A2 2 0 0 1 15 4.6V11.4A2 2 0 0 1 13 13.4H3A2 2 0 0 1 1 11.4V4.6A2 2 0 0 1 3 2.6ZM3 3.9H13A0.7 0.7 0 0 1 13.7 4.6V11.4A0.7 0.7 0 0 1 13 12.1H3A0.7 0.7 0 0 1 2.3 11.4V4.6A0.7 0.7 0 0 1 3 3.9Z"/><path fill-rule="evenodd" d="M7.437 5.737c 0.286 -0.017 1.127 0 1.413 0.017c 0.79 0.101 1.48 0.286 2.085 0.605c 0.673 0.353 1.093 0.79 1.228 1.295c 0.05 0.185 0.05 0.505 0 0.689c -0.135 0.505 -0.555 0.942 -1.228 1.295c -0.605 0.32 -1.278 0.505 -2.102 0.605c -0.37 0.034 -1.295 0.034 -1.665 0c -0.824 -0.101 -1.497 -0.286 -2.102 -0.605c -0.673 -0.353 -1.093 -0.79 -1.228 -1.295c -0.05 -0.185 -0.05 -0.505 0 -0.689c 0.135 -0.505 0.555 -0.942 1.228 -1.295c 0.673 -0.353 1.463 -0.555 2.371 -0.622zm 0.32 0.37c -0.488 -0.084 -0.858 0 -1.144 0.286c -0.084 0.084 -0.135 0.151 -0.185 0.269c -0.135 0.286 -0.202 0.605 -0.185 0.992c 0.017 0.387 0.101 0.706 0.235 0.992c 0.336 0.656 0.975 1.11 1.783 1.244c 0.622 0.118 1.093 -0.084 1.312 -0.555c 0.135 -0.286 0.202 -0.605 0.185 -1.009c -0.034 -0.622 -0.252 -1.144 -0.656 -1.547c -0.353 -0.353 -0.824 -0.589 -1.345 -0.673z"/></svg>';
+
+  // The side panel the mode brings (its row of the Score menu, and its
+  // button at the head of the panel): the box of the mode's glyph, with its
+  // right part filled where the panel stands beside the page. The owner's
+  // pick of 2026-10-15, variant 2 of design-score-panel-rest.html, with the
+  // glyph on the menu's row as well ("el Side panel de la barra de pestañas
+  // debe tener el icono").
+  const PANEL_ICON =
+    '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M3 2.6H13A2 2 0 0 1 15 4.6V11.4A2 2 0 0 1 13 13.4H3A2 2 0 0 1 1 11.4V4.6A2 2 0 0 1 3 2.6ZM3 3.9H13A0.7 0.7 0 0 1 13.7 4.6V11.4A0.7 0.7 0 0 1 13 12.1H3A0.7 0.7 0 0 1 2.3 11.4V4.6A0.7 0.7 0 0 1 3 3.9Z"/><rect x="9.3" y="3.9" width="4.4" height="8.2"/></svg>';
+
+  // The glyphs of what the keys of the score mode write, for the Score menu
+  // and the score panel: the seven figures, the two rests, the chord, what
+  // takes a note out, a bar on either side, and the playing. But for the
+  // last and the rests, which are abcjs's own (below), they are the drawings
+  // of design-toolbar.html, the sheet the menus and the panel were picked
+  // from (2026-10-13), put at the weight of the bar's own notes, and like
+  // the search's glass not yet through a round of their own.
+  //
+  // A note of a given length: the head low on the left, the stem up its
+  // right side, and a flag for each halving past the quarter. The head is
+  // the tilted ellipse of the bar's other notes (ALIGN_ICON, SYMBOL_ICON),
+  // larger, since this note has the box to itself: 2.9 by 2.05, which
+  // reaches 2.77 right of its centre, where the stem stands, 1.5 wide as
+  // theirs are. Fill only, since the stylesheet zeroes strokes: the open
+  // head of a half note is the ellipse with a smaller one cut out of it.
+  function noteIcon(flags, open) {
+    const head = open
+      ? '<path fill-rule="evenodd" transform="rotate(-25 5.9 11.6)" d="M3 11.6a2.9 2.05 0 1 0 5.8 0a2.9 2.05 0 1 0-5.8 0ZM4.1 11.6a1.8 .95 0 1 0 3.6 0a1.8 .95 0 1 0-3.6 0Z"/>'
+      : '<ellipse cx="5.9" cy="11.6" rx="2.9" ry="2.05" transform="rotate(-25 5.9 11.6)"/>';
+    let out = head + '<rect x="7.17" y="1.4" width="1.5" height="10.2" rx=".4"/>';
+    [1.4, 3.5, 5.6, 7.7].slice(0, flags).forEach(function (y) {
+      out += '<path d="M8.67 ' + y + 'c.3 1.5 2.9 1.9 2.7 4.5-.5-1.4-1.9-1.8-2.7-2.1z"/>';
+    });
+    return '<svg viewBox="0 0 16 16">' + out + "</svg>";
+  }
+  // By the key that writes each (FIGURE_KEYS). The whole note has no stem: a
+  // ring, wider than it is tall.
+  const NOTE_ICONS = {
+    1: '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M3.1 8a4.9 3.4 0 1 0 9.8 0a4.9 3.4 0 1 0-9.8 0ZM5.2 8a2.8 1.7 0 1 0 5.6 0a2.8 1.7 0 1 0-5.6 0Z"/></svg>',
+    2: noteIcon(0, true),
+    3: noteIcon(0),
+    4: noteIcon(1),
+    5: noteIcon(2),
+    6: noteIcon(3),
+    7: noteIcon(4),
+  };
+  // A rest: the quarter rest, abcjs's own outline (`rests.quarter`, 6.7.0)
+  // fitted to the box and as tall as the quarter note's glyph, so that it is
+  // the rest the score draws. The owner's pick of 2026-10-15 (A of
+  // design-score-panel-rest.html): the half rest on its line it replaces
+  // read as a hat at this size.
+  const REST_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M7.191 1.535c0.07 -0.035 0.141 -0.035 0.211 -0.018c0.053 0.035 2.78 3.273 2.851 3.414c0.123 0.229 0.088 0.458 -0.088 0.739c-0.141 0.194 -0.422 0.475 -0.95 0.915c-0.264 0.211 -0.51 0.44 -0.563 0.493c-0.546 0.581 -0.669 1.461 -0.352 2.129c0.106 0.229 0.158 0.282 0.774 0.985c1.126 1.32 1.073 1.267 1.073 1.373c0 0.106 -0.106 0.211 -0.211 0.229c-0.088 0 -0.158 -0.035 -0.282 -0.158c-0.44 -0.44 -1.443 -0.757 -1.989 -0.634c-0.264 0.053 -0.405 0.158 -0.528 0.405c-0.07 0.176 -0.123 0.387 -0.141 0.669c-0.018 0.387 0.053 0.792 0.176 1.179c0.088 0.246 0.141 0.387 0.264 0.563c0.106 0.141 0.106 0.194 0.018 0.246c-0.07 0.035 -0.106 0.018 -0.264 -0.176c-0.634 -0.809 -1.214 -1.971 -1.408 -2.833c-0.158 -0.616 -0.088 -1.038 0.158 -1.214c0.123 -0.07 0.246 -0.088 0.51 -0.088c0.51 0.035 1.232 0.229 1.936 0.528l0.229 0.106l-0.968 -1.144c-1.478 -1.742 -1.531 -1.813 -1.584 -1.918c-0.053 -0.141 -0.07 -0.282 -0.018 -0.44c0.088 -0.282 0.334 -0.563 1.073 -1.179c0.264 -0.211 0.493 -0.422 0.546 -0.458c0.405 -0.44 0.598 -1.056 0.528 -1.637c-0.035 -0.194 -0.123 -0.493 -0.229 -0.651c-0.053 -0.088 -0.264 -0.352 -0.475 -0.616c-0.211 -0.246 -0.405 -0.475 -0.422 -0.51c-0.053 -0.106 0 -0.246 0.123 -0.299z"/></svg>';
+  // A rest of a given length (the line of Shift+1…7): the eighth rest, the
+  // same outline's (`rests.8th`), in the middle of the box. The owner's
+  // pick for it the same day ("el de corchea para rest of given length").
+  const REST_GIVEN_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M6.625 2.867c0.492 -0.067 0.917 0.067 1.252 0.38c0.201 0.224 0.291 0.403 0.425 0.939c0.067 0.246 0.134 0.492 0.157 0.537c0.089 0.201 0.246 0.335 0.447 0.358c0.089 0 0.134 0 0.246 -0.067c0.291 -0.134 0.984 -0.962 1.252 -1.476c0.067 -0.157 0.179 -0.224 0.291 -0.224c0.089 0 0.201 0.067 0.246 0.134c0.022 0.045 -0.201 0.828 -1.387 4.786c-0.76 2.594 -1.409 4.764 -1.431 4.786c0 0.022 -0.089 0.089 -0.179 0.112c-0.134 0.067 -0.157 0.067 -0.335 0.067c-0.179 0 -0.224 0 -0.358 -0.045c-0.067 -0.045 -0.157 -0.089 -0.157 -0.112c-0.045 -0.022 0.112 -0.425 1.252 -3.668c0.716 -1.991 1.297 -3.646 1.275 -3.646l-0.38 0.112c-0.805 0.268 -1.297 0.358 -1.901 0.358c-0.492 0 -0.626 -0.022 -0.984 -0.201c-0.984 -0.47 -1.32 -1.61 -0.76 -2.46c0.246 -0.335 0.626 -0.604 1.029 -0.671z"/></svg>';
+  // A second head on the stem: a chord.
+  const CHORD_ICON =
+    '<svg viewBox="0 0 16 16"><ellipse cx="5.9" cy="12.2" rx="2.5" ry="1.75" transform="rotate(-25 5.9 12.2)"/><ellipse cx="5.9" cy="8" rx="2.5" ry="1.75" transform="rotate(-25 5.9 8)"/><rect x="6.78" y="1.4" width="1.5" height="10.8" rx=".4"/></svg>';
+  // Taking out: the key that does it, as keyboards draw it.
+  const TAKE_OUT_ICON =
+    '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M5.3 3.2h8.2c.8 0 1.5.7 1.5 1.5v6.6c0 .8-.7 1.5-1.5 1.5H5.3L1 8l4.3-4.8Zm.6 1.3L2.8 8l3.1 3.5h7.6a.2.2 0 0 0 .2-.2V4.7a.2.2 0 0 0-.2-.2H5.9Z"/><path d="m7.3 6 .9-.9L9.7 6.6l1.5-1.5.9.9L10.6 7.5l1.5 1.5-.9.9-1.5-1.5-1.5 1.5-.9-.9 1.5-1.5z"/></svg>';
+  // A bar put in: the barlines it stands beside, and a plus on the side it
+  // goes to.
+  const BAR_BEFORE_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M10.9 2.5h1.3v11h-1.3zM13.6 2.5h1.3v11h-1.3z"/><path d="M4 5.4h1.3v2H7.3v1.3H5.3v2H4v-2H2V7.4h2z"/></svg>';
+  const BAR_AFTER_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M1.1 2.5h1.3v11H1.1zM3.8 2.5h1.3v11H3.8z"/><path d="M10.7 5.4H12v2h2v1.3h-2v2h-1.3v-2h-2V7.4h2z"/></svg>';
+  // Play/pause: the triangle and the two bars of the player's own button,
+  // which wears one or the other by whether the tune sounds, side by side
+  // here, since Space does both and the row is named for both (the owner's
+  // ask of 2026-10-13: "Play/pause, con los dos iconos"). In the one box of
+  // a glyph, so the names of the rows keep their column: each half as tall
+  // as the other, and the bars as wide as the gap between them.
+  const PLAY_PAUSE_ICON = '<svg viewBox="0 0 16 16"><path d="M1.1 3.2 7.5 8 1.1 12.8z"/><path d="M9.1 3.2h1.9v9.6h-1.9zM12.9 3.2h1.9v9.6h-1.9z"/></svg>';
 
   // The headings of the document, read from the Lezer tree so a `#` inside a
   // code block or an equation is not mistaken for one. Both Markdown heading
@@ -15822,12 +21085,14 @@
   }
 
   // The panel drawn from the setting in force: the class that shows it, the
-  // lit button, and the list, which is only filled while it is open.
+  // lit button and the ticked row of the Page menu, and the list, which is
+  // only filled while it is open.
   function applyOutline() {
     const root = app();
     if (root) root.classList.toggle("mdm-outline--open", outlineOpen);
     const btn = document.querySelector('#app button[data-type="outline"]');
     if (btn) btn.classList.toggle("mdm-btn--on", outlineOpen);
+    syncRow("page-outline");
     if (outlineOpen) refreshOutline();
     remeasureText();
   }
@@ -15853,18 +21118,31 @@
     const root = app();
     if (!root) return;
     const body = document.querySelector("#app .mdm-body");
-    const room = body ? body.getBoundingClientRect().width - EDITOR_MIN : Infinity;
+    const room = body ? outlineRoom(body) : Infinity;
     const width = Math.max(OUTLINE_MIN, Math.min(outlineWidth, room));
     root.style.setProperty("--mdm-outline-width", Math.round(width) + "px");
     remeasureText();
   }
 
+  // The most the outline may take of the row under the bar: what is left of
+  // it by the column the editor keeps and by the score panel, while that one
+  // is up at the other edge (it measures nothing while it is hidden).
+  function outlineRoom(body) {
+    const side = body.querySelector(".mdm-score-panel");
+    return body.getBoundingClientRect().width - EDITOR_MIN - (side ? side.getBoundingClientRect().width : 0);
+  }
+
   // The pane can be resized under an open panel (the editor group dragged
   // narrower, the window itself), so the fit is worked out again whenever it
   // changes. Only the width on screen moves; the setting stays where the grip
-  // left it.
+  // left it. The score panel first, whose width the outline is fitted to, and
+  // which takes the room of a scroll bar as the pane gets too short for one
+  // of its faces (fitScorePanelWidth).
   function watchOutlineRoom() {
-    window.addEventListener("resize", applyOutlineWidth);
+    window.addEventListener("resize", function () {
+      fitScorePanelWidth();
+      applyOutlineWidth();
+    });
   }
 
   // The player row spans the toolbar, so the pane getting narrower or wider
@@ -15889,7 +21167,7 @@
       const root = app();
       const box = body.getBoundingClientRect();
       // The editor keeps a column of its own wherever the sash is dragged to.
-      const most = Math.min(OUTLINE_MAX, Math.max(OUTLINE_MIN, box.width - EDITOR_MIN));
+      const most = Math.min(OUTLINE_MAX, Math.max(OUTLINE_MIN, outlineRoom(body)));
       let width = outlineWidth;
       const drag = function (ev) {
         width = Math.min(most, Math.max(OUTLINE_MIN, ev.clientX - box.left));
@@ -15943,50 +21221,1125 @@
   const BLOCK_MOD = { pc: "Shift", mac: "Alt" };
   const LEVEL_MOD = { pc: "", mac: "Alt" };
 
-  // The name of a shortcut as VS Code writes it on the platform in use, for
-  // a button's tip and for a menu row, which have to agree. Written from the
-  // test CodeMirror reads `Mod` with (/Mac/ on navigator.platform; its iOS
-  // branch cannot run in a webview), so a tip cannot name Ctrl where the
-  // binding answers to Cmd.
-  function shortcutLabel(key, also) {
-    const mac = /Mac/.test(navigator.platform);
-    const second = also ? also[mac ? "mac" : "pc"] : "";
-    return mac
-      ? (second ? { Alt: "\u2325", Shift: "\u21e7" }[second] : "") + "\u2318" + key
-      : "Ctrl+" + (second ? second + "+" : "") + key;
+  // The key a row of a menu shares with the keyboard, in the words
+  // CodeMirror's keymaps write one in: `bind` where the row's command is
+  // bound under such a name ({ key: "Mod-Shift-l" }, with `mac` where a Mac
+  // answers to another), or the letter of a Mod- binding (`key`) with the
+  // second modifier the block keys carry (`also`, BLOCK_MOD). Null for a row
+  // that has no key.
+  function rowBinding(entry) {
+    if (entry.bind) return entry.bind;
+    if (!entry.key) return null;
+    const second = function (side) {
+      return entry.also && entry.also[side] ? entry.also[side] + "-" : "";
+    };
+    return { key: "Mod-" + second("pc") + entry.key, mac: "Mod-" + second("mac") + entry.key };
   }
 
-  // A button of the bar. `menu` is a list of entries for a drop-down panel:
-  // {name, label (HTML), click}; the panel opens on click and closes on a
-  // click anywhere else or on Escape. `draw` lays a panel out by its own
-  // hand, once, where a list of rows will not do (the music symbols, whose
-  // families share rows), and `panel` is a class of the panel's own.
+  // What such a key is made of on the platform in use: its modifiers, and
+  // the key itself. Read by the test CodeMirror reads `Mod` with (/Mac/ on
+  // navigator.platform; its iOS branch cannot run in a webview), so a row
+  // cannot name Ctrl where the binding answers to Cmd.
+  function keyParts(bind) {
+    const mac = /Mac/.test(navigator.platform);
+    const parts = ((mac && bind.mac) || bind.key).split("-");
+    const key = parts.pop();
+    const has = function (name) {
+      return parts.indexOf(name) >= 0;
+    };
+    return {
+      mac: mac,
+      ctrl: has("Ctrl") || (!mac && has("Mod")),
+      cmd: has("Cmd") || (mac && has("Mod")),
+      shift: has("Shift"),
+      alt: has("Alt"),
+      key: key.length === 1 ? key.toUpperCase() : key,
+    };
+  }
+
+  // The name of a key as VS Code writes it on the platform in use, which is
+  // what a row of a menu shows at its far edge: the modifiers in VS Code's
+  // order, spelled out on a PC and as their signs on a Mac, and an arrow as
+  // its arrow.
+  const KEY_SIGNS = { ArrowUp: "\u2191", ArrowDown: "\u2193", ArrowLeft: "\u2190", ArrowRight: "\u2192" };
+  // The modifiers in that order, each as a PC spells it and as a Mac signs
+  // it (a PC has no Cmd).
+  const KEY_MODS = [
+    ["ctrl", "Ctrl+", "\u2303"],
+    ["shift", "Shift+", "\u21e7"],
+    ["alt", "Alt+", "\u2325"],
+    ["cmd", "", "\u2318"],
+  ];
+  // The modifiers of such a key, or those of them `keep` keeps.
+  function modsLabel(k, keep) {
+    return KEY_MODS.filter(function (m) {
+      return k[m[0]] && (!keep || keep(m[0]));
+    })
+      .map(function (m) {
+        return k.mac ? m[2] : m[1];
+      })
+      .join("");
+  }
+  function keyLabel(bind) {
+    const k = keyParts(bind);
+    return modsLabel(k) + (KEY_SIGNS[k.key] || k.key);
+  }
+
+  // Two keys that differ in their modifiers alone, written as one the way
+  // the name of their line is written ("Note to the left/right"): the
+  // modifiers that tell them apart with a slash between, then the ones they
+  // share and the key, Ctrl/Alt+1, and on a Mac ⌘/⌥1. Not VS Code's order
+  // for both halves where the two share a modifier: Ctrl+Shift and
+  // Shift+Alt are Ctrl/Alt+Shift, whose right half reads Alt+Shift, since
+  // no one order keeps both. For two bindings of one key, each with a
+  // modifier the other has not, which the roster's two pairs are: else a
+  // half is written as nothing ("/Shift+1"), or the second key not at all
+  // (found by the second reading of the code, 2026-10-14).
+  function eitherLabel(a, b) {
+    const x = keyParts(a);
+    const y = keyParts(b);
+    const apart = function (k, other) {
+      return modsLabel(k, function (m) {
+        return !other[m];
+      });
+    };
+    const shared = modsLabel(x, function (m) {
+      return y[m];
+    });
+    return apart(x, y).replace(/\+$/, "") + "/" + apart(y, x) + shared + (KEY_SIGNS[x.key] || x.key);
+  }
+
+  // And as aria-keyshortcuts wants it, for whoever reads the bar without
+  // seeing it.
+  function keyAria(bind) {
+    const k = keyParts(bind);
+    return (k.ctrl ? "Control+" : "") + (k.cmd ? "Meta+" : "") + (k.shift ? "Shift+" : "") + (k.alt ? "Alt+" : "") + k.key;
+  }
+
+  // The binding one of CodeMirror's own keymaps gives a command, so that a
+  // row names the key its command really has: found by the command where the
+  // bundle exports it (undo, the search panel), and by the key where it does
+  // not (the bundle carries the default keymap and not every command in it),
+  // in which case the row runs whatever that key runs.
+  function ownBinding(keymap, what) {
+    const found = keymap.find(function (b) {
+      return typeof what === "string" ? b.key === what : b.run === what && !!b.key;
+    });
+    return found || null;
+  }
+
+  // The rows of the bar's menus by name, each with what brings it up to
+  // date, so that a row whose tick or whose greying follows a setting is put
+  // right when the setting comes back (syncRow) and not only the next time
+  // its panel opens: a row says what is so whether or not anybody is looking
+  // at it. A name may stand in two places, a row of the Score menu and the
+  // same thing on the score panel, and each is kept.
+  const menuRows = new Map();
+  function keepRow(name, mark) {
+    if (!menuRows.has(name)) menuRows.set(name, []);
+    menuRows.get(name).push(mark);
+  }
+
+  // What a row says of the state it stands for, read off its entry: greyed
+  // while there is nothing for it to do (`off`), and ticked while what it
+  // names is on (`on`). The tick is the one the theme and the heading level
+  // already wore, after the name and before the key.
+  function markRow(row, entry) {
+    const off = !!(entry.off && entry.off());
+    row.classList.toggle("mdm-menu__item--off", off);
+    row.disabled = off;
+    if (!entry.on) return;
+    const on = !!entry.on();
+    let tick = row.querySelector(".mdm-swatch__tick");
+    if (on && !tick) {
+      tick = document.createElement("span");
+      tick.className = "mdm-swatch__tick";
+      tick.textContent = "✓";
+      row.insertBefore(tick, row.querySelector(".mdm-menu__key, .mdm-menu__more"));
+    } else if (!on && tick) {
+      row.removeChild(tick);
+    }
+    row.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+
+  function syncRow(name) {
+    (menuRows.get(name) || []).forEach(function (mark) {
+      mark();
+    });
+  }
+
+  // The arrowhead of a row that leads to more, fill only like the glyphs.
+  const MORE_ICON = '<svg viewBox="0 0 8 8"><path d="M2.3.9v6.2L6.3 4z"/></svg>';
+
+  // How long a submenu stays up after the pointer has gone from its row to
+  // another row of the same panel. The way from a row to the lower rows of
+  // its submenu is a diagonal across the rows under it, and shut at the
+  // first of them the submenu was gone before the pointer got there.
+  const SUB_LINGER = 250;
+  let subLinger = 0;
+
+  // A submenu beside the row it hangs from: to the right, and to the left
+  // where the pane ends before it would. In a pane too narrow for either it
+  // is moved in over its own panel by what it overhangs, never past the
+  // pane's left edge, which is what keepInPane does with a panel under its
+  // button. SUB_RISE is how far the stylesheet lifts it for its first row to
+  // stand level with the row it hangs from (.mdm-menu--sub).
+  const SUB_RISE = 5;
+  function placeSub(sub) {
+    sub.classList.remove("mdm-menu--left");
+    sub.style.left = "";
+    sub.style.top = "";
+    const pane = document.getElementById("app").getBoundingClientRect();
+    // As tall as the pane lets it be, as the menu under a word is as tall as
+    // the room under the bar (fitUnderBar): held to the 60% of the
+    // stylesheet, the notes of the Score menu, 353px of them, would scroll
+    // in a pane under 588px tall with the room to show them whole. Not a
+    // list that may be any length (`mdm-menu--long`: the themes), which is
+    // what that 60% is for.
+    if (!sub.classList.contains("mdm-menu--long")) {
+      const css = getComputedStyle(sub);
+      const frame = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom) + parseFloat(css.borderTopWidth) + parseFloat(css.borderBottomWidth);
+      sub.style.maxHeight = Math.max(0, Math.floor(pane.height - 8 - frame)) + "px";
+    }
+    // And up by what it passes the foot of the pane, the top of the pane
+    // being as far as it goes.
+    const tall = sub.getBoundingClientRect();
+    const under = Math.min(tall.bottom - (pane.bottom - 4), tall.top - (pane.top + 4));
+    if (under > 0) sub.style.top = -(SUB_RISE + Math.round(under)) + "px";
+    if (sub.getBoundingClientRect().right <= pane.right - 4) return;
+    sub.classList.add("mdm-menu--left");
+    if (sub.getBoundingClientRect().left >= pane.left + 4) return;
+    sub.classList.remove("mdm-menu--left");
+    const box = sub.getBoundingClientRect();
+    const over = Math.min(box.right - (pane.right - 4), box.left - (pane.left + 4));
+    if (over > 0) sub.style.left = "calc(100% - " + Math.round(over) + "px)";
+  }
+
+  // The keys a legend names (menuRow). Two that differ by the key alone are
+  // written with what they share once, Ctrl+↑ ↓, a run of digits by its
+  // two ends, Ctrl+0…7, and two runs that differ by a modifier (`or`) as
+  // one, Ctrl/Alt+1…7 (eitherLabel).
+  function keysLabel(keys) {
+    const first = keys.or ? eitherLabel(keys.first, keys.or) : keyLabel(keys.first);
+    if (keys.to) return first + "\u2026" + keys.to;
+    return first + " " + (KEY_SIGNS[keys.then] || keys.then);
+  }
+
+  // One row of a menu, or of the score panel: its glyph, where the panel it
+  // stands in keeps a column of them (`glyphs`), its name, and at its far
+  // edge the key it shares with the keyboard. A legend (`keys`) is the same
+  // line with nothing to press: a pair of keys or a run of them, there to be
+  // read, and not a button.
+  function menuRow(entry, glyphs) {
+    const row = document.createElement(entry.keys ? "div" : "button");
+    if (entry.keys) {
+      row.className = "mdm-menu__legend";
+    } else {
+      row.type = "button";
+      row.className = "mdm-menu__item";
+    }
+    row.setAttribute("data-type", entry.name);
+    // A row that works on the selection is exempt from dismissFromOutside,
+    // and so is one that reads where the caret is (`readsCaret`: the switch
+    // of the score mode, which starts on the score the caret was in and
+    // gives the caret back where it found it). One that writes into the text
+    // greys out under the score mode, as the buttons these rows were did.
+    if (entry.caret || entry.readsCaret) row.classList.add("mdm-btn--caret");
+    if (entry.caret || entry.edit) row.classList.add("mdm-btn--edit");
+    if (glyphs) {
+      const glyph = document.createElement("span");
+      glyph.className = "mdm-menu__icon";
+      glyph.innerHTML = entry.icon || "";
+      row.appendChild(glyph);
+    }
+    if (entry.label !== undefined) row.insertAdjacentHTML("beforeend", entry.label);
+    else row.appendChild(document.createTextNode(entry.tip));
+    const bind = rowBinding(entry);
+    if (bind || entry.keys) {
+      const key = document.createElement("span");
+      key.className = "mdm-menu__key";
+      key.textContent = bind ? keyLabel(bind) : keysLabel(entry.keys);
+      row.appendChild(key);
+      if (bind) row.setAttribute("aria-keyshortcuts", keyAria(bind));
+    }
+    return row;
+  }
+
+  // Lays the entries of a menu out in its panel. An entry is one of:
+  //
+  //  - a row: {name, click}, with its name as text (`tip`, the name the same
+  //    control had in its tip while it was a button) or as HTML made by its
+  //    owner (`label`: a swatch, a tick of its own), a glyph (`icon`), the
+  //    key it shares with the keyboard (rowBinding), and what markRow reads;
+  //  - a row that leads to more: the same with `menu`, the entries of the
+  //    submenu, in place of `click`, or with `draw` where the submenu is
+  //    laid out by its own hand because a list of rows will not do (the
+  //    music symbols, whose families share rows), under a class of its own
+  //    (`panel`);
+  //  - a legend: {name, keys}, a line that shows a pair of keys or a run of
+  //    them and takes no press (menuRow);
+  //  - "|", a rule between two runs of rows;
+  //  - {head, note}, a header and the quiet line that may follow it, naming
+  //    the branch the rows under them belong to. Neither is a row: they take
+  //    no press and carry no data-type, so nothing that reads the panel's
+  //    buttons finds them.
+  //
+  // Where one row of a panel has a glyph every row keeps the room of one, so
+  // the names stand in one column; `column` keeps it whatever the entries,
+  // for a panel filled in several runs (the score panel). `rows` is where
+  // each row is kept with its entry, for the panel to read them all again
+  // when it opens.
+  function fillMenu(panel, entries, rows, column) {
+    const list = (entries || []).filter(Boolean);
+    const glyphs =
+      !!column ||
+      list.some(function (entry) {
+        return !!entry.icon;
+      });
+    const settle = function (group) {
+      panel.querySelectorAll(":scope > .mdm-menu__group--open").forEach(function (el) {
+        if (el !== group) el.classList.remove("mdm-menu__group--open");
+      });
+    };
+    list.forEach(function (entry) {
+      if (entry === "|") {
+        const rule = document.createElement("div");
+        rule.className = "mdm-menu__rule";
+        panel.appendChild(rule);
+        return;
+      }
+      if (entry.head) {
+        const head = document.createElement("div");
+        head.className = "mdm-menu__head";
+        head.textContent = entry.head;
+        panel.appendChild(head);
+        if (entry.note) {
+          const note = document.createElement("div");
+          note.className = "mdm-menu__note";
+          note.textContent = entry.note;
+          panel.appendChild(note);
+        }
+        return;
+      }
+      const row = menuRow(entry, glyphs);
+      if (entry.keys) {
+        // A press on a legend is a press on nothing: the menu it is read in
+        // stays up, where a press anywhere else on the page would shut it.
+        row.addEventListener("click", function (e) {
+          e.stopPropagation();
+        });
+        panel.appendChild(row);
+        return;
+      }
+      rows.set(row, entry);
+      keepRow(entry.name, function () {
+        markRow(row, entry);
+      });
+      if (!entry.menu && !entry.draw) {
+        row.addEventListener("click", function (e) {
+          e.stopPropagation();
+          closeMenus();
+          entry.click();
+        });
+        // The pointer has come to a row that leads nowhere: a submenu left
+        // open beside another row is shut, once it has had its time.
+        row.addEventListener("mouseenter", function () {
+          clearTimeout(subLinger);
+          if (panel.querySelector(":scope > .mdm-menu__group--open")) {
+            subLinger = setTimeout(function () {
+              settle(null);
+            }, SUB_LINGER);
+          }
+        });
+        panel.appendChild(row);
+        return;
+      }
+      // A row that leads to more, and the submenu it leads to. The submenu
+      // is a sibling of the row inside a group of the two: a button cannot
+      // hold the buttons of another panel.
+      const group = document.createElement("div");
+      group.className = "mdm-menu__group";
+      const more = document.createElement("span");
+      more.className = "mdm-menu__more";
+      more.innerHTML = MORE_ICON;
+      row.appendChild(more);
+      const sub = document.createElement("div");
+      sub.className = "mdm-menu mdm-menu--sub" + (entry.panel ? " " + entry.panel : "");
+      // A submenu whose every cell works on the selection (the music
+      // symbols) is exempt from dismissFromOutside with its row: a press on
+      // a cell put the block being edited away before the cell could find
+      // the caret it was for. The rows of a list say it one by one.
+      if (entry.caret) sub.classList.add("mdm-btn--caret");
+      if (entry.draw) entry.draw(sub);
+      else fillMenu(sub, entry.menu, rows);
+      const show = function () {
+        clearTimeout(subLinger);
+        if (group.classList.contains("mdm-menu__group--open")) return;
+        settle(group);
+        group.classList.add("mdm-menu__group--open");
+        placeSub(sub);
+      };
+      // Under the pointer, or pressed: either way it opens, and neither
+      // shuts it, since a press on a row already opened by the pointer on
+      // its way there is a press to see what is in it.
+      row.addEventListener("click", function (e) {
+        e.stopPropagation();
+        show();
+      });
+      row.addEventListener("mouseenter", function () {
+        clearTimeout(subLinger);
+        if (!panel.querySelector(":scope > .mdm-menu__group--open")) show();
+        else subLinger = setTimeout(show, SUB_LINGER);
+      });
+      sub.addEventListener("mouseenter", function () {
+        clearTimeout(subLinger);
+      });
+      group.appendChild(row);
+      group.appendChild(sub);
+      panel.appendChild(group);
+      // A panel that scrolls cuts off whatever hangs outside it, a submenu
+      // among it: one that holds a submenu gives up the scrolling.
+      panel.classList.add("mdm-menu--nest");
+    });
+  }
+
+  // How tall the menu under a word may be: the room there is under it, down
+  // to the foot of the pane. The panels of the bar are held to 60% of the
+  // pane's height (style.css), the rule for a list that may be any length,
+  // the themes; held to it, a menu of a dozen rows scrolled in a pane 494px
+  // tall with the room under it to show it whole (seen in the real window,
+  // 2026-10-13). Not the one that holds a submenu, which does not scroll.
+  function fitUnderBar(panel) {
+    if (panel.classList.contains("mdm-menu--nest")) return;
+    const pane = document.getElementById("app").getBoundingClientRect();
+    // The height the stylesheet limits is the rows': the panel's padding and
+    // border stand outside it.
+    const css = getComputedStyle(panel);
+    const frame = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom) + parseFloat(css.borderTopWidth) + parseFloat(css.borderBottomWidth);
+    panel.style.maxHeight = Math.max(0, Math.floor(pane.bottom - panel.getBoundingClientRect().top - 8 - frame)) + "px";
+  }
+
+  // ---------- The Score menu and the score panel ----------
+  //
+  // The music's corner of the bar, the owner's asks of 2026-10-13: the word
+  // Score beside Page, with the rows variant A of design-toolbar.html drew
+  // under it, and what Score navigation does kept at the side as well, as
+  // variant D had it, for whoever wants it there.
+  //
+  // What the mode's keys do is written once, the roster below, and read
+  // twice: the Score menu lays it out under three rows of its own (Notes,
+  // Bars, Move and select), and the score panel as a pad of the figures over
+  // the same rows. So a key has one name in both, and neither says what the
+  // other does not.
+  //
+  // A row with one key is a command: a press on it does what the key does,
+  // by the same road (the commands over scoreKeys), and it is greyed while
+  // the mode is off and the key is the text's. A row that names a pair of
+  // keys or a run of them is a legend: it is there for the keys to be read
+  // and takes no press (menuRow), and a legend is not greyed with the mode,
+  // since reading the keys is how a reader comes to turn it on.
+  //
+  // The names are the owner's where he gave one (2026-10-13, on trying the
+  // first set), and the rest follow the three things his have in common: a
+  // place is to the left or to the right of another, never before or after
+  // it; the two halves of a pair of keys are told apart by a slash; and no
+  // name opens with an article.
+  //
+  // Left out, as the drawing marked them, are what the editor cannot do
+  // yet: a metronome, a check of the bars and a fill of one with rests.
+  const FIGURE_NAMES = { 1: "Whole note", 2: "Half note", 3: "Quarter note", 4: "Eighth note", 5: "Sixteenth note", 6: "32nd note", 7: "64th note" };
+  let scoreRows = null;
+  function scoreRoster() {
+    if (scoreRows) return scoreRows;
+    const off = function () {
+      return !scoreMode;
+    };
+    const command = function (name, tip, key, run, icon) {
+      return { name: name, tip: tip, icon: icon, bind: { key: key }, off: off, click: run };
+    };
+    // An entry of the pad on the score panel, where the rest of the roster
+    // stands as rows.
+    const pad = function (entry) {
+      entry.pad = true;
+      return entry;
+    };
+    const figures = Object.keys(FIGURE_KEYS).map(function (digit) {
+      const entry = command(
+        "score-note-" + digit,
+        FIGURE_NAMES[digit],
+        digit,
+        function () {
+          scoreWrites("figure", FIGURE_KEYS[digit]);
+        },
+        NOTE_ICONS[digit]
+      );
+      // The figure in use (tellScoreFigure).
+      entry.on = function () {
+        return scoreInUse === FIGURE_KEYS[digit];
+      };
+      return pad(entry);
+    });
+    scoreRows = {
+      // The switch of the mode. Never greyed while the mode is on, the row
+      // being the way out of it.
+      mode: {
+        name: "mdm-score-navigation",
+        icon: SCORE_MODE_ICON,
+        tip: "Score navigation",
+        on: function () {
+          return scoreMode;
+        },
+        off: function () {
+          return !scoreMode && !!view && !hasScores(view.state);
+        },
+        click: pressScoreMode,
+        readsCaret: true,
+      },
+      // The score panel (buildScorePanel): asked for or not is a setting, as
+      // the outline's is (mdm.scorePanel), and its row of the Score menu and
+      // its button at the head of the panel say the setting, in the mode and
+      // out of it; the panel itself is up only under the mode
+      // (applyScorePanel). "Side panel" is the owner's name (2026-10-13).
+      panel: {
+        name: "mdm-score-panel",
+        icon: PANEL_ICON,
+        tip: "Side panel",
+        on: function () {
+          return scorePanelOpen;
+        },
+        click: function () {
+          askSetting("scorePanel", scorePanelOpen ? "hidden" : "shown");
+        },
+      },
+      notes: figures.concat([
+        "|",
+        pad(
+          command(
+            "score-rest",
+            "Rest",
+            "0",
+            function () {
+              scoreWrites("rest");
+            },
+            REST_ICON
+          )
+        ),
+        { name: "score-keys-rest", tip: "Rest of given length", icon: REST_GIVEN_ICON, keys: { first: { key: "Shift-1" }, to: "7" } },
+        "|",
+        // The two sides on one line, the owner's ask of 2026-10-14
+        // ("comprime note to the left/right"): Ctrl for the left and Alt
+        // for the right, in the order the name has them.
+        // From 1: Ctrl or Alt with 0 puts in a rest, as long as the
+        // cursor's place (scoreWrites), and no note (the owner's catch of
+        // 2026-10-15: the run had started at 0).
+        { name: "score-keys-sides", tip: "Note to the left/right", keys: { first: { key: "Mod-1" }, or: { key: "Alt-1" }, to: "7" } },
+        pad(
+          command(
+            "score-chord",
+            "A note more in the chord",
+            "Enter",
+            function () {
+              scoreWrites("head");
+            },
+            CHORD_ICON
+          )
+        ),
+        pad(
+          command(
+            "score-take-out",
+            "Take out",
+            "Delete",
+            function () {
+              scoreWrites("out");
+            },
+            TAKE_OUT_ICON
+          )
+        ),
+      ]),
+      bars: [
+        command(
+          "score-bar-before",
+          "Add bar to the left",
+          "Mod-ArrowLeft",
+          function () {
+            scoreAddsBar("before");
+          },
+          BAR_BEFORE_ICON
+        ),
+        command(
+          "score-bar-after",
+          "Add bar to the right",
+          "Mod-ArrowRight",
+          function () {
+            scoreAddsBar("after");
+          },
+          BAR_AFTER_ICON
+        ),
+      ],
+      moves: [
+        { name: "score-keys-across", tip: "Move left/right", keys: { first: { key: "ArrowLeft" }, then: "ArrowRight" } },
+        { name: "score-keys-step", tip: "Step up/down", keys: { first: { key: "ArrowUp" }, then: "ArrowDown" } },
+        { name: "score-keys-staff", tip: "Staff above/below", keys: { first: { key: "Mod-ArrowUp" }, then: "ArrowDown" } },
+        { name: "score-keys-line", tip: "Line above/below", keys: { first: { key: "Mod-Shift-ArrowUp" }, then: "ArrowDown" } },
+        "|",
+        { name: "score-keys-select", tip: "Select", keys: { first: { key: "Shift-ArrowLeft" }, then: "ArrowRight" } },
+        { name: "score-keys-select-parts", tip: "Select in every part", keys: { first: { key: "Mod-Shift-ArrowLeft" }, then: "ArrowRight" } },
+        command("score-select-all", "Select all scores", "Mod-a", scoreChoosesAll),
+        command("score-copy", "Copy", "Mod-c", copyScoreSelection),
+        command("score-cut", "Cut", "Mod-x", scoreCuts),
+        command("score-paste", "Paste", "Mod-v", pasteScoreClipboard),
+        command("score-let-go", "Let go", "Escape", scoreLetsGo),
+      ],
+      play: command("score-play", "Play/pause", "Space", toggleScorePlayback, PLAY_PAUSE_ICON),
+      // The playing: whether the page keeps up with the playhead.
+      follow: {
+        name: "mdm-follow",
+        icon: FOLLOW_ICON,
+        tip: "Follow the playhead",
+        on: function () {
+          return following;
+        },
+        click: function () {
+          askSetting("followPlayhead", following ? "still" : "follow");
+        },
+      },
+    };
+    return scoreRows;
+  }
+
+  // The commands of the roster by name: what greys out while the mode is off
+  // (updateScoreRows).
+  function scoreRosterNames() {
+    const roster = scoreRoster();
+    return roster.notes
+      .concat(roster.bars, roster.moves, [roster.play])
+      .filter(function (entry) {
+        return !!entry.click;
+      })
+      .map(function (entry) {
+        return entry.name;
+      });
+  }
+
+  // The Keys face of the score panel (buildScorePanel): every key the mode
+  // answers to (scoreKeys), but Ctrl or Alt with 0, a rest as long as the
+  // cursor's place put in to either side, whose line waits for the owner's
+  // name since the note run starts at 1 (B20 of tests/README.md), for a reader who writes with the keyboard and
+  // keeps the panel beside the score to look at as they write (the owner's
+  // ask of 2026-10-14). The runs are the Buttons face's, Notes, Bars and
+  // Selection, in its order, with the moves, which have no button, as a run
+  // of their own before the choosing, and the playing and the history last.
+  //
+  // A key that has a row is its row's own entry, so it says here what it
+  // says in the Score menu and on the other face. The seven keys of the
+  // figures are one line, written as a run is under it (his ask: "no vayas
+  // nota por nota, comprime 1...7"), and named as his Rest of given length
+  // is. Written here and nowhere else are the keys that have no row: a rest
+  // of a figure put in to the left or to the right, Backspace, and with a
+  // stretch chosen the walk over the parts (the two keys that walk the lines
+  // with nothing chosen, so they stand twice, once in each of their runs)
+  // and the pick of one. Undo and Redo are named by the binding the rows of
+  // the Edit menu read (ownBinding), so the two places cannot name two keys;
+  // under the mode they take back and make again the mode's own changes.
+  //
+  // The names of the lines that are new follow what the owner's names have
+  // in common, as the roster's do.
+  let scoreKeyLines = null;
+  function scoreKeysFace() {
+    if (scoreKeyLines) return scoreKeyLines;
+    const roster = scoreRoster();
+    const named = {};
+    roster.notes.concat(roster.bars, roster.moves, [roster.play]).forEach(function (entry) {
+      if (entry !== "|") named[entry.name] = entry;
+    });
+    // By name. A name that is not the roster's leaves its line out, and says
+    // so on the console, where SM119, which reads the face whole, finds the
+    // line missing: not a throw, since this runs as the editor is built
+    // (init builds the panel before the view), and a throw here would leave
+    // every document a bar over an empty pane (found by a second reading of
+    // the code, 2026-10-14).
+    const row = function (name) {
+      if (!named[name]) console.error("scoreKeysFace: no row of the mode is named " + name);
+      return named[name] || null;
+    };
+    scoreKeyLines = [
+      { title: "Notes" },
+      // With the quarter note's glyph, the owner's ask of 2026-10-14
+      // ("ponle iconito una negra"): one figure for the seven, whose own
+      // glyphs are the pad of the other face.
+      { name: "score-keys-note", tip: "Note of given length", icon: NOTE_ICONS[3], keys: { first: { key: "1" }, to: "7" } },
+      row("score-rest"),
+      row("score-keys-rest"),
+      "|",
+      row("score-keys-sides"),
+      // Its twin, on one line as it is: Ctrl for the left and Alt for the
+      // right, with Shift. The left with Ctrl on a Mac as well, and not
+      // Cmd: the system takes Cmd+Shift+3, 4 and 5 for its screenshots
+      // (BLOCK_MOD), which are the quarter, the eighth and the sixteenth,
+      // and the mode answers to Ctrl there as well (scoreKeys). Found by a
+      // second reading of the code, 2026-10-14.
+      { name: "score-keys-rest-sides", tip: "Rest to the left/right", keys: { first: { key: "Mod-Shift-1", mac: "Ctrl-Shift-1" }, or: { key: "Shift-Alt-1" }, to: "7" } },
+      row("score-chord"),
+      row("score-take-out"),
+      { name: "score-keys-back", tip: "Take out and move left", bind: { key: "Backspace" } },
+      { title: "Bars" },
+      row("score-bar-before"),
+      row("score-bar-after"),
+      { title: "Move" },
+      row("score-keys-across"),
+      row("score-keys-step"),
+      row("score-keys-staff"),
+      row("score-keys-line"),
+      { title: "Selection" },
+      row("score-keys-select"),
+      row("score-keys-select-parts"),
+      { name: "score-keys-parts", tip: "Part above/below", keys: { first: { key: "Mod-Shift-ArrowUp" }, then: "ArrowDown" } },
+      { name: "score-keys-pick", tip: "Add/remove part", bind: { key: "Mod-Shift-Space" } },
+      "|",
+      row("score-select-all"),
+      row("score-copy"),
+      row("score-cut"),
+      row("score-paste"),
+      row("score-let-go"),
+      "|",
+      row("score-play"),
+      { name: "score-keys-undo", tip: "Undo", icon: UNDO_ICON, bind: ownBinding(CM.historyKeymap, CM.undo) },
+      { name: "score-keys-redo", tip: "Redo", icon: REDO_ICON, bind: ownBinding(CM.historyKeymap, CM.redo) },
+    ].filter(Boolean);
+    return scoreKeyLines;
+  }
+
+  // A line of the Keys face, written as its row is written on the Buttons
+  // face and in the menu (menuRow): the room of a glyph, with the row's
+  // glyph where it has one, the name, and at the far edge the key as the
+  // platform writes it. But a line to be read and not a control: a legend,
+  // with no wash under the pointer and nothing a press does, as a legend of
+  // a menu is, and in the ink of a row, since on this face every line is
+  // read and none is told from a row by being quieter (style.css). Named by
+  // data-line and not data-type, so that whatever reads the panel's
+  // controls by their names finds none of these.
+  function keyLine(entry) {
+    const line = document.createElement("div");
+    line.className = "mdm-menu__legend mdm-score-panel__line";
+    line.setAttribute("data-line", entry.name);
+    const glyph = document.createElement("span");
+    glyph.className = "mdm-menu__icon";
+    glyph.innerHTML = entry.icon || "";
+    line.appendChild(glyph);
+    line.appendChild(document.createTextNode(entry.tip));
+    // With no key where its binding is not found, as menuRow leaves a row.
+    const bind = entry.keys ? null : rowBinding(entry);
+    if (entry.keys || bind) {
+      const key = document.createElement("span");
+      key.className = "mdm-menu__key";
+      key.textContent = entry.keys ? keysLabel(entry.keys) : keyLabel(bind);
+      line.appendChild(key);
+    }
+    return line;
+  }
+
+  // The score panel: what Score navigation does, kept in sight down the
+  // right edge of the editor, the twin of the outline down the left. It is
+  // up while two things are so: it is asked for (mdm.scorePanel, written by
+  // the "Side panel" row of the Score menu) and the mode is on. Neither
+  // alone brings it up, the owner's rule of 2026-10-13, after trying it kept
+  // up out of the mode as well, where all it had to give was its switch; and
+  // the row is ticked by the setting alone, so that with the mode off it
+  // says what the mode will bring, panel or none (applyScorePanel).
+  //
+  // At its head the two switches that bring it, the mode's, which is the
+  // way out of it there, and its own; under them the two words that choose
+  // the face in sight. Buttons: the
+  // figures and the three keys beside them as a pad of buttons, each with
+  // its key written under it and the one in use lit, then the rows of the
+  // Score menu that are commands, and the two of the playing. Keys: every
+  // key of the mode, on lines to be read (scoreKeysFace).
+  //
+  // Not the three of the score's look (the fill, the lines, the place),
+  // which are set once and left and stay in the menu.
+  // Shown unless the host says hidden, its default since 2026-10-14: a
+  // setting the page is given no word for is read as the host reads it,
+  // whose fallback is shown (SM123), as the playhead's is.
+  let scorePanelOpen = SETTINGS.scorePanel !== "hidden";
+  // The face in sight (mdm.scorePanelFace), written by the two words at the
+  // panel's head: the panel comes back on the face it was left on.
+  let scorePanelFace = SETTINGS.scorePanelFace === "keys" ? "keys" : "buttons";
+
+  // What a key of the pad says of the state it stands for, as markRow says
+  // it of a row: greyed with nothing to do, and on the disc while it is the
+  // figure in use, the mark a button of the bar wears.
+  function markPad(btn, entry) {
+    const off = !!(entry.off && entry.off());
+    btn.classList.toggle("mdm-btn--off", off);
+    btn.disabled = off;
+    if (!entry.on) return;
+    const on = entry.on();
+    btn.classList.toggle("mdm-btn--on", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+
+  function buildScorePanel() {
+    const roster = scoreRoster();
+    const panel = document.createElement("div");
+    panel.className = "mdm-score-panel";
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", "Score panel");
+    const rows = new Map();
+    const title = function (into, text) {
+      const el = document.createElement("div");
+      el.className = "mdm-score-panel__title";
+      el.textContent = text;
+      into.appendChild(el);
+    };
+    // The names of the panel stand in one column, with the room of a glyph
+    // before each whether or not its run of rows has one.
+    const fill = function (into, entries) {
+      fillMenu(into, entries, rows, true);
+    };
+    // The head: the two switches that bring the panel up, Score navigation
+    // and Side panel, at its two edges, each a button of the bar with its
+    // glyph alone, on the disc while what it names is on, which with the
+    // panel in sight both always are. A press on either takes the panel
+    // away: with the mode, or alone, the mode staying on. The owner's pick
+    // of 2026-10-15, variant 2 of design-score-panel-rest.html, the
+    // asymmetry he asked to be put right put right his second way: "Deja
+    // score navigation y side panel solo con los iconos. El cartel con el
+    // texto debe salir cuando se le posa el cursor encima". The name is the
+    // bar's tip, under the switch and opening inward, from its left edge
+    // under the left one and to its right edge under the right one: the
+    // panel cuts what hangs past its edges, and a tip centred under a
+    // switch at an edge would hang half past it.
+    const head = document.createElement("div");
+    head.className = "mdm-score-panel__head";
+    panel.appendChild(head);
+    [roster.mode, roster.panel].forEach(function (entry, i) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mdm-btn mdm-tip mdm-score-panel__toggle " + (i === 0 ? "mdm-tip--s-start" : "mdm-tip--s-end");
+      btn.setAttribute("aria-label", entry.tip);
+      // As its row of the menu is: a press that reads where the caret is,
+      // exempt from dismissFromOutside (menuRow).
+      if (entry.readsCaret) btn.classList.add("mdm-btn--caret");
+      btn.setAttribute("data-type", entry.name);
+      btn.innerHTML = entry.icon;
+      btn.addEventListener("click", function () {
+        entry.click();
+      });
+      const mark = function () {
+        markPad(btn, entry);
+      };
+      keepRow(entry.name, mark);
+      mark();
+      head.appendChild(btn);
+    });
+    // The two faces, and under the two switches of the head the two words
+    // that choose between them (the owner's pick of 2026-10-14, E1 of
+    // design-score-key-help-E.html with the keys of the figures in one
+    // line): Buttons, for the pointer, and Keys, for whoever writes with the
+    // keyboard and keeps the panel beside the score to read. Both are laid
+    // out and the one out of sight has no height (style.css), so the panel
+    // is as wide as the wider of the two and the text keeps its wrap as the
+    // face changes. A word asks for its face, and the face changes as the
+    // setting comes back, as every switch of the bar does
+    // (applyScorePanelFace).
+    const pick = document.createElement("div");
+    pick.className = "mdm-score-panel__switch";
+    pick.setAttribute("role", "group");
+    pick.setAttribute("aria-label", "Face of the panel");
+    panel.appendChild(pick);
+    const faces = {};
+    [
+      ["buttons", "Buttons"],
+      ["keys", "Keys"],
+    ].forEach(function (pair) {
+      const which = pair[0];
+      const word = document.createElement("button");
+      word.type = "button";
+      word.className = "mdm-btn mdm-score-panel__tab";
+      word.setAttribute("data-type", "score-face-" + which);
+      word.textContent = pair[1];
+      word.addEventListener("click", function () {
+        if (scorePanelFace !== which) askSetting("scorePanelFace", which);
+      });
+      pick.appendChild(word);
+      const face = document.createElement("div");
+      face.className = "mdm-score-panel__face";
+      face.setAttribute("data-face", which);
+      face.setAttribute("role", "group");
+      face.setAttribute("aria-label", pair[1]);
+      panel.appendChild(face);
+      faces[which] = { word: word, face: face };
+    });
+    keepRow("mdm-score-panel-face", function () {
+      Object.keys(faces).forEach(function (which) {
+        const shown = which === scorePanelFace;
+        faces[which].word.classList.toggle("mdm-btn--on", shown);
+        faces[which].word.setAttribute("aria-pressed", shown ? "true" : "false");
+        faces[which].face.classList.toggle("mdm-score-panel__face--away", !shown);
+      });
+    });
+    // Buttons. The legends of the menu are not on it: they are a help and
+    // no buttons (the owner, 2026-10-13), and they stand on the other face
+    // with every key there is. So the run of the menu that moves and
+    // chooses is, here, the run that chooses.
+    const buttons = faces.buttons.face;
+    title(buttons, "Notes");
+    // The pad: the figures in a row, then the rest, the chord and what takes
+    // out, and under them the line that names the key under the pointer or
+    // the focus, as the panel of the music symbols names its cells (a glyph
+    // carries no words of its own, and a tip would be cut by the panel's
+    // edge, which scrolls).
+    const pads = document.createElement("div");
+    pads.className = "mdm-score-panel__pads";
+    const caption = document.createElement("div");
+    caption.className = "mdm-score-panel__caption";
+    const name = function (key) {
+      caption.textContent = (key && key.getAttribute("aria-label")) || "\u00a0";
+    };
+    name(null);
+    const keys = roster.notes.filter(function (entry) {
+      return !!entry.pad;
+    });
+    const figures = Object.keys(FIGURE_KEYS).length;
+    [keys.slice(0, figures), keys.slice(figures)].forEach(function (run) {
+      const pad = document.createElement("div");
+      pad.className = "mdm-score-panel__pad";
+      run.forEach(function (entry) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "mdm-btn mdm-score-panel__key";
+        btn.setAttribute("data-type", entry.name);
+        btn.setAttribute("aria-label", entry.tip);
+        btn.setAttribute("aria-keyshortcuts", keyAria(entry.bind));
+        btn.innerHTML = entry.icon;
+        const cap = document.createElement("span");
+        cap.className = "mdm-score-panel__cap";
+        cap.textContent = keyLabel(entry.bind);
+        btn.appendChild(cap);
+        btn.addEventListener("click", function () {
+          entry.click();
+        });
+        const mark = function () {
+          markPad(btn, entry);
+        };
+        keepRow(entry.name, mark);
+        mark();
+        pad.appendChild(btn);
+      });
+      pads.appendChild(pad);
+    });
+    pads.appendChild(caption);
+    pads.addEventListener("mouseover", function (e) {
+      name(e.target.closest(".mdm-score-panel__key"));
+    });
+    pads.addEventListener("focusin", function (e) {
+      name(e.target.closest(".mdm-score-panel__key"));
+    });
+    pads.addEventListener("mouseleave", function () {
+      name(null);
+    });
+    buttons.appendChild(pads);
+    title(buttons, "Bars");
+    fill(buttons, roster.bars);
+    title(buttons, "Selection");
+    fill(
+      buttons,
+      roster.moves.filter(function (entry) {
+        return entry !== "|" && !entry.keys;
+      })
+    );
+    fill(buttons, ["|", roster.play, roster.follow]);
+    // Keys: a line to a key, or to a pair or a run of keys, in runs named as
+    // the Buttons face names its own.
+    const lines = faces.keys.face;
+    scoreKeysFace().forEach(function (entry) {
+      if (entry === "|") {
+        const rule = document.createElement("div");
+        rule.className = "mdm-menu__rule";
+        lines.appendChild(rule);
+      } else if (entry.title) title(lines, entry.title);
+      else lines.appendChild(keyLine(entry));
+    });
+    rows.forEach(function (entry, row) {
+      markRow(row, entry);
+    });
+    syncRow("mdm-score-panel-face");
+    return panel;
+  }
+
+  // What the reader of a score is looking at, while they are looking at it:
+  // the drawing the cursor stands in, where the cursor's column is whole in
+  // the pane, with how far down the pane that drawing stands. Null with no
+  // cursor in sight.
+  function scoreInSight() {
+    const beat = scoreMode && view ? document.querySelector("#app .mdm-score-cursor__beat") : null;
+    if (!beat) return null;
+    const box = beat.getBoundingClientRect();
+    const pane = view.scrollDOM.getBoundingClientRect();
+    if (box.top < pane.top || box.bottom > pane.top + view.scrollDOM.clientHeight) return null;
+    const svg = beat.ownerSVGElement;
+    return { svg: svg, top: svg.getBoundingClientRect().top - pane.top };
+  }
+
+  // That drawing put back where it stood in the pane, once a change of the
+  // column's width has wrapped the text again, and the cursor's note brought
+  // into the box of a score that has become too wide for the column.
+  //
+  // Behind CodeMirror's own measure of the page, which is run here and not
+  // waited for. CodeMirror holds the line at the head of the pane where it
+  // is, scrolling by whatever grew or shrank above it, and it works that out
+  // against the heights it had before the change: the page moved before that
+  // measure is moved a second time for the same lines (read off the measure
+  // loop of the vendored bundle, and measured: under four paragraphs drawn
+  // over the head of a pane of 900 by 700, a score standing 420px down the
+  // pane ended 265px down it as the panel came, in sight and 155px from
+  // where the reader had it). And now rather than at the next frame, where
+  // CodeMirror would have measured by itself: as the mode is left the text
+  // takes the focus back in the same task, the block the caret is in opens,
+  // and a hold made after that would hold the drawing against its own
+  // source, which leaving the mode with no panel up does not do. `measure`
+  // is CodeMirror's and not of its documented surface, as the
+  // mustMeasureContent of its viewState is not; the bundle is vendored.
+  function holdScore(held) {
+    if (typeof view.measure === "function") view.measure();
+    if (!held.svg.isConnected) return;
+    const moved = held.svg.getBoundingClientRect().top - view.scrollDOM.getBoundingClientRect().top - held.top;
+    if (Math.abs(moved) >= 1) view.scrollDOM.scrollTop += moved;
+    revealScoreCursorAcross();
+  }
+
+  // The panel drawn from the setting in force and from the mode: the row of
+  // the Score menu, ticked by the setting whatever the mode, and the class
+  // that shows the panel, there while both are on.
+  //
+  // The panel is a flex sibling of the text, as the outline is, so the
+  // column moves over as it comes and goes: the outline is fitted to the
+  // room that is left and the text measured again in the same frame
+  // (applyOutlineWidth). And the column is narrower by the panel's width
+  // while it is up, so in a pane with no room to spare the lines wrap again
+  // and what stands under them moves down, and back up as the panel goes:
+  // the score the cursor was in sight on is held where it stood (holdScore).
+  // `held` is that score as the caller read it, for the one caller that
+  // puts the cursor away before it comes here (leaveScoreMode). A cursor the
+  // reader had scrolled away from holds nothing, and the page is left to
+  // CodeMirror, which keeps the line at its head.
+  function applyScorePanel(held) {
+    syncRow("mdm-score-panel");
+    const root = app();
+    const shown = scorePanelOpen && scoreMode;
+    if (!root || root.classList.contains("mdm-score-panel--open") === shown) return;
+    const kept = held || scoreInSight();
+    root.classList.toggle("mdm-score-panel--open", shown);
+    fitScorePanelWidth();
+    applyOutlineWidth();
+    if (kept) holdScore(kept);
+  }
+
+  // The face of the panel in sight, from the setting in force: its word on
+  // the disc, and the other face laid out with no height (buildScorePanel).
+  // The panel is as wide on either face, the room it keeps for a bar being
+  // asked of both faces at once (fitScorePanelWidth), so nothing on the page
+  // moves as the face changes, nothing is held, and nothing is fitted again.
+  function applyScorePanelFace() {
+    syncRow("mdm-score-panel-face");
+  }
+
+  // The room a scroll bar of the page takes, read once off a probe that
+  // always scrolls: 10px in VS Code's webview and in the test browser with
+  // its bars drawn (scrollbar-width: thin, style.css), none where the bars
+  // float over the page or are hidden.
+  let barRoom = null;
+  function scrollBarRoom() {
+    if (barRoom === null) {
+      const probe = document.createElement("div");
+      probe.style.cssText = "position: absolute; visibility: hidden; width: 50px; height: 50px; overflow-y: scroll";
+      app().appendChild(probe);
+      barRoom = probe.offsetWidth - probe.clientWidth;
+      probe.remove();
+    }
+    return barRoom;
+  }
+
+  // The panel as wide on either face. Both faces are laid out, so it is as
+  // wide as the wider of the two (buildScorePanel); and while either face is
+  // taller than the pane it is wider by the room of a scroll bar, whichever
+  // face is in sight. The face that scrolls has its bar in that room, and a
+  // face that does not has the room in its rows, and not as a bare strip
+  // down the right edge: that strip is what the menus were rid of (style.css,
+  // over the menus of the words), and what a gutter kept on both faces gave
+  // this panel in the second build of 2026-10-14 (found by a second reading
+  // of the code). With neither, the bar of the face that scrolls took its
+  // room for the panel off the editor as the face changed and the text
+  // wrapped again: seen in a real window that day, the Keys face taller
+  // than the pane and the Buttons face not, the panel 271px on one face and
+  // 281 on the other. With neither face taller than the pane the panel is as
+  // wide as it ever was. Never so wide that the editor is left less than its
+  // column, which the stylesheet's max-width says and a min-width would
+  // overrule. Asked again as the panel comes up and as the pane is resized,
+  // which is when what it reads may change: the faces' heights are their
+  // own, whichever face is in sight.
+  function fitScorePanelWidth() {
+    const root = app();
+    const panel = root ? root.querySelector(".mdm-score-panel") : null;
+    if (!panel) return;
+    panel.style.minWidth = "";
+    const room = scrollBarRoom();
+    if (!room || !root.classList.contains("mdm-score-panel--open")) return;
+    // How tall the panel's content is with its tallest face in sight: what
+    // stands over the faces, the face, and the panel's foot. Off the faces'
+    // top and their own content, and not off the panel's scrollHeight, which
+    // is the panel's own height as long as the content is shorter (the
+    // panel is as tall as the row it stands in): read so, a pane tall enough
+    // for both faces was taken for one too short (seen in the test browser,
+    // 2026-10-14). The face out of sight has no height, and its content is
+    // measured all the same.
+    const faces = panel.querySelectorAll(".mdm-score-panel__face");
+    if (!faces.length) return;
+    const head = faces[0].getBoundingClientRect().top - panel.getBoundingClientRect().top - panel.clientTop + panel.scrollTop;
+    let tallest = 0;
+    faces.forEach(function (face) {
+      tallest = Math.max(tallest, face.scrollHeight);
+    });
+    if (head + tallest + parseFloat(getComputedStyle(panel).paddingBottom) <= panel.clientHeight) return;
+    // Its own width, which takes in the bar while the face in sight scrolls.
+    const own = panel.getBoundingClientRect().width - (panel.scrollHeight > panel.clientHeight ? room : 0);
+    const most = panel.parentNode.getBoundingClientRect().width - EDITOR_MIN;
+    panel.style.minWidth = Math.min(own + room, most) + "px";
+  }
+
+  // A control of the bar. A button is a glyph with its name in a tip, and
+  // the outline's is the one there is; a word (`word`) is its own name and
+  // stands over a menu, seven of them side by side as a menu bar (the
+  // owner's pick of 2026-10-13: variant A of design-toolbar.html). `menu` is
+  // the list of entries of its drop-down panel, laid out by fillMenu; the
+  // panel opens on a click and closes on a click anywhere else or on Escape.
   function toolbarButton(spec) {
     const item = document.createElement("div");
     item.className = "mdm-toolbar__item";
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "mdm-btn mdm-tip mdm-tip--s";
     btn.setAttribute("data-type", spec.name);
-    if (spec.key) {
-      const mac = /Mac/.test(navigator.platform);
-      const also = spec.also ? spec.also[mac ? "mac" : "pc"] : "";
-      btn.setAttribute("aria-label", spec.tip + " (" + shortcutLabel(spec.key, spec.also) + ")");
-      btn.setAttribute("aria-keyshortcuts", (mac ? "Meta+" : "Control+") + (also ? also + "+" : "") + spec.key);
+    if (spec.word) {
+      // No tip: a word has said its name already.
+      btn.className = "mdm-word";
+      btn.textContent = spec.word;
     } else {
+      btn.className = "mdm-btn mdm-tip mdm-tip--s";
       btn.setAttribute("aria-label", spec.tip);
+      btn.innerHTML = spec.icon;
     }
-    // A button that works on the selection is exempt from dismissFromOutside.
-    if (spec.caret) btn.classList.add("mdm-btn--caret");
-    btn.innerHTML = spec.icon;
+    // A word over rows that work on the selection, or that read where the
+    // caret is, is exempt from dismissFromOutside (`readsCaret`): its press
+    // comes before the press on the row, and the block being edited has to
+    // be open still for the second.
+    if (spec.readsCaret) btn.classList.add("mdm-btn--caret");
+    // A word with nothing but rows that write into the text under it greys
+    // out while the score mode freezes it.
+    if (spec.edit) btn.classList.add("mdm-btn--edit");
     item.appendChild(btn);
-    if (spec.menu || spec.build || spec.draw) {
+    if (spec.menu) {
       const panel = document.createElement("div");
-      panel.className = "mdm-menu" + (spec.panel ? " " + spec.panel : "");
-      // A panel whose rows work on the selection (the heading levels) is
-      // exempt with its button: a press on a row put the block being edited
-      // away before the row could find the lines it was for.
-      if (spec.caret) panel.classList.add("mdm-btn--caret");
+      panel.className = "mdm-menu";
       item.appendChild(panel);
       // What each row can do is read again every time the panel opens, not
       // once when it is filled: the Audio rows of the export panel grey out
@@ -15995,94 +22348,48 @@
       const rows = new Map();
       const refresh = function () {
         rows.forEach(function (entry, row) {
-          const off = !!(entry.off && entry.off());
-          row.classList.toggle("mdm-menu__item--off", off);
-          row.disabled = off;
+          markRow(row, entry);
         });
       };
-      const fill = function (entries) {
-        panel.innerHTML = "";
-        rows.clear();
-        (entries || []).forEach(function (entry) {
-          // A header, and the quiet line that may follow it, name the branch
-          // the rows under them belong to. Neither is a row: they take no
-          // press and carry no data-type, so nothing that reads the panel's
-          // buttons finds them.
-          if (entry.head) {
-            const head = document.createElement("div");
-            head.className = "mdm-menu__head";
-            head.textContent = entry.head;
-            panel.appendChild(head);
-            if (entry.note) {
-              const note = document.createElement("div");
-              note.className = "mdm-menu__note";
-              note.textContent = entry.note;
-              panel.appendChild(note);
-            }
-            return;
-          }
-          const row = document.createElement("button");
-          row.type = "button";
-          row.className = "mdm-menu__item" + (entry.className ? " " + entry.className : "");
-          row.setAttribute("data-type", entry.name);
-          row.innerHTML = entry.label;
-          row.addEventListener("click", function (e) {
-            e.stopPropagation();
-            closeMenus();
-            entry.click();
-          });
-          rows.set(row, entry);
-          panel.appendChild(row);
-        });
+      // The list is filled once, and what its rows say is read again each
+      // time the panel opens.
+      fillMenu(panel, spec.menu, rows);
+      refresh();
+      const show = function () {
+        closeMenus();
         refresh();
-        if (!panel.children.length && spec.empty) {
-          const note = document.createElement("div");
-          note.className = "mdm-menu__empty";
-          note.textContent = spec.empty;
-          panel.appendChild(note);
-        }
+        item.classList.add("mdm-toolbar__item--open");
+        fitUnderBar(panel);
+        keepInPane(panel);
       };
-      // A panel of glyphs names the one under the pointer or the focus on a
-      // caption line under them (symbolPanel), and the line is blank again
-      // whenever the panel opens. The pointer's name goes by itself, with the
-      // mouseleave Chrome sends the panel as it hides under it; the one the
-      // keyboard left, a cell focused and then Enter or Escape, would still
-      // be there.
-      const name = function (row) {
-        const caption = panel.querySelector(".mdm-menu__caption");
-        if (caption) caption.textContent = (row && row.getAttribute("aria-label")) || "\u00a0";
-      };
-      panel.addEventListener("mouseover", function (e) {
-        name(e.target.closest(".mdm-menu__item"));
-      });
-      panel.addEventListener("focusin", function (e) {
-        name(e.target.closest(".mdm-menu__item"));
-      });
-      panel.addEventListener("mouseleave", function () {
-        name(null);
-      });
-      // A fixed list is filled once; a `build` panel (the outline, whose
-      // headings change as the document is edited) is rebuilt each time it
-      // opens.
-      if (spec.menu) fill(spec.menu);
-      else if (spec.draw) spec.draw(panel);
+      // Whether it was the pointer that opened the panel (below).
+      let byPointer = false;
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
-        const open = item.classList.contains("mdm-toolbar__item--open");
-        closeMenus();
-        if (!open) {
-          if (spec.build) fill(spec.build());
-          else refresh();
-          name(null);
-          item.classList.add("mdm-toolbar__item--open");
-          keepInPane(panel);
-        }
+        // A press shuts the panel a press opened. One the pointer opened on
+        // its way along the words is left open by the press that comes
+        // after: a hand that presses a word means to see its menu, and with
+        // another menu open the pointer has opened this one before the
+        // press lands, which would then have shut it under the hand.
+        if (item.classList.contains("mdm-toolbar__item--open") && !byPointer) closeMenus();
+        else if (!item.classList.contains("mdm-toolbar__item--open")) show();
+        byPointer = false;
         // The bar is not somewhere to be: the focus goes back to the text, as
         // it does from the buttons that act on the caret. Without this the
         // press left the document unfocused, and unfocused it draws itself
         // with nobody in it, so opening a menu would have closed the block
         // being edited behind the panel.
         if (view) view.focus();
+      });
+      // The manners of a menu bar: with the menu of one word open, the
+      // pointer coming to another word opens that one in its place, and no
+      // press is needed to look along the row. Only once a press has opened
+      // the first.
+      btn.addEventListener("mouseenter", function () {
+        const open = document.querySelector("#app .mdm-toolbar__item--open > .mdm-word");
+        if (!open || open === btn) return;
+        show();
+        byPointer = true;
       });
     } else {
       btn.addEventListener("click", function () {
@@ -16103,17 +22410,26 @@
   }
 
   function closeMenus() {
-    document.querySelectorAll("#app .mdm-toolbar__item--open").forEach(function (el) {
-      el.classList.remove("mdm-toolbar__item--open");
+    clearTimeout(subLinger);
+    document.querySelectorAll("#app .mdm-toolbar__item--open, #app .mdm-menu__group--open").forEach(function (el) {
+      el.classList.remove("mdm-toolbar__item--open", "mdm-menu__group--open");
+    });
+    // The line that names a music symbol is blank again when its panel next
+    // opens (symbolPanel). The pointer's name goes by itself, with the
+    // mouseleave Chrome sends the panel as it hides under it; the one the
+    // keyboard left, a cell focused and then Enter or Escape, would still
+    // be there.
+    document.querySelectorAll("#app .mdm-toolbar .mdm-menu__caption").forEach(function (el) {
+      el.textContent = "\u00a0";
     });
   }
 
-  // A panel hangs from the left edge of its button, and #app clips whatever
+  // A panel hangs from the left edge of its word, and #app clips whatever
   // passes its right edge (overflow-x: clip in style.css) instead of letting
-  // the page scroll to it, so a panel wider than the room right of its button
+  // the page scroll to it, so a panel wider than the room right of its word
   // was cut there, rows and all. It is moved left by what it overhangs, never
-  // past the pane's left edge, and goes back under its button the next time
-  // it opens with room.
+  // past the pane's left edge, and goes back under its word the next time it
+  // opens with room.
   function keepInPane(panel) {
     panel.style.left = "";
     const pane = document.getElementById("app").getBoundingClientRect();
@@ -16128,17 +22444,6 @@
     return el;
   }
 
-  // The end of a row of the bar. The toolbar wraps, so a child that asks for
-  // the whole width takes what is left of the line with it and the next
-  // button starts a row of its own, which is how the player's row sits under
-  // the buttons (mountPlayer). It draws nothing: where a row ends is said by
-  // the row ending.
-  function rowBreak() {
-    const el = document.createElement("span");
-    el.className = "mdm-toolbar__break";
-    return el;
-  }
-
   function buildToolbar() {
     const bar = document.createElement("div");
     bar.className = "mdm-toolbar";
@@ -16147,6 +22452,50 @@
         if (view) cmd(view);
       };
     };
+    // A row for a command CodeMirror binds by itself, named by the key it is
+    // bound to there. Left out, and not written with a key that does
+    // nothing, should a later bundle stop binding it.
+    const bound = function (name, tip, keymap, what) {
+      const binding = ownBinding(keymap, what);
+      return binding ? { name: name, tip: tip, bind: binding, click: run(binding.run), caret: true } : null;
+    };
+    // A word of the bar over its rows. The word answers for them where a
+    // press has to be read before a row is chosen: it is exempt from
+    // dismissFromOutside when any of them works on the selection, since the
+    // press on Format comes before the press on Bold and the block being
+    // edited has to be open still for the second, and it greys out with the
+    // score mode when every one of them writes into the text.
+    const word = function (name, label, rows) {
+      const real = rows.filter(function (row) {
+        return row && row !== "|" && !row.head;
+      });
+      return {
+        name: name,
+        word: label,
+        menu: rows,
+        readsCaret: real.some(function (row) {
+          return !!(row.caret || row.readsCaret);
+        }),
+        edit: real.every(function (row) {
+          return !!(row.caret || row.edit);
+        }),
+      };
+    };
+    // The bar was two rows of buttons, thirty-seven of them, and is one row
+    // now: the outline, and seven words that are each a menu. The owner's
+    // pick of 2026-10-13, variant A of design-toolbar.html, built in two
+    // rounds that day: the six words of the text first, with the buttons of
+    // the music left standing at the far end of the row, and then the word
+    // Score, which took them in.
+    // A menu is what makes room for the keys, which the buttons had no way
+    // to show but a tip, and for the commands that had a key and no button
+    // at all (the search, the carets, a line moved or deleted, and every
+    // key of the score mode).
+    //
+    // It undoes two things asked for on 2026-09-19 and written here until
+    // now, the six of the Insert menu spelled out as buttons and the bar in
+    // two rows; the sheet said so, and the pick was made over it.
+    const roster = scoreRoster();
     const specs = [
       // Outline leads the bar: its panel opens down the left edge, so the
       // button sits on the side the panel appears (as in the Vditor version).
@@ -16157,23 +22506,332 @@
         click: toggleOutline,
       },
       "|",
-      // The export menu next: the one button that leaves the editor. It has
-      // two branches, and the headers are what tells them apart. Document is
-      // the page: the host saves the file first, then renders it with the
-      // filter the command line uses (bin/mdm), and prints the PDF from that
-      // page unless LaTeX is asked to typeset it. Audio is the music: the
-      // editor renders it itself, one file per score, and needs nothing
-      // installed.
+      // Edit: what is done to the text as a whole and not to what a word or
+      // a line is. Going back and forth, the search, the carets, and a line
+      // moved or taken out. Only the first two had a button; the rest are
+      // here to be found, each with the key that was the only way to it.
+      word("menu-edit", "Edit", [
+        // Greyed with nothing to go back or forth to (updateUndoRows), and
+        // under the score mode, which has its own Ctrl+Z.
+        {
+          name: "undo",
+          icon: UNDO_ICON,
+          tip: "Undo",
+          bind: ownBinding(CM.historyKeymap, CM.undo),
+          click: run(mdmUndo),
+          edit: true,
+          off: function () {
+            return !view || CM.undoDepth(view.state) === 0;
+          },
+        },
+        {
+          name: "redo",
+          icon: REDO_ICON,
+          tip: "Redo",
+          bind: ownBinding(CM.historyKeymap, CM.redo),
+          click: run(mdmRedo),
+          edit: true,
+          off: function () {
+            return !view || CM.redoDepth(view.state) === 0;
+          },
+        },
+        "|",
+        // The search row, by its find field and by its replace field. They
+        // work on the selection, which the field is filled from. Not under
+        // the score mode, whose text is frozen: a match would open nothing,
+        // and the row would take the keys the cursor walks with.
+        {
+          name: "find",
+          icon: FIND_ICON,
+          tip: "Find",
+          bind: ownBinding(CM.searchKeymap, CM.openSearchPanel),
+          click: function () {
+            openSearch(false);
+          },
+          caret: true,
+        },
+        {
+          name: "replace",
+          tip: "Replace",
+          bind: { key: "Mod-h", mac: "Cmd-Alt-f" },
+          click: function () {
+            openSearch(true);
+          },
+          caret: true,
+        },
+        "|",
+        // The carets: one more on the next match, one on every match, and
+        // one on the line above or below. The glyph of the family stands on
+        // its first row, and the switch that was its button is the third:
+        // Ctrl+D matches whole words by default, and ticked it matches
+        // inside words too (score -> also the score in scores).
+        {
+          name: "select-next-match",
+          icon: MULTICURSOR_ICON,
+          tip: "Add the next match",
+          bind: { key: "Mod-d" },
+          click: run(selectNextOccurrenceMaybe),
+          caret: true,
+        },
+        bound("select-all-matches", "Select every match", CM.searchKeymap, CM.selectSelectionMatches),
+        {
+          name: "mdm-match-substring",
+          tip: "Match inside words",
+          on: function () {
+            return matchSubstring;
+          },
+          click: function () {
+            askSetting("multicursorMatch", matchSubstring ? "word" : "substring");
+          },
+        },
+        {
+          name: "add-caret-above",
+          tip: "Add a caret above",
+          bind: { key: "Ctrl-Alt-ArrowUp", mac: "Cmd-Alt-ArrowUp" },
+          click: run(addCaretVertically(-1)),
+          caret: true,
+        },
+        {
+          name: "add-caret-below",
+          tip: "Add a caret below",
+          bind: { key: "Ctrl-Alt-ArrowDown", mac: "Cmd-Alt-ArrowDown" },
+          click: run(addCaretVertically(1)),
+          caret: true,
+        },
+        "|",
+        bound("move-line-up", "Move the line up", CM.defaultKeymap, "Alt-ArrowUp"),
+        bound("move-line-down", "Move the line down", CM.defaultKeymap, "Alt-ArrowDown"),
+        bound("delete-line", "Delete the line", CM.defaultKeymap, "Shift-Mod-k"),
+      ]),
+      // Format: the marks on words inside a line.
+      word("menu-format", "Format", [
+        // `key` is the letter of the Mod- binding the row shares (the
+        // keymap above), named at its far edge so the shortcut can be found.
+        { name: "bold", icon: BOLD_ICON, tip: "Bold", key: "B", click: run(toggleInline("**")), caret: true },
+        { name: "italic", icon: ITALIC_ICON, tip: "Italic", key: "I", click: run(toggleInline("*")), caret: true },
+        // No key yet: D19 in docs/cm6-migration.md.
+        // The highlight, after the strikethrough: the last of the marks that
+        // colour words rather than shape them, and Pandoc's bracketed span
+        // `[x]{.mark}`. It takes no key; the letters that would read as its own
+        // are spent or taken (D19).
+        //
+        // Its twin, an underline button writing `[x]{.underline}`, was fitted
+        // beside it on 2026-09-19 and taken off the same day (the owner's call).
+        // Two reasons, in his order: a bracketed span leaks its class name into
+        // any reader that is not Pandoc, where `[word]{.underline}` shows as
+        // those characters and not as a word (the superscript at least leaves
+        // `2^nd^` readable), and this one buys nothing the bar has not got,
+        // since an underline is the typewriter's italic and this editor sets in
+        // Latin Modern through TeX. The highlight pays the same toll for
+        // something italic cannot do, which is to point without changing the
+        // voice. What stays behind is the reading: `.mdm-underline` in
+        // style.css, because the page underlines the span whether or not a
+        // button writes it (the Span branch above).
+        { name: "strikethrough", icon: STRIKE_ICON, tip: "Strikethrough", click: run(toggleInline("~~")), caret: true },
+        // The superscript and the subscript next, a pair of their own and
+        // still a pair of marks like the three before them (`^x^`, `~x~`),
+        // and then the two bracketed spans, which are written with an
+        // attribute and not with punctuation: small caps and the highlight,
+        // the same gesture twice (toggleSpan). The owner set this order on
+        // 2026-09-19, moving the two scripts up off the spans. None of the
+        // four takes a key (D19).
+        { name: "superscript", icon: SUP_ICON, tip: "Superscript", click: run(toggleInline("^")), caret: true },
+        { name: "subscript", icon: SUB_ICON, tip: "Subscript", click: run(toggleInline("~")), caret: true },
+        { name: "small-caps", icon: SMALLCAPS_ICON, tip: "Small caps", click: run(toggleSpan("smallcaps")), caret: true },
+        { name: "highlight", icon: HIGHLIGHT_ICON, tip: "Highlight", click: run(toggleSpan("mark")), caret: true },
+        // A rule, and the two that are not a way of saying a word: where it
+        // leads, and that it is code.
+        "|",
+        { name: "link", icon: LINK_ICON, tip: "Link", key: "K", click: run(insertLink), caret: true },
+        // Inline code last of the marks, as it was on the bar, where it
+        // stood beside the code block with only a separator between the two
+        // chevrons: one is a mark on words inside a line and the other makes
+        // the line a block, which is the cut between this menu and the
+        // next, and it is the cut the keys make too (a letter for the words,
+        // the letter under BLOCK_MOD for what the line is).
+        { name: "inline-code", icon: CODE_ICON, tip: "Inline code", key: "E", click: run(toggleInline("`")), caret: true },
+      ]),
+      // Paragraph: what a line is. The level of a heading first (the rows the
+      // heading button's own menu had), then the blocks that have no level,
+      // then the two ways out of a line that only had a key.
+      word(
+        "menu-paragraph",
+        "Paragraph",
+        headingMenuItems().concat([
+          "|",
+          { name: "code-block", icon: CODE_BLOCK_ICON, tip: "Code block", key: "C", also: BLOCK_MOD, click: run(toggleCodeBlock), caret: true },
+          { name: "unordered-list", icon: LIST_ICON, tip: "Unordered list", click: run(toggleList(false)), caret: true },
+          { name: "ordered-list", icon: OLIST_ICON, tip: "Ordered list", click: run(toggleList(true)), caret: true },
+          { name: "task-list", icon: TASK_ICON, tip: "Task list", key: "T", also: BLOCK_MOD, click: run(toggleTask), caret: true },
+          { name: "quote", icon: QUOTE_ICON, tip: "Quote", click: run(toggleQuote), caret: true },
+          "|",
+          { name: "line-break", tip: "Line break", bind: { key: "Shift-Enter" }, click: run(hardBreak), caret: true },
+          { name: "leave-block", tip: "Out of the block", bind: { key: "Mod-Enter" }, click: run(leaveBlock), caret: true },
+        ])
+      ),
+      // Insert: what a document holds beside its words, in the order a
+      // reader meets it (the maths inline and on lines of its own, then the
+      // table, the picture, the note and the rule). The rows before this
+      // menu change what a line already is, these put something new in the
+      // document, and two gestures that different do not share a menu.
+      //
+      // They were one menu before they were six buttons (the owner asked to
+      // see them spelled out on 2026-09-19, which is what put the bar in two
+      // rows), and are one menu again.
+      word("menu-insert", "Insert", [
+        { name: "insert-equation", icon: EQUATION_ICON, tip: "Equation", click: run(toggleInline("$")), caret: true },
+        { name: "insert-equation-block", icon: EQUATION_BLOCK_ICON, tip: "Equation block", click: run(insertBlock(EQUATION_BLOCK, EQUATION_CARET)), caret: true },
+        { name: "insert-table", icon: TABLE_ICON, tip: "Table", click: run(insertBlock(TABLE_BLOCK, TABLE_CARET)), caret: true },
+        { name: "insert-picture", icon: PICTURE_ICON, tip: "Picture", click: run(insertPicture), caret: true },
+        { name: "insert-footnote", icon: FOOTNOTE_ICON, tip: "Footnote", click: run(insertFootnote), caret: true },
+        { name: "insert-rule", icon: RULE_ICON, tip: "Horizontal rule", click: run(insertBlock(RULE_BLOCK, RULE_CARET)), caret: true },
+        // The music symbols (2026-09-23): the smallest thing a line can
+        // hold, a character, and the one of this menu that is the music's,
+        // after a rule. It was a button, the first of the Insert group and
+        // then the one left at the far end of the row with the music; it
+        // stands where the sheet the menus were picked from drew it. Its
+        // submenu is SYMBOLS laid out by symbolPanel.
+        "|",
+        { name: "insert-symbol", icon: SYMBOL_ICON, tip: "Music symbol", draw: symbolPanel, panel: "mdm-menu--glyphs", caret: true },
+      ]),
+      // The page: its outline, what it is painted in, what it is set in, how
+      // its lines meet the right edge and where its words may divide there,
+      // and whether it shows the block at the top that is not prose.
+      // Switches over the document as a whole, none of which knows there is
+      // music in it. A row that is a switch is named for what it turns on
+      // and ticked while that is on; a row that is a choice of several leads
+      // to them.
+      word("menu-page", "Page", [
+        // The outline has its button at the head of the bar as well, where
+        // its panel opens; here it is one of the page's switches.
+        {
+          name: "page-outline",
+          icon: OUTLINE_ICON,
+          tip: "Outline",
+          on: function () {
+            return outlineOpen;
+          },
+          click: toggleOutline,
+        },
+        "|",
+        // The theme leads the rest, because the fill colours of the score
+        // are defined per theme and the wider switch should read before the
+        // ones that depend on it.
+        // Its list is as long as the themes installed: the one submenu that
+        // keeps the room of a scroll bar and the height of a list that may
+        // be any length (placeSub).
+        { name: "mdm-theme", icon: THEME_ICON, tip: "Theme", menu: themeMenuItems(), panel: "mdm-menu--long" },
+        // Named by what a reader would call the face rather than by the name
+        // of its file: the roman is the face of a LaTeX document. Off, the
+        // text is in the sans Markdown is usually written in.
+        {
+          name: "mdm-text-font",
+          icon: TEXT_FONT_ICON,
+          tip: "LaTeX font",
+          on: function () {
+            return textFont === "roman";
+          },
+          click: function () {
+            askSetting("textFont", textFont === "roman" ? "sans" : "roman");
+          },
+        },
+        // Beside the hyphenation menu, since the two decide together how a
+        // line of prose meets the right edge.
+        {
+          name: "mdm-text-align",
+          icon: TEXT_ALIGN_ICON,
+          tip: "Justified text",
+          on: function () {
+            return textAlign === "justify";
+          },
+          click: function () {
+            askSetting("textAlign", textAlign === "justify" ? "left" : "justify");
+          },
+        },
+        {
+          name: "mdm-hyphenation",
+          icon: HYPHENATION_ICON,
+          tip: "Hyphenation",
+          menu: hyphenationMenuItems(),
+          // A language is written into the header (withLang in extension.js).
+          edit: true,
+        },
+        // Greyed in a file with no header: there is nothing to show.
+        {
+          name: "mdm-front-matter",
+          icon: FM_ICON,
+          tip: "YAML header",
+          on: function () {
+            return headerShown() && headerText !== "";
+          },
+          off: function () {
+            return headerText === "";
+          },
+          click: function () {
+            if (headerText === "") return;
+            pinHeader(!headerShown());
+          },
+        },
+      ]),
+      // Score: the music. The switch of the mode, and of the panel that
+      // keeps the mode's keys in sight at the side while it is on; what
+      // those keys write, add and walk, each run under a row of its own
+      // (scoreRoster); the playing; and the three that dress a score and
+      // touch nothing else on the page, in the order a reader meets them,
+      // the box, then the lines inside it, then where the box sits. Beside
+      // Page, where the owner asked for it (2026-10-13): the sheet drew it
+      // apart, at the far end of the row.
+      word("menu-score", "Score", [
+        roster.mode,
+        roster.panel,
+        "|",
+        { name: "score-notes", tip: "Notes", menu: roster.notes },
+        { name: "score-bars", tip: "Bars", menu: roster.bars },
+        { name: "score-moves", tip: "Move and select", menu: roster.moves },
+        "|",
+        roster.play,
+        roster.follow,
+        "|",
+        { name: "mdm-score-fill", icon: SCORE_ICON, tip: "Score fill", menu: fillMenuItems() },
+        {
+          name: "mdm-staff-lines",
+          icon: STAFF_ICON,
+          tip: "Ink staff lines",
+          on: function () {
+            return staffLines === "ink";
+          },
+          click: function () {
+            askSetting("staffLines", staffLines === "gray" ? "ink" : "gray");
+          },
+        },
+        {
+          name: "mdm-score-align",
+          icon: ALIGN_ICON,
+          tip: "Scores at the left",
+          on: function () {
+            return scoreAlign === "left";
+          },
+          click: function () {
+            askSetting("scoreAlign", scoreAlign === "left" ? "center" : "left");
+          },
+        },
+      ]),
+      // The export menu last of the words: the one that leaves the editor.
+      // It has two branches, and the headers are what tells them apart.
+      // Document is the page: the host saves the file first, then renders it
+      // with the filter the command line uses (bin/mdm), and prints the PDF
+      // from that page unless LaTeX is asked to typeset it. Audio is the
+      // music: the editor renders it itself, one file per score, and needs
+      // nothing installed.
       //
       // The line under the Audio header is there because the rail of every
-      // score carries this same icon: pressed there it writes that one score,
-      // pressed here it writes them all, and the panel is the cheapest place
-      // to say so.
-      {
-        name: "mdm-export",
-        icon: EXPORT_ICON,
-        tip: "Export",
-        menu: [{ head: "Document" }]
+      // score carries the export glyph: pressed there it writes that one
+      // score, pressed here it writes them all, and the panel is the
+      // cheapest place to say so.
+      word(
+        "menu-export",
+        "Export",
+        [{ head: "Document" }]
           .concat(
             EXPORT_FORMATS.map(function (format) {
               return {
@@ -16192,7 +22850,7 @@
                 name: "mdm-export-" + format.to,
                 label: format.label,
                 // Nothing to write in a document with no score, said the way
-                // the header button of a file with no YAML says it.
+                // the header row of a file with no YAML says it.
                 off: function () {
                   return scoreless(view && view.state);
                 },
@@ -16201,179 +22859,11 @@
                 },
               };
             })
-          ),
-      },
-      "|",
-      { name: "undo", icon: UNDO_ICON, tip: "Undo", click: run(mdmUndo) },
-      { name: "redo", icon: REDO_ICON, tip: "Redo", click: run(mdmRedo) },
-      "|",
-      { name: "headings", icon: HEADING_ICON, tip: "Heading", build: headingMenuItems, caret: true },
-      // `key` is the letter of the Mod- binding the button shares (the
-      // keymap above), named in the tip so the shortcut can be found.
-      { name: "bold", icon: BOLD_ICON, tip: "Bold", key: "B", click: run(toggleInline("**")), caret: true },
-      { name: "italic", icon: ITALIC_ICON, tip: "Italic", key: "I", click: run(toggleInline("*")), caret: true },
-      // No key yet: D19 in docs/cm6-migration.md.
-      // The highlight, after the strikethrough: the last of the marks that
-      // colour words rather than shape them, and Pandoc's bracketed span
-      // `[x]{.mark}`. It takes no key; the letters that would read as its own
-      // are spent or taken (D19).
-      //
-      // Its twin, an underline button writing `[x]{.underline}`, was fitted
-      // beside it on 2026-09-19 and taken off the same day (the owner's call).
-      // Two reasons, in his order: a bracketed span leaks its class name into
-      // any reader that is not Pandoc, where `[word]{.underline}` shows as
-      // those characters and not as a word (the superscript at least leaves
-      // `2^nd^` readable), and this one buys nothing the bar has not got,
-      // since an underline is the typewriter's italic and this editor sets in
-      // Latin Modern through TeX. The highlight pays the same toll for
-      // something italic cannot do, which is to point without changing the
-      // voice. What stays behind is the reading: `.mdm-underline` in
-      // style.css, because the page underlines the span whether or not a
-      // button writes it (the Span branch above).
-      { name: "strikethrough", icon: STRIKE_ICON, tip: "Strikethrough", click: run(toggleInline("~~")), caret: true },
-      // The superscript and the subscript next, a pair of their own and
-      // still a pair of marks like the three before them (`^x^`, `~x~`),
-      // and then the two bracketed spans, which are written with an
-      // attribute and not with punctuation: small caps and the highlight,
-      // the same gesture twice (toggleSpan). The owner set this order on
-      // 2026-09-19, moving the two scripts up off the spans. None of the
-      // four takes a key (D19).
-      { name: "superscript", icon: SUP_ICON, tip: "Superscript", click: run(toggleInline("^")), caret: true },
-      { name: "subscript", icon: SUB_ICON, tip: "Subscript", click: run(toggleInline("~")), caret: true },
-      { name: "small-caps", icon: SMALLCAPS_ICON, tip: "Small caps", click: run(toggleSpan("smallcaps")), caret: true },
-      { name: "highlight", icon: HIGHLIGHT_ICON, tip: "Highlight", click: run(toggleSpan("mark")), caret: true },
-      { name: "link", icon: LINK_ICON, tip: "Link", key: "K", click: run(insertLink), caret: true },
-      // Inline code last of the marks and the code block first of the
-      // blocks, so the two chevrons stand beside each other with only the
-      // separator between them: one is a mark on words inside a line and the
-      // other makes the line a block, which is the cut the separator is
-      // there to make, and it is the cut the keys make too (a letter for the
-      // words, the letter under BLOCK_MOD for what the line is).
-      { name: "inline-code", icon: CODE_ICON, tip: "Inline code", key: "E", click: run(toggleInline("`")), caret: true },
-      "|",
-      { name: "code-block", icon: CODE_BLOCK_ICON, tip: "Code block", key: "C", also: BLOCK_MOD, click: run(toggleCodeBlock), caret: true },
-      { name: "unordered-list", icon: LIST_ICON, tip: "Unordered list", click: run(toggleList(false)), caret: true },
-      { name: "ordered-list", icon: OLIST_ICON, tip: "Ordered list", click: run(toggleList(true)), caret: true },
-      { name: "task-list", icon: TASK_ICON, tip: "Task list", key: "T", also: BLOCK_MOD, click: run(toggleTask), caret: true },
-      { name: "quote", icon: QUOTE_ICON, tip: "Quote", click: run(toggleQuote), caret: true },
-      // A cut of their own, and then the six that were the Insert menu, as
-      // buttons closing the row: what a document holds beside its words, in
-      // the order a reader meets it (the maths inline and on lines of its
-      // own, then the table, the picture, the note and the rule). One button
-      // held them while the bar was one row, and the row is what they cost:
-      // the owner asked to see the bar in two, so they are spelled out here
-      // and what follows opens the second row ("/" below). The separator is
-      // his call as well: the buttons before it change what a line already
-      // is, these put something new in the document, and two gestures that
-      // different do not share a run.
-      //
-      // The music symbols open the run (2026-09-23): the smallest thing a
-      // line can hold, a character, and the one that stands in a sentence
-      // where the maths after it may stand on lines of its own. Its panel is
-      // SYMBOLS laid out by symbolPanel, and the row still closes on the rule.
-      "|",
-      { name: "insert-symbol", icon: SYMBOL_ICON, tip: "Music symbol", draw: symbolPanel, panel: "mdm-menu--glyphs", caret: true },
-      { name: "insert-equation", icon: EQUATION_ICON, tip: "Equation", click: run(toggleInline("$")), caret: true },
-      { name: "insert-equation-block", icon: EQUATION_BLOCK_ICON, tip: "Equation block", click: run(insertBlock(EQUATION_BLOCK, EQUATION_CARET)), caret: true },
-      { name: "insert-table", icon: TABLE_ICON, tip: "Table", click: run(insertBlock(TABLE_BLOCK, TABLE_CARET)), caret: true },
-      { name: "insert-picture", icon: PICTURE_ICON, tip: "Picture", click: run(insertPicture), caret: true },
-      { name: "insert-footnote", icon: FOOTNOTE_ICON, tip: "Footnote", click: run(insertFootnote), caret: true },
-      { name: "insert-rule", icon: RULE_ICON, tip: "Horizontal rule", click: run(insertBlock(RULE_BLOCK, RULE_CARET)), caret: true },
-      // The second row starts under the outline button: everything from here
-      // on is a switch over the document as a whole and not an edit of the
-      // text, so the break falls where a separator stood and does its work.
-      "/",
-      // Ctrl+D matches whole words by default; this lights up to match inside
-      // words too (score -> also the score in scores).
-      {
-        name: "mdm-match-substring",
-        icon: MULTICURSOR_ICON,
-        tip: matchTip(),
-        click: function () {
-          askSetting("multicursorMatch", matchSubstring ? "word" : "substring");
-          if (view) view.focus();
-        },
-      },
-      "|",
-      // The page: what it is painted in, what it is set in, how its lines
-      // meet the right edge and where its words may divide there, and whether
-      // it shows the block at the top that is not prose. Switches over the document as a whole, none of which knows
-      // there is music in it.
-      // The theme leads them, because the fill colours of the next group are
-      // defined per theme and the wider switch should read before the ones
-      // that depend on it.
-      { name: "mdm-theme", icon: THEME_ICON, tip: "Theme", menu: themeMenuItems() },
-      {
-        name: "mdm-text-font",
-        icon: TEXT_FONT_ICON,
-        tip: textFontTip(),
-        click: function () {
-          askSetting("textFont", textFont === "roman" ? "sans" : "roman");
-        },
-      },
-      // Beside the hyphenation menu, since the two decide together how a
-      // line of prose meets the right edge.
-      {
-        name: "mdm-text-align",
-        icon: textAlignIcon(),
-        tip: textAlignTip(),
-        click: function () {
-          askSetting("textAlign", textAlign === "justify" ? "left" : "justify");
-        },
-      },
-      {
-        name: "mdm-hyphenation",
-        icon: HYPHENATION_ICON,
-        tip: "Hyphenation",
-        build: hyphenationMenuItems,
-      },
-      {
-        name: "mdm-front-matter",
-        icon: FM_ICON,
-        tip: fmTip(),
-        click: function () {
-          if (headerText === "") return;
-          pinHeader(!headerShown());
-        },
-      },
-      "|",
-      // The score: the three that dress the music and touch nothing else on
-      // the page, in the order a reader meets them, the box, then the lines
-      // inside it, then where the box sits.
-      { name: "mdm-score-fill", icon: SCORE_ICON, tip: "Score fill", menu: fillMenuItems() },
-      {
-        name: "mdm-staff-lines",
-        icon: STAFF_ICON,
-        tip: staffTip(),
-        click: function () {
-          askSetting("staffLines", staffLines === "gray" ? "ink" : "gray");
-        },
-      },
-      {
-        name: "mdm-score-align",
-        icon: ALIGN_ICON[alignTarget()],
-        tip: alignTip(),
-        click: function () {
-          askSetting("scoreAlign", alignTarget());
-        },
-      },
-      "|",
-      // The playing: alone at the end, because it is the only button here
-      // that changes what the editor DOES rather than what anything looks
-      // like, and the only one that means nothing until a tune sounds.
-      {
-        name: "mdm-follow",
-        icon: FOLLOW_ICON,
-        tip: followTip(),
-        click: function () {
-          askSetting("followPlayhead", following ? "still" : "follow");
-        },
-      },
+          )
+      ),
     ];
     specs.forEach(function (spec) {
-      if (spec === "|") bar.appendChild(separator());
-      else if (spec === "/") bar.appendChild(rowBreak());
-      else bar.appendChild(toolbarButton(spec));
+      bar.appendChild(spec === "|" ? separator() : toolbarButton(spec));
     });
     // A press on the chrome must not take the focus off the text. The
     // document draws itself with nobody in it while it is unfocused, so the
@@ -16398,9 +22888,11 @@
     // The rail does it another way, with spans that cannot take the focus at
     // all, because it stands inside the content where a focusable element
     // would take the caret with it (chromeButton).
+    // The score panel is chrome as the bar is, and so is a legend of a menu,
+    // which is no button and is pressed by whoever reads it for one.
     document.addEventListener("mousedown", function (e) {
-      const el = e.target && e.target.closest ? e.target.closest("button, [role=button]") : null;
-      if (!el || !el.closest(".mdm-toolbar, .mdm-outline") || el.closest(".cm-panels")) return;
+      const el = e.target && e.target.closest ? e.target.closest("button, [role=button], .mdm-menu__legend") : null;
+      if (!el || !el.closest(".mdm-toolbar, .mdm-outline, .mdm-score-panel") || el.closest(".cm-panels")) return;
       if (e.target.closest("input, .abcjs-midi-progress-background")) return;
       e.preventDefault();
     });
@@ -16410,26 +22902,22 @@
       // Ctrl+F with the focus anywhere in the page opens the search panel:
       // the editor's own keymap hears the key only from a caret in the text,
       // and the document opens unfocused (G118).
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f" && view && !view.hasFocus) {
+      // Not under the score mode, whose text is frozen: a match would open
+      // nothing, and the row would take the keys the cursor walks with.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f" && view && !view.hasFocus && !scoreMode) {
         e.preventDefault();
-        // The panel is inside the view, so the field it focuses makes the
-        // document somebody's, and a match inside a hidden block opens it.
-        // Said ahead of the opening: the field is focused inside the update
-        // that mounts the panel, where syncFocus cannot dispatch it.
-        if (!view.state.field(focusField, false)) view.dispatch({ effects: setFocused.of(true) });
-        CM.openSearchPanel(view);
+        openSearch(false);
       }
     });
     return bar;
   }
 
-  // Undo and redo grey out when there is nothing to do, the way they did.
-  function updateUndoButtons() {
-    if (!view) return;
-    const undoBtn = document.querySelector('#app button[data-type="undo"]');
-    const redoBtn = document.querySelector('#app button[data-type="redo"]');
-    if (undoBtn) undoBtn.classList.toggle("mdm-btn--off", CM.undoDepth(view.state) === 0);
-    if (redoBtn) redoBtn.classList.toggle("mdm-btn--off", CM.redoDepth(view.state) === 0);
+  // Undo and redo grey out when there is nothing to do, the way they did as
+  // buttons. The rows say it themselves (`off`, in buildToolbar) and are
+  // asked again whenever the text or the selection moves.
+  function updateUndoRows() {
+    syncRow("undo");
+    syncRow("redo");
   }
 
   // ---------- Initialization ----------
@@ -16471,16 +22959,22 @@
     const host = document.createElement("div");
     host.className = "mdm-editor";
     body.appendChild(host);
+    // And the score panel down the right edge, hidden until it is asked for
+    // and the mode is on (#app carries mdm-score-panel--open then).
+    body.appendChild(buildScorePanel());
     root.appendChild(body);
     buildEditor(text);
     updateFrontMatter();
-    updateUndoButtons();
-    // The buttons that hold a state come up showing the setting they were left
-    // on, the panel included: the document reopens as it was closed.
+    updateUndoRows();
+    // What holds a state comes up showing the setting it was left on, the
+    // outline included: the document reopens as it was closed. Of the score
+    // panel what comes up is the tick of its row: the panel waits for the
+    // mode, and a document opens out of it.
+    applyScorePanel();
     applyOutlineWidth();
     applyOutline();
-    updateMatchButton();
-    updateFollowButton();
+    syncRow("mdm-match-substring");
+    updateScoreRows();
     watchOutlineRoom();
     watchTheme();
     applyTheme();
@@ -16544,6 +23038,8 @@
       }
       outlineOpen = next.outline === "shown";
       outlineWidth = next.outlineWidth || 250;
+      scorePanelOpen = next.scorePanel !== "hidden";
+      scorePanelFace = next.scorePanelFace === "keys" ? "keys" : "buttons";
       matchSubstring = next.multicursorMatch === "substring";
       following = next.followPlayhead !== "still";
       textFont = next.textFont || "roman";
@@ -16556,12 +23052,15 @@
       applyTheme();
       applyScoreAlign();
       updateFrontMatter();
-      // The width first: the panel is shown by the call after it, and setting
-      // its width before that keeps it from opening at one width and jumping
-      // to another.
+      // The score panel, which fits the outline to the room it leaves as
+      // it comes or goes; then the outline's width, and the outline shown by
+      // the call after it: setting its width before that keeps it from
+      // opening at one width and jumping to another.
+      applyScorePanel();
+      applyScorePanelFace();
       applyOutlineWidth();
       applyOutline();
-      updateMatchButton();
+      syncRow("mdm-match-substring");
       applyFollowPlayhead();
       applyTextFont();
       applyTextAlign();

@@ -318,7 +318,7 @@ test("a score's export offers MIDI and WAV in a menu that behaves like the toolb
 
   // And so does opening a menu of the toolbar.
   await press("#app .mdm-score .mdm-audio-export");
-  await press('#app .mdm-toolbar [data-type="mdm-theme"]');
+  await press('#app .mdm-toolbar [data-type="menu-page"]');
   assert.equal(
     await page.evaluate(() => getComputedStyle(document.querySelector("#app .mdm-score .mdm-menu")).display),
     "none",
@@ -328,19 +328,30 @@ test("a score's export offers MIDI and WAV in a menu that behaves like the toolb
   await h.close();
 });
 
-test("the export of a score is drawn with the toolbar's export glyph", { skip }, async () => {
+// The arrow leaving its tray was the glyph of the toolbar's export button as
+// well, one drawing in the two places it stood. The bar's export is the word
+// Export since 2026-10-13 and draws no glyph, so the rail of a score is the
+// one place the arrow is left: what is held is that it is still the arrow,
+// and that no button or row of the bar draws it for something else.
+test("the export of a score is drawn with the export arrow, which nothing on the bar draws", { skip }, async () => {
   const h = await open({ text: TWO_SCORES, scores: 2 });
-  const same = await h.page.evaluate(() => {
+  const seen = await h.page.evaluate(() => {
+    const flat = (svg) => svg.innerHTML.replace(/\s+/g, " ").trim();
     const rail = document.querySelector("#app .mdm-score .mdm-audio-export svg");
-    const bar = document.querySelector('#app .mdm-toolbar [data-type="mdm-export"] svg');
     return {
-      rail: rail.innerHTML.replace(/\s+/g, " ").trim(),
-      bar: bar.innerHTML.replace(/\s+/g, " ").trim(),
+      rail: flat(rail),
+      paths: Array.from(rail.querySelectorAll("path")).map((p) => p.getAttribute("d").slice(0, 7)),
+      bar: Array.from(document.querySelectorAll("#app .mdm-toolbar .mdm-btn > svg, #app .mdm-toolbar .mdm-menu__icon > svg")).map(flat),
+      word: document.querySelector('#app .mdm-toolbar [data-type="menu-export"]').innerHTML,
       label: document.querySelector("#app .mdm-score .mdm-audio-export").getAttribute("aria-label"),
     };
   });
-  assert.equal(same.rail, same.bar, "the rail draws another arrow than the bar");
-  assert.equal(same.label, "Export audio");
+  // The arrow, and the tray it leaves.
+  assert.deepEqual(seen.paths, ["M8 1.6 ", "M2.6 9."]);
+  assert.ok(seen.bar.length > 30, "the glyphs of the bar were not read");
+  assert.ok(!seen.bar.includes(seen.rail), "a control of the bar draws the export arrow");
+  assert.equal(seen.word, "Export", "the bar's export is not the bare word");
+  assert.equal(seen.label, "Export audio");
   await h.close();
 });
 
@@ -928,13 +939,13 @@ test("a score's own button writes its file beside the document, end to end", { s
   }
 });
 
-// The panel of the toolbar's export button, which is the other half of the
-// same feature: the rail writes one score and this writes them all, and the
-// two branches (the document, and the audio of the scores in it) are told
-// apart by the headers over their rows.
+// The menu under the word Export, which is the other half of the same
+// feature: the rail writes one score and this writes them all, and the two
+// branches (the document, and the audio of the scores in it) are told apart
+// by the headers over their rows.
 const exportPanel = (page) =>
   page.evaluate(() => {
-    const btn = document.querySelector('#app button[data-type="mdm-export"]');
+    const btn = document.querySelector('#app button[data-type="menu-export"]');
     // A press on an open button shuts it, so a panel already open is shut
     // first: every call of this leaves the panel open and freshly read.
     if (btn.parentElement.classList.contains("mdm-toolbar__item--open")) btn.click();
@@ -965,7 +976,7 @@ test("the export panel names its two branches, and audio is one file per score",
   // A header is not something to press: it reaches no click handler of its
   // own and takes no pointer, so a press aimed at it lands on the panel.
   const inert = await page.evaluate(() => {
-    const head = document.querySelectorAll("#app .mdm-toolbar .mdm-menu__head")[1];
+    const head = document.querySelectorAll("#app .mdm-toolbar__item--open .mdm-menu__head")[1];
     const box = head.getBoundingClientRect();
     const at = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
     return { tag: head.tagName, hit: at.className };
@@ -1012,19 +1023,27 @@ test("with no score to write, the audio rows grey out and the document's do not"
       "mdm-export-wav off",
     ]
   );
-  // Greyed at the weight of a button of the bar with nothing to do, which is
-  // one declaration in the stylesheet for both.
+  // Greyed at the weight of a button with nothing to do, which is one
+  // declaration in the stylesheet for both. The button is a key of the score
+  // panel's pad, greyed while the score mode is off, and the switch of the
+  // mode in the Score menu is greyed with the rows here, for their reason:
+  // no score.
   const weights = await page.evaluate(() => {
     const row = document.querySelector('#app .mdm-toolbar button[data-type="mdm-export-midi"]');
-    const undo = document.querySelector('#app .mdm-toolbar button[data-type="undo"]');
+    const button = document.querySelector('#app .mdm-score-panel button[data-type="score-note-3"]');
+    const mode = document.querySelector('#app .mdm-toolbar button[data-type="mdm-score-navigation"]');
     return {
       row: getComputedStyle(row).opacity,
-      undo: getComputedStyle(undo).opacity,
+      button: getComputedStyle(button).opacity,
+      greyed: button.classList.contains("mdm-btn--off"),
       pointer: getComputedStyle(row).pointerEvents,
+      mode: getComputedStyle(mode).opacity + "/" + getComputedStyle(mode).pointerEvents,
     };
   });
   assert.equal(weights.row, "0.35");
-  assert.equal(weights.undo, weights.row, "the row and the greyed button of the bar differ");
+  assert.equal(weights.greyed, true, "the key of the pad is not greyed, so the weights compare nothing");
+  assert.equal(weights.button, weights.row, "the row and a greyed button differ");
+  assert.equal(weights.mode, "0.35/none", "the switch of the score mode is not greyed in a document with no score");
   assert.equal(weights.pointer, "none");
   // And it takes no press: nothing is asked of the host at all.
   const posts = await exported(page, () =>
@@ -1069,7 +1088,7 @@ test("a document too long to read in the time the panel has keeps its rows live"
     const CM = window.__mdm.CM;
     const view = window.__mdm.view;
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
-    const btn = document.querySelector('#app button[data-type="mdm-export"]');
+    const btn = document.querySelector('#app button[data-type="menu-export"]');
     btn.click();
     return {
       unread: !CM.ensureSyntaxTree(view.state, view.state.doc.length, 0),

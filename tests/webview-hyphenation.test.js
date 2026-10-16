@@ -1,8 +1,10 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { open, skip, docText, setSelection, selectionRanges, postSettings, setSettingPosts, lastEdit, update } = require("./webview/helpers.js");
+const { open, skip, docText, setSelection, selectionRanges, postSettings, setSettingPosts, lastEdit, update, pressBar, barState } = require("./webview/helpers.js");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+// The row of the Page menu the languages hang from, which was a button of the
+// bar with a menu of its own until the bar went to words (2026-10-13).
 const BUTTON = 'button[data-type="mdm-hyphenation"]';
 const ENTRY = tag => '#app button[data-type="mdm-hyphenation-' + tag + '"]';
 const PATTERNS = require("../vscode-mdm/media/hyphenation-patterns.js");
@@ -21,21 +23,27 @@ async function wrapInsideWord(page) {
   });
 }
 
-// The menu as the reader finds it, opened and closed again by its button:
-// each entry's tag, its label and whether the tick is on it.
+// The menu as the reader finds it, opened by the word Page and the row that
+// leads to the languages, and closed again by the word: each entry's tag, its
+// label, whether the tick is on it, and whether it was ticked before anything
+// was opened, since a row says what is so with its menu shut as well.
 async function menu(page) {
-  await page.click(BUTTON);
-  const entries = await page.$$eval('#app button[data-type^="mdm-hyphenation-"]', els => els.map(el => ({
+  const read = () => page.$$eval('#app button[data-type^="mdm-hyphenation-"]', els => els.map(el => ({
     tag: el.getAttribute("data-type").slice("mdm-hyphenation-".length),
     label: el.childNodes[0].textContent,
     ticked: !!el.querySelector(".mdm-swatch__tick"),
   })));
-  await page.click(BUTTON);
+  const shut = await read();
+  await pressBar(page, "mdm-hyphenation");
+  const entries = await read();
+  assert.equal(await page.$eval("#app .mdm-menu__group--open > " + BUTTON + " + .mdm-menu", el => getComputedStyle(el).display), "block",
+    "the languages did not open beside their row");
+  await page.click('#app button[data-type="menu-page"]');
+  assert.deepEqual(shut, entries, "the tick was on another entry until the menu was opened");
   return entries;
 }
 const ticked = entries => entries.filter(e => e.ticked).map(e => e.tag);
 const marks = page => page.$$eval("#app .mdm-hyphen", els => els.length);
-const lit = page => page.$eval(BUTTON, el => el.classList.contains("mdm-btn--on"));
 
 test("the menu opens on no hyphenation, the default, and names each language in its own words", { skip }, async t => {
   const h = await open({ text: "---\nlang: es\n---\n\nUna representación extraordinariamente internacionalización.\n", scores: 0 });
@@ -47,14 +55,17 @@ test("the menu opens on no hyphenation, the default, and names each language in 
   assert.deepEqual(entries.slice(1).map(e => e.tag).sort(), Object.keys(PATTERNS).sort(), "the menu and the patterns disagree");
   assert.deepEqual(ticked(entries), ["none"]);
   assert.equal(await marks(h.page), 0, "words divided before a language was chosen");
-  // The tick says what is chosen, and the button lights while a language is
-  // dividing the prose: dark on the default, lit once Spanish divides.
-  assert.equal(await h.page.$eval(BUTTON, el => el.getAttribute("aria-label")), "Hyphenation");
-  assert.equal(await lit(h.page), false, "the default lit the button");
+  // The tick says what is chosen. The languages hang from a row of the Page
+  // menu, which names them, shows that it leads to more and says nothing of
+  // the state: the button they hung from was lit while a language divided
+  // the prose, and the tick is where that is read now.
+  const row = await barState(h.page, "mdm-hyphenation");
+  assert.deepEqual([row.kind, row.under, row.name, row.on], ["row", "menu-page", "Hyphenation", false]);
+  assert.equal(await h.page.$eval(BUTTON, el => !!el.querySelector(".mdm-menu__more svg")), true, "the row does not say it leads to more");
   await postSettings(h.page, { hyphenation: "auto" });
   await h.page.waitForFunction(() => document.querySelector("#app .mdm-hyphen"));
   assert.deepEqual(ticked(await menu(h.page)), ["es"]);
-  assert.equal(await lit(h.page), true, "a language dividing the prose left the button dark");
+  assert.equal((await barState(h.page, "mdm-hyphenation")).on, false, "the row that leads to the languages wears a tick of its own");
   assert.deepEqual(h.errors, []);
 });
 
@@ -89,8 +100,7 @@ test("the host's answer divides words in that language, and no hyphenation joins
   await h.page.setViewport({ width: 340, height: 500 });
   await sleep(100);
   assert.equal(await wrapInsideWord(h.page), null, "a word was divided before a language was chosen");
-  await h.page.click(BUTTON);
-  await h.page.click(ENTRY("es"));
+  await pressBar(h.page, "mdm-hyphenation-es");
   // What the host does with that (extension-host.test.js): a header of its
   // own holding `lang: es`, sent back as an update, and the setting echoed.
   const header = "---\nlang: es\n---\n";
@@ -99,7 +109,6 @@ test("the host's answer divides words in that language, and no hyphenation joins
   await h.page.waitForFunction(() => document.querySelector("#app .mdm-hyphen"));
   assert.equal(await docText(h.page), prose, "the hidden header reached the text the editor holds");
   assert.deepEqual(ticked(await menu(h.page)), ["es"]);
-  assert.equal(await lit(h.page), true, "the button stayed dark with Spanish dividing");
   const at = await wrapInsideWord(h.page);
   assert.ok(at, "Spanish did not divide a word");
   await setSelection(h.page, at);
@@ -110,15 +119,13 @@ test("the host's answer divides words in that language, and no hyphenation joins
   await h.page.setViewport({ width: 1400, height: 500 });
   await sleep(150);
   assert.equal(await wrapInsideWord(h.page), null, "hyphens did not disappear when the line grew");
-  await h.page.click(BUTTON);
-  await h.page.click(ENTRY("none"));
+  await pressBar(h.page, "mdm-hyphenation-none");
   assert.deepEqual((await setSettingPosts(h.page)).pop(), { type: "setSetting", key: "hyphenation", value: "none" });
   assert.equal(await h.page.evaluate(() => window.__posts.filter(m => m.type === "setLanguage").length), 1,
     "no hyphenation wrote to the header");
   await postSettings(h.page, { frontMatter: "hidden", hyphenation: "none" });
   await h.page.waitForFunction(() => !document.querySelector("#app .mdm-hyphen"));
   assert.deepEqual(ticked(await menu(h.page)), ["none"]);
-  assert.equal(await lit(h.page), false, "no hyphenation left the button lit");
   assert.equal(await docText(h.page), prose);
   assert.deepEqual(await selectionRanges(h.page), [[at, at]]);
   assert.deepEqual(h.errors, []);
@@ -202,12 +209,10 @@ test("a hidden header selects Spanish, and an external language change recompute
   t.after(() => h.close());
   assert.ok(await marks(h.page) > 0);
   assert.deepEqual(ticked(await menu(h.page)), ["es"], "a regional tag did not tick its language");
-  assert.equal(await lit(h.page), true, "a regional tag left the button dark");
   assert.equal(await docText(h.page), prose);
   await update(h.page, header.replace("es-CU", "ja") + prose, false, 0, header.replace("es-CU", "ja"));
   assert.equal(await marks(h.page), 0, "an unsupported language borrowed Spanish cuts");
   assert.deepEqual(ticked(await menu(h.page)), ["none"], "a language without patterns did not tick no hyphenation");
-  assert.equal(await lit(h.page), false, "a language without patterns lit the button");
   assert.equal(await docText(h.page), prose);
   assert.deepEqual(h.errors, []);
 });
@@ -234,13 +239,11 @@ test("a header that names no language divides nothing and ticks nothing until on
   t.after(() => h.close());
   assert.equal(await marks(h.page), 0, "a header naming no language was divided as English");
   assert.deepEqual(ticked(await menu(h.page)), ["none"], "a header naming no language did not tick no hyphenation");
-  assert.equal(await lit(h.page), false, "the button lit with nothing divided");
-  // A `lang:` typed on screen divides, ticks and lights at once.
+  // A `lang:` typed on screen divides and ticks at once.
   const at = text.indexOf("---\n\n");
   await h.page.evaluate(at => window.__mdm.view.dispatch({ changes: { from: at, insert: "lang: en\n" } }), at);
   await h.page.waitForFunction(() => document.querySelector("#app .mdm-hyphen"));
   assert.deepEqual(ticked(await menu(h.page)), ["en"]);
-  assert.equal(await lit(h.page), true, "a lang typed on screen left the button dark");
   assert.deepEqual(h.errors, []);
 });
 
@@ -259,7 +262,6 @@ test("while the file's header is kept aside, a header typed in the text does not
   assert.equal(await docText(h.page), typed + prose);
   assert.ok(await marks(h.page) > 0, "the typed header took the language away");
   assert.deepEqual(ticked(await menu(h.page)), ["es"]);
-  assert.equal(await lit(h.page), true);
   assert.deepEqual(h.errors, []);
 });
 

@@ -108,6 +108,11 @@ const SETTINGS = {
   // in the provider).
   frontMatter: ["hidden", "shown"],
   outline: ["hidden", "shown"],
+  // Shown first, the fallback as well as the default: Score navigation
+  // comes with its panel until the Side panel row says otherwise (the
+  // owner's ask of 2026-10-14).
+  scorePanel: ["shown", "hidden"],
+  scorePanelFace: ["buttons", "keys"],
   multicursorMatch: ["word", "substring"],
   followPlayhead: ["follow", "still"],
   textFont: ["roman", "sans"],
@@ -4351,8 +4356,9 @@ class MdmEditorProvider {
     // It is opened in two ways, which is what the owner asked for over
     // three days (2026-10-03 to 2026-10-05):
     //
-    // - The setting mdm.frontMatter, which is the YAML button of the
-    //   toolbar: the button writes it, as every other button of the bar
+    // - The setting mdm.frontMatter, which is the YAML header row of the
+    //   Page menu (the YAML button of the bar until the bar became words
+    //   over menus): the row writes it, as every other switch of the bar
     //   writes its own, so it is remembered and every editor follows it.
     //   `shown` keeps the source of every header in view, as the YAML it
     //   is, with no title block drawn in its place, and what it shows stays
@@ -4635,7 +4641,7 @@ class MdmEditorProvider {
         endAudioRun(document.uri.toString(), "the editor reloaded");
         webview.postMessage(updateMsg());
       } else if (msg.type === "header") {
-        // The YAML button, or a click on the drawn title: the source of the
+        // The YAML header row, or a click on the drawn title: the source of the
         // header opened or put away. In the writing turn, behind the edit
         // the webview posts ahead of this (it sends what it was holding
         // first), so the text that answers is the one that edit left.
@@ -4830,6 +4836,7 @@ window.MDM_PALETTE = ${inlineJson(readPalette())};
 <script src="${mediaUri}/mdm-hyphenation.js"></script>
 <script src="${mediaUri}/mdm-audio.js"></script>
 <script src="${mediaUri}/mdm-crossref.js"></script>
+<script src="${mediaUri}/mdm-bars.js"></script>
 </head>
 <body>
 <div id="app"></div>
