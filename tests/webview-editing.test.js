@@ -943,6 +943,31 @@ test("Backspace after a later item's marker takes the marker and parts the line 
   assert.equal(out.head, 9);
 });
 
+test("Backspace after the marker of an empty item takes the marker and leaves the caret on its line", { skip }, async () => {
+  // An empty item has no text for the item above to take in, so no blank
+  // line parts the two: the line stays where it was, with the caret on it
+  // (the owner, 2026-10-15: Backspace on the item Enter had just made
+  // between two others put the caret on a new line below it).
+  const text = "1. Three strings to tune:\n  - G\n  - D\n  - \n  - A\n";
+  let out = await pressOn(text, text.indexOf("  - \n") + 4, ["Backspace"]);
+  assert.equal(out.text, "1. Three strings to tune:\n  - G\n  - D\n\n  - A\n");
+  assert.equal(out.head, text.indexOf("  - \n"), "the caret is not on the line the marker left");
+  // At the end of a list, nested in an item, on a quote's empty line, and
+  // in an ordered list, renumbered past the item that left it.
+  out = await pressOn("- keep\n- \n", 9, ["Backspace"]);
+  assert.equal(out.text, "- keep\n\n");
+  assert.equal(out.head, 7);
+  out = await pressOn("- a\n  - \n", 8, ["Backspace"]);
+  assert.equal(out.text, "- a\n  \n");
+  assert.equal(out.head, 6);
+  out = await pressOn("> a\n> \n", 6, ["Backspace"]);
+  assert.equal(out.text, "> a\n\n");
+  assert.equal(out.head, 4);
+  out = await pressOn("1. a\n2. \n3. c\n", 8, ["Backspace"]);
+  assert.equal(out.text, "1. a\n\n2. c\n");
+  assert.equal(out.head, 5);
+});
+
 test("Backspace after the hashes of a heading takes them all (ED21)", { skip }, async () => {
   const out = await pressOn("## Scales\n", 3, ["Backspace"]);
   assert.equal(out.text, "Scales\n");

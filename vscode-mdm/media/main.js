@@ -11821,7 +11821,10 @@
   // left is a paragraph, after the list or inside the item around it, and
   // not a lazy continuation of the item before, which the readers join into
   // that item's line (G078; lang-markdown blanked the marker with spaces
-  // instead). An emoji with a skin tone or a keycap goes whole (G056).
+  // instead). An empty item leaves no text to part, and its line stays
+  // where it is with the caret on it: the blank line had put the caret on
+  // the line below (the owner, 2026-10-15). An emoji with a skin tone or a
+  // keycap goes whole (G056).
   // Anything else is CodeMirror's own deletion.
   function mdmBackspace(view) {
     const state = view.state;
@@ -11875,7 +11878,8 @@
             special = true;
             const prefix = line.text.slice(0, inner.from);
             const prevText = line.from > 0 && /[^ \t>]/.test(doc.lineAt(line.from - 1).text);
-            const insert = prevText ? prefix.replace(/[ \t]+$/, "") + state.lineBreak + prefix : prefix;
+            const textLeft = /\S/.test(line.text.slice(col));
+            const insert = prevText && textLeft ? prefix.replace(/[ \t]+$/, "") + state.lineBreak + prefix : prefix;
             const out = [{ from: line.from, to: pos, insert: insert }];
             if (inner.item && inner.node.name === "OrderedList") renumberList(inner.item, doc, out, -2);
             return { range: CM.EditorSelection.cursor(line.from + insert.length), changes: out };
