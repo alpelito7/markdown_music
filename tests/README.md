@@ -10079,3 +10079,30 @@ above was 154 since before 0.7.3 and the file held 159; it says 160 now.
     escape (seen in `tests/tmp/eq-parens/work/parens/`). `&nbsp;` is
     read alike by both. Not touched: which reading the editor follows
     is the owner's to say.
+28. Text cut from a hyphenated row as a word was typed over, reported by
+    the owner on 2026-10-15 and not reproduced. He double-clicked the
+    "Tres" of "Tres ejemplos:" at the end of a long ordered item of a
+    Spanish document with hyphenation on, typed a letter, and the row then
+    read "*International Classif* («Clasif" with the caret after it: the
+    italic run and the plain text after it each lost everything from one
+    letter on, and in both words that letter is the one hyphenation marks
+    before the break "fi-ca" (a `span.mdm-hyphen` per break), the closing
+    `*` between the two kept. Tried and right every time (bench and notes
+    in `tests/tmp/typing-over-word/`): the harness on the same lines and
+    on his own file read in memory, with hyphenation on and off, the
+    letter typed, inserted as an IME would commit it, composed, and
+    through a dead key; twelve words replaced by every one of those paths;
+    a composition after each of 45 marked letters; and a real VS Code
+    (1.133, Chrome 148) on X11 with fcitx5 running a copy of his profile,
+    real mouse and keys through XTEST, the column as wide as his so that
+    the item broke on the same words, with fcitx5's word hint on (every
+    key a composition) and off (no composition, a dead key included).
+    Read and not proven: @codemirror/view 6.43.12 fixed "updating the DOM
+    for marks around an active composition that could sometimes try to use
+    the same DOM node twice"; a node used twice leaves its first place,
+    which would cut a row at a mark as the picture shows, but only during
+    an IME composition, and with his fcitx5 a plain key is none unless the
+    word hint is on. The view vendored here is 6.43.9. Whether the
+    document lost the text or only the row on screen is not known: the
+    caret drawn after "Clasif" fits a document that kept it, with the
+    typed letter inside what the row stopped showing.
