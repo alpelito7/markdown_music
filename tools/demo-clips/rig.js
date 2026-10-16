@@ -20,14 +20,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { PUPPETEER, PORT } = require("./paths.js");
-
-// A pointer that moves at a constant speed reads as a machine. easeInOutCubic
-// is the curve a hand makes: it starts, it travels, it settles.
-function easeInOutCubic(t) {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
+const { travel, stroke, keyGaps, readTime } = require("./motion.js");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// How long the pointer is on a thing before it presses it (pressAt). A hand
+// that has arrived presses: a tenth of a second, where every press used to
+// wait a third to a half of one whatever it was on. A button the take leaves
+// its own tooltip to name is the exception, and how long the pointer is on
+// that one is by what the tooltip says (readTip, below).
+const SETTLE = 110;
 
 // ---------------------------------------------------------------- overlay
 
@@ -46,7 +48,7 @@ function overlaySource() {
 function overlayFn() {
   // The overlay's own version, so a VS Code still holding an older overlay
   // from an earlier run (the workbench outlives a run) gets this one instead.
-  const VERSION = 2;
+  const VERSION = 5;
   if (window.__mdmRig && window.__mdmRig.version === VERSION) return;
   const stale = document.getElementById("__mdm_rig");
   if (stale) stale.remove();
@@ -163,12 +165,21 @@ function overlayFn() {
   host.appendChild(dot);
   document.body.appendChild(host);
   let flip = false;
+  let beat = null;
+  function tick() {
+    flip = !flip;
+    dot.style.background = flip ? "rgba(0,0,0,0.004)" : "rgba(0,0,0,0)";
+  }
 
   window.__mdmRig = {
     version: VERSION,
-    tick: function () {
-      flip = !flip;
-      dot.style.background = flip ? "rgba(0,0,0,0.004)" : "rgba(0,0,0,0)";
+    tick: tick,
+    // The pixel flipped 25 times a second for as long as the camera runs,
+    // so the screencast has a frame of whatever is on screen within 40 ms
+    // of its getting there (see startRec).
+    pulse: function (on) {
+      if (beat) clearInterval(beat);
+      beat = on ? setInterval(tick, 40) : null;
     },
     move: function (x, y, name) {
       cur.style.transform = "translate(" + x + "px," + y + "px)";
@@ -479,33 +490,106 @@ class Rig {
     await this.page.evaluate((p) => window.__mdmRig && window.__mdmRig.move(p.x, p.y, p.shape), { x, y, shape });
   }
 
-  // An eased travel, one Input event per step, with the drawn pointer kept in
-  // step. The event goes first, so a hover it sets off (the buttons of a score,
-  // a tooltip, the wash under a button) is there when the shape is picked.
+  // A travel as a hand makes it (motion.js): for as long as its distance and
+  // the size of its target make it take, with no ms given, on a shallow arc,
+  // quick off the mark and slow into the target. opts.size is how wide the
+  // thing aimed at is, opts.pace stretches the time (above 1) or shortens
+  // it, and opts.direct has the pointer go all the way in one stroke. A ms
+  // given is the time outright.
+  //
+  // One Input event per step, with the drawn pointer kept in step. The event
+  // goes first, so a hover it sets off (the buttons of a score, a tooltip,
+  // the wash under a button) is there when the shape is picked. The pointer
+  // is put where the clock says it is at each step, so the move takes the
+  // time it was given however long a step takes to send; counted out in
+  // steps with a fixed sleep between them, as it first was, a move ran
+  // longer than its time by whatever the three round trips of a step cost.
   async moveTo(target, ms, opts) {
     const o = opts || {};
-    const dur = ms === undefined ? 620 : ms;
-    const x0 = this.x;
-    const y0 = this.y;
+    const path = travel({ x: this.x, y: this.y }, target, { ms, width: o.size, pace: o.pace, direct: o.direct });
     const off = await this.webviewOffset();
-    const steps = Math.max(2, Math.round(dur / 16));
-    for (let i = 1; i <= steps; i++) {
-      const t = easeInOutCubic(i / steps);
-      const x = Math.round(x0 + (target.x - x0) * t);
-      const y = Math.round(y0 + (target.y - y0) * t);
-      await this.cdp.send("Input.dispatchMouseEvent", {
-        type: "mouseMoved",
-        x,
-        y,
-        buttons: o.buttons || 0,
-        modifiers: o.modifiers || 0,
-      });
-      const shape = await this.shapeAt(x, y, off);
-      await this.page.evaluate((p) => window.__mdmRig && window.__mdmRig.move(p.x, p.y, p.shape), { x, y, shape });
-      this.x = x;
-      this.y = y;
-      await sleep(16);
+    const began = Date.now();
+    for (;;) {
+      const t = Math.min(path.ms, Date.now() - began);
+      const p = path.at(t);
+      const x = Math.round(p.x);
+      const y = Math.round(p.y);
+      if (x !== this.x || y !== this.y) {
+        await this.cdp.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x,
+          y,
+          buttons: o.buttons || 0,
+          modifiers: o.modifiers || 0,
+        });
+        const shape = await this.shapeAt(x, y, off);
+        await this.page.evaluate((p) => window.__mdmRig && window.__mdmRig.move(p.x, p.y, p.shape), { x, y, shape });
+        this.x = x;
+        this.y = y;
+      }
+      if (t >= path.ms) break;
+      await sleep(8);
     }
+  }
+
+  // The pointer taken to a place and pressed there: the travel, the moment a
+  // hand takes to press once it has arrived (SETTLE), and the click. With
+  // opts.tip the pointer stays until the editor's tooltip has come up and
+  // been read (readTip), for a button nothing else on screen names. The
+  // rest of opts goes to the travel and to the click.
+  async pressAt(target, opts) {
+    const o = opts || {};
+    await this.moveTo(target, o.ms, o);
+    if (o.tip) await this.readTip();
+    else await sleep(o.settle === undefined ? SETTLE : o.settle);
+    if (o.clickCount === 2) await this.doubleClick(o);
+    else await this.click(o);
+  }
+
+  // The tooltip of the thing under the pointer: what it says, and whether
+  // it is whole on screen yet. The editor draws a tip from the aria-label of
+  // whatever carries .mdm-tip, in its ::after, faded in 200 ms after the
+  // pointer comes (style.css); the pointer is a real one to the page, so
+  // :hover names the thing, the innermost of them where a button stands
+  // inside another thing that has a tip. A score puts up a tip of its own
+  // for the buttons of its chrome (.mdm-score-edit__tip, two lines of it on
+  // a line's end), which is read off what it shows.
+  async tipUnder() {
+    return this.evalFrame(() => {
+      const whole = (style) => style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) > 0.99;
+      const own = document.querySelector("#app .mdm-score-edit__tip--shown");
+      if (own) {
+        const label = Array.from(own.children, (line) => line.textContent).join("\n") || own.textContent;
+        return { label, whole: whole(getComputedStyle(own)) };
+      }
+      const under = document.querySelectorAll("#app .mdm-tip:hover");
+      const el = under[under.length - 1];
+      if (!el) return { label: "", whole: false };
+      return { label: el.getAttribute("aria-label") || "", whole: whole(getComputedStyle(el, "::after")) };
+    });
+  }
+
+  // The pointer left where it is until the tooltip there has come up and
+  // been on screen for what it takes to read (motion.js, readTime). The
+  // reading is counted from the tip being whole and not from the pointer's
+  // arrival, since how far along the tip is by then depends on the travel:
+  // waiting 1130 ms from the arrival left "Score navigation" whole for 1130,
+  // the tip having started up before the pointer stopped. A take that waits
+  // for a tip on a thing that has none, or whose tip does not come up (one
+  // put away by a click is not shown again until the pointer has left), is
+  // stopped: the wait would be a pointer standing still for nothing. What
+  // the tip said is returned, for a take that counts on what it says.
+  async readTip() {
+    const until = Date.now() + 1500;
+    let tip = await this.tipUnder();
+    while (!tip.whole && Date.now() < until) {
+      await sleep(20);
+      tip = await this.tipUnder();
+    }
+    if (!tip.label) throw new Error("the pointer waits for a tooltip on a thing that has none");
+    if (!tip.whole) throw new Error(`the tooltip ${JSON.stringify(tip.label)} did not come up`);
+    await sleep(readTime(tip.label));
+    return tip.label;
   }
 
   async click(opts) {
@@ -550,15 +634,19 @@ class Rig {
     this.reshapeLater(180);
   }
 
-  // A press here, an eased travel to target with the button held, and the
-  // release there: a selection dragged out with the mouse.
-  async dragTo(target, ms) {
+  // A press here, a travel to target with the button held, and the release
+  // there: a selection dragged out with the mouse, or a thing carried. A
+  // hand carries slower than it points, a third slower here with no ms and
+  // no opts.pace given, and looks at where it has brought the thing before
+  // it lets go (opts.hold, 140 ms with none given).
+  async dragTo(target, ms, opts) {
+    const o = opts || {};
     const base = { button: "left", clickCount: 1 };
     await this.page.evaluate((p) => window.__mdmRig && window.__mdmRig.ring(p.x, p.y), { x: this.x, y: this.y });
     await this.cdp.send("Input.dispatchMouseEvent", { ...base, x: this.x, y: this.y, type: "mousePressed", buttons: 1 });
-    await sleep(90);
-    await this.moveTo(target, ms, { buttons: 1 });
-    await sleep(60);
+    await sleep(110);
+    await this.moveTo(target, ms, { buttons: 1, size: o.size, pace: o.pace === undefined ? 1.3 : o.pace, direct: o.direct });
+    await sleep(o.hold === undefined ? 140 : o.hold);
     await this.cdp.send("Input.dispatchMouseEvent", { ...base, x: this.x, y: this.y, type: "mouseReleased", buttons: 0 });
     this.reshapeLater(180);
   }
@@ -662,25 +750,41 @@ class Rig {
   // A scroll that lands where it was asked to. A wheel is quantised, so a take
   // that scrolls down by wheel and back by the same wheel does not end on the
   // offset it began at, and the loop jumps. This moves the scroller on the
-  // pointer's eased curve, which looks like a scroll and ends on an exact
-  // offset.
+  // curve of the pointer's own stroke (motion.js), off quickly and slowing
+  // to a stop as a page flicked with a wheel does, which looks like a scroll
+  // and ends on an exact offset. By the clock, as moveTo is, so it takes the
+  // time it is given.
   async smoothScrollTo(target, ms) {
     const dur = ms === undefined ? 480 : ms;
     const from = await this.atScrollTop();
-    const steps = Math.max(2, Math.round(dur / 16));
-    for (let i = 1; i <= steps; i++) {
-      const t = easeInOutCubic(i / steps);
+    const began = Date.now();
+    for (;;) {
+      const t = Math.min(dur, Date.now() - began);
       await this.frame.evaluate((v) => {
         document.querySelector("#app .cm-scroller").scrollTop = v;
-      }, Math.round(from + (target - from) * t));
-      await sleep(16);
+      }, Math.round(from + (target - from) * stroke(t / dur)));
+      if (t >= dur) break;
+      await sleep(8);
     }
   }
 
   // ---- keyboard ----
 
-  async type(text, delay) {
-    await this.page.keyboard.type(text, { delay: delay === undefined ? 55 : delay });
+  // Text typed a key at a time, `delay` ms a key on average and unevenly, as
+  // fingers type (keyGaps in motion.js): at one fixed interval a line of
+  // text came out as a teleprinter's. opts.even keeps the fixed interval.
+  async type(text, delay, opts) {
+    const base = delay === undefined ? 55 : delay;
+    if (!base || (opts && opts.even)) {
+      await this.page.keyboard.type(text, { delay: base });
+      return;
+    }
+    const keys = Array.from(text);
+    const gaps = keyGaps(text, base);
+    for (let i = 0; i < keys.length; i++) {
+      await this.page.keyboard.type(keys[i]);
+      if (i < keys.length - 1) await sleep(gaps[i]);
+    }
   }
 
   async press(chord) {
@@ -698,6 +802,7 @@ class Rig {
     fs.mkdirSync(outDir, { recursive: true });
     this.outDir = outDir;
     this.frames = [];
+    this.lag = 0;
     let seq = 0;
     this.recording = true;
     this._onFrame = async ({ data, metadata, sessionId }) => {
@@ -705,6 +810,9 @@ class Rig {
       const file = path.join(outDir, `f${String(seq++).padStart(5, "0")}.png`);
       fs.writeFileSync(file, Buffer.from(data, "base64"));
       this.frames.push({ file, t: metadata.timestamp });
+      // How far behind the screen the camera runs: a frame is stamped when
+      // it is taken, and gets here when the ones before it have been.
+      this.lag = Math.max(this.lag, Date.now() / 1000 - metadata.timestamp);
       try {
         await this.cdp.send("Page.screencastFrameAck", { sessionId });
       } catch (e) {
@@ -723,10 +831,21 @@ class Rig {
       await sleep(50);
     }
     if (!this.frames.length) throw new Error("the screencast sent no first frame");
+    // And a frame of everything after it. What changes in the webview with
+    // nothing painted anew, a tooltip faded in by its opacity, did not
+    // always send one: the tip of a score's line-end button came up 300 ms
+    // into a hover of 1.2 s and reached the take with the frame of the press
+    // that ended it, 1.155 s after the frame before (the frames of
+    // 2026-10-06), so the take showed the pointer standing on a button for
+    // no reason and the tip for a tenth of a second. The pixel is flipped
+    // from the page's own timer while the camera runs, and every frame it
+    // forces carries the window as it then is.
+    await this.page.evaluate(() => window.__mdmRig && window.__mdmRig.pulse && window.__mdmRig.pulse(true));
   }
 
   async stopRec() {
     this.recording = false;
+    await this.page.evaluate(() => window.__mdmRig && window.__mdmRig.pulse && window.__mdmRig.pulse(false)).catch(() => {});
     try {
       await this.cdp.send("Page.stopScreencast");
     } catch (e) {
@@ -859,4 +978,4 @@ function dissolveHome(frames, seconds, opts) {
   return out;
 }
 
-module.exports = { Rig, sleep, encodeMp4, encodeGif, encodePoster, seam, dissolveHome };
+module.exports = { Rig, sleep, SETTLE, encodeMp4, encodeGif, encodePoster, seam, dissolveHome };

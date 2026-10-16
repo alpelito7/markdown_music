@@ -75,6 +75,11 @@ strips `muted` from a `<video>` and Chrome then shows only its poster.
   whose alt text is the block itself.
 - `rig.js` drives VS Code and encodes; the reasons for the frame size, the
   pointer and the hairline drawn round every frame are in its comments.
+- `motion.js` is how the pointer travels and how typed keys are spaced: the
+  time a move takes for its distance, the arc it goes on, how it slows into
+  its target, and how long a button's tooltip is left up to be read, by
+  what it says. It needs no VS Code, and `tests/clip-motion.test.js` holds
+  it to what was decided.
 - The VS Code profile, the link to `vscode-mdm/`, the copies of the
   documents and the frames of a take in progress go to
   `~/.cache/mdm-demo-clips` (another path: `MDM_DEMO_STATE`). The profile

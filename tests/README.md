@@ -9523,6 +9523,144 @@ Not looked at on Windows or macOS, where whether a press answered by the
 dialog ever kept the pointer is not known; following on the release is
 what VS Code's own editor does on every system.
 
+### The pointer of the clips moves as a hand does (2026-10-06)
+
+The owner, of the three takes: the pointer should move more as a person's
+does and not stand so long where it has no reason to, which does not mean
+going slower, and what is monotonous can be hurried. His example was the
+Markdown take's three words made bold. On the frames of the take then
+published the pointer reached the first word at 14.4 s and left the third at
+20.1: on each word it stood 0.6 s before the double click and 0.9 s after
+it, and for the time after it was drawn as the arrow and not the I-beam,
+since what is under a pointer on a selected word is the selection's own
+layer.
+
+Until then every move was a straight line on one symmetric curve, for the
+time its beat named, and every click waited a third to a half of a second
+whatever it was on. What a move is now is in `tools/demo-clips/motion.js`,
+which needs no VS Code: the time its distance and its target make it take,
+the form of Fitts's law with two constants picked by eye on the takes; top
+speed at 0.37 of that time and the rest spent arriving; a shallow arc turned
+away from where a wrist would lie; a long move onto a small target stopped a
+few pixels short and closed, six times in ten; keys at uneven intervals.
+Every choice is a function of the two ends of the move, so a take recorded
+again moves as it did. `rig.js` puts the pointer where the clock says it is
+(counted in steps, a move ran longer than the time it was given), and
+`pressAt` presses a tenth of a second after arriving, or waits for the
+editor's tooltip on a button nothing else names. The takes wait in three
+places only, which the head of `clips.js` lists, and a result is given the
+time to the next press and not a time the pointer stands still.
+
+Recorded off the owner's screen, light: the tour 25.2 s where it was 40.4,
+the Markdown take 54.6 s where it was 87.8, the seam of each at 0.000 %. The
+three words take 2 s: the pointer is on the first at 9.0 s and off the
+third at 11.0. (Both takes were recorded again that afternoon, below; the
+beats of the three words were not touched, and were not measured again.)
+
+Two faults of the camera were found on the way, and are the rig's now:
+
+- A change in the webview with nothing painted anew, a tooltip faded in by
+  its opacity, did not always send the screencast a frame: one tooltip came
+  up 300 ms into a hover and reached the take 1.155 s after the frame
+  before, with the press that ended the hover. The overlay's invisible pixel
+  is flipped 25 times a second while the camera runs, and `record.js` stops
+  a take in which the camera went half a second without a frame.
+- The workbench goes on believing the pointer is where it last saw it,
+  since a move over the webview tells it nothing. Once a Markdown take had
+  pressed the close button of the `.bib`'s tab, every take after it showed
+  VS Code's "Close (Ctrl+W)" over the entry half a second after the `.bib`
+  opened; the first take of a session was clean. `record.js` shows the
+  workbench the pointer over its title bar before each take.
+
+#### A little longer on the buttons (2026-10-06, afternoon)
+
+The owner, having seen the three: good, and a little more of a pause when
+the pointer is on a button, so that its tooltip can be read. Measured on
+the takes of the morning, a tip stood whole for 0.43 to 0.7 s, the same
+whatever it said (a press came 560 ms after the pointer), and the five
+words of the multicursor button for 1.07.
+
+How long a tip is left is now by what it says, and counted from when it is
+whole: `readTime` in `motion.js`, 550 ms and 28 a character, and
+`rig.readTip`, which asks the page what the tip under the pointer says and
+whether it is whole yet (the opacity of the `::after` it is drawn in), waits
+for that, and then waits the reading. Counted from the pointer's arrival
+the same wait gave a different time on screen from one button to the next,
+since a tip starts up as the pointer comes onto its button: a quarter of a
+second before a long travel ends, hardly at all before a hop does. A take
+that waits for a tip on a thing with none, or whose tip does not come up,
+stops. No take names a number of milliseconds for a tip any more.
+
+Measured on the new takes, whole on screen: "LaTeX font" 0.97 s, "Gray
+staff lines" 1.03, the multicursor button 1.60, "Show player" and "Export
+audio" 1.10, "Justify text" and "Hyphenation" 1.00, "Show YAML header"
+1.07, "Unordered list" 1.03, "Highlight" 0.97. That is the reading and
+about a tenth of a second more, the tip staying up through the press.
+"Theme" and "Table" were looked at on frames and not timed: the measure
+counts rows of 30 px of the tip's ground, and one short word has few. The
+tour is 27.7 s and the Markdown take 56.8, the seam of each at 0.000 %.
+
+Eleven tests in `clip-motion.test.js`, in `test:fast`. Round M, run on a copy
+of `motion.js`, `rig.js` and the tests in a scratch folder, the copy first
+passing each test by itself:
+
+- **M1** a move of no length not caught → *a move begins where the pointer
+  is and ends on the point it was sent to*.
+- **M2** every move 400 ms, **M3** the time a beat gives a move ignored →
+  *a move takes longer the further it goes and the smaller what it aims at*.
+- **M4** the stroke the same forwards as backwards → *the pointer is quick
+  off the mark, slow into its target, and never turns back*.
+- **M5** the bow with no cap, **M6** a hop bowed as a travel is, **M7** no
+  move bowed → *a travel bows off the straight line, by 42 px at the most,
+  and a hop goes straight*. M5 would have survived the moves the test first
+  made, none of them long enough to reach the cap: one of 900 px was added.
+- **M8** the bow not turned away from the wrist, **M9** a reach along the
+  wrist's line bowed as any other → *a sweep across the window bows up, and
+  a reach along the wrist's own line hardly bows*.
+- **M10** no move stopped short, **M11** every long one, **M12** one onto a
+  wide thing too, **M13** the first stroke past its target → *a long move
+  onto a button comes up a few pixels short and closes the gap, more often
+  than not*.
+- **M14** chance a throw of the dice → *a move and a line of typing are the
+  same every time they are asked for*.
+- **M15** keys at one interval, **M16** no breath at a space → *typed keys
+  come at uneven intervals, with a breath either side of a space*.
+- **M17** a press waiting 420 ms → *a press comes a tenth of a second after
+  the pointer*. (The M18 of the morning, a tooltip given 320 ms, was
+  against a constant that is gone.)
+- **M18** every tooltip read in the same second, **M19** a tip left whole
+  for what the first takes left it (300 ms and 28 a character), **M20** 60
+  ms a character, which stands over two seconds on two lines, **M21** a
+  label counted with its spaces and its line break as written → *a tooltip
+  is whole on screen for as long as its words take to read, and no longer*.
+- **M22** the reading counted from the pointer's arrival, **M23** a thing
+  with no tooltip waited on all the same, **M24** a tip that does not come
+  up waited for and pressed, **M25** a press left to a tooltip coming as
+  any other, **M26** a plain press asking the page for a tooltip → *a press
+  left to a tooltip waits for it to be whole and then for what it takes to
+  read, and stops where none comes up*, which runs `pressAt` on a rig with
+  no window and a clock of its own.
+
+What the tests do not reach is what needs a VS Code: that a take's pointer
+is where `motion.js` says, the pulse, the title bar, and what the page
+answers when it is asked about a tip (`tipUnder`). Those are held by the
+takes themselves, which stop on a blind camera and on a tip that does not
+come up, and by the frames, which were looked at and, for the tips, timed.
+
+Run on this state: `test:fast`, 323 of 323; round M, M1 to M26, all caught.
+
+### The pointer of the clips no quicker than main's (2026-10-15)
+
+The owner, of the takes recorded on 2026-10-06: "el cursor tiene momentos en que va muy rápido, sobre todo en las líneas rectas. De hecho, prefiero las versiones que están en main."
+
+Measured on the takes, the pointer found in every frame of the mp4 by its three drawn shapes (`tests/tmp/clip-speed/track.py` of the branch) and cut into moves (`moves.py`): in moves of 300 px or more the pointer of those takes went about two and a half times as fast as main's of 0.7.3, 1467 and 1336 px/s at the median in the tour and the Markdown take against 538 and 505. The README's GIF, at 14 pictures a second, showed it up to 530 px on from one picture to the next, where main's showed 160 at the most but once (350, where the screencast lost frames at the top of a move). The quickest were the moves to the rest corner, nearly straight, 500 to 970 px in 0.3 to 0.4 s where main's took 1.2 to 1.8: Fitts's law grows with the logarithm of the distance, and those moves aim at a target 200 px wide, which shortens them further.
+
+`motion.js` gives a move no less than `FLOOR` s for each square root of a pixel of its distance, whatever it aims at; 0.048 is the median, over main's long moves, of their time over the square root of their distance. Recorded with it off screen on the 0.7.2 editor of `markdown_music-clip-pointer` (`tests/tmp/clip-speed/bench/` of the branch), the long moves of the tour and of the Markdown take have main's numbers: top speed 1556 and 1258 px/s at the median (main's 1442 and 1273), and the largest step between two pictures of the GIF 159 and 130 px. The tour is 31.4 s and the Markdown take 66.9 (27.7 and 56.8 before; main's are 42.2 and 97.9). Four versions were put side by side for him in `design/design-clip-speed.html` of the branch: main's, the takes of 2026-10-06, this floor (C) and 0.032 (D). C was the one proposed, and was applied when he said to go on.
+
+One test in `clip-motion.test.js`, *a long move is no quicker than main's takes made it, whatever it aims at*: every move of the test's set, onto targets 26, 120 and 200 px wide, takes at least the floor; no two pictures of a GIF at 14 a second find the pointer more than 110 px apart; the trip from the play button to the rest corner takes 1.3 to 2 s; and a hop from one row of a menu to the next stays under 300 ms. Round FL, on a copy (`tests/tmp/clip-speed/mut/`, run by `patch/mutate-floor.py`), the copy passing by itself first and after: **FL1** no floor, **FL2** the floor for small targets only, **FL3** the floor halved, **FL7** the floor a third longer -> the new test; **FL4** the floor linear in the distance, 0.48 s at 100 px -> the new test and *a move takes longer the further it goes and the smaller what it aims at*; **FL5** pace not scaling the floor, **FL6** the floor laid over a time given outright -> *a move takes longer the further it goes and the smaller what it aims at*.
+
+Run on this state: `test:fast`, 349 of 349 in the branch; `clip-motion.test.js`, 12 of 12 in the branch and in `markdown_music-clip-pointer`, whose `motion.js` and test are the same bytes. Not run: the rest of the suite. The README's takes are not recorded again yet.
+
 ### Backspace on an empty item (2026-10-15)
 
 Reported by the owner with two pictures: under an ordered item, Enter at

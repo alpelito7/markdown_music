@@ -134,7 +134,27 @@ async function take(rig, clip, look, keepFrames) {
   // the frame shows and nothing scrolls between the settling and the take.
   await clip.frame(rig);
   await (clip.settle || settleCaret)(rig);
-  const at = await rest(rig);
+  // The workbench shown the pointer over its title bar, where nothing
+  // answers one, before the pointer goes to wait over the document. A move
+  // over the webview goes to the webview's frame and tells the workbench
+  // nothing, so the workbench goes on believing the pointer is where it
+  // last saw it: on the close button of the .bib's tab, once a Markdown take
+  // had pressed it, and every take after that one showed VS Code's "Close
+  // (Ctrl+W)" over the entry half a second after the .bib opened, with the
+  // pointer a window away on the document (the takes of 2026-10-06; the
+  // first of a session was clean, which is how the published one got by).
+  const bar = await rig.page.evaluate(() => {
+    const el = document.querySelector(".part.titlebar");
+    const r = el && el.getBoundingClientRect();
+    return r && r.width ? { x: Math.round(r.left + r.width * 0.62), y: Math.round(r.top + r.height / 2) } : null;
+  });
+  if (bar) {
+    await rig.warp(bar.x, bar.y);
+    await sleep(200);
+  }
+  // Where the pointer stands in the first frame: at the foot of the pane,
+  // unless the clip has it wait somewhere nearer its first errand.
+  const at = await (clip.rest || rest)(rig);
   await rig.warp(at.x, at.y);
   await sleep(700);
 
@@ -144,6 +164,15 @@ async function take(rig, clip, look, keepFrames) {
   await sleep(300);
   await clip.beats(rig, { look });
   let frames = await rig.stopRec();
+  const lag = rig.lag;
+  // The camera held to having looked all the while. It is sent a frame when
+  // the window changes, and pulsed 25 times a second besides (rig.js,
+  // startRec), so the longest it goes without one is a few hundredths of a
+  // second; half a second with none is a camera that missed whatever came
+  // up in it, as it missed a tooltip for 1.155 s on 2026-10-06.
+  let blind = 0;
+  for (let i = 1; i < frames.length; i++) blind = Math.max(blind, frames[i].t - frames[i - 1].t);
+  if (blind > 0.5) throw new Error(`${tag}: the camera went ${blind.toFixed(2)} s without a frame`);
   await noToast(rig, `${tag} ended`);
   // A clip that ends away from where it began puts the editor back off camera
   // and dissolves its last stretch into its first frame, so the loop closes
@@ -162,7 +191,8 @@ async function take(rig, clip, look, keepFrames) {
   const gap = seam(frames);
   console.log(
     `  ${frames.length} frames, ${seconds.toFixed(1)} s, ${(frames.length / seconds).toFixed(0)} fps, ` +
-      `seam ${(gap * 100).toFixed(3)}%` + (gap > SEAM_LIMIT ? "  <- DOES NOT LOOP" : "")
+      `seam ${(gap * 100).toFixed(3)}%` + (gap > SEAM_LIMIT ? "  <- DOES NOT LOOP" : "") +
+      `, camera at most ${lag.toFixed(2)} s behind`
   );
 
   fs.mkdirSync(CLIPS_OUT, { recursive: true });

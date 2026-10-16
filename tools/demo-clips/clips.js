@@ -3,14 +3,35 @@
 //
 // A loop has no seam: a clip ends on the frame it opened on, or ends
 // elsewhere and dissolves back into its first frame as the tour does, and
-// record.js measures that the two ends agree (rig.js, seam). Every click the
-// camera sees waits 320 to 520 ms with the pointer on it: long enough for the
-// eye to arrive before the change does, and long enough for the editor to
-// draw its own tooltip (style.css waits 200 ms and fades it in over 100),
-// which names a button without a caption having to. The multicursor button
-// waits 1500 ms, because its tooltip has to be read and not only seen. The
-// tour carries no caption at all: the one it had under Ctrl+D pulled the eye
-// off the four notes changing (owner, 2026-09-14).
+// record.js measures that the two ends agree (rig.js, seam).
+//
+// How the pointer moves is the rig's (motion.js): a move takes the time its
+// distance makes it take, and a press comes a tenth of a second after the
+// pointer arrives (rig.pressAt). What a take decides is where the pointer
+// waits, and it waits in three places only. The takes used to wait a third
+// to a half of a second before every click, whatever it was on, and stand
+// still through every hold after one; the owner found the pointer did not
+// move as a person's does and stood where it had no reason to (2026-10-06).
+//
+// - On a toolbar button nothing else on screen names, for its tooltip
+//   (`tip`), which names the button without a caption having to. How long
+//   is the rig's to say and not the take's: until the tip has been whole on
+//   screen for what it takes to read, by what it says (rig.readTip, and
+//   readTime in motion.js), which is 0.7 s for "Theme" and twice that for
+//   the five words of the multicursor button. The takes of the morning of
+//   2026-10-06 left every tip whole for a little over half a second, and
+//   the owner asked for a little more, so that they can be read.
+// - After a press whose result has to be looked at, for a third to a half
+//   of a second, and then it leaves for its next errand while the result is
+//   still being read: what a result is given is the time to the next press,
+//   not the time the pointer stands still.
+// - Where something has to be read: a header's two lines, a table drawn, an
+//   entry in its file.
+//
+// What repeats goes faster each time: the second and third word picked, the
+// later cells of a table, a chord pressed four times. The tour carries no
+// caption at all: the one it had under Ctrl+D pulled the eye off the four
+// notes changing (owner, 2026-09-14).
 //
 // frame() puts the document where the take needs it and is never recorded;
 // beats() is the take. alt is what ships with the clip: on the Marketplace an
@@ -330,74 +351,66 @@ const tour = {
     const edit = tour.edit;
     const button = (type) => rig.at(`#app button[data-type="${type}"]`);
     const row = (label) => rig.atLabel("#app .mdm-menu__item", label);
-    await sleep(800);
+    await sleep(500);
 
     // The face, first of the four. Its tooltip reads "LaTeX font" here and
     // not "Usual Markdown font": textFontTip (main.js) names the press and
-    // not the state, so on the sans it says where the press goes. It is held
-    // 1300 ms after the press, longer than the theme and the staff lines are,
-    // because what changes is every word on the page and not one button.
-    await rig.moveTo(await button("mdm-text-font"), 600);
+    // not the state, so on the sans it says where the press goes. What
+    // changes is every word on the page and not one button, so the pointer
+    // stays on a little longer after this press than after the next ones.
+    await rig.pressAt(await button("mdm-text-font"), { tip: true });
     await sleep(520);
-    await rig.click();
-    await sleep(1300);
 
-    // The three settings after it. Each dwell is long enough for the button's
-    // own tooltip to name it, so no caption has to.
-    await rig.moveTo(await button("mdm-theme"), 480);
-    await sleep(420);
-    await rig.click();
-    await sleep(520);
-    await rig.moveTo(await row("MDM Light"), 420);
+    // The three settings after it, each named by its own tooltip. The theme
+    // is picked from a menu, and the pointer is on its row long enough for
+    // the row to be read before it is pressed.
+    await rig.pressAt(await button("mdm-theme"), { tip: true });
     await sleep(340);
-    await rig.click();
-    await sleep(1100);
+    await rig.pressAt(await row("MDM Light"), { settle: 300, size: 110 });
+    await sleep(480);
 
-    await rig.moveTo(await button("mdm-staff-lines"), 520);
-    await sleep(520);
-    await rig.click();
-    await sleep(1000);
+    await rig.pressAt(await button("mdm-staff-lines"), { tip: true });
+    await sleep(420);
 
-    // Longer on this one. Its tooltip names the setting the edit below turns
-    // on, and at 620 ms it was gone before it could be read.
-    await rig.moveTo(await button("mdm-match-substring"), 420);
-    await sleep(1500);
-    await rig.click();
-    await sleep(900);
+    // Longer on this one, by what it says: its tooltip names the setting
+    // the edit below turns on, in five words where the others have one or
+    // two, and the rig leaves it whole for 1.4 s (at 620 ms from the
+    // pointer's arrival, in the first takes, it was gone before it could be
+    // read).
+    await rig.pressAt(await button("mdm-match-substring"), { tip: true });
+    await sleep(480);
 
     // Down to the score, to the offset frame() measured. The theme and the ink
     // are set by now; if either had moved the score, the page would open it
     // somewhere the heights above were not measured for, so that stops the take.
-    await rig.smoothScrollTo(scoreView.scrollTop, 700);
-    await sleep(400);
+    await rig.smoothScrollTo(scoreView.scrollTop, 620);
+    await sleep(260);
     const landed = await scoreTop(rig);
     if (Math.abs(landed - scoreView.top) > 3) {
       throw new Error(`the score stands at ${landed} and not at ${scoreView.top} after the scroll`);
     }
 
     // The score opens its ABC above the drawing.
-    await rig.moveTo(await rig.at("#app .mdm-score", { fy: 0.62 }), 620);
-    await sleep(360);
-    await rig.click();
-    await sleep(1600);
+    await rig.pressAt(await rig.at("#app .mdm-score", { fy: 0.62 }), { size: 160 });
+    await sleep(950);
 
     // Four notes at once: the first Ctrl+D selects the bare note under the
     // caret, and the next three add the same letter inside the other notes and
-    // chords, which is what the setting just turned on allows.
-    await rig.moveTo(await atBareNote(rig, edit.target), 560);
-    await sleep(320);
-    await rig.click();
-    await sleep(300);
+    // chords, which is what the setting just turned on allows. The first is
+    // given the time to be seen for what it is, a note selected, and the
+    // three after it come as a hand repeats a chord, quicker each time.
+    await rig.pressAt(await atBareNote(rig, edit.target), { size: 12, direct: true });
+    await sleep(140);
     // Off the note before anything is selected. Over text the pointer is the
     // I-beam, centred on its point, and left where the click was it stood on
     // the first E through all four selections and hid it.
-    await rig.moveTo({ x: rig.x + 12, y: rig.y + 30 }, 240);
-    await sleep(600);
-    for (let i = 0; i < 4; i++) {
+    await rig.moveTo({ x: rig.x + 14, y: rig.y + 32 }, undefined, { size: 30 });
+    await sleep(300);
+    for (const held of [560, 380, 300, 300]) {
       await rig.press("Control+d");
-      await sleep(i ? 480 : 620);
+      await sleep(held);
     }
-    await sleep(250);
+    await sleep(200);
     // The letter first and the sign in front of it after. Typed in the order
     // it is written, "_" then "e", the score redrew between the two keys with
     // "_" in place of every E, which drew [_c] as a C flat and dropped the lone
@@ -406,27 +419,25 @@ const tour = {
     const letter = edit.typed.slice(-1);
     const sign = edit.typed.slice(0, -1);
     await rig.type(letter, 120);
-    await sleep(900);
+    await sleep(800);
     await rig.press("ArrowLeft");
-    await sleep(260);
+    await sleep(200);
     await rig.type(sign, 120);
-    await sleep(1300);
+    await sleep(1100);
 
     // The player, and the playhead across the edited tune. The headphones
     // stand in the margin beside the first line of the open source, up while
-    // the source is open, and the pointer crosses the drawing on its way to
-    // them.
-    await rig.moveTo(await rig.at("#app .mdm-score", { fy: 0.55 }), 520);
-    await sleep(260);
-    await rig.moveTo(await rig.at("#app .mdm-score .mdm-audio-toggle"), 380);
-    await sleep(480);
-    await rig.click();
+    // the source is open, and the pointer goes straight to them: it used to
+    // go down to the drawing first and stop there, a corner no hand turns.
+    await rig.pressAt(await rig.at("#app .mdm-score .mdm-audio-toggle"), { tip: true });
     await rig.waitFor(() => !!document.querySelector("#app .abcjs-midi-start"), { timeout: 12000 });
-    await sleep(600);
-    await rig.moveTo(await rig.at("#app .abcjs-midi-start"), 560);
-    await sleep(380);
-    await rig.click();
-    await rig.moveTo(await rest(rig), 900);
+    // Off the rail as soon as the player is there. Its row pushes the page
+    // down under the pointer, which is then on the button over the
+    // headphones, and a pointer left there a third of a second brought up
+    // that button's tooltip, "Copy" (the first take of 2026-10-06).
+    await sleep(120);
+    await rig.pressAt(await rig.at("#app .abcjs-midi-start"), { settle: 260 });
+    await rig.moveTo(await rest(rig), undefined, { size: 200 });
 
     // The score's export button, pressed while the tune plays, so the take
     // shows that a score can be written out as a file (owner, 2026-09-28).
@@ -437,16 +448,10 @@ const tour = {
     //
     // Timed by the player's clock and not by sleeps. The tune is 7.5 s (five
     // bars of 3/4 at 120), and a take that ran past it would show the player
-    // stop and reset under the menu. By sleeps alone the first take with this
-    // beat pressed 7 s into the tune: the moves ran longer than their
-    // nominal times, and the screencast drops the frames still in flight when
-    // the camera stops, about 0.85 s of that take's end, which with the
-    // 0.6 s dissolve left the menu 0.6 s on screen (measured on its frames).
-    // Leaving the rest at 0:02, the press came about 4 s into the tune (the
-    // click itself costs some 0.3 s over its sleeps), and a hold of 3.2 s
-    // stopped the take a quarter of a second before the tune's end; 2.8 s
-    // leaves the menu about 2 s on screen before the dissolve and more than
-    // half a second to spare.
+    // stop and reset under the menu. Leaving the rest when the clock reads
+    // 0:02, the press comes a little over a second later, the travel and the
+    // wait for the tooltip, and the menu is held for 2.5 s, the last 0.6 of
+    // them the dissolve.
     await rig.waitFor(
       () => {
         const clock = document.querySelector("#app .abcjs-midi-clock");
@@ -455,10 +460,15 @@ const tour = {
       },
       { timeout: 8000, poll: 40 }
     );
-    await rig.moveTo(await rig.at("#app .mdm-score .mdm-audio-export"), 700);
-    await sleep(520);
-    await rig.click();
-    await sleep(2800);
+    await rig.pressAt(await rig.at("#app .mdm-score .mdm-audio-export"), { tip: true });
+    await sleep(2500);
+    // Held to the tune still sounding when the camera stops: past its end
+    // the player resets under the menu.
+    const playing = await rig.evalFrame(() => {
+      const start = document.querySelector("#app .abcjs-midi-start");
+      return !!start && start.classList.contains("abcjs-pushed");
+    });
+    if (!playing) throw new Error("the tune ended before the take did");
   },
   // Off camera: the player shut, the edit undone, the block folded. The theme
   // and the two toolbar settings go back with the next take's settings.
@@ -495,8 +505,9 @@ const tour = {
 // The window point of a stretch of the document's text, found through
 // CodeMirror as prose() finds its line, so the take follows markdown.mdm when
 // its words change: where the stretch starts, or where it ends with end set,
-// or the middle of it with mid set. Null means it is not in the pane, which a
-// beat treats as a take gone wrong rather than clicking the title bar.
+// or the middle of it with mid set, or that share of the way along it with
+// along. Null means it is not in the pane, which a beat treats as a take
+// gone wrong rather than clicking the title bar.
 async function atText(rig, needle, opts) {
   const o = opts || {};
   const off = await rig.webviewOffset();
@@ -510,7 +521,8 @@ async function atText(rig, needle, opts) {
       const pane = document.querySelector("#app .cm-scroller").getBoundingClientRect();
       const at = o.end ? b : a;
       if (!at || at.top < pane.top || at.bottom > pane.bottom) return null;
-      const x = o.mid && b && Math.abs(b.top - a.top) < 2 ? (a.left + b.right) / 2 : at.left;
+      const share = o.mid ? 0.5 : o.along;
+      const x = share !== undefined && b && Math.abs(b.top - a.top) < 2 ? a.left + (b.right - a.left) * share : at.left;
       return { x, y: (at.top + at.bottom) / 2 };
     },
     needle,
@@ -756,146 +768,148 @@ const markdown = {
   settle: settleUnderHeading,
   async beats(rig) {
     const button = (type) => rig.at(`#app button[data-type="${type}"]`);
-    await sleep(900);
+    await sleep(500);
 
     // Justified. The tooltip reads "Justify text" on the ragged page
     // (textAlignTip names the press), and every paragraph on screen squares
     // up at once.
-    await rig.moveTo(await button("mdm-text-align"), 620);
-    await sleep(520);
-    await rig.click();
-    await sleep(1300);
+    await rig.pressAt(await button("mdm-text-align"), { tip: true });
+    await sleep(460);
 
     // English, from the hyphenation menu. The host writes the header and
     // answers, and the button lights once the language is dividing the
     // prose: waited for, so the hold after it is a hold on divided words and
     // not on a round trip.
-    await rig.moveTo(await button("mdm-hyphenation"), 380);
-    await sleep(420);
-    await rig.click();
-    await sleep(600);
-    await rig.moveTo(await rig.atLabel("#app .mdm-menu__item", "English"), 420);
-    await sleep(380);
-    await rig.click();
+    await rig.pressAt(await button("mdm-hyphenation"), { tip: true });
+    await sleep(340);
+    await rig.pressAt(await rig.atLabel("#app .mdm-menu__item", "English"), { settle: 300, size: 110 });
     await rig.waitFor(
       () => document.querySelector('#app button[data-type="mdm-hyphenation"]').classList.contains("mdm-btn--on"),
       { timeout: 8000 }
     );
-    await sleep(1500);
+    await sleep(750);
 
-    // The header the choice wrote, opened above the heading and shut again.
-    await rig.moveTo(await button("mdm-front-matter"), 380);
-    await sleep(520);
+    // The header the choice wrote, opened above the heading, left open for
+    // as long as its two lines take to read, and shut again.
+    await rig.pressAt(await button("mdm-front-matter"), { tip: true });
+    await sleep(1500);
     await rig.click();
-    await sleep(2000);
-    await rig.click();
-    await sleep(1100);
+    await sleep(420);
 
     // Three words at once: a double click takes the first, and Alt with a
     // double click adds each of the others. Then two asterisks typed over the
     // three selections wrap every one of them (surroundSelection in main.js).
+    //
+    // As a hand picks three words in a row: the first aimed at, the other
+    // two a flick each, and the pointer gone from a word as soon as it is
+    // taken. It used to stand on each for a second and a half, 0.6 s before
+    // the double click and 0.9 after, and the time after showed the arrow in
+    // place of the I-beam, since what is under the pointer then is the
+    // selection's own layer: three words, three stops, the pointer changing
+    // shape at each (the owner's "esta rara", 2026-10-06; on the frames of
+    // the take then published the pointer reaches the first word at 14.4 s
+    // and leaves the third at 20.1).
     const words = ["melody", "harmony", "rhythm"];
     for (let i = 0; i < words.length; i++) {
-      await rig.moveTo(await atText(rig, words[i], { mid: true }), i ? 460 : 720);
-      await sleep(i ? 240 : 320);
-      await rig.doubleClick({ modifiers: i ? 1 : 0 });
-      await sleep(460);
+      await rig.pressAt(await atText(rig, words[i], { along: 0.8 }), {
+        clickCount: 2,
+        modifiers: i ? 1 : 0,
+        size: 44,
+        pace: i ? 0.8 : 1,
+        settle: i ? 70 : 110,
+        direct: true,
+      });
+      // Under the 180 ms after which the rig looks again at what a still
+      // pointer is on (reshapeLater): on a word just selected that is the
+      // arrow, and the first take of this beat showed it for two frames.
+      // Each word is taken near its end, for the same reason: the pointer
+      // has less of the selection to cross on its way out of it.
+      await sleep(80);
     }
-    // Off the word before the typing, as the tour steps off its note: left on
-    // it, the I-beam stood over the last selection.
-    await rig.moveTo({ x: rig.x + 14, y: rig.y + 34 }, 240);
-    await sleep(520);
+    // Off the last word at once and briskly, down and to the right, where
+    // nothing is under the pointer while the keys work.
+    await rig.moveTo({ x: rig.x + 30, y: rig.y + 38 }, undefined, { size: 40, pace: 0.7 });
+    await sleep(400);
     await rig.type("*", 0);
-    await sleep(320);
+    await sleep(260);
     await rig.type("*", 0);
-    await sleep(1500);
+    await sleep(1000);
 
     // Down to the list, and the three lines made one.
-    await rig.smoothScrollTo(await scrollFor(rig, "The list button"), 800);
-    await sleep(500);
+    await rig.smoothScrollTo(await scrollFor(rig, "The list button"), 620);
+    await sleep(250);
     const first = await atText(rig, "Justified the text");
-    await rig.moveTo({ x: first.x + 1, y: first.y }, 620);
-    await sleep(260);
-    await rig.dragTo(await atText(rig, "Made three words bold", { end: true }), 650);
-    await sleep(420);
-    await rig.moveTo(await button("unordered-list"), 640);
-    await sleep(500);
-    await rig.click();
-    await sleep(1300);
+    await rig.moveTo({ x: first.x + 1, y: first.y }, undefined, { size: 14 });
+    await sleep(120);
+    await rig.dragTo(await atText(rig, "Made three words bold", { end: true }), undefined, { size: 14, pace: 1.15, hold: 120 });
+    await sleep(220);
+    await rig.pressAt(await button("unordered-list"), { tip: true });
+    await sleep(700);
 
     // A phrase highlighted.
     const phrase = "as it marks these";
     const from = await atText(rig, phrase);
-    await rig.moveTo({ x: from.x + 1, y: from.y }, 640);
-    await sleep(260);
-    await rig.dragTo(await atText(rig, phrase, { end: true }), 520);
-    await sleep(400);
-    await rig.moveTo(await button("highlight"), 640);
-    await sleep(500);
-    await rig.click();
-    await sleep(1300);
+    await rig.moveTo({ x: from.x + 1, y: from.y }, undefined, { size: 14 });
+    await sleep(120);
+    await rig.dragTo(await atText(rig, phrase, { end: true }), undefined, { size: 14, pace: 1.15, hold: 120 });
+    await sleep(220);
+    await rig.pressAt(await button("highlight"), { tip: true });
+    await sleep(800);
 
     // The table. Scrolled first so that its paragraph, the source the button
     // writes under it and the table drawn under that are all in the pane
     // while it is filled in.
-    await rig.smoothScrollTo(await scrollFor(rig, "The table button"), 700);
+    await rig.smoothScrollTo(await scrollFor(rig, "The table button"), 600);
+    await sleep(250);
+    await rig.pressAt(await atText(rig, "after the last one.", { end: true }), { size: 14 });
+    await sleep(240);
+    await rig.pressAt(await button("insert-table"), { tip: true });
     await sleep(450);
-    await rig.moveTo(await atText(rig, "after the last one.", { end: true }), 620);
-    await sleep(300);
-    await rig.click();
-    await sleep(500);
-    await rig.moveTo(await button("insert-table"), 700);
-    await sleep(500);
-    await rig.click();
-    await sleep(900);
     // The pointer to its corner while the keyboard works, so the button's
-    // tooltip goes and nothing stands over the cells.
-    await rig.moveTo(await rest(rig), 700);
+    // tooltip goes and nothing stands over the cells. The head of the table
+    // is typed at a pace it can be followed at, and the rows under it, which
+    // say nothing new about how a table is filled, as fast as a hand that
+    // knows what it is writing.
+    await rig.moveTo(await rest(rig), undefined, { size: 200 });
     for (let i = 0; i < markdown.cells.length; i++) {
-      await rig.type(markdown.cells[i], 45);
+      await rig.type(markdown.cells[i], i < 2 ? 46 : 30);
       if (i < markdown.cells.length - 1) {
-        await sleep(160);
+        await sleep(i < 2 ? 130 : 80);
         await rig.press("Tab");
-        await sleep(220);
+        await sleep(i < 2 ? 190 : 110);
       }
     }
-    await sleep(900);
+    await sleep(700);
     // Out of the table: a click on its paragraph, and the source goes,
     // leaving the table drawn.
-    await rig.moveTo(await atText(rig, "after the last one.", { end: true }), 700);
-    await sleep(300);
-    await rig.click();
-    await sleep(1400);
+    await rig.pressAt(await atText(rig, "after the last one.", { end: true }), { size: 14 });
+    await sleep(1000);
 
     // The picture, pasted into the empty line kept for it under its
     // paragraph, and its caption typed into the label the paste leaves the
     // caret in (writePicture in main.js). A click on the paragraph above
     // draws it.
-    await rig.smoothScrollTo(await scrollFor(rig, "A picture pasted"), 700);
-    await sleep(450);
+    await rig.smoothScrollTo(await scrollFor(rig, "A picture pasted"), 600);
+    await sleep(250);
     const intro = await atText(rig, "where the caret is:", { end: true });
-    await rig.moveTo(await emptyBelow(rig, "where the caret is:", 2), 620);
-    await sleep(300);
-    await rig.click();
-    await sleep(600);
+    await rig.pressAt(await emptyBelow(rig, "where the caret is:", 2), { size: 60 });
+    await sleep(350);
     await pastePicture(rig, PICTURE);
     await rig.waitFor(() => /!\[\]\([^)]*-images\/image\.png\)/.test(window.__mdm.view.state.doc.toString()), {
       timeout: 8000,
     });
-    await sleep(900);
-    await rig.moveTo({ x: rig.x + 16, y: rig.y + 38 }, 240);
-    await rig.type("The extension's icon", 55);
-    await sleep(700);
-    await rig.moveTo({ x: intro.x + 3, y: intro.y }, 620);
-    await sleep(300);
-    await rig.click();
-    await sleep(350);
+    await sleep(600);
+    await rig.moveTo({ x: rig.x + 16, y: rig.y + 38 }, undefined, { size: 40 });
+    await rig.type("The extension's icon", 48);
+    await sleep(450);
+    await rig.pressAt({ x: intro.x + 3, y: intro.y }, { size: 14 });
+    await sleep(250);
     // Down to the picture whole, caption and all, as soon as it is drawn,
     // measured again now that it is: the heights the scroll before the paste
     // was taken from had an empty line where the picture now stands.
-    await rig.smoothScrollTo(await scrollFor(rig, "A picture pasted"), 700);
-    await rig.moveTo(await rest(rig), 700);
-    await sleep(1800);
+    await rig.smoothScrollTo(await scrollFor(rig, "A picture pasted"), 600);
+    await rig.moveTo(await rest(rig), undefined, { size: 200 });
+    await sleep(1300);
 
     // The end of the page: the equation numbered at the margin and named as
     // "Equation 1" in the paragraph above it, both drawn from the start, and
@@ -914,13 +928,11 @@ const markdown = {
       return s.scrollHeight - s.clientHeight;
     });
     const toEnd = Math.min(await scrollFor(rig, "An equation given a label"), foot - 12);
-    await rig.smoothScrollTo(await wholeRowAt(rig, toEnd), 800);
-    await sleep(1600);
+    await rig.smoothScrollTo(await wholeRowAt(rig, toEnd), 700);
+    await sleep(1200);
     const where = "between two frequencies";
-    await rig.moveTo(await atText(rig, where, { end: true }), 640);
-    await sleep(300);
-    await rig.click();
-    await sleep(350);
+    await rig.pressAt(await atText(rig, where, { end: true }), { size: 10, direct: true });
+    await sleep(250);
     // The click aims at the end of the word, and a pixel either side of it
     // is the colon after it; typed there, the key would stand outside the
     // sentence it cites for.
@@ -936,10 +948,10 @@ const markdown = {
     // is drawn, and the entry arrived in the blue an entry takes under the
     // pointer (the first take, 2026-09-30).
     const off = () => emptyBelow(rig, where, 1).then((p) => ({ x: p.x + 160, y: p.y }));
-    await rig.moveTo(await off(), 380);
-    await sleep(300);
-    await rig.type(" " + markdown.cite, 80);
-    await sleep(900);
+    await rig.moveTo(await off(), undefined, { size: 60 });
+    await sleep(160);
+    await rig.type(" " + markdown.cite, 70);
+    await sleep(600);
     // The caret out of the paragraph, onto the empty line under it: a line
     // shows its source while the caret is on it, and the citation is drawn
     // once it is not. Pandoc prints it in the host (citationService in
@@ -947,15 +959,13 @@ const markdown = {
     // the hold after it is a hold on the drawn citation and its entry. The
     // line is found again, in case the key typed took the paragraph to
     // another row.
-    await rig.moveTo(await off(), 200);
-    await sleep(300);
-    await rig.click();
+    await rig.pressAt(await off(), { size: 60 });
     await rig.waitFor(
       () => !!document.querySelector("#app .mdm-cited:not(.mdm-cited--missing)") && !!document.querySelector("#app .mdm-refs .csl-entry"),
       { timeout: 10000 }
     );
-    await rig.moveTo(await rest(rig), 700);
-    await sleep(1600);
+    await rig.moveTo(await rest(rig), undefined, { size: 200 });
+    await sleep(1300);
 
     // The entry clicked, and the bibliography opened at it in the group to
     // the right (openEntry in extension.js), then its tab closed, which gives
@@ -963,22 +973,20 @@ const markdown = {
     // entry opens its file with that and nothing else (handleMouseDown in
     // main.js), and it does so only once the host has said which file holds
     // it, the class waited for here. The pointer on it turns it blue with the
-    // hand, which says it is a thing to click before the click does.
+    // hand, which says it is a thing to click before the click does, so the
+    // pointer is on it for half a second before it presses.
     const bib = markdown.files[0];
     await rig.waitFor(() => !!document.querySelector("#app .mdm-refs .csl-entry.mdm-refs-entry--source"), {
       timeout: 8000,
     });
-    await rig.moveTo(await rig.at("#app .mdm-refs .csl-entry", { fx: 0.35, fy: 0.3 }), 700);
-    await sleep(700);
+    const entry = await rig.at("#app .mdm-refs .csl-entry", { fx: 0.35, fy: 0.3 });
     const pageAt = () => rig.evalFrame(() => window.__mdm.view.scrollDOM.scrollTop);
     const stood = await pageAt();
-    await rig.click();
+    await rig.pressAt(entry, { settle: 520, size: 200 });
     await waitTab(rig, bib, true);
     // Long enough to read the entry in its file.
-    await sleep(2600);
-    await rig.moveTo(await tabClose(rig, bib), 800);
-    await sleep(500);
-    await rig.click();
+    await sleep(2000);
+    await rig.pressAt(await tabClose(rig, bib), { settle: 260, size: 16 });
     await waitTab(rig, bib, false);
     // The document takes the width back, and CodeMirror sets its lines again
     // at it, before the pointer looks for its corner. It comes back on the
@@ -986,17 +994,15 @@ const markdown = {
     // of the page it used to come back at the foot, four lines further on,
     // and the last hold lost the paragraph that names the equation (the
     // take of 2026-09-30; keepPlace in main.js is what keeps it now).
-    await sleep(500);
+    await sleep(450);
     const back = await pageAt();
     if (Math.abs(back - stood) > 1) {
       throw new Error(`the page stood at ${stood} before the .bib opened and is at ${back} after it closed`);
     }
-    await rig.moveTo(await rest(rig), 700);
-    // Long enough to see the document whole again: the screencast drops the
-    // frames still in flight when the camera stops (about 0.85 s, the tour's
-    // note) and the dissolve takes 0.6 s more, so 2.2 s here left the last
-    // picture of the take on screen for about 1.5 s (2026-09-28).
-    await sleep(2600);
+    await rig.moveTo(await rest(rig), undefined, { size: 200 });
+    // Long enough to see the document whole again before the last 0.6 s of
+    // the take dissolve into its first frame.
+    await sleep(1900);
   },
   // Off camera: the division turned off for this document, which the
   // extension keeps per file, the file reverted, and the picture's folder
