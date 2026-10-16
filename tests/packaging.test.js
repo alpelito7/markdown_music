@@ -213,7 +213,7 @@ function readmeSection(md, heading) {
 test("the README shows the tour first and the Markdown clip under Writing Markdown", () => {
   const md = read(EXT, "README.md");
   const ids = [...md.matchAll(/^<!-- clip: ([a-z0-9-]+) -->[ \t]*$/gm)].map((m) => m[1]);
-  assert.deepEqual(ids, ["tour", "markdown"], "the README's clips are not the tour and then the Markdown one");
+  assert.deepEqual(ids, ["tour", "markdown", "score-navigation"], "the README's clips are not the tour, the Markdown one and the score mode's, in that order");
   const score = readmeSection(md, "Writing a score");
   const markdown = readmeSection(md, "Writing Markdown");
   assert.ok(score && markdown && score.from < markdown.from, "Writing Markdown no longer follows Writing a score");
@@ -325,6 +325,41 @@ test("the tour's document opens on the title its header names, and says it once"
   assert.ok(!/^#{1,6}\s/.test(first), `the text opens on a heading under the title block: ${first}`);
   const again = m[2].split("\n").filter((l) => /^#{1,6}\s/.test(l) && l.replace(/^#+\s*/, "").trim() === title);
   assert.deepEqual(again, [], "the title is written again as a heading");
+});
+
+// The third clip, where the owner asked for it in the README: the take of
+// the score mode at the head of a section of its own (2026-10-05), and that
+// section after "Writing Markdown", so the clip comes after the Markdown
+// one (2026-10-06, "el video de score navigation debe estar en el readme
+// despues del de markdown"; it was first put between the two Writing
+// sections, with what the README says about scores). Before "The toolbar",
+// which is where the README stops showing and starts listing. Under the
+// clip, the keys as a table and two sentences round it; held to the words
+// it was written with, for the reason "Writing Markdown" is held to its
+// own.
+test("the README shows the score mode's clip at the head of Score navigation, after Writing Markdown and before The toolbar", () => {
+  const md = read(EXT, "README.md");
+  const mode = readmeSection(md, "Score navigation");
+  const markdown = readmeSection(md, "Writing Markdown");
+  const toolbar = readmeSection(md, "The toolbar");
+  assert.ok(mode, "the README has no Score navigation section");
+  assert.ok(markdown && toolbar && markdown.to === mode.from && mode.to === toolbar.from, "Score navigation does not stand between Writing Markdown and The toolbar");
+  assert.ok(md.indexOf("<!-- clip: markdown -->") < md.indexOf("<!-- clip: score-navigation -->"), "the clip of the score mode is not after the Markdown one");
+  const clip = md.indexOf("<!-- clip: score-navigation -->");
+  assert.ok(clip > mode.from && clip < mode.to, "the clip of the score mode is not in Score navigation");
+  const before = md.slice(mode.from, clip).replace(/^\s*## Score navigation\s*/, "");
+  assert.equal(before, "", "the clip is not the first thing under its heading");
+  // The row's name as the Score menu says it, and where it is, which is
+  // what a reader looks for. It was a button at the far end of the bar until
+  // the music went under its word (2026-10-13).
+  assert.match(mode.text, /\*\*Score navigation\*\*, the first row of the \*\*Score\*\* menu/);
+  const words = mode.text
+    .split("\n")
+    .filter((l) => !/^(## |<!-- |!\[|\|---)/.test(l))
+    .join(" ")
+    .split(/\s+/)
+    .filter((w) => /[A-Za-z0-9]/.test(w)).length;
+  assert.ok(words <= 238, `Score navigation has ${words} words; it was written with 230 on 2026-10-05, the keys of its table among them, and has 235 since the drag of a line's end was named`);
 });
 
 // The takes, as tools/demo-clips/clips.js holds them, whether the README

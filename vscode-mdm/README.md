@@ -16,11 +16,14 @@ Repeats, ties, lyrics, several voices and the rest of the notation are in the [A
 ## Writing Markdown
 
 <!-- clip: markdown -->
-![In Latin Modern on MDM Light, the toolbar justifies the text, and English chosen from the hyphenation menu divides its words and writes lang: en into the YAML header that the YAML button shows and hides. Three words turn bold as two asterisks are typed over them, three lines become a list, a phrase is highlighted, a table is filled cell by cell and a pasted picture is saved beside the document. Under an equation numbered at the margin, a citation typed as its key is drawn as the page prints it, and a click on its work, listed at the end, opens the bibliography beside the document at its entry.](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/clip-markdown.gif)
+![In Latin Modern on MDM Light, the Page menu justifies the text, and English chosen under Hyphenation divides its words and writes lang: en into the YAML header, which the YAML header row shows and hides. Three words turn bold as two asterisks are typed over them, three lines become a list, a phrase is highlighted, a table is filled cell by cell and a pasted picture is saved beside the document. Under an equation numbered at the margin, a citation typed as its key is drawn as the page prints it, and a click on its work, listed at the end, opens the bibliography beside the document at its entry.](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/clip-markdown.gif)
 
 The text is the file, and the editor reads it as the export does: Pandoc's Markdown, with CommonMark's blank lines. Lists, quotes, callouts, tables, footnotes, numbered equations, figures, tables and sections are drawn in place, and a line shows its source while the caret is on it. With a bibliography in the header and Quarto installed, a citation reads as the page prints it, "Knuth (1984)". A pasted picture is saved in a folder beside the document. `Ctrl+B` and `Ctrl+I` mark words, `Ctrl+1` to `Ctrl+6` set a heading's level and `Ctrl+F` searches.
 
 ## Score navigation
+
+<!-- clip: score-navigation -->
+![With Score navigation on, a click puts a cursor on an empty organ score and the keys write it: 3, 2 and 1 a quarter, a half and a whole note where the arrows stand, Alt or Ctrl with them a note after or before, Ctrl+↓ the part below and Enter a second note in a chord. Ctrl+Shift with the arrows selects two bars in all three parts and walks up to the left hand, which Space leaves out, and Ctrl+C and Ctrl+V copy the right hand and the pedal into the next two bars. The end of the line, dragged to a barline, sets the four bars on two lines, and Space plays the second as the mode is left.](https://raw.githubusercontent.com/alpelito7/markdown_music/main/vscode-mdm/docs/clip-score-navigation.gif)
 
 **Score navigation**, the first row of the **Score** menu, freezes the text and gives the keys to the scores: a cursor stands on a staff, and what is written there is written into the score's ABC. The row again gives the text back.
 
