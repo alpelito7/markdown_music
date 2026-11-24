@@ -1,0 +1,31 @@
+/* The faces the music's characters are drawn in on the exported page, for a
+   page set in the roman: mdm-music.css with the size the editor draws them
+   at beside the roman (vscode-mdm/media/style.css says why these two files).
+
+   The editor sets the roman at the sans's x-height with a `font-size-adjust`
+   on its text, and that property scales every face of a line by that face's
+   own x-height, the fallbacks too: Noto Music's is 0.536 em, so it is drawn
+   at 0.528 / 0.536 = 98.51%, and KaTeX_Main's is 0.431, the roman's own, so
+   it is drawn at 122.51% (measured in Chrome 157 on 2026-11-21, 98.50% and
+   122.49% to the width of a 100px run). The page carries those two numbers
+   as `size-adjust` on each face, as mdm-roman.css does for the roman's own
+   four, because Chrome keeps the descriptor when it prints a PDF and drops
+   the property. */
+@font-face {
+  font-family: "MDM Music";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  size-adjust: 98.51%;
+  src: url(fonts/NotoMusic-Regular.ttf) format("truetype");
+  unicode-range: U+1D100-1D1FF, U+2669-266C;
+}
+@font-face {
+  font-family: "MDM Music";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  size-adjust: 122.51%;
+  src: url(fonts/KaTeX_Main-Regular.woff2) format("woff2");
+  unicode-range: U+266D-266F;
+}

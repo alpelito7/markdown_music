@@ -12,6 +12,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 const ROOT = path.join(__dirname, "..");
 const EXT = path.join(ROOT, "vscode-mdm");
@@ -81,6 +82,27 @@ test("the notices name a licence for everything the extension ships", () => {
     fs.existsSync(path.join(EXT, "licenses", "GUST-FONT-LICENSE.txt")),
     "the extension ships the faces without the licence they came under"
   );
+  // Noto Music is under the SIL Open Font License, which asks that the
+  // licence travel with the font, and names no Reserved Font Name, so the
+  // file may be carried as it is under its own name.
+  for (const file of [path.join(ROOT, "THIRD-PARTY-NOTICES.md"), path.join(EXT, "THIRD-PARTY-NOTICES.md")]) {
+    const text = fs.readFileSync(file, "utf8");
+    assert.match(text, /Noto\s+Music\s+2\.004/, "Noto Music is not credited in " + file);
+    assert.match(text, /SIL\s+Open\s+Font\s+License\s+1\.1/, "Noto Music's licence is not named in " + file);
+    assert.match(text, /aeb2998c380f5807cda77e1d94e4ac596429cb74d4fffb8da279d4f3144c0eae/, "the file's hash is not in " + file);
+  }
+  for (const dir of [ROOT, EXT]) {
+    assert.match(read(dir, "licenses", "SIL-OPEN-FONT-LICENSE.txt"), /SIL OPEN FONT LICENSE Version 1\.1/, "the OFL does not travel in " + dir);
+  }
+  // The file credited is the one carried, in the three places it is.
+  for (const p of [["vscode-mdm", "media", "fonts"], ["_extensions", "mdm", "resources", "music"], ["vscode-mdm", "render", "mdm", "resources", "music"]]) {
+    const bytes = fs.readFileSync(path.join(ROOT, ...p, "NotoMusic-Regular.ttf"));
+    assert.equal(
+      crypto.createHash("sha256").update(bytes).digest("hex"),
+      "aeb2998c380f5807cda77e1d94e4ac596429cb74d4fffb8da279d4f3144c0eae",
+      p.join("/") + " carries another Noto Music than the one credited"
+    );
+  }
   // And the tools the export asks of the machine are named as not shipped.
   assert.match(notices, /Lesser\s+General\s+Public\s+License/);
   assert.ok(

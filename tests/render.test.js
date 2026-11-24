@@ -2167,6 +2167,78 @@ test("a self-contained roman page carries its own faces", () => {
   );
 });
 
+// ---------- The music's characters ----------
+
+// The notes, rests and accidentals the editor's symbol panel writes are drawn
+// on the page from the editor's own faces, the "MDM Music" family: Noto Music
+// and, for the flat, the natural and the sharp, KaTeX's roman (the owner's
+// pick of 2026-11-21; vscode-mdm/media/style.css says why). The faces ride
+// with a page that holds one of the characters and with no other, as the
+// roman rides only with a page set in it, a note in the title of the YAML
+// header counting as one; and the sheet is the face's, a page in the roman
+// taking the one that sizes them as the editor's font-size-adjust does (MF2).
+const MUSIC_DOC = (title, body) =>
+  `---\ntitle: "${title}"\nformat:\n  html: {}\nfilters:\n  - mdm\n---\n\n${body}\n`;
+
+test("the music's faces travel to the page with a document that holds one of their characters, sized for the face it is set in (MF2)", () => {
+  const vendored = (...p) => sha1Bytes(fs.readFileSync(path.join(ROOT, "_extensions", "mdm", "resources", ...p)));
+  const render = (name, text, face) => {
+    const dir = freshDir(name);
+    fs.writeFileSync(path.join(dir, "doc.mdm"), text);
+    const r = runMdm(["render", "doc.mdm", "--to", "html", "-M", "mdm-text-font:" + face], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const html = fs.readFileSync(path.join(dir, "doc.html"), "utf8");
+    const libs = path.join(dir, "doc_files", "libs", "quarto-contrib");
+    const music = fs.readdirSync(libs).find((n) => n.startsWith("mdm-music"));
+    return { html, libs, music: music ? path.join(libs, music) : null };
+  };
+  for (const face of ["sans", "roman"]) {
+    const page = render("music-face-" + face, MUSIC_DOC("Notes", "A quarter note \u{1D15F} and a B♭."), face);
+    assert.ok(page.music, face + ": the music's faces did not ride with a page that holds a note");
+    const own = face === "roman" ? "mdm-music-roman.css" : "mdm-music.css";
+    const other = face === "roman" ? "mdm-music.css" : "mdm-music-roman.css";
+    assert.ok(page.html.includes(own), face + ": the page does not link " + own);
+    assert.ok(!page.html.includes(other), face + ": the page links " + other + " as well");
+    const blocks = faceBlocks(fs.readFileSync(path.join(page.music, own), "utf8"))['"MDM Music"'] || [];
+    assert.equal(blocks.length, 2, face + ": the family is not two faces");
+    const noto = blocks.find((b) => b.includes("fonts/NotoMusic-Regular.ttf"));
+    const katex = blocks.find((b) => b.includes("fonts/KaTeX_Main-Regular.woff2"));
+    assert.ok(noto && katex, face + ": the family is not Noto Music and KaTeX's roman: " + blocks.join("\n"));
+    assert.match(noto, /unicode-range: U\+1D100-1D1FF, U\+2669-266C;/, face + ": Noto Music answers for other characters");
+    assert.match(katex, /unicode-range: U\+266D-266F;/, face + ": KaTeX's roman answers for other characters");
+    // Beside the roman the editor scales each face by its own x-height
+    // (font-size-adjust on .cm-content), which the page writes as a
+    // size-adjust; beside the sans neither scales them.
+    if (face === "roman") {
+      assert.match(noto, /size-adjust: 98\.51%;/, "Noto Music is not drawn at the editor's size beside the roman");
+      assert.match(katex, /size-adjust: 122\.51%;/, "KaTeX's flat is not drawn at the editor's size beside the roman");
+    } else {
+      assert.ok(!/size-adjust/.test(noto + katex), "the sans page scales the music's faces");
+    }
+    // The files themselves, the ones the extension carries.
+    assert.equal(sha1Bytes(fs.readFileSync(path.join(page.music, "fonts", "NotoMusic-Regular.ttf"))), vendored("music", "NotoMusic-Regular.ttf"));
+    assert.equal(sha1Bytes(fs.readFileSync(path.join(page.music, "fonts", "KaTeX_Main-Regular.woff2"))), vendored("katex", "fonts", "KaTeX_Main-Regular.woff2"));
+    // And the stacks of the prose name the family first, the roman's in the
+    // look block and the sans's in mdm-look.css.
+    if (face === "roman") {
+      assert.match(lookBlock(page.html)["--mdm-text"] || "", /^"MDM Music", "Latin Modern Roman"/, "the roman's stack does not name the music first");
+    } else {
+      const lookDir = fs.readdirSync(page.libs).find((n) => n.startsWith("mdm-look"));
+      assert.match(fs.readFileSync(path.join(page.libs, lookDir, "mdm-look.css"), "utf8"), /--mdm-text: "MDM Music", var\(--mdm-sans\);/, "the sans's stack does not name the music first");
+    }
+  }
+  // A note in the title alone is a note of the page.
+  const titled = render("music-face-title", MUSIC_DOC("Tempo \u{1D15F} = 60", "Just prose."), "sans");
+  assert.ok(titled.music, "a note in the title did not bring the faces");
+  // And so is a flat alone, which is not of the Musical Symbols block.
+  const flat = render("music-face-flat", MUSIC_DOC("Keys", "A piece in B\u266D major."), "sans");
+  assert.ok(flat.music, "a flat alone did not bring the faces");
+  // And a page with none carries none of it.
+  const plain = render("music-face-none", MUSIC_DOC("No music", "Just prose, and `B♭` in code."), "roman");
+  assert.equal(plain.music, null, "the music's faces rode with a page that holds none of their characters");
+  assert.ok(!/mdm-music/.test(plain.html), "the page links a music sheet it has no use for");
+});
+
 test("the roman travels to the paper, and takes the sans preamble with it", () => {
   const dir = freshDir("look-roman-tex");
   fs.writeFileSync(path.join(dir, "doc.mdm"), TEX_DOC);

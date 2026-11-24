@@ -105,6 +105,26 @@ The complete, unmodified Work is at <https://ctan.org/pkg/lm>, which is what
 clause 6d of the licence asks be named. GUST and the authors provide no
 support for this copy.
 
+## Noto Music 2.004
+
+The face the notes, rests and accidentals of the text are drawn in (the
+characters the symbol panel writes), in the editor, on the exported page and
+in the PDF printed from it. Copyright 2022 The Noto Project Authors,
+<https://github.com/notofonts/music>. Released under the SIL Open Font
+License 1.1, with no Reserved Font Name. Full text in
+`licenses/SIL-OPEN-FONT-LICENSE.txt`.
+
+One file, `NotoMusic-Regular.ttf`, under `media/fonts/` and, for the bundled
+Quarto filter, under `render/mdm/resources/music/`.
+
+The file is `ofl/notomusic/NotoMusic-Regular.ttf` of the Google Fonts
+repository, <https://github.com/google/fonts>, as of commit
+`76321256001b61f49827d5176183cca77823bea6` (2026-10-12), with no change:
+SHA-256 `aeb2998c380f5807cda77e1d94e4ac596429cb74d4fffb8da279d4f3144c0eae`.
+The flat, the natural and the sharp are drawn from KaTeX's own
+`KaTeX_Main-Regular.woff2`, credited under KaTeX above, which the page takes
+beside it for that alone.
+
 ## The MIT licence
 
 abcjs, CodeMirror, Lezer and KaTeX are all under the MIT licence, reproduced

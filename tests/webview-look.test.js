@@ -2356,6 +2356,88 @@ test("an editor left in the sans comes back in the sans", { skip }, async () => 
   await h.close();
 });
 
+// ---------- The music's characters ----------
+
+// The notes, rests and accidentals the symbol panel writes are drawn from the
+// editor's own faces, the "MDM Music" family of style.css: Noto Music for the
+// notes, the rests, the beamed pairs and the double flat and double sharp,
+// and KaTeX's roman for the flat, the natural and the sharp (the owner's pick
+// of 2026-11-21, C of design/design-music-face.html). Before it they came from
+// the computer, and a Mac has no face with the notes and the rests: every one
+// of them was a blank cell of the panel and a gap in the text, drawn with the
+// blank the roman has for a character it lacks (2026-11-20). Read with
+// CSS.getPlatformFontsForNode, which names the face that drew each glyph and
+// whether it was a web face: on the Linux the suite was written on Noto Music
+// is installed, and the system's copy is not the editor's (MF1).
+const MUSIC_LINES = {
+  notes: "\u{1D15C}\u{1D15D}\u{1D15E}\u{1D15F}\u{1D160}\u{1D161}\u{1D162}\u{1D163}\u{1D164}",
+  rests: "\u{1D13B}\u{1D13C}\u{1D13D}\u{1D13E}\u{1D13F}\u{1D140}\u{1D141}\u{1D142}",
+  more: "♫♬\u{1D12B}\u{1D12A}♩♪",
+  signs: "♭♮♯",
+};
+const KATEX_SIGNS = ["symbol-flat", "symbol-natural", "symbol-sharp"];
+
+// The faces that drew the glyphs of every element a selector finds, as
+// "Family*" for a web face and "Family" for one of the system's, with how
+// many glyphs each drew.
+async function drawnBy(page, selector) {
+  const s = await page.target().createCDPSession();
+  await s.send("DOM.enable");
+  await s.send("CSS.enable");
+  const doc = await s.send("DOM.getDocument", { depth: -1 });
+  const ids = (await s.send("DOM.querySelectorAll", { nodeId: doc.root.nodeId, selector })).nodeIds;
+  const out = [];
+  for (const id of ids) {
+    const { fonts } = await s.send("CSS.getPlatformFontsForNode", { nodeId: id });
+    const { attributes } = await s.send("DOM.getAttributes", { nodeId: id });
+    const at = attributes.indexOf("data-type");
+    out.push({
+      type: at >= 0 ? attributes[at + 1] : null,
+      faces: Object.fromEntries(fonts.map((f) => [f.familyName + (f.isCustomFont ? "*" : ""), f.glyphCount])),
+    });
+  }
+  await s.detach();
+  return out;
+}
+
+test("the music symbols are drawn from the editor's own faces, in the panel and in the text, in either face of the prose (MF1)", { skip }, async () => {
+  const text = Object.values(MUSIC_LINES).join("\n\n") + "\n\nThe end.\n";
+  for (const face of ["roman", "sans"]) {
+    const h = await open({ text, scores: 0, seed: { settings: { textFont: face } } });
+    try {
+      // The caret on the last line, away from the four read here.
+      await setSelection(h.page, text.length - 1);
+      await h.page.evaluate(() => document.fonts.ready);
+      await sleep(200);
+      // Both lists in document order, so the n-th text is the n-th line read.
+      const texts = await h.page.$$eval("#app .cm-line", (els) => els.map((e) => e.textContent));
+      const lines = await drawnBy(h.page, "#app .cm-line");
+      for (const [name, chars] of Object.entries(MUSIC_LINES)) {
+        const line = lines[texts.indexOf(chars)];
+        assert.ok(line, face + ": no line reads the " + name + ": " + JSON.stringify(texts));
+        // Every glyph of the line from the one face, the code face aside: a
+        // line of CodeMirror's draws one glyph of it, whatever the line holds
+        // (Menlo on this Mac, measured on the line of "The end." as well).
+        const wanted = name === "signs" ? "KaTeX_Main*" : "Noto Music*";
+        const drawn = Object.keys(line.faces).filter((f) => !/mono|menlo|courier|consol/i.test(f));
+        assert.deepEqual(drawn, [wanted], face + ": the " + name + " are not drawn from " + wanted + " alone: " + JSON.stringify(line.faces));
+        assert.equal(line.faces[wanted], Array.from(chars).length, face + ": a glyph of the " + name + " is missing: " + JSON.stringify(line.faces));
+      }
+      await pressBar(h.page, "insert-symbol");
+      await sleep(200);
+      const cells = await drawnBy(h.page, "#app .mdm-menu--glyphs .mdm-menu__glyph");
+      assert.equal(cells.length, 29, face + ": the panel does not hold its 29 cells");
+      for (const cell of cells) {
+        const wanted = KATEX_SIGNS.includes(cell.type) ? "KaTeX_Main*" : "Noto Music*";
+        assert.deepEqual(Object.keys(cell.faces), [wanted], face + ": " + cell.type + " is not drawn from " + wanted + " alone: " + JSON.stringify(cell.faces));
+      }
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+  }
+});
+
 // ---------- Justified text ----------
 
 // Each kind of line that wraps, written long enough to take several rows of a

@@ -311,9 +311,11 @@ local function look_css(l)
   -- The roman, when the editor was in it. The faces themselves ride with the
   -- page as their own dependency (ensure_look), and this is the line that
   -- spends them: mdm-look.css sets --mdm-text to the sans and reads it on the
-  -- body and the headings, so the words move and the chrome does not.
+  -- body and the headings, so the words move and the chrome does not. The
+  -- music's characters first, from faces of their own (music_face), as the
+  -- editor's stack names them.
   if l.text_font == "roman" then
-    put("text", '"Latin Modern Roman", Georgia, "Times New Roman", serif')
+    put("text", '"MDM Music", "Latin Modern Roman", Georgia, "Times New Roman", serif')
   end
   put("hyphenation", l.hyphenation)
   -- Spent on the paragraphs and list items (mdm-look.css), whose fallback is
@@ -4276,14 +4278,77 @@ local function table_element(el)
   if place and place ~= "default" then el.classes:insert("mdm-table-" .. place) end
   return table_lists(el) or ((sided or place) and el) or nil
 end
+
+-- ---------- The music's characters ----------
+--
+-- The notes, rests and accidentals Unicode has a character for, which the
+-- editor's symbol panel writes into the text (SYMBOLS in media/main.js), are
+-- in no face the prose is set in, and a page that left them to the reader's
+-- computer drew them with whatever it had: on a Mac nothing at all for the
+-- notes and the rests, since macOS has no face with them (measured on
+-- 2026-11-20). They come from a family of their own, "MDM Music", named first
+-- in both stacks of the prose (mdm-look.css for the sans, look_css for the
+-- roman) and drawn from Noto Music and from KaTeX's roman by unicode-range;
+-- vscode-mdm/media/style.css says why those two.
+--
+-- The faces travel only with a page that holds one of the characters, as the
+-- roman travels only with a page set in it: a self-contained export takes
+-- every dependency inside the file, and Noto Music is 124 KB. Every Str of
+-- the document is read, the metadata's too (doc:walk reaches the title of the
+-- YAML header, measured on Pandoc 3.10), and code is not: neither stack of
+-- the code face names the family. The patterns are the UTF-8 of U+1D100 to
+-- U+1D1FF (F0 9D 84 80 to F0 9D 87 BF) and of U+2669 to U+266F (E2 99 A9 to
+-- E2 99 AF).
+--
+-- The sheet is the face's: a page in the roman takes the one that carries the
+-- size the editor draws them at beside it (mdm-music-roman.css says how it was
+-- measured), any other the one that draws them as they come.
+--
+-- The typeset PDF does not draw them yet: LuaLaTeX leaves each one out with
+-- no more than a "Missing character" in its log (bin/mdm, 2026-09-23). The
+-- TrueType file is the one it could load (luaotfload reads no woff2), and
+-- doing so is the next step, written under Pending in tests/README.md.
+local MUSIC_CHARS = { "\240\157[\132-\135]", "\226\153[\169-\175]" }
+
+local function has_music(text)
+  for _, p in ipairs(MUSIC_CHARS) do
+    if text:find(p) then return true end
+  end
+  return false
+end
+
+local function music_face(doc)
+  if not quarto.doc.is_format("html") then return nil end
+  local found = false
+  doc:walk({
+    Str = function(s)
+      if not found and has_music(s.text) then found = true end
+    end,
+  })
+  if not found then return nil end
+  local roman = look and look.text_font == "roman"
+  quarto.doc.add_html_dependency({
+    name = "mdm-music",
+    version = "2.004",
+    stylesheets = { roman and "resources/music/mdm-music-roman.css" or "resources/music/mdm-music.css" },
+    resources = {
+      { name = "fonts/NotoMusic-Regular.ttf", path = "resources/music/NotoMusic-Regular.ttf" },
+      { name = "fonts/KaTeX_Main-Regular.woff2", path = "resources/katex/fonts/KaTeX_Main-Regular.woff2" },
+    },
+  })
+  return nil
+end
+
 -- Meta has to run before the CodeBlocks, since it settles the abcm2ps path,
 -- and before the headings, since it settles which command each level of them
 -- is written as (look.heads), which title_sections reads too. The equations
 -- are numbered next, before Math writes any formula out and the maths pass
 -- sets them on paper. Within the last table the Pandoc function runs after
--- the element ones.
+-- the element ones. The music's faces are settled after Meta, which reads the
+-- face the page is set in (look.text_font).
 return {
   { Meta = Meta },
+  { Pandoc = music_face },
   { Pandoc = equations },
   { Pandoc = title_sections },
   { CodeBlock = CodeBlock, Header = sixth_heading, HorizontalRule = horizontal_rule,

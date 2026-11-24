@@ -102,8 +102,11 @@
      roman and said so (mdm-text-font, written into the block the filter puts
      in the head). The chrome of the page, the player bar and the tooltips,
      keeps --mdm-sans whichever face the words are in, as the toolbar of the
-     editor does. */
-  --mdm-text: var(--mdm-sans);
+     editor does. The music's characters come first, from faces of their own
+     that answer for them and for nothing else (resources/music/, which ride
+     with a page that holds one; music_face in mdm.lua), as the editor's stack
+     names them. */
+  --mdm-text: "MDM Music", var(--mdm-sans);
   /* How the prose meets the right edge: ragged, as a page has always been set,
      unless the editor was justifying and said so (mdm-text-align). */
   --mdm-text-align: left;

@@ -639,8 +639,10 @@ What it does:
   the 128th and the accidentals from the double flat to the double sharp,
   and writes the one picked at the caret as Unicode text: a figure stands in
   a sentence or a table cell as a letter does, and any other editor reads it
-  as text. Until a music face travels with the extension they are drawn in
-  whatever face the machine has, and a PDF typeset with TeX leaves them out.
+  as text. They are drawn in Noto Music, the flat, the natural and the sharp
+  in the roman of the equations, in the editor, on the exported page and in
+  the PDF printed from it, whatever the machine has; a PDF typeset with TeX
+  still leaves them out.
   In the Paragraph menu, a code block, also
   `Ctrl+Shift+C` (`⌥⌘C` on a Mac): on an empty line it opens a block with
   the caret after the opening backticks, where the language is typed (`abc`
@@ -1064,7 +1066,7 @@ differs, carets and undo history kept.
 MDM is MIT (`LICENSE`). What it vendors is credited one by one in
 `THIRD-PARTY-NOTICES.md`, with the version of each copy actually in the tree:
 abcjs 6.7.0, CodeMirror 6 with its Lezer packages, and KaTeX 0.18.4 are all
-MIT. Three things are not. The piano the editor plays with is the Musyng
+MIT. Four things are not. The piano the editor plays with is the Musyng
 Kite soundfont, CC BY-SA 3.0, included unmodified, so the notice is the
 attribution the licence asks for. The roman the prose and the scores are set
 in is Latin Modern Roman 2.004, four faces as woff2 files, and once more
@@ -1073,7 +1075,8 @@ under the GUST Font Licence, which is LPPL 1.3c with a renaming clause the
 notice names. The words a document is divided at come from the hyph-utf8
 patterns, which are MIT but for English (a notice of its own, which lets
 it be redistributed with that notice), Portuguese (BSD-3-Clause) and
-Russian (LPPL 1.3c).
+Russian (LPPL 1.3c). The notes and rests of the text are drawn in Noto Music
+2.004, carried unchanged under the SIL Open Font License 1.1.
 
 The one program that is not vendored is abcm2ps, which engraves the scores
 of a PDF typeset with LaTeX on a machine with neither Chrome nor Edge: somebody else's work
@@ -1082,8 +1085,8 @@ Methfessel's abc2ps), called as a separate process and never linked into
 anything here. Neither the repository nor the `.vsix` carries the binary;
 the search order and the source are in `THIRD-PARTY-NOTICES.md`, and the
 LGPL and GPL texts are kept in `licenses/`
-for reference. So the `.vsix` is MIT but for the three above: the soundfont,
-the Latin Modern faces and the hyphenation patterns.
+for reference. So the `.vsix` is MIT but for the four above: the soundfont,
+the Latin Modern faces, the hyphenation patterns and Noto Music.
 
 ## Known limitations (prototype)
 

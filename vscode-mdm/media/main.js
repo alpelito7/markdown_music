@@ -12001,17 +12001,18 @@
   // note is its note followed by the combining augmentation dot, U+1D16D,
   // which has no precomposed form.
   //
-  // What draws them is not settled yet. No face the prose is set in has
-  // these characters (Latin Modern has ♪ and none of the rest; KaTeX_Main,
-  // carried for the maths, has ♭ ♮ ♯ and stands in no stack of the prose's):
-  // on screen and on the exported page they come from whatever the machine
-  // has, Noto Music or FreeSerif for the notes on the Linux they were
-  // measured on, and on paper they are left out: exported through bin/mdm on
-  // 2026-09-23, in the roman and in the sans alike, the quarter note, the
-  // half, the flat and the sharp left nothing between the words they stood
-  // among, and a table cell holding one came out empty, with no error (the
-  // log says "Missing character" and nothing reads it). A music face
-  // vendored beside Latin Modern is the decision this waits on.
+  // No face the prose is set in has these characters (Latin Modern has ♪
+  // and none of the rest), and they came from whatever the machine had: Noto
+  // Music or FreeSerif on the Linux they were first measured on, and on a Mac
+  // nothing, every note and rest of the panel a blank cell (2026-11-20). The
+  // editor and the exported page draw them from faces of their own since the
+  // owner's pick of 2026-11-21, Noto Music and KaTeX's roman for ♭ ♮ ♯ (the
+  // "MDM Music" family of style.css, which says why). On the typeset PDF they
+  // are still left out: exported through bin/mdm on 2026-09-23, in the roman
+  // and in the sans alike, the quarter note, the half, the flat and the
+  // sharp left nothing between the words they stood among, and a table cell
+  // holding one came out empty, with no error (the log says "Missing
+  // character" and nothing reads it); under Pending in tests/README.md.
   //
   // The panel sets each family on a row of its own under its header, flush
   // left, and the beamed pair and the accidentals, two cells and five, share

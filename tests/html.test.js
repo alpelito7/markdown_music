@@ -2946,6 +2946,32 @@ test("on paper the roman's faces are embedded as fonts, from the outlines kept f
   );
 });
 
+// And the music's two faces, which have no faces of their own for the print
+// and need none: Noto Music is TrueType as it comes, and so is KaTeX's roman,
+// so the PDF Chrome prints from the page carries each as a font, where a face
+// with CFF outlines would go in as Type 3 drawings and read lighter (the
+// roman's above). This is the reason the editor's style.css gives for
+// carrying the TrueType file and no woff2. Read off the PDF's own font
+// objects, which Chrome writes uncompressed, so poppler is not needed (MF4).
+test("on paper the music symbols are embedded as TrueType fonts, Noto Music and KaTeX's roman, in either face (MF4)", { skip }, () => {
+  for (const face of ["roman", "sans"]) {
+    const name = "music-print-" + face;
+    fs.writeFileSync(
+      path.join(DIR, name + ".mdm"),
+      ["---", "mdm-text-font: " + face, "mdm-print-faces: truetype", "filters:", "  - mdm", "---", "",
+        "A quarter note \u{1D15F}, a rest \u{1D13D}, a B♭ and an F♯.", ""].join("\n")
+    );
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html"], { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const pdf = fs.readFileSync(printPdf(name)).toString("latin1");
+    const descriptors = pdf.split(/\bendobj\b/).filter((o) => /\/Type\s*\/FontDescriptor/.test(o));
+    for (const font of ["NotoMusic-Regular", "KaTeX_Main-Regular"]) {
+      const d = descriptors.find((o) => new RegExp("/FontName\\s*/[A-Z]{6}\\+" + font + "\\b").test(o));
+      assert.ok(d, face + ": the PDF does not carry " + font);
+      assert.match(d, /\/FontFile2\b/, face + ": " + font + " is not embedded as a TrueType font");
+    }
+  }
+});
 
 // The headings are the PDF's bookmarks, each once. A heading that opened a
 // sheet came out of Chrome with its words twice in its bookmark ("Heading
@@ -3874,6 +3900,107 @@ test("every heading is drawn on the page at the size the editor draws it, in eit
   }
 });
 
+// The music's characters on the page, against the editor: drawn from the
+// same faces, Noto Music and KaTeX's roman for ♭ ♮ ♯ (the "MDM Music" family,
+// resources/music/ and the editor's style.css), and each as wide as the
+// editor draws it, in either face of the prose. Beside the roman the editor
+// scales them by its font-size-adjust and the page by the size-adjust of
+// mdm-music-roman.css; a page that named the faces without those two numbers
+// drew Noto Music 1.5% wider and KaTeX's flat 22.5% narrower than the editor
+// (the factors of 2026-11-21), and before the faces were the page's, a Mac
+// drew the notes and the rests as nothing at all (MF3).
+const MUSIC_BODY = [
+  "Notes \u{1D15D} \u{1D15E} \u{1D15F} \u{1D160} and rests \u{1D13B} \u{1D13D}, B♭, F♯ and E♮, F\u{1D12A} and ♫.",
+  "\u{1D15C}\u{1D15D}\u{1D15E}\u{1D15F}\u{1D160}\u{1D161}\u{1D162}\u{1D163}\u{1D164}",
+  "\u{1D13B}\u{1D13C}\u{1D13D}\u{1D13E}\u{1D13F}\u{1D140}\u{1D141}\u{1D142}",
+  "♫♬\u{1D12B}\u{1D12A}♩♪",
+  "♭♮♯",
+];
+
+// The advance of every music character in the elements a selector finds, by
+// its first occurrence, read off a Range around the one character.
+const MUSIC_WIDTHS = function (selector) {
+  const re = /[\u{1D100}-\u{1D1FF}♩-♯]/u;
+  const out = {};
+  for (const el of document.querySelectorAll(selector)) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      let i = 0;
+      for (const ch of node.data) {
+        if (re.test(ch) && !(ch in out)) {
+          const r = document.createRange();
+          r.setStart(node, i);
+          r.setEnd(node, i + ch.length);
+          out[ch] = +r.getBoundingClientRect().width.toFixed(3);
+        }
+        i += ch.length;
+      }
+    }
+  }
+  return out;
+}.toString();
+
+test("the page draws the music symbols from the editor's faces and at the editor's size, in either face (MF3)", { skip }, async () => {
+  const { open: openEditor } = require("./webview/helpers.js");
+  const body = MUSIC_BODY.join("\n\n") + "\n\nThe end.\n";
+  for (const face of ["roman", "sans"]) {
+    const name = "music-" + face;
+    fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + body);
+    const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:" + face], { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+
+    const browser = await puppeteer.launch({
+      executablePath: CHROME,
+      args: ["--no-sandbox", "--allow-file-access-from-files"],
+      defaultViewport: { width: SIDE_BY_SIDE_WIDTH, height: 1200 },
+    });
+    OPEN_BROWSERS.add(browser);
+    let page, faces;
+    try {
+      const tab = await browser.newPage();
+      await tab.goto("file://" + path.join(DIR, name + ".html"), { waitUntil: "networkidle0" });
+      await tab.evaluate(() => document.fonts.ready);
+      page = await tab.evaluate((f) => eval("(" + f + ")")("main.content p"), MUSIC_WIDTHS);
+      // The faces of the four paragraphs that are music and nothing else.
+      const texts = await tab.$$eval("main.content p", (els) => els.map((e) => e.textContent));
+      const cdp = await tab.target().createCDPSession();
+      await cdp.send("DOM.enable");
+      await cdp.send("CSS.enable");
+      const doc = await cdp.send("DOM.getDocument", { depth: -1 });
+      const ids = (await cdp.send("DOM.querySelectorAll", { nodeId: doc.root.nodeId, selector: "main.content p" })).nodeIds;
+      faces = {};
+      for (const group of MUSIC_BODY.slice(1)) {
+        const at = texts.indexOf(group);
+        assert.ok(at >= 0, face + ": no paragraph of the page reads " + JSON.stringify(group) + ": " + JSON.stringify(texts));
+        const { fonts } = await cdp.send("CSS.getPlatformFontsForNode", { nodeId: ids[at] });
+        faces[group] = fonts.map((x) => x.familyName + (x.isCustomFont ? "*" : ""));
+      }
+    } finally {
+      await browser.close();
+      OPEN_BROWSERS.delete(browser);
+    }
+    for (const [group, drawn] of Object.entries(faces)) {
+      const wanted = group === MUSIC_BODY[4] ? "KaTeX_Main*" : "Noto Music*";
+      assert.deepEqual(drawn, [wanted], face + ": the page draws " + group + " from " + JSON.stringify(drawn));
+    }
+
+    const h = await openEditor({ text: body, scores: 0, seed: { settings: { textFont: face } } });
+    let editor;
+    try {
+      await h.page.evaluate(() => document.fonts.ready);
+      editor = await h.page.evaluate((f) => eval("(" + f + ")")("#app .cm-line"), MUSIC_WIDTHS);
+    } finally {
+      await h.close();
+    }
+    const chars = Object.keys(editor);
+    // Nine notes, eight rests, the beamed pairs, ♩ ♪, and five accidentals.
+    assert.equal(chars.length, 26, face + ": the editor did not draw the 26 characters: " + chars.join(""));
+    assert.deepEqual(Object.keys(page).sort(), chars.sort(), face + ": the page and the editor do not hold the same characters");
+    const off = chars.filter((c) => Math.abs(page[c] - editor[c]) > 0.05)
+      .map((c) => c + " editor " + editor[c] + " page " + page[c]);
+    assert.deepEqual(off, [], face + ": the page draws these at another width than the editor");
+  }
+});
 
 // The air around a heading, gap by gap against the editor: from the bottom of
 // each block's line box to the top of the next, and from the top of the

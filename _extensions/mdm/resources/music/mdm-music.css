@@ -1,0 +1,32 @@
+/* The faces the music's characters are drawn in on the exported page, for a
+   page set in the sans: the other end of the "MDM Music" family of the
+   editor's stylesheet (vscode-mdm/media/style.css, which says why these two
+   files and why first in the stack of the prose).
+
+   Noto Music 2.004 for the Musical Symbols block and the four notes of
+   Miscellaneous Symbols (U+2669 to U+266C), and KaTeX's roman, the file the
+   equations of a page load, for the flat, the natural and the sharp. Each
+   answers for its range and for no other character, so the words are drawn
+   in the face the page names after it.
+
+   This sheet rides with the page only when the document holds one of these
+   characters (music_face in mdm.lua), and a page set in the roman takes
+   mdm-music-roman.css in its place, which sizes the two the way the editor
+   does under the roman. Here they are drawn as they come, as the editor
+   draws them beside the sans. */
+@font-face {
+  font-family: "MDM Music";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/NotoMusic-Regular.ttf) format("truetype");
+  unicode-range: U+1D100-1D1FF, U+2669-266C;
+}
+@font-face {
+  font-family: "MDM Music";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/KaTeX_Main-Regular.woff2) format("woff2");
+  unicode-range: U+266D-266F;
+}

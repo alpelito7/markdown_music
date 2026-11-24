@@ -47,7 +47,7 @@ body {
 #app {
   --mdm-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  --mdm-text: var(--mdm-sans);
+  --mdm-text: "MDM Music", var(--mdm-sans);
 }
 /* The zoom (mdm.zoom, applyZoom in main.js): the size the page is drawn at,
    as a factor of the lengths this sheet names.
@@ -527,6 +527,62 @@ body {
   font-display: block;
   src: url(fonts/LatinModernRoman-BoldItalic.woff2) format("woff2");
 }
+/* ---------- The music's characters: Noto Music, and KaTeX's roman ----------
+
+   The notes, rests and accidentals Unicode has a character for, which the
+   symbol panel writes into the text (SYMBOLS in main.js), are in no face the
+   prose is set in, and they were drawn with whatever the computer had: Noto
+   Music or FreeSerif on the Linux the panel was built on, and on a Mac
+   nothing at all. macOS has no face with the notes and the rests (U+1D13B to
+   U+1D164), and Chrome fell to Latin Modern, whose drawing for a character it
+   lacks is blank: every note and rest of the panel was an empty cell, and
+   the flat and the sharp came from three faces of the system at once (Times
+   New Roman, Hiragino Sans, Apple Symbols; measured on 2026-11-20, the
+   owner's report). They are the editor's own now, one family, "MDM Music",
+   from two files, each answering by unicode-range for its characters and no
+   other, so the words stay in the face named after it. The owner's pick of
+   2026-11-21, C of design/design-music-face.html:
+   - Noto Music 2.004 (fonts/NotoMusic-Regular.ttf, the file Google publishes,
+     unchanged) for the Musical Symbols block and ♩ ♪ ♫ ♬. It draws every
+     cell of the panel whole, a dotted note with its dot; Bravura Text, the
+     other face put to him, broke the dotted eighth and sixteenth and dropped
+     the dot of the other three.
+   - KaTeX_Main for ♭ ♮ ♯, the file the equations already load. Noto Music's
+     sit small and below the letter they follow (the sharp of F♯ hung under
+     the line), and these are Computer Modern, the roman's own drawing.
+   First in both stacks of the prose, and not after the face of the words:
+   Latin Modern has ♪ and none of the others, so after it one note of the
+   panel would be another drawing from its neighbours'.
+   TrueType and not woff2, because it is the file Chrome embeds as a font
+   when it prints the page into a PDF (a face with CFF outlines goes in as
+   drawings and reads lighter: the print faces of mdm.lua), and the one
+   LuaLaTeX can load, which reads no woff2, the day the typeset PDF draws
+   these too.
+   No size is named. Under the roman the font-size-adjust on .cm-content
+   scales each face of a line by its own x-height, Noto Music's 0.536 em to
+   98.51% and KaTeX_Main's 0.431 to 122.51%; the exported page has no
+   font-size-adjust and carries those two numbers as size-adjust
+   (render/mdm/resources/music/mdm-music-roman.css), so both draw them at one
+   size. Beside the sans neither surface scales them.
+   One weight and one slant: bold or italic prose draws them as the browser
+   makes a regular bold or slanted, the same on the page. */
+@font-face {
+  font-family: "MDM Music";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/NotoMusic-Regular.ttf) format("truetype");
+  unicode-range: U+1D100-1D1FF, U+2669-266C;
+}
+@font-face {
+  font-family: "MDM Music";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(vendor/cm6/fonts/KaTeX_Main-Regular.woff2) format("woff2");
+  unicode-range: U+266D-266F;
+}
+
 /* ---------- The same roman, for the words on a staff ----------
 
    The four files again, under a name of their own, because the family above
@@ -706,7 +762,7 @@ body {
    family name out. Both are read, and the engraving keeps abcjs's own faces
    unless it has both. */
 #app.mdm-text--roman {
-  --mdm-text: "Latin Modern Roman", Georgia, "Times New Roman", serif;
+  --mdm-text: "MDM Music", "Latin Modern Roman", Georgia, "Times New Roman", serif;
   --mdm-score-face: "Latin Modern Roman Score";
   --mdm-score-face-wide: "Latin Modern Roman Score Wide";
 }
