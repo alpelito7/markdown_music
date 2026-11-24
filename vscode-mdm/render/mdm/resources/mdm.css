@@ -4,9 +4,12 @@
 /* A blank line of the body over and under a score, which is all the editor
    draws there (its buttons stand in the margin, out of the flow). It was
    1.5rem, 25.5 px on Quarto's root of 17, and a score stood 9.5 px further
-   from its neighbours than in the editor. */
+   from its neighbours than in the editor. The page's blank line, which is
+   the prose's em (--mdm-blank in mdm-look.css): a fixed 16px stood a score
+   3.2px further from the text round it than the editor once the page was
+   set at 0.9 (html.test.js, 2026-11-16). */
 .mdm-block {
-  margin: 16px 0;
+  margin: var(--mdm-blank, 16px) 0;
 }
 .mdm-paper {
   /* abcjs sets display:inline-block inline on the box it draws into. A block
@@ -22,6 +25,13 @@
      the fill has to travel with the music the way it does in the editor
      (there abcjs's own box is the one carrying both). */
   overflow: visible !important;
+  /* And it pins a height there, the engraving's, at which the drawing is no
+     longer drawn once the page is set at 0.9 (drawAt in mdm.js): the box
+     takes its height from the drawing, as the editor's does (`height: auto
+     !important` on #app code.language-abc in style.css), where it stood
+     11px over a drawing of 98 (html.test.js, 2026-11-16). On paper it
+     already did (mdm-look.css). */
+  height: auto !important;
 }
 /* The drawing is drawn at the size it is engraved at and at no other, as in
    the editor (#app code.language-abc svg in vscode-mdm/media/style.css):

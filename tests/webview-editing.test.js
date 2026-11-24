@@ -893,14 +893,17 @@ test("the formatting keys stop at the text, and reach VS Code from anywhere else
   for (const name of ["c", "t"]) await blockChord(h.page, name);
   assert.deepEqual(await heard(), []);
   // What the levels do not take is VS Code's from the text as well: a digit
-  // past the sixth level, a digit of the number pad (Ctrl+Numpad0 resets
-  // its zoom) and the chord the levels had until 2026-10-03.
+  // past the sixth level, a digit of the number pad and the chord the levels
+  // had until 2026-10-03. Not the pad's 0 with Ctrl, which was VS Code's way
+  // back to a window at 100 and is the page's since the page has a zoom of
+  // its own (2026-11-16, webview-zoom.test.js): it sets no level either, and
+  // stops at the page as the zoom's other keys do.
   const before3 = await docText(h.page);
   await levelChord(h.page, 7);
   await levelChord(h.page, 0, "pad");
   await levelChord(h.page, 2, "pad");
   await blockChord(h.page, 2);
-  assert.deepEqual(await heard(), ["Digit7", "Numpad0", "Numpad2", "Shift+Digit2"]);
+  assert.deepEqual(await heard(), ["Digit7", "Numpad2", "Shift+Digit2"]);
   assert.equal(await docText(h.page), before3);
   // A key of the pad says nothing about the next one: the row's digit is
   // answered again straight after it (on the first line, the caret having
@@ -1429,9 +1432,10 @@ async function insertOn(text, pos, row) {
 // Page, which took in the buttons of the music that had been left at the far
 // end of the row). It stood in two rows of buttons from 2026-09-19, 65px of
 // chrome over the text, and is 35px. Nothing stands on it but the outline's
-// button and the words. In a pane too narrow for the row the words that do
-// not fit take the next one, each whole.
-test("the bar is one row, seven words after the outline and nothing else", { skip }, async () => {
+// button and the words, and, while the zoom is not 100, the reading of it at
+// the right end of the row (2026-11-16, webview-zoom.test.js). In a pane too
+// narrow for the row the words that do not fit take the next one, each whole.
+test("the bar is one row, seven words after the outline and nothing else, but the zoom while it is not 100", { skip }, async () => {
   const h = await open({ text: "Text.\n", scores: 0 });
   const seen = () =>
     h.page.evaluate(() => {
@@ -1444,9 +1448,11 @@ test("the bar is one row, seven words after the outline and nothing else", { ski
         height: bar.getBoundingClientRect().height,
         inner: Math.round(bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight)),
         outline: box(bar.querySelector(':scope > .mdm-toolbar__item > button[data-type="outline"]')),
-        words: [...bar.querySelectorAll(":scope > .mdm-toolbar__item > .mdm-word")].map((w) => Object.assign({ name: w.textContent }, box(w))),
+        // What is drawn: the reading of the zoom is there at 100 and not
+        // drawn.
+        words: [...bar.querySelectorAll(":scope > .mdm-toolbar__item > .mdm-word")].filter((w) => w.getClientRects().length).map((w) => Object.assign({ name: w.textContent }, box(w))),
         // Whatever stands on the bar itself, the rows of its menus apart.
-        controls: [...bar.querySelectorAll("button")].filter((b) => !b.closest(".mdm-menu")).map((b) => b.getAttribute("data-type")),
+        controls: [...bar.querySelectorAll("button")].filter((b) => !b.closest(".mdm-menu") && b.getClientRects().length).map((b) => b.getAttribute("data-type")),
       };
     });
   for (const width of [900, 1400]) {
@@ -1468,6 +1474,19 @@ test("the bar is one row, seven words after the outline and nothing else", { ski
       assert.ok(run[i - 1].right <= run[i].left, width + ": " + run[i].name + " does not come after " + run[i - 1].name);
     }
   }
+  // At another zoom the reading of it comes on the same row, at its right
+  // end, and the bar keeps its height; back at 100 it goes.
+  await postSettings(h.page, { zoom: 125 });
+  await sleep(200);
+  const zoomed = await seen();
+  assert.deepEqual(zoomed.words.map((w) => w.name), ["Edit", "Format", "Paragraph", "Insert", "Page", "Score", "Export", "125%"]);
+  assert.equal(zoomed.controls[zoomed.controls.length - 1], "zoom-reading");
+  assert.equal(new Set(zoomed.words.map((w) => w.top)).size, 1, "the reading is not on the row of the words");
+  assert.equal(zoomed.words[7].right, zoomed.inner, "the reading is not at the right end of the row");
+  assert.equal(zoomed.height, 35);
+  await postSettings(h.page, { zoom: 100 });
+  await sleep(200);
+  assert.equal((await seen()).words.length, 7);
   // Too narrow for the whole row: the words that do not fit take the next,
   // and none is cut by the pane's edge.
   await h.page.setViewport({ width: 420, height: 900 });
@@ -1597,10 +1616,12 @@ test("a row that leads to more opens its submenu beside it, and the pointer may 
       const b = document.querySelector('#app button[data-type="' + n + '"]').getBoundingClientRect();
       return { x: b.x + b.width / 2, y: b.y + b.height / 2, left: b.left, right: b.right, top: b.top, bottom: b.bottom };
     }, name);
-  // The rows of the Page menu that lead to more, each with its submenu.
+  // Two of the rows of the Page menu that lead to more, each with its
   const subs = () =>
     h.page.evaluate(() =>
-      [...document.querySelectorAll('#app .mdm-toolbar button[data-type="menu-page"] + .mdm-menu > .mdm-menu__group')].map((g) => {
+      [...document.querySelectorAll('#app .mdm-toolbar button[data-type="menu-page"] + .mdm-menu > .mdm-menu__group')]
+        .filter((g) => /^mdm-(theme|hyphenation)$/.test(g.querySelector(":scope > button").getAttribute("data-type")))
+        .map((g) => {
         const row = g.querySelector(":scope > button");
         const sub = g.querySelector(":scope > .mdm-menu");
         const s = sub.getBoundingClientRect();
@@ -1618,6 +1639,11 @@ test("a row that leads to more opens its submenu beside it, and the pointer may 
     );
   await h.page.click('#app button[data-type="menu-page"]');
   await sleep(80);
+  assert.deepEqual(
+    await h.page.evaluate(() =>
+      [...document.querySelectorAll('#app .mdm-toolbar button[data-type="menu-page"] + .mdm-menu > .mdm-menu__group > button')].map((b) => b.getAttribute("data-type"))
+    ),
+  );
   let seen = await subs();
   assert.deepEqual(seen.map((s) => [s.name, s.more, s.shown]), [["mdm-theme", true, false], ["mdm-hyphenation", true, false]]);
 
@@ -5508,14 +5534,18 @@ test("a second click on a drawing puts its source away, as a click outside the t
 
   // An inline equation shows its drawing beside its source while it is
   // edited (the preview), and that is the drawing its second click lands on.
+  // The paragraph's, in a line, and not the one in the table's cell, which
+  // CodeMirror kept drawn above the pane once the page was set at 0.9 and
+  // was the first to match (2026-11-16).
+  const inlineEq = "#app .cm-line .mdm-math:not(.mdm-math--block)";
   await rig.bring("Filler d 12", "x^2");
-  await rig.click(await rig.box("#app .mdm-math:not(.mdm-math--block)"));
+  await rig.click(await rig.box(inlineEq));
   const inline = await rig.state();
   assert.ok(inline.inline > 0 && inline.focus, "the inline equation did not open: " + JSON.stringify(inline));
   await rig.click(await rig.box("#app .mdm-math--preview"));
   assert.deepEqual(await rig.state(), shut, "the inline equation was not put away by a click on its preview");
   const head = await rig.head();
-  await rig.click(await rig.box("#app .mdm-math:not(.mdm-math--block)"));
+  await rig.click(await rig.box(inlineEq));
   await rig.click(await rig.margin());
   assert.equal(head, await rig.head(), "the preview and the margin leave the caret in different places");
   assert.deepEqual(h.errors, []);
@@ -6152,7 +6182,11 @@ test("a drawn block is numbered by its first line, and by every line once a care
 // under a row of its own, the notes, the bars, and the moving and the
 // selecting; the playing; and the three that dress a score, the box, the
 // lines inside it and where the box sits.
-const BAR = ["outline", "|", "menu-edit", "menu-format", "menu-paragraph", "menu-insert", "menu-page", "menu-score", "menu-export"];
+// And at the end of the row, the reading of the zoom (drawn only while the
+// zoom is not 100), a word over the zoom's rows as the Zoom row of the Page
+// menu leads to them.
+
+const ZOOM_ROWS = ["zoom-in", "zoom-out", "zoom-actual", "|", "zoom-50", "zoom-67", "zoom-75", "zoom-80", "zoom-90", "zoom-100", "zoom-110", "zoom-125", "zoom-150", "zoom-175", "zoom-200", "zoom-250", "zoom-300"];
 
 const MENUS = {
   "menu-edit": [
@@ -6194,6 +6228,7 @@ const MENUS = {
   "menu-insert": ["insert-equation", "insert-equation-block", "insert-table", "insert-picture", "insert-footnote", "insert-rule", "|", ["insert-symbol", "glyphs"]],
   "menu-page": [
     "page-outline",
+    ["mdm-zoom", ZOOM_ROWS],
     "|",
     ["mdm-theme", ["mdm-theme-0", "mdm-theme-1", "mdm-theme-2", "mdm-theme-3"]],
     "mdm-text-font",
@@ -6254,6 +6289,7 @@ const MENUS = {
     "mdm-score-align",
   ],
   "menu-export": ["# Document", "mdm-export-html", "mdm-export-pdf", "mdm-export-both", "# Audio", "(one file per score)", "mdm-export-midi", "mdm-export-wav"],
+  "zoom-reading": ZOOM_ROWS,
 };
 
 test("the bar is grouped by what a control is about, and so is the menu under each word", { skip }, async () => {
@@ -6351,6 +6387,7 @@ const ROWS = [
   ["insert-rule", "Horizontal rule", null, null, true],
   ["insert-symbol", "Music symbol", null, null, true],
   ["page-outline", "Outline", null, null, true],
+  ["mdm-zoom", "Zoom", null, null, true],
   ["mdm-theme", "Theme", null, null, true],
   ["mdm-text-font", "LaTeX font", null, null, true],
   ["mdm-text-align", "Justified text", null, null, true],
@@ -6371,7 +6408,14 @@ const ROWS = [
   ["mdm-export-both", "HTML + PDF", null, null, false],
   ["mdm-export-midi", "MIDI", null, null, false],
   ["mdm-export-wav", "WAV", null, null, false],
-];
+  // The zoom's, under the Zoom row of the Page menu and under the reading at
+  // the end of the bar: the keys are the ones VS Code zooms its window with,
+  // Ctrl++ written as Firefox writes it, the key a keyboard with a + of its
+  // own presses.
+  ["zoom-in", "Zoom in", "Ctrl++", "\u2318+", false],
+  ["zoom-out", "Zoom out", "Ctrl+-", "\u2318-", false],
+  ["zoom-actual", "Actual size", "Ctrl+NumPad0", "\u2318NumPad0", false],
+].concat([50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300].map((step) => ["zoom-" + step, step + "%", null, null, false]));
 
 test("every row says its name, and the key it shares with the keyboard as the platform writes it", { skip }, async () => {
   for (const [platform, column] of [
@@ -6386,8 +6430,8 @@ test("every row says its name, and the key it shares with the keyboard as the pl
       said.push([row[0], s.name, s.key, s.glyph !== ""]);
     }
     assert.deepEqual(said, ROWS.map((row) => [row[0], row[1], row[column], row[4]]), platform || "a PC");
-    // And every row of the seven menus is in that list: one added without a
-    // line here would be a row nobody decided the name of.
+    // And every row of the menus of the bar is in that list: one added
+    // without a line here would be a row nobody decided the name of.
     const all = await h.page.$$eval("#app .mdm-word + .mdm-menu > .mdm-menu__item, #app .mdm-word + .mdm-menu > .mdm-menu__group > .mdm-menu__item", (els) =>
       els.map((el) => el.getAttribute("data-type"))
     );

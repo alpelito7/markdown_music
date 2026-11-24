@@ -119,6 +119,7 @@ test("hostile setting values never reach the webview HTML", () => {
     "mdm.frontMatter": null,
     "mdm.outline": { shown: true },
     "mdm.outlineWidth": "</script>",
+    "mdm.zoom": "</script>",
     // Not its fallback with junk after it, which would come to the
     // fallback whether the allowlist read the value whole or by its head.
     "mdm.scorePanel": "hidden</script>",
@@ -147,6 +148,7 @@ test("hostile setting values never reach the webview HTML", () => {
     textAlign: "justify",
     hyphenation: "none",
     outlineWidth: 250,
+    zoom: 100,
     multiCursorModifier: "alt",
   });
 });
@@ -160,6 +162,7 @@ test("valid setting values pass through to the webview HTML", () => {
     "mdm.frontMatter": "shown",
     "mdm.outline": "shown",
     "mdm.outlineWidth": 480,
+    "mdm.zoom": 125,
     "mdm.scorePanel": "shown",
     "mdm.scorePanelFace": "keys",
     "mdm.multicursorMatch": "substring",
@@ -184,6 +187,7 @@ test("valid setting values pass through to the webview HTML", () => {
     textAlign: "left",
     hyphenation: "auto",
     outlineWidth: 480,
+    zoom: 125,
     multiCursorModifier: "alt",
   });
 });
@@ -238,6 +242,38 @@ test("setSetting stores a width, clamped, and refuses what is not a number", asy
     [
       ["mdm.outlineWidth", 1200],
       ["mdm.outlineWidth", 317],
+    ]
+  );
+});
+
+// The zoom is the other number, held to the band of its steps in per cent
+// (ZOOM_STEPS in media/main.js): the first and the last of them, a whole per
+// cent, and 100 for anything that is not a number, which is the page an
+// export prints.
+test("the zoom is clamped to the band of its steps, and is 100 unset", () => {
+  const zoom = (value) => settingsOf(boot("Body\n", { "mdm.zoom": value })).zoom;
+  assert.equal(zoom(125), 125);
+  assert.equal(zoom(137), 137, "a zoom between two steps is kept as it is");
+  assert.equal(zoom(112.6), 113, "a fractional zoom is rounded");
+  assert.equal(zoom(10), 50, "under the floor");
+  assert.equal(zoom(1000), 300, "over the ceiling");
+  assert.equal(zoom(undefined), 100, "unset");
+  assert.equal(zoom("150"), 100, "a string is not a zoom");
+  assert.equal(zoom(NaN), 100);
+  assert.equal(zoom(-Infinity), 100);
+});
+
+test("setSetting stores a zoom, clamped, and refuses what is not a number", async () => {
+  const h = boot("Body\n", {});
+  await h.receive({ type: "setSetting", key: "zoom", value: 150 });
+  await h.receive({ type: "setSetting", key: "zoom", value: 20 });
+  await h.receive({ type: "setSetting", key: "zoom", value: "125" });
+  await h.receive({ type: "setSetting", key: "zoom", value: {} });
+  assert.deepEqual(
+    vscode._state.updates.map((u) => [u.key, u.value]),
+    [
+      ["mdm.zoom", 150],
+      ["mdm.zoom", 50],
     ]
   );
 });
@@ -4555,6 +4591,19 @@ test("the export carries the look the editor is showing", async () => {
   assert.equal(look["mdm-syn-string"], "e6db74");
   assert.equal(look["mdm-syn-base"], "f8f8f2");
   assert.equal(look["mdm-syn-bg"], "272822");
+});
+
+// The zoom is the reader's magnifying glass and no part of the look: an
+// export from an editor at 175% is the export from one at 100%, and nothing
+// it is handed names a zoom (exportLook, NUMBER_SETTINGS in extension.js).
+test("an export from a zoomed editor is the export at 100%: the zoom does not travel", async () => {
+  const zoomed = await exportWith("html", { "mdm.zoom": 175 }, seedTheme("#e6db74"));
+  const plain = await exportWith("html", {}, seedTheme("#e6db74"));
+  assert.deepEqual(lookOf(zoomed), lookOf(plain));
+  // Read off the metadata, the one part of the call the filter reads a look
+  // from (the paths around it may hold any word, this bench's own included).
+  const said = Object.entries(lookOf(zoomed)).map((pair) => pair.join(":"));
+  assert.ok(!said.some((p) => /zoom|175/i.test(p)), "the look names the zoom: " + said.join(" "));
 });
 
 // The look of an export is the editor's, and its word division the

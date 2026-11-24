@@ -665,6 +665,15 @@
     return w;
   }
 
+  // A drawing at the page's size: the size abcjs engraves it at, times the
+  // factor the page is set at (--mdm-zoom in mdm-look.css), as the editor
+  // draws it at its 100 (drawAtZoom in vscode-mdm/media/main.js). The
+  // viewBox scales the engraving into the box, so nothing is engraved again.
+  function drawAt(svg, w, h) {
+    svg.style.width = "calc(" + w + "px * var(--mdm-zoom, 1))";
+    svg.style.height = "calc(" + h + "px * var(--mdm-zoom, 1))";
+  }
+
   // The same drawing once more per staff system, for paper. An SVG is atomic
   // to Chrome's printer, so a score longer than what was left of the sheet
   // went on to the next one whole and left the foot of the sheet blank under
@@ -904,7 +913,9 @@
     fit.appendChild(paper);
     var drawn = fitPaper(paper);
     if (drawn) {
-      fit.style.maxWidth = Math.ceil(drawn) + "px";
+      var svg = paper.querySelector("svg");
+      drawAt(svg, drawn, parseFloat(svg.getAttribute("height")));
+      fit.style.maxWidth = "calc(" + Math.ceil(drawn) + "px * var(--mdm-zoom, 1))";
       card.style.setProperty("--mdm-score-natural", drawn + "px");
     }
     sliceForPrint(paper);

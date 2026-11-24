@@ -570,6 +570,371 @@
     }
   }
 
+  // ---------- Zoom ----------
+
+  // The size the page is drawn at, in per cent of the size it is set at
+  // (mdm.zoom): the reader's magnifying glass and no part of the look, so
+  // nothing of an export reads it, and 100 is the page an export prints. The
+  // whole page grows and shrinks together, the words with the width of the
+  // column, and the equations, the scores and the pictures with the words,
+  // so that a line ends on the same word at any zoom while the pane has room
+  // for the column; what is the editor's and not the document's keeps its
+  // size (--mdm-zoom in style.css says what that is, and why the margin it
+  // stands in is not zoomed).
+  //
+  // The steps are the ones a browser zooms a page by (Chrome's, from 50 to
+  // 300), so that the page here and the exported page in a browser magnify
+  // alike. A value written in settings.json between two steps is drawn as it
+  // is, and a step from it goes to the next one on that side.
+  const ZOOM_STEPS = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300];
+  const ZOOM_LEAST = ZOOM_STEPS[0];
+  const ZOOM_MOST = ZOOM_STEPS[ZOOM_STEPS.length - 1];
+
+  // A zoom as the host keeps it: a whole per cent inside the band, and 100
+  // for anything that is not a number (numberSetting in extension.js reads
+  // settings.json the same way).
+  function zoomValue(value) {
+    if (typeof value !== "number" || !isFinite(value)) return 100;
+    return Math.min(ZOOM_MOST, Math.max(ZOOM_LEAST, Math.round(value)));
+  }
+
+  let zoom = zoomValue(SETTINGS.zoom);
+
+  // The page at the zoom's 100 is set at 0.9 of the lengths the sheets name
+  // (the prose's 16px, the column's 820px, and every length that goes with
+  // them): what the zoom's 90 drew until 2026-11-16, which the owner asked,
+  // that day, to be the size a document opens at and to be called 100. The
+  // exported page is set at the same factor (--mdm-zoom in mdm-look.css),
+  // so 100 is still the page an export prints.
+  const PAGE_AT = 0.9;
+
+  // The factor the page's lengths are drawn at: the zoom's, of the page's.
+  function pageScale() {
+    return +((zoom / 100) * PAGE_AT).toFixed(6);
+  }
+
+  // A length of the page at the zoom, for what is sized here and not in the
+  // sheet (a score's drawing, a picture): the multiplication is left to the
+  // sheet, so that a change of zoom is one custom property written on #app
+  // and no walk over the scores and the pictures of the document.
+  function zoomed(length) {
+    return "calc(" + length + " * var(--mdm-zoom, 1))";
+  }
+
+  // The step next to a zoom, in (1) or out (-1): the first step past it on
+  // that side, which from a value between two steps is the nearer one in
+  // that direction. The ends of the band stay where they are.
+  function zoomStep(from, dir) {
+    if (dir > 0) {
+      for (let i = 0; i < ZOOM_STEPS.length; i++) if (ZOOM_STEPS[i] > from) return ZOOM_STEPS[i];
+      return ZOOM_MOST;
+    }
+    for (let i = ZOOM_STEPS.length - 1; i >= 0; i--) if (ZOOM_STEPS[i] < from) return ZOOM_STEPS[i];
+    return ZOOM_LEAST;
+  }
+
+  // The zoom drawn: the factor on #app that the sheet multiplies the page
+  // by, the mark of a zoom that is not 100 (which shows the reading of it at
+  // the end of the bar), the rows that say it, and a measure. CodeMirror
+  // keeps the height of a line and the width of a character until its
+  // resize observer fires, and that observer watches the scroller alone
+  // (6.43), whose size a zoom never changes.
+  function applyZoom() {
+    const root = app();
+    if (!root) return;
+    root.style.setProperty("--mdm-zoom", String(pageScale()));
+    root.classList.toggle("mdm-zoomed", zoom !== 100);
+    updateZoomRows();
+    remeasureText();
+  }
+
+  // Where the reader is, held through a change of zoom, as the line being
+  // read is held through a change of the text (holdPlace): the spot of the
+  // page at one height of the pane, by the block it is in and how far down
+  // that block it is, as a share of the block rather than in pixels, since
+  // every block grows with the zoom. The height is the pointer's for the
+  // wheel, where a reader zooming with it is looking, and the top of the
+  // pane for a key or a row of a menu, which is where a page is read from.
+  //
+  // The top of the pane is held as the pane's own top, wherever that is once
+  // the zoom is drawn: the reading of the zoom at the end of the bar can take
+  // the bar into a second row in a narrow pane, and the pane then starts a
+  // row lower. And a page scrolled no further than the air over its first
+  // line keeps the same share of that air, which at the top is none: the air
+  // grows with the zoom, and held by the first line a page at its top was
+  // left scrolled into it by 18px a step of a hundred (the second reading of
+  // the zoom, 2026-11-16).
+  function zoomPlace(y) {
+    if (!view) return null;
+    const pane = view.scrollDOM.getBoundingClientRect();
+    const top = typeof y !== "number";
+    const at = top ? pane.top : Math.min(Math.max(y, pane.top), pane.bottom);
+    if (top && at < view.documentTop) {
+      const air = parseFloat(getComputedStyle(view.contentDOM).paddingTop) || 0;
+      return { air: air > 0 ? Math.min(1, view.scrollDOM.scrollTop / air) : 0 };
+    }
+    const height = Math.max(0, at - view.documentTop);
+    const block = view.lineBlockAtHeight(height);
+    const share = block.height > 0 ? Math.min(1, Math.max(0, (height - block.top) / block.height)) : 0;
+    return { top: top, at: Math.max(at, view.documentTop), from: block.from, share: share };
+  }
+
+  // CodeMirror's own measure first, and the page moved after it: the measure
+  // keeps the line at the top of the pane still by itself when the heights
+  // over it change, reckoned from the heights it had, so a scroll set before
+  // it would be moved again by that much (the trap holdScore names).
+  // `measure` is CodeMirror's own and not in its documented API; the test
+  // that zooms with the page scrolled is what says the next bump kept it.
+  function holdZoomPlace(place) {
+    if (!view || !place) return;
+    view.measure();
+    if (place.air !== undefined) {
+      const air = parseFloat(getComputedStyle(view.contentDOM).paddingTop) || 0;
+      view.scrollDOM.scrollTop = Math.round(place.air * air);
+      return;
+    }
+    const block = view.lineBlockAt(place.from);
+    const now = view.documentTop + block.top + place.share * block.height;
+    const want = place.top ? view.scrollDOM.getBoundingClientRect().top : place.at;
+    const moved = now - want;
+    if (Math.abs(moved) >= 0.5) view.scrollDOM.scrollTop += moved;
+  }
+
+  // A zoom asked for here (a key, the wheel, a row of a menu): drawn at once,
+  // with the reader's place held, and stored once the gesture has settled,
+  // as the width of the outline is stored on the drop of its grip: a wheel
+  // turned through five steps is one write to settings.json and not five,
+  // and what comes back is the zoom already on screen.
+  const ZOOM_SETTLE = 400;
+  let zoomTimer = 0;
+  // What was asked of the host, and when, until it is heard back: a settings
+  // message sent for any other reason in between carries the zoom stored
+  // before the ask, and taken for the reader's it would put the page back a
+  // step under the hand that zoomed it (takeZoom).
+  const ZOOM_ANSWER = 3000;
+  let zoomAsked = null;
+  function setZoom(value, y) {
+    const next = zoomValue(value);
+    if (next === zoom) return;
+    const place = zoomPlace(y);
+    zoom = next;
+    lingerReading();
+    applyZoom();
+    holdZoomPlace(place);
+    clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(function () {
+      zoomTimer = 0;
+      zoomAsked = { value: zoom, at: Date.now() };
+      askSetting("zoom", zoom);
+    }, ZOOM_SETTLE);
+  }
+
+  // The reading at the end of the bar, kept up while a reader zooms and for
+  // ZOOM_LINGER after the last step, 100 included: hidden as the zoom came
+  // to 100, it went away under a wheel turned through 100 and came back on
+  // the next notch, and the step a reader most wants to see said is the one
+  // back to the size of the export (the owner's report, 2026-11-20). Once
+  // the hand has stopped, at 100 it goes as it always did (D5). Not while
+  // its own menu is open, which it carries: the reader is still at it.
+  // A zoom the host brings (takeZoom) is no reader's gesture, and shows the
+  // reading only while it is not 100.
+  const ZOOM_LINGER = 1500;
+  let readingLinger = 0;
+  function lingerReading() {
+    const root = app();
+    if (!root) return;
+    clearTimeout(readingLinger);
+    root.classList.add("mdm-zoom-linger");
+    readingLinger = setTimeout(putReadingAway, ZOOM_LINGER);
+  }
+
+  // The reading put away, where the zoom is 100. In a pane narrow enough
+  // that the reading took the bar into a second row, the bar loses that row
+  // and the pane starts a row higher; nothing else has changed, so the page
+  // stays where it is on the screen and the row of the pane's top shows
+  // what was over it, rather than every line moving up by the bar's row.
+  function putReadingAway() {
+    readingLinger = 0;
+    const root = app();
+    if (!root || !root.classList.contains("mdm-zoom-linger")) return;
+    const end = root.querySelector(".mdm-toolbar__item--end");
+    if (end && end.classList.contains("mdm-toolbar__item--open")) {
+      readingLinger = setTimeout(putReadingAway, ZOOM_LINGER);
+      return;
+    }
+    const place = zoom === 100 && view ? zoomPlace(view.scrollDOM.getBoundingClientRect().top) : null;
+    root.classList.remove("mdm-zoom-linger");
+    holdZoomPlace(place);
+  }
+
+  // The zoom the host says is stored, from a settings message. Not over a
+  // gesture still settling, nor over an answer still on its way, unless that
+  // answer is long overdue: the host may have had no way to write it (a
+  // settings.json that cannot be written), and the page then goes back to
+  // what is stored.
+  function takeZoom(value) {
+    const stored = zoomValue(value);
+    if (zoomTimer) return;
+    if (zoomAsked) {
+      if (stored !== zoomAsked.value && Date.now() - zoomAsked.at < ZOOM_ANSWER) return;
+      zoomAsked = null;
+    }
+    if (stored === zoom) return;
+    const place = zoomPlace(null);
+    zoom = stored;
+    applyZoom();
+    holdZoomPlace(place);
+  }
+
+  // The keys of the zoom are the ones VS Code zooms its window with, read off
+  // its own bindings (1.133.0: zoomIn, zoomOut and zoomReset): Ctrl+= with
+  // or without Shift, and Ctrl with the pad's +; Ctrl+- and Ctrl with the
+  // pad's -, and Ctrl+Shift+- as well but on Linux, where that chord is
+  // VS Code's Go Forward; and Ctrl with the pad's 0 for 100. Cmd for Ctrl on
+  // a Mac, where Cmd+0 stays VS Code's Focus Side Bar as Ctrl+0 is a
+  // paragraph's on a PC (the block keys). Ctrl++ is taken as well, the key
+  // a keyboard with a + of its own presses (a Spanish or a German one). They
+  // are taken for the page with the focus anywhere in the editor, the text,
+  // the bar, a panel or nobody, and stopped there: in this editor the page is
+  // what a reader zooms, and VS Code goes on zooming its window from
+  // everywhere else.
+  function zoomKey(e) {
+    const mac = /Mac/.test(navigator.platform);
+    const linux = !mac && !/Win/.test(navigator.platform);
+    if (e.altKey || (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey)) return 0;
+    // On a PC a key of the row of digits pressed with Ctrl alone is a
+    // level's whatever it writes (D19): a French board writes - on its 6,
+    // and Ctrl with it is a heading of the sixth level, CodeMirror falling
+    // back to the key's own digit (levelKey). With Shift it is no level's,
+    // and the = a Spanish or a German board writes on its 0 then is the
+    // zoom's, as Ctrl+= is VS Code's there.
+    if (!mac && !e.shiftKey && /^Digit/.test(e.code || "")) return 0;
+    if (e.key === "+" || e.key === "=") return 1;
+    if (e.key === "-" && !e.shiftKey) return -1;
+    if (e.key === "_" && e.shiftKey && !linux) return -1;
+    if (e.key === "0" && !e.shiftKey && e.code === "Numpad0") return "back";
+    return 0;
+  }
+
+  // On the window in the capture phase, registered after the score mode's
+  // keys: a key the mode has taken (it takes a digit of the number pad for a
+  // figure, Ctrl+NumPad0 writing a rest) is left to it. Held down, a step is
+  // taken for every repeat, as a browser does.
+  function zoomKeys(e) {
+    if (e.defaultPrevented || !view) return;
+    const dir = zoomKey(e);
+    if (!dir) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setZoom(dir === "back" ? 100 : zoomStep(zoom, dir), null);
+  }
+
+  // Ctrl with the wheel steps the zoom as the keys do, a step a notch of the
+  // wheel. A pinch on a touchpad comes as the wheel with Ctrl as well, in
+  // small turns, and takes a step for every WHEEL_STEP pixels it has turned
+  // through, so that a pinch zooms steadily and not by a step an event. The
+  // spot under the pointer stays where it is (zoomPlace). Its default is the
+  // browser zooming the whole webview, which is not this page's to do, and
+  // the host page of VS Code hears every wheel of the page on the window.
+  // Not passive, since a pinch's default has to be stopped, and that is a
+  // cost: the first wheel event of every scroll now waits for the page's
+  // own thread, which may be engraving a score just come into view. Not
+  // measured (ZP3 under Pending in tests/README.md).
+  const WHEEL_STEP = 40;
+  let wheelTurn = 0;
+  let wheelAt = 0;
+  function zoomWheel(e) {
+    const mac = /Mac/.test(navigator.platform);
+    if (!(e.ctrlKey || (mac && e.metaKey)) || !view) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 800 : 1);
+    if (!dy) return;
+    const now = performance.now();
+    if (now - wheelAt > 300 || (wheelTurn && dy > 0 !== wheelTurn > 0)) wheelTurn = 0;
+    wheelAt = now;
+    wheelTurn += dy;
+    if (Math.abs(wheelTurn) < WHEEL_STEP) return;
+    const dir = wheelTurn < 0 ? 1 : -1;
+    wheelTurn = 0;
+    setZoom(zoomStep(zoom, dir), e.clientY);
+  }
+
+  // A magnifying glass with a plus in it, the lens and the handle of the
+  // search's own glass (FIND_ICON) so that the two read as one family.
+  // Filled, since the toolbar stylesheet sets stroke-width 0.
+  const ZOOM_ICON =
+    '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M6.8 1.4a5.4 5.4 0 0 1 4.3 8.7l3.5 3.5-1 1-3.5-3.5A5.4 5.4 0 1 1 6.8 1.4Zm0 1.4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><rect x="4.5" y="6.1" width="4.6" height="1.4" rx=".7"/><rect x="6.1" y="4.5" width="1.4" height="4.6" rx=".7"/></svg>';
+
+  // The rows of the zoom: a step in, a step out and back to 100, each with
+  // its key and greyed where it has nowhere to go, then the steps
+  // themselves, the one in force ticked. They stand under the Zoom row of
+  // the Page menu and under the reading at the end of the bar, the same
+  // rows in both, kept in step by name (keepRow).
+  function zoomMenuItems() {
+    return [
+      {
+        name: "zoom-in",
+        tip: "Zoom in",
+        bind: { key: "Mod-+" },
+        off: function () {
+          return zoom >= ZOOM_MOST;
+        },
+        click: function () {
+          setZoom(zoomStep(zoom, 1), null);
+        },
+      },
+      {
+        name: "zoom-out",
+        tip: "Zoom out",
+        bind: { key: "Mod--" },
+        off: function () {
+          return zoom <= ZOOM_LEAST;
+        },
+        click: function () {
+          setZoom(zoomStep(zoom, -1), null);
+        },
+      },
+      {
+        name: "zoom-actual",
+        tip: "Actual size",
+        bind: { key: "Mod-NumPad0" },
+        off: function () {
+          return zoom === 100;
+        },
+        click: function () {
+          setZoom(100, null);
+        },
+      },
+      "|",
+    ].concat(
+      ZOOM_STEPS.map(function (step) {
+        return {
+          name: "zoom-" + step,
+          tip: step + "%",
+          on: function () {
+            return zoom === step;
+          },
+          click: function () {
+            setZoom(step, null);
+          },
+        };
+      })
+    );
+  }
+
+  function updateZoomRows() {
+    ["zoom-in", "zoom-out", "zoom-actual"]
+      .concat(
+        ZOOM_STEPS.map(function (step) {
+          return "zoom-" + step;
+        })
+      )
+      .forEach(syncRow);
+    const reading = document.querySelector('#app .mdm-toolbar button[data-type="zoom-reading"]');
+    if (reading) reading.textContent = zoom + "%";
+  }
+
   // ---------- Word division ----------
 
   // A menu, like the theme and the score fill: its first entry keeps words
@@ -1377,6 +1742,7 @@
   // attributes grow with it: leaving them at the declared value would squeeze
   // the union into a narrower viewport, scaling the score down.
   function fitScores() {
+    let resized = false;
     document
       .querySelectorAll("code.language-abc svg:not([data-mdm-fit])")
       .forEach(function (svg) {
@@ -1396,15 +1762,45 @@
         const y = box ? Math.min(0, box.y) : 0;
         const w = (box ? Math.max(width, box.x + box.width) : width) - x;
         const h = (box ? Math.max(height, box.y + box.height) : height) - y;
+        if (w !== width || h !== height) resized = true;
         svg.setAttribute("viewBox", x + " " + y + " " + w + " " + h);
         svg.setAttribute("width", w);
         svg.setAttribute("height", h);
+        drawAtZoom(svg, w, h);
         // The drawing's own width, which a fill's side padding gives way to
-        // (#app.mdm-score--filled code.language-abc in style.css).
+        // (#app.mdm-score--filled code.language-abc in style.css), at the
+        // zoom there.
         const card = svg.closest("code.language-abc");
         if (card) card.style.setProperty("--mdm-score-natural", w + "px");
         if (box) svg.setAttribute("data-mdm-fit", "1");
       });
+    // A drawing widened to its ink is a widget that changed size, which
+    // CodeMirror is not told of by anything it watches: its heights are read
+    // again, as a picture's are once its file is in (ImageWidget). Of
+    // fifteen shapes of score probed on the second reading of the zoom
+    // (2026-11-16), a slur under the lowest notes hung 1.3 units below the
+    // height abcjs declares, and a title wider than its staff outgrew the
+    // box in width alone (ZM14).
+    if (resized && view) {
+      if (view.viewState) view.viewState.mustMeasureContent = true;
+      view.requestMeasure();
+    }
+  }
+
+  // The size a drawing is laid out at: the width and the height its
+  // attributes give it, which is the size it is engraved at and the size the
+  // export prints, at the zoom (zoomed). The viewBox scales the engraving
+  // into that box, so the staff, the notes and the words on them grow with
+  // the prose and are not engraved again; everything drawn into the score
+  // afterwards (the playing line, the score mode's cursor) is placed in the
+  // drawing's own units and goes with it, and what is placed over it from
+  // outside reads the drawing's screen matrix (getScreenCTM), which carries
+  // the zoom. Written wherever the size is: where abcjs has just written
+  // it (renderScore), where the drawing is widened to its ink (fitScores)
+  // and where the score mode makes room in it (setDrawingBox).
+  function drawAtZoom(svg, w, h) {
+    svg.style.width = zoomed(w + "px");
+    svg.style.height = zoomed(h + "px");
   }
 
   // Clicking a note makes abcjs highlight it: it writes fill="#ff0000" on the
@@ -6113,7 +6509,7 @@
       fig.className = "mdm-figure";
       const img = document.createElement("img");
       img.className = "mdm-image";
-      if (this.width) img.style.width = this.width;
+      pictureAtZoom(img, this.width);
       const remeasure = function () {
         if (view.viewState) view.viewState.mustMeasureContent = true;
         view.requestMeasure();
@@ -6185,6 +6581,23 @@
     }
   }
 
+  // A picture's width at the zoom. A width in per cent is of the column and
+  // one in ems or exes of the words around it, and the zoom has sized both
+  // already; one in any other unit is the size an export prints and is
+  // multiplied (zoomed), as is the picture's own size where it is given
+  // none, once the file has said what that is. Its own size is read at the
+  // load, ahead of the listener that has the line measured again
+  // (ImageWidget), so the line is measured at the size it is drawn at.
+  function pictureAtZoom(img, width) {
+    if (width) {
+      img.style.width = /(?:%|(?:^|[^r])em|ex|ch)$/.test(width) ? width : zoomed(width);
+      return;
+    }
+    img.addEventListener("load", function () {
+      if (img.naturalWidth > 0) img.style.width = zoomed(img.naturalWidth + "px");
+    });
+  }
+
   class ImageWidget extends WidgetType {
     constructor(src, alt, width) {
       super();
@@ -6198,7 +6611,7 @@
     toDOM(view) {
       const img = document.createElement("img");
       img.className = "mdm-image";
-      if (this.width) img.style.width = this.width;
+      pictureAtZoom(img, this.width);
       // The picture arrives after the line was measured, and CodeMirror
       // has no way of knowing: its height map kept the line at one row of
       // text, a click below the picture landed lines lower than the word
@@ -6610,6 +7023,18 @@
         }
         const img = document.createElement("img");
         img.className = "mdm-image";
+        // At the zoom, as a picture in a line of prose is (ImageWidget),
+        // and the heights read again once its file is in, as that one's are:
+        // the cell grows by the picture with nothing CodeMirror watches
+        // changing size (a gap older than the zoom, which the zoom leans on).
+        pictureAtZoom(img, null);
+        const measureAgain = function () {
+          if (!view) return;
+          if (view.viewState) view.viewState.mustMeasureContent = true;
+          view.requestMeasure();
+        };
+        img.addEventListener("load", measureAgain);
+        img.addEventListener("error", measureAgain);
         img.src = p.src;
         img.alt = p.alt;
         img.title = p.alt;
@@ -7137,11 +7562,14 @@
       if (!this.open) {
         const chrome = document.createElement("div");
         chrome.className = "mdm-chrome";
+        // Lengths of the page, drawn at the zoom as the parts they stand level
+        // with are: in plain pixels the button stood 2px under the title's top
+        // once the zoom's 100 drew the page at 0.9 (2026-11-16).
         let top = "0";
-        if (first && first.classList.contains("mdm-title")) top = "18px";
-        else if (first && first.classList.contains("mdm-subtitle")) top = "4px";
-        else if (first && first.classList.contains("mdm-title-categories")) top = "11px";
-        else if (first && first.classList.contains("mdm-title-prose") && first.querySelector(".mdm-title-label")) top = "12px";
+        if (first && first.classList.contains("mdm-title")) top = zoomed("18px");
+        else if (first && first.classList.contains("mdm-subtitle")) top = zoomed("4px");
+        else if (first && first.classList.contains("mdm-title-categories")) top = zoomed("11px");
+        else if (first && first.classList.contains("mdm-title-prose") && first.querySelector(".mdm-title-label")) top = zoomed("12px");
         chrome.style.top = top;
         chrome.appendChild(chromeButton("mdm-copy", "Copy", COPY_ICON, "w"));
         wrap.appendChild(chrome);
@@ -7761,46 +8189,50 @@
     // is a 3 px bar and 14 px of air, the 17 the quote has always drawn; a
     // list item is 1.5em of hanging indent with no bar, the measure the
     // page's lists take (mdm-look.css). Nested levels come out as nested
-    // bars and the inset is their sum, pixels and ems together. One
-    // gradient for all the bars, because a line is one element and a border
-    // draws one bar; the inset itself is a transparent border on the line,
-    // so the padding of a card or a heading inside a frame stays its own.
-    const FRAME_STEP = 17;
-    const FRAME_BAR = 3;
-    const LIST_STEP = 1.5;
+    // bars and the inset is their sum. One gradient for all the bars,
+    // because a line is one element and a border draws one bar; the inset
+    // itself is a transparent border on the line, so the padding of a card
+    // or a heading inside a frame stays its own. A border is drawn in whole
+    // pixels, so each step is a whole number of them at the zoom (the
+    // --mdm-frame-* and --mdm-list-step of style.css say why), and the
+    // positions are written as counts of them.
     const frameCache = new Map();
-    const at = function (px, em) {
-      if (!em) return px + "px";
-      return px ? "calc(" + px + "px + " + em + "em)" : em + "em";
+    // Where `steps` levels with a bar and `items` levels of a list end, and
+    // with `bar` where the bar of the next level does.
+    const at = function (steps, items, bar) {
+      const terms = [];
+      if (steps) terms.push(steps + " * var(--mdm-frame-step)");
+      if (items) terms.push(items + " * var(--mdm-list-step)");
+      if (bar) terms.push("var(--mdm-frame-bar)");
+      return terms.length ? "calc(" + terms.join(" + ") + ")" : "0px";
     };
     const buildFrame = function (levels, key, n) {
       const parts = [];
-      let px = 0;
-      let em = 0;
-      let endPx = 0;
-      let endEm = 0;
+      let steps = 0;
+      let items = 0;
+      // Where the last bar drawn ends, while there is one.
+      let end = null;
       let quotes = 0;
       let callout = null;
       let item = false;
       let marker = null;
       levels.forEach(function (level) {
         if (level.kind === "list") {
-          em += LIST_STEP;
+          items++;
           item = true;
           if (level.first === n) marker = level.marker;
           return;
         }
         const color =
           level.kind === "quote" ? "var(--mdm-quote-bar)" : "var(--mdm-co-" + level.name + ")";
-        if (px > endPx || em > endEm) parts.push("transparent " + at(endPx, endEm) + " " + at(px, em));
-        parts.push(color + " " + at(px, em) + " " + at(px + FRAME_BAR, em));
-        endPx = px + FRAME_BAR;
-        endEm = em;
-        px += FRAME_STEP;
+        if (end || items) parts.push("transparent " + (end || "0px") + " " + at(steps, items));
+        end = at(steps, items, true);
+        parts.push(color + " " + at(steps, items) + " " + end);
+        steps++;
         if (level.kind === "quote") quotes++;
         else callout = level.name;
       });
-      parts.push("transparent " + at(endPx, endEm));
+      parts.push("transparent " + (end || "0px"));
       let cls = "mdm-framed";
       if (quotes) cls += " mdm-quote mdm-quote-" + Math.min(quotes, 4);
       if (callout) cls += " mdm-co-line mdm-co--" + callout;
@@ -7810,7 +8242,7 @@
         key: key,
         cls: cls,
         marker: marker,
-        style: "--mdm-bars: " + bars + "; --mdm-inset: " + at(px, em),
+        style: "--mdm-bars: " + bars + "; --mdm-inset: " + at(steps, items),
       };
     };
     // The prefix a line carries for the containers around it, level by
@@ -10120,9 +10552,10 @@
   // VS Code they are two: Ctrl+Numpad0 resets the zoom (primary 2146, read
   // in 1.133.0), which a paragraph's key would have taken from it. A digit
   // from the pad is not answered here, so it is not stopped and goes on to
-  // the workbench. A binding is handed no event, so the key going down
-  // leaves word of where it is (noteKey, an observer, which CodeMirror
-  // calls ahead of the keymap).
+  // the workbench; the pad's 0 with Ctrl never gets this far since the page
+  // has a zoom of its own, which takes it first for 100 (zoomKeys). A
+  // binding is handed no event, so the key going down leaves word of where
+  // it is (noteKey, an observer, which CodeMirror calls ahead of the keymap).
   let padKey = false;
   function noteKey(e) {
     padKey = e.location === 3;
@@ -13342,6 +13775,23 @@
         SCORE_VISUALS.set(code, visual);
       }
       sinkLedgers(code);
+      // The drawing at the zoom from the moment it is made, and not from
+      // fitScores a frame later. CodeMirror measures a widget as it draws it
+      // (a scroll that brings a score in measures it at once) and keeps that
+      // height until something it watches changes size, which a drawing
+      // growing inside the widget is not: at 150% a score of 352px came into
+      // the margin over the pane at 352, grew to 528 a frame later, and the
+      // text under it dropped by the difference (the second reading of the
+      // zoom, 2026-11-16). abcjs writes the size as two attributes and no
+      // viewBox, so the box is written from them, for the engraving to scale
+      // into the zoomed size; fitScores widens it to the ink afterwards.
+      const svg = code.querySelector("svg");
+      const w = svg ? parseFloat(svg.getAttribute("width")) : 0;
+      const h = svg ? parseFloat(svg.getAttribute("height")) : 0;
+      if (w > 0 && h > 0) {
+        if (!svg.getAttribute("viewBox")) svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+        drawAtZoom(svg, w, h);
+      }
     } catch (e) {
       // Score rendering must never break editing.
     }
@@ -13500,6 +13950,8 @@
     "fontStretch",
     "fontSizeAdjust",
   ];
+  // How many times its size a face is measured at (caretFace).
+  const CARET_SCALE = 10;
   let caretFaces = Object.create(null);
   // What was last written on a caret, so that a caret already cut is not cut
   // again: the foot below is taken from the box the caret stands in, which
@@ -13535,8 +13987,9 @@
   // how much of the letter's box is under it is the face's descent as the
   // browser lays it out, in whole pixels (6 of the 28 in the roman's prose,
   // 4 of the 19 in the code face beside it), which is not what a canvas
-  // says (6.09) and is what two faces on one row differ by (drawnFace).
-  function faceBox(cs) {
+  // says (6.09) and is what the caret's box ends that far under its
+  // baseline by. `size`, when given, sets the ruler at another size.
+  function faceBox(cs, size) {
     const ruler = document.createElement("div");
     ruler.style.cssText = "position:absolute;left:0;top:0;visibility:hidden;white-space:pre";
     const letter = ruler.appendChild(document.createElement("span"));
@@ -13544,6 +13997,7 @@
     CARET_FACE.forEach(function (property) {
       letter.style[property] = cs[property];
     });
+    if (size) letter.style.fontSize = size;
     const mark = ruler.appendChild(document.createElement("span"));
     mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
     view.dom.appendChild(ruler);
@@ -13560,17 +14014,27 @@
     const key = font + " / " + cs.fontStretch + " / " + cs.fontSizeAdjust;
     let face = caretFaces[key];
     if (!face) {
-      caretPad.font = font;
+      // The ink and the ratio read at ten times the size and brought back
+      // (k, per pixel of that canvas): the canvas and the box of the text
+      // both answer in whole pixels, and the ratio of two of them read at
+      // the row's own size carried a pixel of rounding into the caret. At
+      // the 0.9 the zoom's 100 sets the page at, a `##` in the roman read
+      // its descenders 4px deep in "Ahgy" and 5 in "gjpqy" at 21.6px, and
+      // the caret's foot stood 1.22px under the letters' (2026-11-16, and
+      // already so at a zoom of 90 before it); at ten times the size that
+      // pixel is a tenth of one.
+      const scaled = parseFloat(cs.fontSize) * CARET_SCALE + "px";
+      caretPad.font = cs.fontStyle + " " + cs.fontWeight + " " + scaled + " " + cs.fontFamily;
       const up = caretPad.measureText(CARET_ASCENDERS);
       const down = caretPad.measureText(CARET_DESCENDERS);
       const body = up.fontBoundingBoxAscent + up.fontBoundingBoxDescent;
       const box = faceBox(cs);
+      const big = faceBox(cs, scaled);
       const brackets = caretPad.measureText("[]");
       face = caretFaces[key] = {
         asc: up.actualBoundingBoxAscent,
         desc: down.actualBoundingBoxDescent,
-        fDesc: up.fontBoundingBoxDescent,
-        k: body > 0 ? box.height / body : 0,
+        k: body > 0 ? big.height / body / CARET_SCALE : 0,
         box: box.height,
         below: box.below,
         // The brackets, which are what a caret in the mark of a note is as
@@ -13670,16 +14134,18 @@
     // What the caret reaches over the baseline and under it, and the
     // baseline. In a mark set off the row, the brackets of the mark's own
     // face on the mark's own baseline. Everywhere else the ink of the row's
-    // face on the row's baseline, to which the foot of a box of another size
-    // is first moved: where a box of the row's face ends on that baseline.
+    // face on the row's baseline. The baseline is where the box the caret
+    // was drawn in stands, the descent of its own face over its foot: it was
+    // taken as a box of the row's face ending there, less the descent the
+    // canvas gives, which is the same baseline but for the rounding of the
+    // one against the other (0.6px on a `##` at 0.9, 2026-11-16).
     let rise = face.asc * face.k;
     let drop = face.desc * face.k;
-    let baseline = box.bottom - from.face.below + face.below - face.fDesc * face.k;
+    const baseline = box.bottom - from.face.below;
     if (raisedBy(from.el, row)) {
       const mark = from.face;
       rise = mark.bAsc * mark.k;
       drop = mark.bDesc * mark.k;
-      baseline = box.bottom - mark.fDesc * mark.k;
     }
     const want = Math.round((rise + drop) * 10) / 10;
     if (!want) return;
@@ -13865,8 +14331,10 @@
     if (!row) return;
     const win = row.getBoundingClientRect();
     let by = 0;
-    if (box.left < win.left + CARD_AIR) by = box.left - (win.left + CARD_AIR);
-    else if (box.right > win.right - CARD_AIR) by = box.right - (win.right - CARD_AIR);
+    // The card's air grows with the page (Zoom, above).
+    const air = CARD_AIR * pageScale();
+    if (box.left < win.left + air) by = box.left - (win.left + air);
+    else if (box.right > win.right - air) by = box.right - (win.right - air);
     if (!by) return;
     row.scrollLeft += by;
     const left = row.scrollLeft;
@@ -17195,6 +17663,7 @@
     svg.setAttribute("viewBox", box.x + " " + box.y + " " + box.w + " " + box.h);
     svg.setAttribute("width", box.w);
     svg.setAttribute("height", box.h);
+    drawAtZoom(svg, box.w, box.h);
   }
 
   function roomForScoreCursor(svg, place) {
@@ -20805,6 +21274,9 @@
     window.addEventListener("keydown", followKeys, true);
     window.addEventListener("keyup", followKeys, true);
     window.addEventListener("keydown", scoreKeys, true);
+    // After the mode's keys, which keep what they take (zoomKeys).
+    window.addEventListener("keydown", zoomKeys, true);
+    window.addEventListener("wheel", zoomWheel, { capture: true, passive: false });
     window.addEventListener("blur", function () {
       const el = app();
       if (el) el.classList.remove("mdm--follow");
@@ -21594,8 +22066,12 @@
   // cannot name Ctrl where the binding answers to Cmd.
   function keyParts(bind) {
     const mac = /Mac/.test(navigator.platform);
-    const parts = ((mac && bind.mac) || bind.key).split("-");
-    const key = parts.pop();
+    const name = (mac && bind.mac) || bind.key;
+    // The minus is the one key whose name is the joint itself: "Mod--",
+    // split at every hyphen, came out as a key with no name (the zoom's).
+    const minus = /--$/.test(name);
+    const parts = (minus ? name.slice(0, -2) : name).split("-");
+    const key = minus ? "-" : parts.pop();
     const has = function (name) {
       return parts.indexOf(name) >= 0;
     };
@@ -21665,7 +22141,9 @@
   // seeing it.
   function keyAria(bind) {
     const k = keyParts(bind);
-    return (k.ctrl ? "Control+" : "") + (k.cmd ? "Meta+" : "") + (k.shift ? "Shift+" : "") + (k.alt ? "Alt+" : "") + k.key;
+    // The plus is the joint of that attribute, and the key is named Plus in
+    // it (the WAI-ARIA definition of aria-keyshortcuts).
+    return (k.ctrl ? "Control+" : "") + (k.cmd ? "Meta+" : "") + (k.shift ? "Shift+" : "") + (k.alt ? "Alt+" : "") + (k.key === "+" ? "Plus" : k.key);
   }
 
   // The binding one of CodeMirror's own keymaps gives a command, so that a
@@ -22670,7 +23148,7 @@
   // panel opens on a click and closes on a click anywhere else or on Escape.
   function toolbarButton(spec) {
     const item = document.createElement("div");
-    item.className = "mdm-toolbar__item";
+    item.className = "mdm-toolbar__item" + (spec.end ? " mdm-toolbar__item--end" : "");
     const btn = document.createElement("button");
     btn.type = "button";
     btn.setAttribute("data-type", spec.name);
@@ -23216,6 +23694,16 @@
             })
           )
       ),
+      // The zoom, read at the right end of the row while it is not 100
+      // (#app carries mdm-zoomed then, and style.css hides it otherwise),
+      // and for a moment after a reader's zoom has come to 100
+      // (lingerReading, mdm-zoom-linger):
+      // the page is not at the size an export prints it, and a reader
+      // judging the one by the other has to be told. A word over the rows of
+      // the zoom, as the seven are words over theirs, set apart from them at
+      // the end of the row because it reads a state and names no part of
+      // the document.
+      Object.assign(word("zoom-reading", zoom + "%", zoomMenuItems()), { end: true }),
     ];
     specs.forEach(function (spec) {
       bar.appendChild(spec === "|" ? separator() : toolbarButton(spec));
@@ -23289,6 +23777,9 @@
     applyTextFont();
     applyTextAlign();
     applyHyphenation();
+    // And the zoom, for the same reason: the page is measured the moment it
+    // is built, and built at the size it is to be read at.
+    applyZoom();
     // Below the bar, a row: the outline panel down the left edge and the
     // editor beside it. The panel is empty and hidden until its button is
     // pressed (#app carries mdm-outline--open).
@@ -23400,6 +23891,9 @@
       textFont = next.textFont || "roman";
       textAlign = next.textAlign || "justify";
       hyphenation = next.hyphenation || "none";
+      // Drawn in place, with its own guards against an answer that is
+      // behind the reader's hand (takeZoom).
+      takeZoom(next.zoom);
       // applyTheme repaints the toolbar and the score styling, whose colours
       // are picked from the effective theme. A theme chosen from the menu
       // also brings a palette message right behind this one, which repaints

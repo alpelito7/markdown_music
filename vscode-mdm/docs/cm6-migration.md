@@ -635,6 +635,31 @@ D21. **The score mode: a frozen text, and a layer of the keyboard over it**
   nothing of it reaches the export. Pinned in `webview-score-mode.test.js`
   (SM01 to SM22).
 
+D22. **The zoom's keys are the page's wherever the focus is in it**
+  (2026-11-16; the owner asked for a zoom with 100% where the page stands
+  and left every decision of it to the implementer, so this is the
+  implementer's, to be confirmed). The keys are the ones VS Code zooms its
+  window with, `Ctrl+=` and `Ctrl+-` (`Ctrl++` and the number pad's too)
+  and `Ctrl+NumPad0` for 100 (with `Ctrl+Shift+-` out as well on Windows and
+  a Mac, where VS Code binds it; on Linux that is its Go Forward), `Cmd` for
+  `Ctrl` on a Mac, read off VS Code's own bindings, and they zoom the
+  page and not the window: in the editor the page is what a reader means to
+  magnify, and the window is still zoomed from anywhere else in VS Code. Not
+  a layer of D20's: a zoom is no more the text's than the player's, and a
+  document opens with nobody in it, where the text's keymap hears nothing.
+  So it is a listener on the window in the capture phase, as the score
+  mode's is (D21), registered after the mode's so that a key the mode takes
+  is left to it (the pad's digits are figures there, and `Ctrl+NumPad0`
+  writes a rest), and it stops what it takes, which keeps the key from
+  VS Code's bubble listener (D19). `Ctrl+0` stays a paragraph's (D19) and
+  `Cmd+0` VS Code's Focus Side Bar, which is why 100 is the pad's 0, as it
+  is VS Code's own; on a PC an unshifted key of the row of digits is never
+  the zoom's (a French board writes - on its 6, a level there). `Ctrl`
+  with the wheel steps it too, on the same listener. Pinned in
+  `webview-zoom.test.js` (ZM04, ZM05, ZM09).
+
+  And the same day, the owner's own word on its size: what 90 drew is the size a document opens at, and is called 100. The page is set at 0.9 of the lengths the sheets name (`PAGE_AT` in `media/main.js`, the factor on `#app` the zoom's of that) and the exported page at the same factor (`--mdm-zoom` in `mdm-look.css`, which sets the prose, the column, the strokes, the drawings and Quarto's root by it), so 100 is still the page an export shows. Asked whether the export should follow, he said it should. The print rules divide their scale by the factor, so a sheet lays out the page the screen shows, line for line, at the size paper has always had. Paper set at 1 instead (tried the same evening) is not the same page: a paragraph broke on other words on paper than in the editor, and the print's own measures, taken on the screen, cut a score and fit a table onto the wrong sheets. And the clip on a printed heading is at the top of its box now, since half a pixel over it doubled the bookmark of every heading that opened a sheet at the new scale. Three things the factor brought out were mended with it: a border is drawn in whole pixels, so each level of a frame (a quote's 17px with its bar of 3, a list's 1.5em) is a whole number of them at the zoom, on the page as in the editor (`--mdm-frame-step`, `--mdm-frame-bar`, `--mdm-list-step`), where a list's levels had stood at 21, 43 and 64 against the page's 21.6, 43.2 and 64.8; the caret's fit reads a face at ten times its size, since the canvas and the box of the text both answer in whole pixels (a `##` in the roman read its descenders 4px deep in one string and 5 in another at 21.6px, and the caret stood 1.22px under the letters, already so at a zoom of 90 before); and the copy button of the title block stands at its offsets at the zoom. Pinned in `webview-zoom.test.js` (ZM01), `webview-look.test.js`, `webview-title.test.js` and `html.test.js`.
+
 Found on the way and settled:
 inside VS Code the workbench replays Ctrl+Z into the page as
 `document.execCommand("undo")` after the keystroke already reached the

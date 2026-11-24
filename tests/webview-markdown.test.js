@@ -2184,7 +2184,7 @@ test("a labelled equation is numbered in the order of the document at the right 
       assert.ok(Math.abs(s.baseline) < 0.5, s.number + " stands " + s.baseline + " px off the formula's baseline");
       assert.ok(Math.abs(s.right) < 0.5, s.number + " stands " + s.right + " px in from the right of its equation");
       assert.ok(s.face, s.number + " is not in the prose's face");
-      assert.equal(s.size, "16px", s.number);
+      assert.equal(s.size, "14.4px", s.number);
       if (!s.cell) assert.ok(Math.abs(s.centre) < 1, s.number + "'s formula stands " + s.centre + " px off the centre");
       // A formula that fits does not scroll: what KaTeX draws past its box
       // (the bar of a fraction, the limits of a sum) is inside the half em.
@@ -2299,7 +2299,9 @@ test("a numbered equation too wide for the column scrolls in its own box, its nu
   // cut between any two letters, and "(4)" stood as three rows beside a
   // formula that could not fit, the grid having given the number the width
   // of one character.
-  const sum = Array.from({ length: 24 }, (_, i) => "x_{" + (i + 1) + "}").join(" + ");
+  // Thirty terms: twenty-four left 288px to scroll at the page's 0.9, short
+  // of the 300 asked for below (2026-11-16).
+  const sum = Array.from({ length: 30 }, (_, i) => "x_{" + (i + 1) + "}").join(" + ");
   const text = "Before.\n\n$$\n" + sum + "\n$$ {#eq-long}\n\nAfter.\n";
   const h = await open({ text, scores: 0, height: 900 });
   try {

@@ -49,6 +49,32 @@ body {
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --mdm-text: var(--mdm-sans);
 }
+/* The zoom (mdm.zoom, applyZoom in main.js): the size the page is drawn at,
+   as a factor of the lengths this sheet names.
+   Every length of this sheet that lays the document out is multiplied by it,
+   the size of the prose and the width of the column first, and what is set
+   in ems of those follows by itself: the headings, the maths, the cards, the
+   tables, the title block. The column and the words grow together, so a line
+   ends on the same word at any zoom while the pane has room for the column.
+   The drawings this sheet does not size, a score and a picture at their own
+   size, are given theirs by main.js (zoomed). What is the editor's and not
+   the document's is left out on purpose: the bar and its menus, the panels
+   at either side, the numbers in the margin, the rail of buttons beside a
+   block, the tips, and the margin they stand in, which is why the
+   scroller's 50px are not multiplied (the rail and the numbers keep their
+   size, and need their room whatever the zoom). A hairline stays a pixel as
+   well, the finest rule the screen draws at any size.
+   At the zoom's 100 the page is set at 0.9 of those lengths (PAGE_AT in
+   main.js): what the zoom's 90 drew until 2026-11-16, the size the owner
+   asked a document to open at, named 100 that day. The exported page is set
+   at the same factor (--mdm-zoom in mdm-look.css), so 100 is still the page
+   an export shows, and its print rules divide their scale by it, so a sheet
+   prints that page at the size paper has always had. A reader magnifies the
+   page with the browser's own zoom. Before main.js has drawn the zoom, the
+   factor is its 100's. */
+#app {
+  --mdm-zoom: 0.9;
+}
 /* Whatever the browser paints itself inside the editor, the scrollbars above
    all, follows the side the editor is showing rather than the side VS Code is
    on. VS Code stamps its own colour scheme on the webview root, so with
@@ -367,7 +393,7 @@ body {
    with it. */
 #app .cm-scroller {
   font-family: var(--mdm-text);
-  font-size: 16px;
+  font-size: calc(16px * var(--mdm-zoom));
   line-height: 1.7;
   overflow: auto;
   padding: 0 50px;
@@ -380,14 +406,25 @@ body {
 }
 #app .cm-content {
   hyphens: manual;
-  max-width: 820px;
+  max-width: calc(820px * var(--mdm-zoom));
   margin: 0 auto;
-  padding: 18px 0 40vh;
+  padding: calc(18px * var(--mdm-zoom)) 0 40vh;
   cursor: text;
   /* The caret in the brass of the accent: one warm mark that follows the
      live point of the document, invisible when nothing moves. The deep form,
      so it reads as a line on the light page. */
   caret-color: var(--mdm-play-accent-ink);
+}
+/* The air over the first line in whole pixels at any zoom, where the engine
+   can round: CodeMirror reads this padding with parseInt, so 19.8px at 110%
+   was taken for 19, and every height it turns into a place on the screen
+   (a click, the line the zoom holds) stood 0.8px off what was drawn (the
+   second reading of the zoom, 2026-11-16). At 100 it is the 18 it was. An
+   engine without round() keeps the fraction, which is what it had. */
+@supports (padding-top: round(1.5px, 1px)) {
+  #app .cm-content {
+    padding-top: round(calc(18px * var(--mdm-zoom)), 1px);
+  }
 }
 /* Lines end where the page ends them. CodeMirror wraps with
    `white-space: break-spaces` (its .cm-lineWrapping), in which the space after
@@ -1016,6 +1053,29 @@ body {
 #app .mdm-toolbar__item--open > .mdm-word {
   background: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
 }
+/* The reading of the zoom (buildToolbar), a word like the seven at the right
+   end of the row, and only while the zoom is not 100 (#app.mdm-zoomed): at
+   100 the page is at the size an export prints it, and there is nothing to
+   say. Except for a moment after a reader's own zoom has come to 100
+   (#app.mdm-zoom-linger, lingerReading in main.js), so that a wheel turned
+   through 100 says 100% on the way rather than losing the word. Its figures
+   of one width, so the word keeps its width from 110% to 150% and the row
+   does not shift as the zoom is stepped. */
+#app .mdm-toolbar__item--end {
+  margin-left: auto;
+}
+#app:not(.mdm-zoomed):not(.mdm-zoom-linger) .mdm-toolbar__item--end {
+  display: none;
+}
+#app .mdm-toolbar__item--end > .mdm-word {
+  font-variant-numeric: tabular-nums;
+}
+/* Its menu is the zoom's, and opens leftward from the end of the row, where
+   a panel hung from the word's left edge would pass the pane's right one. */
+#app .mdm-toolbar__item--end > .mdm-menu {
+  left: auto;
+  right: 0;
+}
 /* Every glyph of the chrome is brass, at rest and under the pointer alike:
    the buttons of this bar, the round pair on a block, the transport of the
    player row. One colour says "this is a control", and the ground under it
@@ -1543,14 +1603,14 @@ body {
   display: flow-root;
   /* What the rail of its copy button is placed against (.mdm-chrome). */
   position: relative;
-  padding-bottom: 17px;
+  padding-bottom: calc(17px * var(--mdm-zoom));
   white-space: normal;
   overflow-wrap: normal;
   word-break: normal;
   cursor: pointer;
 }
 #app .mdm-title-inner {
-  margin-top: -1px;
+  margin-top: calc(-1px * var(--mdm-zoom));
 }
 /* The number of the header's first line stands against the part that
    carries it (#app [data-mdm-line]::before). */
@@ -1566,7 +1626,7 @@ body {
   border-bottom: 1px solid color-mix(in srgb, var(--mdm-ink) 14%, transparent);
 }
 #app .mdm-subtitle {
-  font-size: 21.25px;
+  font-size: calc(21.25px * var(--mdm-zoom));
   font-weight: 300;
   line-height: 1.7;
   margin: 0.25em 0 0.5em;
@@ -1585,7 +1645,7 @@ body {
   text-transform: uppercase;
   border: 1px solid;
   /* Bootstrap's radius as Quarto compiles it, 0.375rem of its 17px root. */
-  border-radius: 6.375px;
+  border-radius: calc(6.375px * var(--mdm-zoom));
   opacity: 0.6;
 }
 #app .mdm-title-byline {
@@ -2265,21 +2325,27 @@ body {
    pixel higher than its words in two rows of eight (read off a capture at
    the screen's own scale), and rounded it stands on the baseline's row in
    all eight. The first vertical-align is for an engine that has no `cap`
-   or no `round()`. */
+   or no `round()`.
+
+   Its sizes are ems of the row's words, which is 13px, 2px and -1px at the
+   16px of the prose and grows with the zoom (--mdm-zoom above) as the
+   words do. Ems and not the zoom's calc: a declaration that names a custom
+   property is not dropped where the engine cannot read it but taken as
+   unset, which would have cost the second vertical-align its fallback. */
 #app .mdm-task {
   -webkit-appearance: none;
   appearance: none;
   box-sizing: border-box;
   position: relative;
-  width: 13px;
-  height: 13px;
+  width: 0.8125em;
+  height: 0.8125em;
   margin: 0;
   border: 1px solid color-mix(in srgb, var(--mdm-ink) 58%, transparent);
-  border-radius: 2px;
+  border-radius: 0.125em;
   background: none;
   font: inherit;
-  vertical-align: -1px;
-  vertical-align: round(calc((1cap - 13px) / 2), 1px);
+  vertical-align: -0.0625em;
+  vertical-align: round(calc((1cap - 0.8125em) / 2), 1px);
   cursor: pointer;
 }
 #app .mdm-task:checked {
@@ -2351,7 +2417,7 @@ body {
      came within 0.6px of the number of a blank line under it (measured in
      the test harness). The row is as tall as it was, so nothing around it
      moves. */
-  height: 2px;
+  height: calc(2px * var(--mdm-zoom));
   margin: 0;
   padding: 0.6em 0;
   background: color-mix(in srgb, var(--mdm-ink) 16%, transparent) content-box;
@@ -2377,13 +2443,30 @@ body {
    buildDecorations works out the levels around it, outermost first, and
    writes them into two properties, the bars as one gradient and the inset
    as a width, 17px a level (the 3px bar and 14 of air the quote has always
-   drawn). One gradient because a line is one element and a border draws one
-   bar, which is why three nested quotes used to draw as one. The inset is a
-   transparent border rather than padding, so that the padding a card, a
-   heading or a blank line has of its own is left alone; the gradient is
-   drawn from the border edge, where the bars are. */
+   drawn) and 1.5em a level of a list. One gradient because a line is one
+   element and a border draws one bar, which is why three nested quotes used
+   to draw as one. The inset is a transparent border rather than padding, so
+   that the padding a card, a heading or a blank line has of its own is left
+   alone; the gradient is drawn from the border edge, where the bars are.
+   A border is drawn in whole pixels, so every step is a whole number of
+   them at the zoom, and the page's quotations and lists are set on the same
+   (mdm-look.css): at the 0.9 the zoom's 100 sets the page at, a level of a
+   list was 21.6px, drawn 21 here, 43 for two and 64 for three, where the
+   page stood its text at 21.6, 43.2 and 64.8 (2026-11-16). The plain
+   lengths first, for an engine without round(). The list's step is left as
+   written, so that its em is the line's. */
 #app {
   --mdm-quote-bar: color-mix(in srgb, var(--mdm-ink) 22%, transparent);
+  --mdm-frame-step: calc(17px * var(--mdm-zoom));
+  --mdm-frame-bar: calc(3px * var(--mdm-zoom));
+  --mdm-list-step: 1.5em;
+}
+@supports (width: round(1.5px, 1px)) {
+  #app {
+    --mdm-frame-step: round(calc(17px * var(--mdm-zoom)), 1px);
+    --mdm-frame-bar: round(calc(3px * var(--mdm-zoom)), 1px);
+    --mdm-list-step: round(1.5em, 1px);
+  }
 }
 #app .mdm-framed {
   border-left: var(--mdm-inset, 0px) solid transparent;
@@ -2710,7 +2793,7 @@ body {
 #app .mdm-math--block .mdm-math-tail {
   text-align: left;
   font-family: var(--mdm-text);
-  font-size: 16px;
+  font-size: calc(16px * var(--mdm-zoom));
   line-height: 1.7;
   padding-top: 0.2em;
 }
@@ -2753,7 +2836,7 @@ body {
   justify-self: end;
   margin-left: 0.5em;
   font-family: var(--mdm-text);
-  font-size: 16px;
+  font-size: calc(16px * var(--mdm-zoom));
   line-height: 1;
   /* Whole, and as wide as it is. The text of the editor may be cut between
      any two letters (overflow-wrap), which made the number's least width
@@ -3577,12 +3660,13 @@ body {
    width; it used to lose the 1.6em of padding as soon as the column was
    narrower than the drawing and the padding together (574 px against 600 in
    a 600 px column, measured). --mdm-score-natural is the drawing's own
-   width, which fitScores in main.js writes on each card, and a percentage in
-   a padding is of the width of the containing block, the column. The page
-   does the same (.mdm-card in mdm-look.css). */
+   width, which fitScores in main.js writes on each card, drawn at the zoom
+   and so multiplied by it here, and a percentage in a padding is of the
+   width of the containing block, the column. The page does the same
+   (.mdm-card in mdm-look.css). */
 #app.mdm-score--filled code.language-abc {
   background: var(--mdm-score-fill);
-  padding: 0.6em clamp(0px, (100% - var(--mdm-score-natural, 0px)) / 2, 0.8em);
+  padding: 0.6em clamp(0px, (100% - var(--mdm-score-natural, 0px) * var(--mdm-zoom)) / 2, 0.8em);
   border-radius: 4px;
 }
 
@@ -3655,7 +3739,7 @@ body {
    of its kind); the row keeps the tint of the innermost callout. */
 #app .mdm-co-line {
   --mdm-co-color: var(--mdm-co-note);
-  padding-right: 10px;
+  padding-right: calc(10px * var(--mdm-zoom));
   background-color: color-mix(in srgb, var(--mdm-co-color) 5%, transparent);
 }
 #app .mdm-co--tip {

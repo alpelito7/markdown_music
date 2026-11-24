@@ -21,6 +21,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
+// The page on screen, the editor's at its 100 and the exported one alike, is
+// set at 0.9 of the lengths the sheets name (PAGE_AT in vscode-mdm/media/
+// main.js, --mdm-zoom in mdm-look.css), and the print rules divide their
+// scale by it: a sheet is the screen's page at the size paper always had, so
+// a pixel of either screen is printed at 1/0.9 of the paper's pixel, PT
+// below (2026-11-16).
+const PAGE_AT = 0.9;
+
 const ROOT = path.join(__dirname, "..");
 const MDM = path.join(ROOT, "bin", "mdm");
 const DIR = path.join(__dirname, "tmp", "html-browser");
@@ -369,7 +377,9 @@ test("every music block is engraved, and none is stretched to the column", { ski
   // two moves.
   for (const b of out) {
     assert.equal(b.pinned, true, "a score was left to fill the column");
-    assert.match(b.maxWidth, /^\d+px$/);
+    // A whole number of the engraving's pixels, at the page's factor (drawAt
+    // in mdm.js).
+    assert.match(b.maxWidth, /^calc\(\d+px \* var\(--mdm-zoom, 1\)\)$/);
     assert.ok(
       b.svg.width < b.block.width - 40,
       "a score was stretched to the column: " + b.svg.width + " of " + b.block.width
@@ -406,11 +416,15 @@ test("the box under a score is the height of the drawing", { skip }, async () =>
   // from the page width, leaving a tall gap under the score; the wrapper is
   // what fixed it. The paper also carries the natural height inline, which is
   // wrong the moment the drawing is scaled, hence height:0 in the stylesheet.
+  // Since 2026-11-16 the box takes its height from the drawing on screen,
+  // the drawing at the page's 0.9 and abcjs's pinned height at 1 (mdm.css),
+  // so the two are one height, to half a pixel and no longer to the 4 this
+  // allowed: with the pinned height the box stood 11px over a drawing of 98.
   const h = await open();
   const out = await blocks(h.page);
   for (const b of out) {
     assert.ok(
-      Math.abs(b.paper.height - b.svg.height) < 4,
+      Math.abs(b.paper.height - b.svg.height) <= 0.5,
       (b.pinned ? "narrow" : "wide") +
         ": paper " +
         Math.round(b.paper.height) +
@@ -558,9 +572,11 @@ function looks(page) {
 test("the page is the editor's: its ground, its ink, its measure", { skip }, async () => {
   const h = await open();
   const l = await looks(h.page);
-  assert.equal(l.fontSize, "16px");
-  assert.equal(l.lineHeight, "27.2px", "the editor's 1.7 of a line");
-  assert.ok(l.column <= 820, "the text column is wider than the editor's 820");
+  // The editor's page at its 100: 0.9 of the 16px and the 820px the sheets
+  // name (PAGE_AT in vscode-mdm/media/main.js, --mdm-zoom in mdm-look.css).
+  assert.equal(l.fontSize, "14.4px");
+  assert.equal(l.lineHeight, "24.48px", "the editor's 1.7 of a line");
+  assert.ok(l.column <= 738, "the text column is wider than the editor's 738");
   // A render from the command line names no look, and its prose keeps the
   // ragged right a page has always had: justified is the editor's default
   // and travels only when the editor sends it (the justified page is
@@ -839,7 +855,7 @@ test("on the page a sounding note's ledger lines are lit with it and put out wit
 test("code is on the editor's card, in the palette's colours", { skip }, async () => {
   const h = await open();
   const l = await looks(h.page);
-  assert.equal(l.codeSize, "14.08px", "0.88 of the editor's 16px");
+  assert.equal(l.codeSize, "12.672px", "0.88 of the editor's 14.4px");
   // The fallback palette, which is what the editor shows when it cannot read a
   // theme, and so what a render from the command line gets:
   // stackoverflow-light.
@@ -1383,9 +1399,10 @@ test("a narrow window leaves the music at its engraved size on both surfaces", {
   }
   // And the drawing was not made smaller to fit: the second score is wider
   // than the 500 px column at this window, so its box is holding some of it
-  // back, and the staff is at the size abcjs draws it (7.9 px a space).
+  // back, and the staff is at the size abcjs draws it, at the page's 0.9
+  // (7.9 px a space at 1, 7.1 at 0.9).
   assert.ok(editor[1].held > 100, "nothing was held back, so nothing was tested");
-  assert.ok(editor[1].gap > 7.5, "the engraving was made smaller: " + editor[1].gap);
+  assert.ok(editor[1].gap > 7.5 * PAGE_AT, "the engraving was made smaller: " + editor[1].gap);
 });
 
 // A wide line of code at a narrow window, on both surfaces. A line of source
@@ -1399,7 +1416,11 @@ test("a narrow window leaves the music at its engraved size on both surfaces", {
 // inside its block while the editor scrolled 232 px of the whole document,
 // dragging the prose sideways with it.
 test("a wide line of code scrolls inside its own block on both surfaces", { skip }, async () => {
-  const width = 600;
+  // 550, which is at the page's 0.9 what 600 was at 1 (a column of 450 for
+  // one of 500): at 600 the longest line now fits the page's column, and
+  // nothing was held back (2026-11-16). The numbers below were read at 600
+  // with the page at 1.
+  const width = 550;
   const page = await pageAt(EXAMPLE_PAGE, width, () => {
     const pre = document.querySelector("div.sourceCode pre.sourceCode");
     // The widest line of the block, as ink: the <pre> holds the lines as
@@ -1668,6 +1689,15 @@ test("on paper the page is scaled, the scores fit and the transport is gone", { 
         slack:
           card.querySelector(".mdm-paper").getBoundingClientRect().height -
           (card.querySelector(".mdm-paper > .mdm-slices") || card.querySelector(".mdm-paper > svg")).getBoundingClientRect().height,
+        // Each drawing paper draws, the slices or the whole one, against the
+        // proportions of its own viewBox: the height its width gives it.
+        shapes: Array.from(card.querySelectorAll(".mdm-paper > .mdm-slices svg, .mdm-paper > svg"))
+          .filter((svg) => svg.getClientRects().length)
+          .map((svg) => {
+            const r = svg.getBoundingClientRect();
+            const vb = svg.viewBox.baseVal;
+            return +(r.height - (r.width * vb.height) / vb.width).toFixed(2);
+          }),
       })),
     };
   });
@@ -1678,13 +1708,18 @@ test("on paper the page is scaled, the scores fit and the transport is gone", { 
   // 51.25 em measure at: 10/12 with TeX's point converted to CSS's (800/803).
   // The box is the window over that, so what Chrome shrinks by is that.
   assert.equal(Number(out.zoom), 1, "the page is laid out a second time, at a zoom");
-  assert.equal(Math.round((1 / out.probe) * 10000) / 10000, 0.8302, "the box that makes Chrome shrink the page is not the sheet over the scale");
+  // The scale is TeX's 10pt over the page's em, which is 0.9 of 16px since
+  // 2026-11-16 (--mdm-zoom in mdm-look.css divides it), so that the sheet
+  // lays out the screen's page and prints it at the size paper had.
+  assert.equal(Math.round((1 / out.probe) * 10000) / 10000, Math.round(((10 / 12) * (800 / 803) / PAGE_AT) * 10000) / 10000, "the box that makes Chrome shrink the page is not the sheet over the scale");
   assert.deepEqual(out.clips, ["clip", "clip"], "what the page holds can make the overflow, and so the scale, its own");
   assert.equal(out.root, screenRoot, "the root is not the size it is on screen");
-  assert.equal(screenRoot, "17px", "Quarto's root is no longer 17px, so the line above reads nothing");
+  // Quarto's 17px at the page's 0.9 (mdm-look.css sets the root by it), and
+  // the editor's column at it.
+  assert.equal(screenRoot, "15.3px", "the root is no longer Quarto's 17px at 0.9, so the line above reads nothing");
   assert.ok(
-    Math.abs(parseFloat(out.column) - 820) <= 0.05,
-    "the printed column is " + out.column + " and not the editor's 820px"
+    Math.abs(parseFloat(out.column) - 738) <= 0.05,
+    "the printed column is " + out.column + " and not the editor's 738px"
   );
   assert.ok(out.audio.length > 0, "the fixture has no player to hide");
   for (const display of out.audio) {
@@ -1696,6 +1731,13 @@ test("on paper the page is scaled, the scores fit and the transport is gone", { 
       Math.abs(card.slack) <= 0.5,
       `the box keeps ${card.slack.toFixed(1)}px of height the drawing does not use`
     );
+    // And no drawing is a box taller or shorter than its drawing: a slice
+    // cloned with the size mdm.js writes inline was as tall as the whole
+    // score (2026-11-16), and the slack above read two boxes inflated alike.
+    assert.ok(card.shapes.length > 0, "nothing of a score is drawn on paper");
+    for (const off of card.shapes) {
+      assert.ok(Math.abs(off) <= 0.5, `a drawing on paper stands in a box ${off}px off its own proportions: ${JSON.stringify(card.shapes)}`);
+    }
   }
 
   // And the score that asks for more width than the measure has, which is the
@@ -1705,9 +1747,13 @@ test("on paper the page is scaled, the scores fit and the transport is gone", { 
   const read = () =>
     Array.prototype.slice.call(document.querySelectorAll(".mdm-card")).map(function (card) {
       const svg = card.querySelector(".mdm-paper svg");
+      const r = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
       return {
-        over: Math.round((svg.getBoundingClientRect().right - card.getBoundingClientRect().right) * 10) / 10,
+        over: Math.round((r.right - card.getBoundingClientRect().right) * 10) / 10,
         held: Math.round(card.scrollWidth - card.clientWidth),
+        // The height the drawing's width gives it, against its box's.
+        shape: +(r.height - (r.width * vb.height) / vb.width).toFixed(2),
       };
     });
   const onScreen = await pageAt(WIDE_STAFF_PAGE, 1400, read);
@@ -1718,6 +1764,10 @@ test("on paper the page is scaled, the scores fit and the transport is gone", { 
     `the wide score hangs ${onPaper[0].over}px past the paper's card`
   );
   assert.equal(onPaper[0].held, 0, "the printed card still has something to scroll");
+  // Clamped, it is the drawing made narrower and shorter alike: with the
+  // height mdm.js writes inline holding, it stood 820 by 118.2 for a drawing
+  // whose proportions give 80.9 (the second reading, 2026-11-16).
+  assert.ok(Math.abs(onPaper[0].shape) <= 0.5, `the clamped score stands in a box ${onPaper[0].shape}px off its own proportions`);
 });
 
 // A card of code longer than what is left of a sheet, printed the way the
@@ -2278,15 +2328,21 @@ test("on paper a rule is as thick as the editor draws it", {
   // hairline alone.
   const hair = runs(crop("hair", left + 300 * PT, heading.y1 - 2, left + 400 * PT, before.y0 - 1), false);
   assert.deepEqual(hair.length, 1, "between the heading and the text there is not one line: " + JSON.stringify(hair));
-  assert.ok(Math.abs(hair[0] - 1) <= 0.2, "the line under a heading is " + hair[0] + " px thick on paper and 1 in the editor");
+  // A pixel of the editor's page is printed at 1/0.9 of one of these (the
+  // page at 0.9 since 2026-11-16), and a stroke whose edges stand on
+  // fractions of a dot of this raster can gain a dot at each, 1/8 px: the
+  // rule's 2 came out 2.25. Within 0.3.
+  const printed = (px) => px / PAGE_AT;
+  assert.ok(Math.abs(hair[0] - printed(1)) <= 0.3, "the line under a heading is " + hair[0] + " px thick on paper and the editor's 1 is " + printed(1).toFixed(2));
   // Between the two lines of prose the rule stands alone.
   const rule = runs(crop("rule", left + 300 * PT, before.y1 + 2, left + 400 * PT, quoted.y0 - 2), false);
   assert.deepEqual(rule.length, 1, "between the text and the quotation there is not one rule: " + JSON.stringify(rule));
-  assert.ok(Math.abs(rule[0] - 2) <= 0.2, "the rule is " + rule[0] + " px thick on paper and 2 in the editor");
+  assert.ok(Math.abs(rule[0] - printed(2 * PAGE_AT)) <= 0.3, "the rule is " + rule[0] + " px thick on paper and the editor's 1.8 is " + printed(2 * PAGE_AT).toFixed(2));
   // Left of the quoted words, across the bar.
   const bar = runs(crop("bar", left - 3 * PT, quoted.y0 + 2, left + 12 * PT, quoted.y1 - 2), true);
   assert.deepEqual(bar.length, 1, "left of the quoted words there is not one bar: " + JSON.stringify(bar));
-  assert.ok(Math.abs(bar[0] - 3) <= 0.2, "the bar of a quotation is " + bar[0] + " px wide on paper and 3 in the editor");
+  // The bar is 3 in whole pixels at 0.9 (--mdm-frame-bar).
+  assert.ok(Math.abs(bar[0] - printed(3)) <= 0.3, "the bar of a quotation is " + bar[0] + " px wide on paper and the editor's 3 is " + printed(3).toFixed(2));
   assert.ok(after.y0 > quoted.y1, "the fixture is not in the order it was written in");
 });
 
@@ -2336,13 +2392,15 @@ test("on paper the type is at the sheet's scale whatever the document holds, and
   });
   const plainProse = wide("paper-hold", "Holdfast");
   const plainSub = wide("paper-hold", "Undertitle");
+  // A pixel of the screen's page is 1/0.9 of one of the paper's.
+  const atScale = (px) => (px * PT) / PAGE_AT;
   assert.ok(
-    Math.abs(plainProse - screen.prose * PT) <= 0.05,
-    "a word of the prose is " + plainProse.toFixed(2) + " pt wide on paper and " + (screen.prose * PT).toFixed(2) + " at the scale"
+    Math.abs(plainProse - atScale(screen.prose)) <= 0.05,
+    "a word of the prose is " + plainProse.toFixed(2) + " pt wide on paper and " + atScale(screen.prose).toFixed(2) + " at the scale"
   );
   assert.ok(
-    Math.abs(plainSub - screen.subtitle * PT) <= 0.05,
-    "the subtitle's word is " + plainSub.toFixed(2) + " pt wide on paper and " + (screen.subtitle * PT).toFixed(2) + " at the scale of what the page draws"
+    Math.abs(plainSub - atScale(screen.subtitle)) <= 0.05,
+    "the subtitle's word is " + plainSub.toFixed(2) + " pt wide on paper and " + atScale(screen.subtitle).toFixed(2) + " at the scale of what the page draws"
   );
   const held = wide("paper-hold-wide", "Holdfast");
   assert.ok(
@@ -2618,8 +2676,8 @@ test("a callout is in the editor's colours on the page, its text at the size of 
     const word = pdfWords(printPdf(name)).find((w) => w.text === "Bodynote");
     assert.ok(word, side + ": the PDF has no word Bodynote");
     assert.ok(
-      Math.abs(word.x1 - word.x0 - read.bodyWord * PT) <= 0.05,
-      side + ": a word of a callout is " + (word.x1 - word.x0).toFixed(2) + " pt wide on paper and " + (read.bodyWord * PT).toFixed(2) + " at the scale"
+      Math.abs(word.x1 - word.x0 - (read.bodyWord * PT) / PAGE_AT) <= 0.05,
+      side + ": a word of a callout is " + (word.x1 - word.x0).toFixed(2) + " pt wide on paper and " + ((read.bodyWord * PT) / PAGE_AT).toFixed(2) + " at the scale"
     );
   }
 });
@@ -3155,6 +3213,8 @@ test("a filled score is drawn at the editor's size, on a card the width of the c
         column: Math.round(document.querySelector("main.content").getBoundingClientRect().width),
         card: Math.round(card.getBoundingClientRect().width),
         fill: getComputedStyle(card).backgroundColor,
+        // The ground beside the first drawing, which the card's padding is.
+        pad: +parseFloat(getComputedStyle(card).paddingLeft).toFixed(2),
         // The first two scores, because they take the two roads a narrow
         // column offers and the fill is measured differently on each: the
         // first is scaled inside the card (a reflow would cost it a system),
@@ -3172,24 +3232,28 @@ test("a filled score is drawn at the editor's size, on a card the width of the c
     const editor = await editorAt(
       { textFont: "roman", scoreFill: "paper" },
       width,
-      () =>
-        Array.prototype.slice
-          .call(document.querySelectorAll("#app .mdm-score code.language-abc"), 0, 2)
-          .map(function (code) {
-            return Math.round(code.querySelector("svg").getBoundingClientRect().width);
-          }),
+      () => {
+        const codes = Array.prototype.slice.call(document.querySelectorAll("#app .mdm-score code.language-abc"), 0, 2);
+        const drawings = codes.map(function (code) {
+          return Math.round(code.querySelector("svg").getBoundingClientRect().width);
+        });
+        return { drawings: drawings, pad: +parseFloat(getComputedStyle(codes[0]).paddingLeft).toFixed(2) };
+      },
       2600
     );
+    // The ground beside a drawing is the same on both, the column less the
+    // drawing at the page's 0.9, up to 0.8em a side.
+    assert.ok(Math.abs(page.pad - editor.pad) <= 0.05, width + ": the fill beside the first score is " + page.pad + " px on the page and " + editor.pad + " in the editor");
     assert.notEqual(page.fill, "rgba(0, 0, 0, 0)", "the page has no fill to test");
     assert.equal(page.card, page.column, width + ": the card is " + page.card + " px in a column of " + page.column);
     assert.equal(page.drawings.length, 2);
-    assert.equal(editor.length, 2);
+    assert.equal(editor.drawings.length, 2);
     for (let i = 0; i < 2; i++) {
       assert.equal(
         page.drawings[i],
-        editor[i],
+        editor.drawings[i],
         width + ": the page draws filled score " + (i + 1) + " " + page.drawings[i] +
-          " px wide and the editor " + editor[i]
+          " px wide and the editor " + editor.drawings[i]
       );
     }
   }
@@ -3304,7 +3368,7 @@ test("the page opens with the block the YAML asks for, in either face", { skip }
   // paragraph a word earlier than the sans on the very same page, both of them
   // held to Quarto's 802px track rather than to the editor's 820.
   assert.equal(b.roman.column, b.sans.column, "the two faces hold different measures");
-  assert.equal(b.roman.column, 820, "the column is not the editor's");
+  assert.equal(b.roman.column, 738, "the column is not the editor's");
 });
 
 // The editor draws that block too (TitleWidget in vscode-mdm/media/main.js,
@@ -3877,8 +3941,15 @@ test("the page hangs a list under its text where the editor does, level by level
       needle + " starts " + exported.xs[i] + "px into the column on the page and " + editor.xs[i] + " in the editor"
     );
   });
-  assert.deepEqual(editor.xs, [24, 48, 72, 24, 24], "the editor's levels: " + JSON.stringify(editor.xs));
-  assert.equal(editor.wrapped, 72, "the editor hangs the wrapped row under the text");
+  // A level is 1.5em of the page's 14.4px in whole pixels, 22, on both
+  // surfaces (--mdm-list-step in style.css, the lists of mdm-look.css).
+  const L = Math.round(1.5 * 16 * PAGE_AT);
+  assert.deepEqual(editor.xs, [L, 2 * L, 3 * L, L, L], "the editor's levels: " + JSON.stringify(editor.xs));
+  // And the page's are the same pixels, now that both are whole ones: the
+  // pixel either way above let the page's 21.6 a level pass beside the
+  // editor's 21 when the editor's frame was a border of 1.5em.
+  assert.deepEqual(exported.xs, editor.xs, "the page's levels: " + JSON.stringify(exported.xs));
+  assert.equal(editor.wrapped, 3 * L, "the editor hangs the wrapped row under the text");
   assert.equal(exported.wrapped, editor.wrapped, "the page hangs it there too");
   assert.ok(
     Math.abs(exported.box - editor.box) <= 2,
@@ -4021,12 +4092,14 @@ test("a task's box on the page is the editor's: its place in the line, its gap a
         const p = exported.boxes[i];
         const e = editor[i];
         const both = where + ", " + task + ": page " + JSON.stringify(p) + ", editor " + JSON.stringify(e);
-        assert.equal(p.size, "13x13", "the page's box, " + both);
-        assert.equal(e.size, "13x13", "the editor's box, " + both);
+        // 13px at the page's 0.9, to the 1/64 px the engine lays it out in.
+        const sized = (s) => s.split("x").every((v) => Math.abs(+v - 13 * PAGE_AT) <= 1 / 64);
+        assert.ok(sized(p.size), "the page's box, " + both);
+        assert.ok(sized(e.size), "the editor's box, " + both);
         assert.ok(Math.abs(p.cap - e.cap) <= 0.05, "the two capitals, " + both);
         assert.equal(p.foot, e.foot, "the box stands at another height in its line, " + both);
         assert.ok(Math.abs(p.gap - e.gap) <= 0.05, "the gap before the text, " + both);
-        assert.ok(Math.abs(p.gap - 8) <= 0.05, "the gap is not half an em, " + both);
+        assert.ok(Math.abs(p.gap - 8 * PAGE_AT) <= 0.05, "the gap is not half an em, " + both);
         assert.ok(Math.abs(p.boxLeft - e.boxLeft) <= 0.5, "the box into the column, " + both);
         assert.ok(Math.abs(p.textLeft - e.textLeft) <= 0.5, "the text into the column, " + both);
         assert.equal(p.appearance, "none", "the page's box is the browser's, " + both);
@@ -4170,12 +4243,14 @@ test("a cell written as a list is set on the page as the editor draws it: its bo
       const e = editor.boxes[i];
       const both = face + ", " + p.text + ": page " + JSON.stringify(p) + ", editor " + JSON.stringify(e);
       assert.equal(p.text, e.text, both);
-      assert.equal(p.size, "13x13", "the page's box, " + both);
-      assert.equal(e.size, "13x13", "the editor's box, " + both);
+      // 13px at the page's 0.9, to the 1/64 px the engine lays it out in.
+      const sized = (s) => s.split("x").every((v) => Math.abs(+v - 13 * PAGE_AT) <= 1 / 64);
+      assert.ok(sized(p.size), "the page's box, " + both);
+      assert.ok(sized(e.size), "the editor's box, " + both);
       assert.equal(p.foot, e.foot, "the box stands at another height in its line, " + both);
       assert.ok(Math.abs(p.boxLeft) <= 0.5 && Math.abs(e.boxLeft) <= 0.5, "the box is not at the head of its cell, " + both);
       assert.ok(Math.abs(p.gap - e.gap) <= 0.05, "the gap before the words, " + both);
-      assert.ok(Math.abs(p.gap - 8) <= 0.05, "the gap is not half an em, " + both);
+      assert.ok(Math.abs(p.gap - 8 * PAGE_AT) <= 0.05, "the gap is not half an em, " + both);
       for (const prop of ["appearance", "ground", "edge", "tick"]) {
         assert.equal(p[prop], e[prop], "the box's " + prop + ", " + both);
       }
@@ -4313,8 +4388,8 @@ test("a table is set on the page and on paper as the editor draws it: its width,
       await h.close();
     }
 
-    assert.equal(exported.column, 820, face + ": the page's column");
-    assert.equal(editor.column, 820, face + ": the editor's column");
+    assert.equal(exported.column, 738, face + ": the page's column");
+    assert.equal(editor.column, 738, face + ": the editor's column");
     assert.equal(exported.tables.length, 3, face + ": the page's tables");
     assert.equal(editor.tables.length, 3, face + ": the editor's tables");
     const overs = ["Overone", "Undone", "Undtwo"];
@@ -4380,14 +4455,14 @@ test("a table is set on the page and on paper as the editor draws it: its width,
       return w;
     };
     for (const mark of ["Ratio", "Cents", "Centre", "22.25", "complicated"]) {
-      const expected = left + editor.words[mark].left * PT;
+      const expected = left + (editor.words[mark].left * PT) / PAGE_AT;
       assert.ok(
         Math.abs(at(mark).x0 - expected) <= 0.6,
         face + ": on paper " + mark + " stands at " + at(mark).x0.toFixed(2) + " pt and the editor has it at " + expected.toFixed(2)
       );
     }
     const pitch = (at("Fifth").y0 - at("Octave").y0) / PT;
-    const editorPitch = editor.words.Fifth.top - editor.words.Octave.top;
+    const editorPitch = (editor.words.Fifth.top - editor.words.Octave.top) / PAGE_AT;
     assert.ok(
       Math.abs(pitch - editorPitch) <= 0.8,
       face + ": on paper the rows are " + pitch.toFixed(2) + " px apart and in the editor " + editorPitch.toFixed(2)
@@ -4588,8 +4663,9 @@ test("a quotation, a card of code, an equation, a score and a rule stand on the 
       // and its size, and a heading's box starts elsewhere over its letters
       // than a line of prose's does.
       if (to === "Thirdlevel" || at(from).sheet !== at(to).sheet) continue;
+      // A pixel of the editor's page is 1/0.9 of one of the paper's.
       const onPaper = (at(to).y0 - at(from).y0) / PT;
-      const inEditor = editor.words[to].top - editor.words[from].top;
+      const inEditor = (editor.words[to].top - editor.words[from].top) / PAGE_AT;
       assert.ok(
         Math.abs(onPaper - inEditor) <= 1.2,
         side + ": across " + what + " the paper has " + onPaper.toFixed(2) + " px from one line of text to the next and the editor " + inEditor.toFixed(2)
@@ -4600,7 +4676,7 @@ test("a quotation, a card of code, an equation, a score and a rule stand on the 
     // row that ends on "so" at the column's edge: in a measure any shorter
     // "so" goes down and stands before it.
     assert.ok(
-      Math.abs(at("height").x0 - (left + editor.words.height.left * PT)) <= 0.6,
+      Math.abs(at("height").x0 - (left + (editor.words.height.left * PT) / PAGE_AT)) <= 0.6,
       side + ": on paper the quotation breaks elsewhere than in the editor"
     );
   }
@@ -4636,7 +4712,7 @@ test("a display equation and a rule leave on the page and on paper the air the e
   fs.writeFileSync(path.join(DIR, name + ".mdm"), "---\nfilters:\n  - mdm\n---\n\n" + text);
   const r = spawnSync(MDM, ["render", name + ".mdm", "--to", "html", "-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify"], { cwd: DIR, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  const exported = await readSheetDoc(name, null, new Function("return (" + BLOCKS + ")('main.content', " + JSON.stringify(MARKS) + ", [])"));
+  const exported = await readSheetDoc(name, null, new Function("return (" + BLOCKS + ")('main.content', " + JSON.stringify(MARKS) + ", [['rule', 'hr', 'height']])"));
   const h = await openEditor({ text, scores: 0, seed: { settings: { textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" } }, height: 1600 });
   let editor;
   try {
@@ -4647,12 +4723,15 @@ test("a display equation and a rule leave on the page and on paper the air the e
     });
     await h.page.mouse.click(2, 2);
     await h.page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
-    editor = await h.page.evaluate((read, ...args) => eval("(" + read + ")")(...args), BLOCKS, "#app .cm-content", MARKS, []);
+    editor = await h.page.evaluate((read, ...args) => eval("(" + read + ")")(...args), BLOCKS, "#app .cm-content", MARKS, [["rule", ".mdm-hr", "height"]]);
   } finally {
     await h.close();
   }
   const words = pdfWords(printPdf(name));
   const at = (mark) => words.find((w) => w.text === mark);
+  // The rule's stroke itself, 2px at the page's 0.9 on both surfaces.
+  assert.equal(exported.styles.rule, editor.styles.rule, "the rule's stroke is " + exported.styles.rule + " on the page and " + editor.styles.rule + " in the editor");
+  assert.ok(Math.abs(parseFloat(editor.styles.rule) - 2 * PAGE_AT) <= 1 / 64, "the rule's stroke is " + editor.styles.rule + ", not the page's 2px at 0.9 to the 1/64 px a box is laid out in");
   const whats = ["a formula of one row", "a taller formula", "a numbered formula", "a rule under a paragraph", "a paragraph", "a rule under a list"];
   MARKS.slice(1).forEach((to, i) => {
     const from = MARKS[i];
@@ -4663,9 +4742,10 @@ test("a display equation and a rule leave on the page and on paper the air the e
       Math.abs(onPage - inEditor) <= 0.5,
       "across " + whats[i] + " the page has " + onPage.toFixed(2) + " px from one line of text to the next and the editor " + inEditor.toFixed(2)
     );
+    // A pixel of the editor's page is 1/0.9 of one of the paper's.
     assert.ok(
-      Math.abs(onPaper - inEditor) <= 1.2,
-      "across " + whats[i] + " the paper has " + onPaper.toFixed(2) + " px from one line of text to the next and the editor " + inEditor.toFixed(2)
+      Math.abs(onPaper - inEditor / PAGE_AT) <= 1.2,
+      "across " + whats[i] + " the paper has " + onPaper.toFixed(2) + " px from one line of text to the next and the editor " + (inEditor / PAGE_AT).toFixed(2)
     );
   });
 });
@@ -4953,11 +5033,12 @@ test("the page lowers a subscript, raises a superscript and captions a figure as
   // em down and half an em up (12px, 3 and 6 at 16px); Quarto's caption at
   // 0.9rem of its 17px root, 15.3px (measured 2026-09-16); and the
   // paragraph's 16px of margin on either side of the figure, which in the
-  // editor is the blank line and nothing else (measured 2026-09-17).
-  assert.equal(editor.subSize, 12, "the editor's subscript: " + JSON.stringify(editor));
-  assert.equal(editor.supSize, 12, "the editor's superscript: " + JSON.stringify(editor));
-  assert.equal(editor.captionSize, 15.3, "the editor's caption: " + JSON.stringify(editor));
-  assert.equal(editor.above, 16, "the air over the figure in the editor: " + JSON.stringify(editor));
+  // editor is the blank line and nothing else (measured 2026-09-17). Each
+  // at the page's 0.9 since 2026-11-16.
+  assert.equal(editor.subSize, +(12 * PAGE_AT).toFixed(2), "the editor's subscript: " + JSON.stringify(editor));
+  assert.equal(editor.supSize, +(12 * PAGE_AT).toFixed(2), "the editor's superscript: " + JSON.stringify(editor));
+  assert.equal(editor.captionSize, +(15.3 * PAGE_AT).toFixed(2), "the editor's caption: " + JSON.stringify(editor));
+  assert.equal(editor.above, Math.round(16 * PAGE_AT), "the air over the figure in the editor: " + JSON.stringify(editor));
   for (const key of ["subSize", "subDrop", "supSize", "supRise", "captionSize", "gap", "picture", "above", "below"]) {
     assert.ok(
       Math.abs(exported[key] - editor[key]) <= 1,

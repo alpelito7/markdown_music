@@ -183,6 +183,13 @@
           "default": "justify",
           "description": "How the prose meets the right edge of the text: paragraphs, list items and quotations. Headings, code, equations, tables and scores are not affected. The Justified text row of the Page menu writes it, and an export from the toolbar carries it to the page and to the paper."
         },
+        "mdm.zoom": {
+          "type": "number",
+          "minimum": 50,
+          "maximum": 300,
+          "default": 100,
+          "description": "The size the editor draws the document at, in per cent: 100 is the size an export prints it at. The whole page grows and shrinks together, the words, the equations, the scores, the pictures and the width of the text, so that while the pane has room for the text a line ends on the same word at any zoom; the toolbar, its menus, the panels at either side and the numbers in the margin keep their size. Ctrl++ and Ctrl+- (Cmd on a Mac) step it, and so does Ctrl with the mouse wheel; Ctrl+NumPad0 (Cmd+NumPad0 on a Mac) brings it back to 100, and the Zoom row of the Page menu lists the steps. While it is not 100 the toolbar shows it at its right end. It changes nothing of an export."
+        },
         "mdm.pdfEngine": {
           "type": "string",
           "enum": ["browser", "latex"],

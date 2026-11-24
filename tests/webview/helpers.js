@@ -609,6 +609,7 @@ function settingsMessage(overrides) {
         textFont: "roman",
         textAlign: "justify",
         hyphenation: "none",
+        zoom: 100,
       },
       overrides || {}
     ),

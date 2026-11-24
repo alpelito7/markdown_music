@@ -15,6 +15,15 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { toEditor, fromEditor, frontMatter } = require("../vscode-mdm/transforms.js");
+
+// The page at the zoom's 100, as a factor of the lengths the sheet names
+// (PAGE_AT in vscode-mdm/media/main.js), and a level of a frame at it, which
+// is a whole number of pixels: a quote's 17 with its bar of 3, and a list's
+// 1.5em (--mdm-frame-step, --mdm-frame-bar and --mdm-list-step in style.css).
+const PAGE = 0.9;
+const STEP = Math.round(17 * PAGE);
+const BAR = Math.round(3 * PAGE);
+const LEVEL = Math.round(1.5 * 16 * PAGE);
 const {
   EXAMPLE,
   open,
@@ -1449,7 +1458,9 @@ test("a blank line between paragraphs is an em, not a line of prose", { skip }, 
     };
   });
   assert.match(seen.blank.cls, /mdm-blank/, "the blank line of the prose is not marked");
-  assert.equal(seen.blank.height, seen.em, "the blank line is not an em tall");
+  // To the 1/64 px the engine lays a box out in: an em of the page's 14.4px
+  // comes out 14.40625.
+  assert.ok(Math.abs(seen.blank.height - seen.em) <= 1 / 64, "the blank line is not an em tall: " + seen.blank.height + " for " + seen.em);
   // What separates the paragraphs is that em and nothing else.
   assert.equal(Math.round(seen.gap), Math.round(seen.em), "the paragraphs are not an em apart");
   assert.ok(
@@ -2074,7 +2085,6 @@ test("the text is set in the roman, and the LaTeX font row hands it back to the 
   // Computer Modern needs beside a sans, and with the words now drawn at the
   // sans's x-height that is the measurement it was made against. The vendored
   // sheet's `font` shorthand keeps the adjust off the maths by itself.
-  assert.equal(first.katex, "19.36px", "the maths was resized under the roman");
   // The row is named for the roman, the way a reader would name it rather
   // than by the name of the file, and ticked while the text is set in it:
   // from the first opening, since the roman is what the editor opens in. Its
@@ -2082,6 +2092,7 @@ test("the text is set in the roman, and the LaTeX font row hands it back to the 
   // on from the start says nothing; a tick beside a name says the name.
   assert.equal(first.name, "LaTeX font");
   assert.ok(first.ticked, "the row is not ticked on the face the editor opens in");
+  assert.equal(first.katex, "17.424px", "the maths was resized under the roman");
 
   await pressBar(h.page, "mdm-text-font");
   await sleep(200);
@@ -2102,9 +2113,9 @@ test("the text is set in the roman, and the LaTeX font row hands it back to the 
   // maths is the 1.21 it always was on both sides of the switch.
   assert.equal(second.adjust, "none", "the sans came out adjusted");
   assert.equal(second.factor, 1, "something is scaling the sans");
-  assert.equal(second.katex, "19.36px", "the maths did not stay at 1.21");
   assert.ok(!second.ticked, "the row is still ticked with the text in the sans");
   assert.equal(second.name, "LaTeX font");
+  assert.equal(second.katex, "17.424px", "the maths did not stay at 1.21");
 
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -2119,10 +2130,10 @@ test("an editor left in the sans comes back in the sans", { skip }, async () => 
   assert.ok(!face.roman, "the seeded sans did not survive the opening");
   assert.match(face.text, /-apple-system/);
   assert.equal(face.adjust, "none");
-  assert.equal(face.katex, "19.36px");
   assert.ok(!face.ticked, "the row came up ticked over a text in the sans");
   assert.equal(face.name, "LaTeX font");
   await pressBar(h.page, "mdm-text-font");
+  assert.equal(face.katex, "17.424px");
   await sleep(200);
   assert.deepEqual(await setSettingPosts(h.page), [
     { type: "setSetting", key: "textFont", value: "roman" },
@@ -2250,10 +2261,17 @@ test("the prose is justified to both edges, and the Justified text row sets it r
   });
   assert.ok(tableRow && tableRow.held > 0, "the long row of the table is not held by its card: " + JSON.stringify(tableRow));
 
-  // A caret on the first row of the paragraph, well inside it, where the
-  // spaces before it are widened: the drawn caret has to follow its letter
-  // when they close up again.
-  const at = JUSTIFY_DOC.indexOf("reach the right") - 60;
+  // A caret on the first row of the paragraph, three quarters of the way
+  // along it, where the spaces before it are widened: the drawn caret has to
+  // follow its letter when they close up again. Found on the row as it is
+  // drawn: a place counted in characters (60 before "reach the right") fell
+  // at the head of a row once the page was set at 0.9, where nothing moves.
+  const at = await h.page.evaluate(() => {
+    const view = window.__mdm.view;
+    const head = view.coordsAtPos(view.state.doc.toString().indexOf("A paragraph of prose"));
+    const box = view.contentDOM.getBoundingClientRect();
+    return view.posAtCoords({ x: box.left + box.width * 0.75, y: (head.top + head.bottom) / 2 });
+  });
   await setSelection(h.page, at);
   await sleep(300);
   const caret = () =>
@@ -2828,11 +2846,50 @@ x = 1  # Ahgy in the code
 \`\`\`
 `;
 
+// A face as the caret's fit reads it (caretFace in vscode-mdm/media/main.js),
+// put on the page for a yardstick to read: a canvas at ten times the size,
+// the box the browser gives text in the face at that size, and the descent
+// of its box at its own. The canvas and the box both answer in whole pixels,
+// and read at the row's size their ratio carried a pixel of rounding into
+// what the ink was taken to be: at the page's 0.9, the descenders of a `##`
+// in the roman read 4px in "Ahgy" and 5 in "gjpqy" (2026-11-16).
+function installFaceAt(page) {
+  return page.evaluate(() => {
+    window.faceAt = function (cs) {
+      const scale = 10;
+      const ruler = document.createElement("div");
+      ruler.style.cssText = "position:absolute;left:0;top:0;visibility:hidden;white-space:pre";
+      const letter = ruler.appendChild(document.createElement("span"));
+      letter.textContent = "x";
+      ["fontStyle", "fontWeight", "fontSize", "fontFamily", "fontStretch", "fontSizeAdjust"].forEach((p) => {
+        letter.style[p] = cs[p];
+      });
+      const mark = ruler.appendChild(document.createElement("span"));
+      mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+      document.body.appendChild(ruler);
+      const read = () => {
+        const range = document.createRange();
+        range.selectNodeContents(letter);
+        return range.getBoundingClientRect();
+      };
+      const below = read().bottom - mark.getBoundingClientRect().bottom;
+      const size = parseFloat(cs.fontSize) * scale + "px";
+      letter.style.fontSize = size;
+      const box = read().height;
+      ruler.remove();
+      const ctx = document.createElement("canvas").getContext("2d");
+      ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + size + " " + cs.fontFamily;
+      return { ctx, scale, box, below };
+    };
+  });
+}
+
 // `own` is the position of a letter of the row's own face on the caret's
 // row, for a row that does not open with one (an equation first) and for a
 // caret that does not stand among such letters (in a run of code). Left out,
 // the letter is the row's first.
-function caretAgainstInk(page, own) {
+async function caretAgainstInk(page, own) {
+  await installFaceAt(page);
   return page.evaluate((own) => {
     const px = (n) => Math.round(n * 100) / 100;
     const caret = document.querySelector("#app .cm-cursor");
@@ -2842,8 +2899,8 @@ function caretAgainstInk(page, own) {
     const el = dom.nodeType === 1 ? dom : dom.parentElement;
     const row = el.closest(".cm-line");
     const cs = getComputedStyle(row);
-    const ctx = document.createElement("canvas").getContext("2d");
-    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+    const face = faceAt(cs);
+    const ctx = face.ctx;
     const m = ctx.measureText("Ahgy");
     // The same letters with the capital accented, which is the top of the
     // face's ink box and what the caret is drawn to.
@@ -2865,10 +2922,11 @@ function caretAgainstInk(page, own) {
     const box = range.getBoundingClientRect();
     // What font-size-adjust did to the size the sheet names: a canvas asked
     // for the computed size measures Latin Modern 22 per cent small, and the
-    // box the browser gave the row's text is what says how big the face
-    // really came out.
-    const k = box.height / (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent);
-    const baseline = box.bottom - m.fontBoundingBoxDescent * k;
+    // box the browser gives text in the face is what says how big the face
+    // really came out. Both at ten times the size (faceAt), and the baseline
+    // where the box of the row's text has its own descent over its foot.
+    const k = face.box / (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) / face.scale;
+    const baseline = box.bottom - face.below;
     const rect = caret.getBoundingClientRect();
     return {
       height: px(rect.height),
@@ -3305,7 +3363,8 @@ const MARKS = [
 ].join("\n");
 
 // `pos` is a place between the `[` and the `^` of the mark.
-function caretAgainstBrackets(page, pos) {
+async function caretAgainstBrackets(page, pos) {
+  await installFaceAt(page);
   return page.evaluate((pos) => {
     const px = (n) => Math.round(n * 100) / 100;
     const view = window.__mdm.view;
@@ -3314,15 +3373,14 @@ function caretAgainstBrackets(page, pos) {
     const text = at.node;
     const el = text.parentElement;
     const cs = getComputedStyle(el);
-    const ctx = document.createElement("canvas").getContext("2d");
-    ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
-    const b = ctx.measureText("[]");
+    const face = window.faceAt(cs);
+    const b = face.ctx.measureText("[]");
     const range = document.createRange();
     range.setStart(text, at.offset - 1);
     range.setEnd(text, at.offset);
     const box = range.getBoundingClientRect();
-    const k = box.height / (b.fontBoundingBoxAscent + b.fontBoundingBoxDescent);
-    const baseline = box.bottom - b.fontBoundingBoxDescent * k;
+    const k = face.box / (b.fontBoundingBoxAscent + b.fontBoundingBoxDescent) / face.scale;
+    const baseline = box.bottom - face.below;
     return {
       letter: text.nodeType === 3 ? text.textContent.charAt(at.offset - 1) : null,
       raised: -parseFloat(getComputedStyle(el.closest(".mdm-sup") || el).top) || 0,
@@ -5257,7 +5315,7 @@ test("an open link sets its marks in grey and its address in the code face and t
         else if (r.kind === "address") {
           assert.equal(r.colour, seen.faint, at + ": an address out of the faint ink");
           assert.equal(r.face, seen.code, at + ": an address out of the code face");
-          assert.equal(r.size, "14.08px", at + ": an address not at 0.88 of the prose");
+          assert.equal(r.size, "12.672px", at + ": an address not at 0.88 of the prose");
         }
       }
     };
@@ -5476,7 +5534,7 @@ test("an address printed as it is written is set in the code face at the size of
     assert.deepEqual(own.addresses.map((a) => a.text), printed, "the addresses changed as a link opened" + which);
     assert.deepEqual(
       own.destinations,
-      [{ text: "https://example.org/own", size: "14.08px", addresses: 0 }],
+      [{ text: "https://example.org/own", size: "12.672px", addresses: 0 }],
       "where an open link goes" + which
     );
     assert.deepEqual(h.errors, []);
@@ -6082,6 +6140,7 @@ test("the number of a rule stands level with its stroke and in the column, and n
     };
     const rows = await h.page.evaluate(() => {
       const content = document.querySelector("#app .cm-content").getBoundingClientRect();
+      const pane = document.querySelector("#app .cm-scroller").getBoundingClientRect();
       return [...document.querySelectorAll("#app .cm-content [data-mdm-line]")].map((l) => {
         const r = l.getBoundingClientRect();
         const marker = l.parentElement.querySelector(":scope > .mdm-li-marker--block");
@@ -6090,9 +6149,18 @@ test("the number of a rule stands level with its stroke and in the column, and n
           n: l.getAttribute("data-mdm-line"),
           cls: l.className,
           framed: l.parentElement.classList.contains("mdm-block-framed"),
-          // The whole margin beside the row and a line over and under it;
-          // the pane's edge is at 0 and the text starts at 50.
-          clip: { x: 0, y: r.top - 30, width: Math.floor(content.left) - 1, height: r.height + 60 },
+          // The whole margin beside the row and a line over and under it,
+          // inside the pane: its edge is at 0 and the text starts where the
+          // column does. The first row's line over it reached 14px above
+          // the pane, into the bar, once the page was set at 0.9 and the
+          // column narrower than the pane, and the words of the bar were
+          // read for its number (it ended 14.5px right of the others).
+          clip: {
+            x: 0,
+            y: Math.max(r.top - 30, pane.top),
+            width: Math.floor(content.left) - 1,
+            height: r.bottom + 30 - Math.max(r.top - 30, pane.top),
+          },
           // Inside the text column, past any bar of a frame.
           stroke: { x: r.left + 40, y: r.top - 2, width: 200, height: r.height + 4 },
           marker: m && { x: m.left, y: r.top - 10, width: m.width, height: r.height + 20 },
@@ -6136,9 +6204,14 @@ test("the number of a rule stands level with its stroke and in the column, and n
         "#app [data-mdm-line]::before, #app .mdm-li-marker { visibility: hidden !important; }"
       );
       assert.ok(stroke, `no stroke drawn for the rule of line ${rule.n} (${face})`);
+      // Within 2px: at the factor 1 the four numbers stood -1.0, -1.0, -1.0
+      // and 0.0px off their strokes, and at the page's 0.9 -1.5, -1.5, -1.0
+      // and -1.0 (2026-11-16, read at the screen's 2x): the number is the
+      // margin's 11px, which the factor leaves alone, on a row it scales.
+      // What this is here for stood 3 to 12px off.
       const off = rule.ink.middle - stroke.middle;
       assert.ok(
-        Math.abs(off) <= 1.5,
+        Math.abs(off) <= 2,
         `the number of the rule of line ${rule.n} (${face}) stands ${off.toFixed(1)}px from its stroke`
       );
       if (!rule.marker) continue;
@@ -6262,14 +6335,16 @@ test("a task's box stands on the middle of the capital, half an em before its te
     assert.equal(rows.length, 5, `not five tasks drawn (${face})`);
     for (const [i, row] of rows.entries()) {
       const where = `task ${i + 1}, ${face}: ` + JSON.stringify(row);
-      assert.ok(row.cap > 10, "the capital is not the line's, " + where);
-      assert.equal(row.width, 13, "the box's width, " + where);
-      assert.equal(row.height, 13, "the box's height, " + where);
+      assert.ok(row.cap > 10 * PAGE, "the capital is not the line's, " + where);
+      // 13px at the page's 0.9, to the 1/64 px the engine lays it out in.
+      assert.ok(Math.abs(row.width - 13 * PAGE) <= 1 / 64, "the box's width, " + where);
+      assert.ok(Math.abs(row.height - 13 * PAGE) <= 1 / 64, "the box's height, " + where);
       assert.ok(Math.abs(row.middles) <= 0.5, "the box is not on the middle of the capital, " + where);
       assert.ok(Math.abs(row.foot - Math.round(row.foot)) < 0.01, "the box is not on a whole pixel from the baseline, " + where);
       assert.ok(Math.abs(row.gap - row.em / 2) < 0.05, "the gap is not half an em, " + where);
-      assert.ok(Math.abs(row.textLeft - 1.5 * row.em) < 0.05, "the text has moved, " + where);
-      assert.ok(Math.abs(row.boxLeft - (row.em - 13)) < 0.05, "the box is not 1.5em less itself and the gap into the column, " + where);
+      // A level of the list is 1.5em in whole pixels (LEVEL).
+      assert.ok(Math.abs(row.textLeft - LEVEL) < 0.05, "the text has moved, " + where);
+      assert.ok(Math.abs(row.boxLeft - (LEVEL - row.em / 2 - 13 * PAGE)) < 0.05, "the box is not a level less itself and the gap into the column, " + where);
     }
     if (face === "roman") {
       assert.ok(rows.every((row) => Math.abs(row.foot) < 0.01), "the roman's box does not stand on the baseline: " + JSON.stringify(rows.map((r) => r.foot)));
@@ -6574,6 +6649,14 @@ const scoreWords = (page, tune) =>
     const titleOf = (svg) =>
       Array.from(svg.querySelectorAll(".abcjs-title")).find((e) => e.getAttribute("font-size"));
     const ours = document.querySelector("#app code.language-abc svg");
+    // Read at the engraving's own size, the scratch one's: the editor draws
+    // its score at the page's 0.9 (drawAtZoom), and Chrome rounds the box of
+    // an SVG text at the size it is drawn at, so an annotation abcjs
+    // reserved 17 for read 17.78 in the drawing's units (16 pixels of the
+    // screen over 0.9), and a title's ink was 0.9 of the scratch one's.
+    const drawnAt = [ours.style.width, ours.style.height];
+    ours.style.width = ours.getAttribute("width") + "px";
+    ours.style.height = ours.getAttribute("height") + "px";
     const scratch = document.createElement("div");
     scratch.style.cssText = "position:absolute;left:-10000px;top:0";
     document.body.appendChild(scratch);
@@ -6632,6 +6715,8 @@ const scoreWords = (page, tune) =>
       height: [+ours.getAttribute("height"), +stock.getAttribute("height")],
     };
     scratch.remove();
+    ours.style.width = drawnAt[0];
+    ours.style.height = drawnAt[1];
     return out;
   }, tune);
 
@@ -6925,11 +7010,13 @@ for (const face of ["roman", "sans"]) {
       seed: { settings: { textFont: face } },
     });
     const s = await headingSizes(h.page);
-    assert.equal(s.body, 16);
+    // The sizes the sheet names, at the page's 0.9.
+    const at = (px) => +(px * PAGE).toFixed(3);
+    assert.equal(s.body, at(16));
     // Markdown's own three: the title, a section, a subsection.
-    assert.deepEqual([s.h1, s.h2, s.h3], [32, 24, 20], "the " + face + " left Markdown's top three");
+    assert.deepEqual([s.h1, s.h2, s.h3], [32, 24, 20].map(at), "the " + face + " left Markdown's top three");
     // An eighth of the body over it, then a sixteenth.
-    assert.deepEqual([s.h4, s.h5], [18, 17], "the " + face + " left the halving under them");
+    assert.deepEqual([s.h4, s.h5], [18, 17].map(at), "the " + face + " left the halving under them");
     // The anchor: `###### x` and `**x**` draw the same.
     assert.equal(s.h6, s.body, "the " + face + "'s sixth level left the size of the prose");
     assert.deepEqual(h.errors, []);
@@ -6963,7 +7050,8 @@ const headingLines = (page) =>
 
 test("a quote in a quote and a callout in a quote wear one bar per level, and a drawn block stands inside them", { skip }, async () => {
   // buildDecorations writes the frame of a line (its levels, outermost
-  // first) as one gradient of bars and an inset of 17 px a level, and a
+  // first) as one gradient of bars and an inset of 17 px a level (STEP at
+  // the page's 0.9, a whole number of pixels, with a bar of BAR), and a
   // block drawn instead of its source takes the frame on a wrapper. Read
   // against the column: the text of a line stands past its bars, a nested
   // quote's second bar starts 17 px in, a callout's bar is in its colour
@@ -7007,21 +7095,25 @@ test("a quote in a quote and a callout in a quote wear one bar per level, and a 
       fenceText: getComputedStyle(fence.querySelector(".mdm-co-fence-text")).opacity,
     };
   });
-  assert.equal(got.one, 17, "one level in: " + JSON.stringify(got));
-  assert.equal(got.two, 34, "two levels in: " + JSON.stringify(got));
-  assert.equal(got.warn, 34, "a callout and a quote in: " + JSON.stringify(got));
-  // Two bars in the gradient of the nested line, one at 0 and one at 17,
-  // each 3 px wide: the stops the browser reports, in order (a stop given
-  // as a pair comes back as two).
+  assert.equal(got.one, STEP, "one level in: " + JSON.stringify(got));
+  assert.equal(got.two, 2 * STEP, "two levels in: " + JSON.stringify(got));
+  assert.equal(got.warn, 2 * STEP, "a callout and a quote in: " + JSON.stringify(got));
+  // Two bars in the gradient of the nested line, one at 0 and one at STEP,
+  // each BAR wide: the stops the browser reports, in order (a stop given as
+  // a pair comes back as two).
   const stops = (g) => (g.match(/(\d+)px/g) || []).map((v) => parseInt(v, 10));
-  assert.deepEqual(stops(got.twoBars), [0, 3, 3, 17, 17, 20, 20], "two bars: " + got.twoBars);
-  assert.equal(got.twoNumber, "48px", "the number's margin takes the inset back: " + got.twoNumber);
+  const twoBars = [0, BAR, BAR, STEP, STEP, STEP + BAR, STEP + BAR];
+  assert.deepEqual(stops(got.twoBars), twoBars, "two bars: " + got.twoBars);
+  assert.equal(got.twoNumber, 14 + 2 * STEP + "px", "the number's margin takes the inset back: " + got.twoNumber);
   // The callout's bar in the warning's colour first, then the quote's bar.
-  assert.match(got.warnBars, /^linear-gradient\(to right, rgb\(207, 146, 54\) 0px, rgb\(207, 146, 54\) 3px/, "the warning's bar: " + got.warnBars);
-  assert.deepEqual(stops(got.warnBars), [0, 3, 3, 17, 17, 20, 20], "the quote's bar beside it: " + got.warnBars);
+  assert.ok(
+    got.warnBars.startsWith("linear-gradient(to right, rgb(207, 146, 54) 0px, rgb(207, 146, 54) " + BAR + "px"),
+    "the warning's bar: " + got.warnBars
+  );
+  assert.deepEqual(stops(got.warnBars), twoBars, "the quote's bar beside it: " + got.warnBars);
   assert.notEqual(got.warnTint, "rgba(0, 0, 0, 0)", "the row keeps the callout's tint");
-  assert.equal(got.wrapInset, "34px", "the rule's wrapper is set in two levels");
-  assert.equal(got.ruleX, 34, "the rule is drawn from the inset");
+  assert.equal(got.wrapInset, 2 * STEP + "px", "the rule's wrapper is set in two levels");
+  assert.equal(got.ruleX, 2 * STEP, "the rule is drawn from the inset");
   assert.equal(got.ruleNumber, "4", "the rule carries its line's number");
   assert.equal(got.fenceRow, "1", "the fence row itself is not faded");
   assert.equal(got.fenceText, "0.5", "the fence text is");
@@ -7081,10 +7173,12 @@ test("a list hangs under its text, level by level, with the marker drawn in the 
       ruleX: wrap ? Math.round(wrap.querySelector(".mdm-hr").getBoundingClientRect().left - left) : null,
     };
   });
-  assert.deepEqual(got.levels, [24, 48, 72, 24, 24, 24, 24], "text set in 24 px a level: " + JSON.stringify(got));
-  assert.equal(got.hanging, 72, "the wrapped row hangs under the text: " + JSON.stringify(got));
-  assert.equal(got.markerRight, 24, "the marker box ends where the text starts");
-  assert.equal(got.markerWidth, 24, "the marker box is 1.5em");
+  // A level is 1.5em in whole pixels (LEVEL, 22 at the page's 0.9).
+  const L = LEVEL;
+  assert.deepEqual(got.levels, [L, 2 * L, 3 * L, L, L, L, L], "text set in " + L + " px a level: " + JSON.stringify(got));
+  assert.equal(got.hanging, 3 * L, "the wrapped row hangs under the text: " + JSON.stringify(got));
+  assert.equal(got.markerRight, L, "the marker box ends where the text starts");
+  assert.equal(got.markerWidth, Math.round(1.5 * 16 * PAGE), "the marker box is 1.5em");
   assert.deepEqual(
     got.markerTexts,
     ["• ", "1. ", "• ", " ", "8. ", "9. ", "10. ", "1. ", "2. ", "3. ", "• "],
@@ -7092,8 +7186,8 @@ test("a list hangs under its text, level by level, with the marker drawn in the 
   );
   assert.ok(got.taskInGap, "the task's box stands in the gap");
   assert.equal(got.blockMarker, true, "a rule on the item's line takes the bullet into its wrapper");
-  assert.equal(got.blockMarkerRight, 24, "in the wrapper's gap");
-  assert.equal(got.ruleX, 24, "and the rule is drawn from the inset");
+  assert.equal(got.blockMarkerRight, L, "in the wrapper's gap");
+  assert.equal(got.ruleX, L, "and the rule is drawn from the inset");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -7500,7 +7594,9 @@ test("a fill under a score never makes the drawing smaller", { skip }, async () 
     const h = await open({ scores: 0, seed: { settings: { textFont: "roman", scoreFill: fill } } });
     await h.page.waitForFunction(() => document.querySelector("#app .mdm-score code.language-abc svg[data-mdm-fit]"));
     sizes[fill] = [];
-    for (const width of [1400, 850, 700, 400]) {
+    // At 780 the column (680) holds the drawing (666, the page's 0.9 of 740)
+    // with less than its ground to spare on either side: the width between.
+    for (const width of [1400, 780, 700, 400]) {
       await h.page.setViewport({ width, height: 1600 });
       await settle(h.page);
       sizes[fill].push(
@@ -7531,9 +7627,11 @@ test("a fill under a score never makes the drawing smaller", { skip }, async () 
   // in between, none once the column is narrower than the drawing.
   const pads = sizes.paper.map((s) => s.pad);
   const all = " (the ground at each width: " + JSON.stringify(sizes.paper) + ")";
-  // 0.8em, which Chrome holds as 12.797 px once it goes through a clamp().
-  assert.ok(Math.abs(pads[0] - 12.8) < 0.05, "no ground beside a drawing with room to spare" + all);
-  assert.ok(pads[1] > 0 && pads[1] < 12.8, "the ground did not give way in part" + all);
+  // 0.8em of the page's 14.4px, which Chrome holds as 11.516 px once it
+  // goes through a clamp().
+  const ground = 0.8 * 16 * PAGE;
+  assert.ok(Math.abs(pads[0] - ground) < 0.05, "no ground beside a drawing with room to spare" + all);
+  assert.ok(pads[1] > 0 && pads[1] < ground - 0.05, "the ground did not give way in part" + all);
   assert.equal(pads[3], 0, "ground kept beside a drawing the column cannot hold" + all);
 });
 
@@ -7553,7 +7651,8 @@ test("a word of the bar is drawn in the brass, in the chrome's own face, as tall
       const button = document.querySelector('#app button[data-type="outline"]');
       const prose = document.querySelector("#app .cm-content .cm-line");
       return {
-        words: [...document.querySelectorAll("#app .mdm-word")].map((w) => {
+        // Drawn, which at 100 leaves out the reading of the zoom (below).
+        words: [...document.querySelectorAll("#app .mdm-word")].filter((w) => w.getClientRects().length).map((w) => {
           const c = css(w);
           return [w.textContent, c.color, c.fontWeight, c.fontSize, c.fontFamily, Math.round(w.getBoundingClientRect().height), c.backgroundColor];
         }),
@@ -7571,6 +7670,16 @@ test("a word of the bar is drawn in the brass, in the chrome's own face, as tall
       ["Edit", "Format", "Paragraph", "Insert", "Page", "Score", "Export"].map((w) => [w, seen.brass, "600", "13px", seen.chrome, seen.tall, "rgba(0, 0, 0, 0)"]),
       side
     );
+    // The reading of the zoom, at the end of the bar while the zoom is not
+    // 100, is a word like the seven, on no ground of its own.
+    await postSettings(h.page, { theme: side, textFont: "roman", zoom: 150 });
+    await sleep(150);
+    const reading = await h.page.evaluate(() => {
+      const w = document.querySelector('#app button[data-type="zoom-reading"]');
+      const c = getComputedStyle(w);
+      return [w.textContent, c.color, c.fontWeight, c.fontSize, c.fontFamily, Math.round(w.getBoundingClientRect().height), c.backgroundColor];
+    });
+    assert.deepEqual(reading, ["150%", seen.brass, "600", "13px", seen.chrome, seen.tall, "rgba(0, 0, 0, 0)"], side + ": the reading of the zoom");
     assert.deepEqual(h.errors, []);
     await h.close();
   }
@@ -7631,7 +7740,6 @@ test("the names of a menu stand in one column and its keys at one edge, the glyp
     ["menu-format", 9, 4, 9],
     ["menu-paragraph", 14, 11, 6],
     ["menu-insert", 7, 0, 7],
-    ["menu-page", 6, 0, 6],
     // Score: its ten rows, the one that names a key (the play), and the
     // seven that wear a glyph (the mode, the side panel, the play, the
     // playhead and the three of the look).

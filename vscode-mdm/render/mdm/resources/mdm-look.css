@@ -65,6 +65,24 @@
   --mdm-score-pad-inline: 0;
   --mdm-score-radius: 0;
   --mdm-score-margin: auto;
+  /* The page at the editor's 100 (PAGE_AT in vscode-mdm/media/main.js and
+     --mdm-zoom in its style.css): 0.9 of the lengths this sheet names, the
+     owner's ask of 2026-11-16, so that the editor at 100 is still the page
+     an export shows. The lengths this sheet lays the document out with are
+     multiplied by it, as the editor's are by its zoom, and what is set in ems of those
+     follows by itself; the rems of Quarto's own rules (the title block
+     first) follow the root, which is set at its 17px by the same factor.
+     The print rules divide their scale by it, so a sheet lays out the page
+     the screen shows, line for line, at the size paper has always had.
+     A hairline stays a pixel, as in the editor, and a length a border
+     carries is a whole number of pixels at the factor, as the editor's
+     frames are (--mdm-frame-* in its style.css): a border is drawn in whole
+     pixels, so a callout's bar of 2.7px came out 2 here beside the editor's
+     2.7 (html.test.js, 2026-11-16). */
+  --mdm-zoom: 0.9;
+  --bs-root-font-size: calc(17px * var(--mdm-zoom));
+  --mdm-frame-step: calc(17px * var(--mdm-zoom));
+  --mdm-frame-bar: calc(3px * var(--mdm-zoom));
 
   --mdm-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
@@ -81,13 +99,22 @@
     Consolas, "Liberation Mono", monospace);
 }
 
+/* The steps of a quotation and a callout in whole pixels where the engine
+   can round (the plain lengths above where it cannot). */
+@supports (width: round(1.5px, 1px)) {
+  :root {
+    --mdm-frame-step: round(calc(17px * var(--mdm-zoom)), 1px);
+    --mdm-frame-bar: round(calc(3px * var(--mdm-zoom)), 1px);
+  }
+}
+
 /* ---------- The page ---------- */
 
 body {
   background: var(--mdm-syn-page);
   color: var(--mdm-ink);
   font-family: var(--mdm-text);
-  font-size: 16px;
+  font-size: calc(16px * var(--mdm-zoom));
   line-height: 1.7;
 }
 /* Whatever the browser paints itself, the scrollbars above all, follows the
@@ -109,9 +136,9 @@ body {
    page, which is the line-break test the export rule is stated in terms of.
    So the width is the editor's own formula instead. There the pane carries
    `padding: 0 50px` and the column is `max-width: 820px` inside it, which is
-   min(820, pane - 100); here the viewport plays the pane. At 1400 that is 820
-   on both sides, at 900 it is 800 on both, and below 920 the two shrink
-   together.
+   min(820, pane - 100), the 820 at the page's factor since 2026-11-16 (738
+   at 0.9); here the viewport plays the pane. At 1400 that is 738 on both
+   sides, at 800 it is 700 on both, and below 838 the two shrink together.
    The column then overflows its grid track, which is what `justify-self`
    answers: an auto margin has no free space to share once the item is wider
    than its track and resolves to zero, leaving the column hanging off the
@@ -121,9 +148,9 @@ body {
    One approximation, stated because it is measured: 100vw counts the
    scrollbar and the editor's pane does not, so on a window narrow enough for
    the column to shrink the page reads about 15 px wider than the editor.
-   Above 920 px, where both sit at a flat 820, the two are exact. */
+   Above 838 px, where both sit at a flat 738, the two are exact. */
 body main.content {
-  width: min(820px, calc(100vw - 100px));
+  width: min(calc(820px * var(--mdm-zoom)), calc(100vw - 100px));
   max-width: none;
   margin-inline: auto;
   justify-self: center;
@@ -244,7 +271,7 @@ body main.content :is(h1, h2, h3, h4, h5, h6) > .header-section-number {
    page stood a score 18.5px closer to what was over it and 9.5px further from
    what was under it. All open. */
 body {
-  --mdm-blank: 16px;
+  --mdm-blank: calc(16px * var(--mdm-zoom));
 }
 body h1,
 body h2,
@@ -566,8 +593,8 @@ body .anchorjs-link {
    of code inside a quotation stopped 22 px short as well). */
 body blockquote,
 body blockquote.blockquote {
-  border-left: 3px solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
-  padding-left: 14px;
+  border-left: var(--mdm-frame-bar) solid color-mix(in srgb, var(--mdm-ink) 22%, transparent);
+  padding-left: calc(var(--mdm-frame-step) - var(--mdm-frame-bar));
   padding-right: 0;
   padding-top: 0;
   padding-bottom: 0;
@@ -584,7 +611,10 @@ body blockquote.blockquote {
 body main.content ul,
 body main.content ol {
   list-style: none;
+  /* In whole pixels, as the editor's levels are: its frame is a border, and
+     1.5em of the page's 14.4px (21.6) was drawn 21 there. */
   padding-left: 1.5em;
+  padding-left: round(1.5em, 1px);
   margin-bottom: 1em;
 }
 body main.content li > ul,
@@ -650,15 +680,15 @@ body main.content input.mdm-task {
   appearance: none;
   box-sizing: border-box;
   position: relative;
-  width: 13px;
-  height: 13px;
-  margin: 0 0.5em 0 calc(-13px - 0.5em);
+  width: calc(13px * var(--mdm-zoom));
+  height: calc(13px * var(--mdm-zoom));
+  margin: 0 0.5em 0 calc(-13px * var(--mdm-zoom) - 0.5em);
   border: 1px solid color-mix(in srgb, var(--mdm-ink) 58%, transparent);
   border-radius: 2px;
   background: none;
   font: inherit;
   vertical-align: -1px;
-  vertical-align: round(calc((1cap - 13px) / 2), 1px);
+  vertical-align: round(calc((1cap - 13px * var(--mdm-zoom)) / 2), 1px);
 }
 body main.content li > input[type="checkbox"]:first-child:checked,
 body main.content li > label:first-child > input[type="checkbox"]:first-child:checked,
@@ -705,7 +735,7 @@ body main.content .mdm-bullet {
    height. The rule Pandoc sets over the notes is left as it was. */
 body hr {
   box-sizing: content-box;
-  height: 2px;
+  height: calc(2px * var(--mdm-zoom));
   margin: 0 0 var(--mdm-blank);
   padding: 0.6em 0;
   border: none;
@@ -719,6 +749,16 @@ body main.content section.footnotes > hr {
 body img {
   max-width: 100%;
   border-radius: 3px;
+}
+/* A picture of the document at the page's size, as the editor draws it
+   (pictureAtZoom in media/main.js): its own size, or a width written for it
+   in pixels, at the factor, and a width in per cent of the column left as it
+   is, which is what a zoom on the picture does to each. A width in ems is
+   already the prose's and is left out, as the editor leaves it, and so is
+   the mark Quarto sets beside an ORCID in ems of the names: zoomed, it came
+   out at 0.81 of its size. */
+body main.content img:not(#title-block-header img, [style*="em"], [style*="ex"], [style*="ch"]) {
+  zoom: var(--mdm-zoom);
 }
 /* A highlight, Pandoc's `[word]{.mark}`. Left to the browser this is pure
    #ffff00 with black letters (Chrome, measured, in both colour schemes),
@@ -751,7 +791,7 @@ body main.content div.callout {
   --mdm-co-color: #4c7bd0;
   margin: 0 0 1em;
   border: none;
-  border-left: 3px solid var(--mdm-co-color);
+  border-left: var(--mdm-frame-bar) solid var(--mdm-co-color);
   border-radius: 0 4px 4px 0;
   background: color-mix(in srgb, var(--mdm-co-color) 5%, transparent);
   color: var(--mdm-ink);
@@ -1299,7 +1339,7 @@ body .code-copy-button:hover {
 .mdm-card {
   background: var(--mdm-score-fill);
   padding-block: var(--mdm-score-pad-block);
-  padding-inline: clamp(0px, (100% - var(--mdm-score-natural, 0px)) / 2, var(--mdm-score-pad-inline));
+  padding-inline: clamp(0px, (100% - var(--mdm-score-natural, 0px) * var(--mdm-zoom)) / 2, var(--mdm-score-pad-inline));
   border-radius: var(--mdm-score-radius);
   /* And the box a drawing the column cannot hold is reached in, by scrolling
      it sideways: the drawing keeps the size it is engraved at (mdm.css), as
@@ -1741,7 +1781,15 @@ body .mdm-audio .abcjs-loading-svg circle {
      measured in the roman, whose ascent the top of the box starts the line
      from. */
   :root {
-    --mdm-sheet-scale: calc(10 / 12 * 800 / 803);
+    /* Over the factor the page is set at (--mdm-zoom above), so that a sheet
+       lays out the page the screen shows, line for line, and prints it at
+       the size paper has always had: one document at two sizes. Set at 1
+       here instead, the sheet was the one it was before the factor and the
+       screen's page 0.9 of it, which is not the same page: a paragraph
+       broke on other words on paper than in the editor, and what this
+       print measures on the screen to cut a score and fit a table went on
+       the wrong sheets (html.test.js, 2026-11-16). */
+    --mdm-sheet-scale: calc(10 / 12 * 800 / 803 / var(--mdm-zoom));
   }
   html:root {
     font-size: var(--bs-root-font-size);
@@ -1753,7 +1801,7 @@ body .mdm-audio .abcjs-loading-svg circle {
     @bottom-center {
       content: counter(page);
       font-family: var(--mdm-text);
-      font-size: calc(16px * var(--mdm-sheet-scale));
+      font-size: calc(16px * var(--mdm-zoom) * var(--mdm-sheet-scale));
       line-height: 1;
       color: var(--mdm-ink);
       vertical-align: top;
@@ -1798,7 +1846,7 @@ body .mdm-audio .abcjs-loading-svg circle {
      side, while A5 comes out at 335.9 pt to TeX's 335.0. A media query
      cannot tell the sheets apart. */
   body main.content {
-    width: min(820px, calc(100vw - 3cm / var(--mdm-sheet-scale) + 3px));
+    width: min(calc(820px * var(--mdm-zoom)), calc(100vw - 3cm / var(--mdm-sheet-scale) + 3px));
     margin-inline: auto;
   }
   /* A score wider than the measure. On screen its card scrolls, which is the
@@ -1813,9 +1861,15 @@ body .mdm-audio .abcjs-loading-svg circle {
      editor's own 820 px, since abcjs engraves at 740; it is what holds a
      score whose %%staffwidth asks for more than the measure (measured on a
      1596 px fixture: 294.5 bp of staff cut to 118.4 and nothing lost). */
+  /* !important against the size mdm.js writes on the drawing at the
+     page's factor (drawAt), which as an inline style holds over this rule:
+     a slice cloned from the drawing kept the whole drawing's height and
+     printed every system on every sheet, and a drawing clamped to the
+     column stood in a box of its full height, blank above and below
+     (the second reading of the page at 0.9, 2026-11-16). */
   body .mdm-paper svg {
     max-width: 100%;
-    height: auto;
+    height: auto !important;
   }
   body .mdm-paper {
     height: auto !important;
@@ -1970,7 +2024,13 @@ body .mdm-audio .abcjs-loading-svg circle {
      doubled bookmarks were back, on 13 of the 14 headings of a sheet-opening
      sweep, for a reason not found (0, 0.5 and 1.1 px: none). Otherwise the
      page is the same to the word box on example.mdm and on a seven-sheet
-     document, header hidden and shown. */
+     document, header hidden and shown.
+     Since the page is set at 0.9 (--mdm-zoom, 2026-11-16) the clip is at
+     the top of the box: half a pixel over it doubled the bookmark of every
+     heading that opened a sheet, the four of html.test.js's fixture, and
+     so did a quarter of one, where none doubles nothing. The cost is the
+     one named above, read at the scale of then: a row off the tip of some
+     accented capitals at 300 dpi. */
   h1,
   h2,
   h3,
@@ -1979,7 +2039,7 @@ body .mdm-audio .abcjs-loading-svg circle {
   h6 {
     break-after: avoid;
     break-inside: avoid;
-    clip-path: inset(-0.5px -100vw -100vh);
+    clip-path: inset(0 -100vw -100vh);
   }
   /* A picture and its caption are one thing, on one sheet. With nothing to
      hold them together a picture that just fitted at the foot of a sheet

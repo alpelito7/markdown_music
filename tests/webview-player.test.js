@@ -4301,10 +4301,12 @@ test("the outline leads the toolbar, and undo and redo lead the Edit menu in the
   // the words, Edit, whose menu opens on undo and redo. The export is the
   // last of the words, the one that leaves the editor, with the rows of its
   // two branches, the document's and the audio of its scores; the headers
-  // over them are not buttons and are not here. Nothing stands past it.
+  // over them are not buttons and are not here. Nothing stands past it but
+  // the reading of the zoom at the end of the row, which is not drawn at 100
+  // and reads a state, no part of the document (webview-zoom.test.js).
   assert.deepEqual(bar.first, ["outline", "menu-edit", "undo", "redo"]);
   const exporter = await h.page.evaluate(() => {
-    const types = Array.from(document.querySelectorAll("#app .mdm-toolbar > .mdm-toolbar__item button[data-type]")).map((b) =>
+    const types = Array.from(document.querySelectorAll("#app .mdm-toolbar > .mdm-toolbar__item:not(.mdm-toolbar__item--end) button[data-type]")).map((b) =>
       b.getAttribute("data-type")
     );
     return types.slice(-6);

@@ -47,6 +47,14 @@ const ext = require("../vscode-mdm/extension.js");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The page at the zoom's 100, as a factor of the lengths the sheet names
+// (PAGE_AT in vscode-mdm/media/main.js): the numbers below were measured at
+// 1 on the page exported from these headers (2026-10-04) and are measured
+// again at 0.9 (2026-11-16), each the old one times the factor, but for a
+// hairline, which stays a pixel, and a row's leading where the face rounds
+// it, both of which the exported page shares (html.test.js).
+const PAGE = 0.9;
+
 const HEADER = [
   "---",
   'title: "A Markdown Music prototype"',
@@ -219,18 +227,19 @@ test("the block is set at the page's sizes and with the page's spaces", { skip }
       margins: cs("#app .mdm-title-block").marginTop + " " + cs("#app .mdm-title-block").marginBottom,
     };
   });
-  assert.equal(m.overTitle, 18.2, "the air over the title");
-  assert.equal(m.titleHeight, 49, "the title's row and its rule");
-  assert.equal(m.overSubtitle, 5.3, "between the title and the subtitle");
-  assert.equal(m.overNames, 10.6, "between the subtitle and the names");
-  assert.equal(m.underBlock, 17, "under the block");
+  // 18.2, 49, 5.3, 10.6 and 17 at 1; the rule under the title stays 1px.
+  assert.equal(m.overTitle, 16.4, "the air over the title");
+  assert.equal(m.titleHeight, 44.2, "the title's row and its rule");
+  assert.equal(m.overSubtitle, 4.8, "between the title and the subtitle");
+  assert.equal(m.overNames, 9.6, "between the subtitle and the names");
+  assert.equal(m.underBlock, 15.3, "under the block");
   assert.equal(m.column, 0, "the block is not the column wide");
-  assert.equal(m.titleSize, "32px");
+  assert.equal(m.titleSize, "28.8px");
   assert.equal(m.titleWeight, "600");
   assert.equal(m.rule, "1px");
-  assert.equal(m.subtitleSize, "21.25px");
+  assert.equal(m.subtitleSize, "19.125px");
   assert.equal(m.subtitleWeight, "300");
-  assert.equal(m.nameSize, "14.4px");
+  assert.equal(m.nameSize, "12.96px");
   assert.notEqual(m.nameInk, m.ink, "the names are in the ink of the prose, not at 72% of it");
   assert.equal(m.margins, "0px 0px", "a margin on the widget, which CodeMirror does not measure");
   assert.deepEqual(h.errors, []);
@@ -1074,7 +1083,11 @@ test("the line the reader is on stays where it is when the header's lines leave 
   await sleep(150);
   assert.ok(Math.abs((await drawingTop()) - before) <= 1, "the drawing moved " + ((await drawingTop()) - before) + "px from under the pointer");
   // A click in the margin: the caret is in the header, out of the pane,
-  // and the line held is the first the pane shows.
+  // and the line held is the first the pane shows. From the top, where the
+  // title is there to be clicked: the step before leaves the drawing where
+  // it was under the pointer, and at the page's 0.9 that put the middle of
+  // the title over the pane, where the click went to the bar.
+  await scrollTo(h.page, 0);
   await forget(h.page);
   await peek(h.page, LONG_TITLED);
   await scrollTo(h.page, 900);
@@ -1721,11 +1734,11 @@ test("an abstract written as a block is paragraphs, and one written on a line a 
     paragraphs: ["One paragraph.", "Another with emphasis."],
     breaks: 0,
     text: "One paragraph.Another with emphasis.",
-    size: "14.4px",
-    label: ["Abstract", "uppercase", "12.8px", "0.8"],
+    size: "12.96px",
+    label: ["Abstract", "uppercase", "11.52px", "0.8"],
   });
   assert.deepEqual(await shape(block.page, ".mdm-title-description"), {
-    paragraphs: ["A description folded."], breaks: 0, text: "A description folded.", size: "14.4px", label: null,
+    paragraphs: ["A description folded."], breaks: 0, text: "A description folded.", size: "12.96px", label: null,
   });
   assert.deepEqual(block.errors, []);
   await block.close();
@@ -1734,10 +1747,10 @@ test("an abstract written as a block is paragraphs, and one written on a line a 
   // a line break.
   const inline = await editor('---\ntitle: T\nabstract: "On *one* line."\ndescription: |-\n  First.\n\n  Second.\n---\n\n' + BODY, false);
   assert.deepEqual(await shape(inline.page, ".mdm-title-abstract"), {
-    paragraphs: [], breaks: 0, text: "On one line.", size: "16px", label: ["Abstract", "uppercase", "12.8px", "0.8"],
+    paragraphs: [], breaks: 0, text: "On one line.", size: "14.4px", label: ["Abstract", "uppercase", "11.52px", "0.8"],
   });
   assert.deepEqual(await shape(inline.page, ".mdm-title-description"), {
-    paragraphs: [], breaks: 1, text: "First.Second.", size: "16px", label: null,
+    paragraphs: [], breaks: 1, text: "First.Second.", size: "14.4px", label: null,
   });
   assert.deepEqual(inline.errors, []);
   await inline.close();
@@ -1749,7 +1762,8 @@ test("an abstract written as a block is paragraphs, and one written on a line a 
 });
 
 // The sizes and the spaces of those parts, as measured on the page exported
-// from this very header on 2026-10-04, a 16px body and a column of 820
+// from this very header on 2026-10-04, a 16px body and a column of 820, and
+// at the page's 0.9 since 2026-11-16 (14.4px and 738)
 // (html.test.js sets the two surfaces side by side, in either face). Numbers
 // here, so that a rule of the editor's sheet that drifts is caught without a
 // Quarto to render the page.
@@ -1791,24 +1805,29 @@ test("the rest of the block is set at the page's sizes and with the page's space
       aligned: [cs(".mdm-title-abstract > p").textAlign, cs(".mdm-title-author p").textAlign, cs(".mdm-title-date p").textAlign, cs(".mdm-title").textAlign],
     };
   });
-  assert.equal(m.column, 820);
+  assert.equal(m.column, 738);
   // Left, top and height of each, from the head of the block.
-  assert.deepEqual(m.author, [[0, 119.2, 24.5], [0, 145.2, 24.5]], "the authors");
-  assert.deepEqual(m.affiliation, [[418, 119.2, 24.5], [418, 145.2, 24.5]], "the affiliations");
-  assert.deepEqual(m.date, [0, 171.1, 24.5], "the date");
-  assert.deepEqual(m.modified, [418, 171.1, 24.5], "the day it was modified");
-  assert.deepEqual(m.doi, [0, 197, 24.5], "the DOI");
-  assert.deepEqual(m.abstractLabel, [0, 235.7, 21.8], "the word over the abstract");
-  assert.deepEqual(m.abstract, [[0, 257.5, 50.4], [0, 322.3, 24.5]], "the abstract");
-  assert.deepEqual(m.keywordsLabel, [0, 359.5, 21.8], "the word over the keywords");
-  assert.deepEqual(m.keywords, [0, 381.3, 24.5], "the keywords");
-  assert.equal(m.first, 422.8, "the first line of the document under the block");
-  assert.deepEqual(m.sizes, ["14.4px", "14.4px", "14.4px", "12.8px"]);
-  assert.deepEqual(m.columns, ["402px 402px", "402px 402px", "16px"]);
+  assert.deepEqual(m.author, [[0, 107.4, 22], [0, 130.7, 22]], "the authors");
+  assert.deepEqual(m.affiliation, [[376.2, 107.4, 22], [376.2, 130.7, 22]], "the affiliations");
+  assert.deepEqual(m.date, [0, 154, 22], "the date");
+  assert.deepEqual(m.modified, [376.2, 154, 22], "the day it was modified");
+  assert.deepEqual(m.doi, [0, 177.3, 22], "the DOI");
+  assert.deepEqual(m.abstractLabel, [0, 212.1, 19.6], "the word over the abstract");
+  assert.deepEqual(m.abstract, [[0, 231.7, 44.8], [0, 289.4, 22]], "the abstract");
+  assert.deepEqual(m.keywordsLabel, [0, 323, 19.6], "the word over the keywords");
+  assert.deepEqual(m.keywords, [0, 342.5, 22], "the keywords");
+  assert.equal(m.first, 379.8, "the first line of the document under the block");
+  assert.deepEqual(m.sizes, ["12.96px", "12.96px", "12.96px", "11.52px"]);
+  // Two halves of the column beside a gap of an em, each to the 1/64 px
+  // the engine lays a track out in (361.797 and 361.812 for 361.8).
+  for (const c of m.columns.slice(0, 2)) {
+    assert.ok(c.split(" ").every((w) => Math.abs(parseFloat(w) - (738 - 16 * PAGE) / 2) <= 1 / 64), "the columns are " + c);
+  }
+  assert.equal(m.columns[2], "14.4px");
   // The marks: an em square for the envelope, where the page's icon stands,
   // and 0.8em for ORCID's.
-  assert.deepEqual([m.envelope[0], m.envelope[2]], [108.4, 14.4], "the envelope");
-  assert.deepEqual([m.orcid[0], m.orcid[1], m.orcid[2]], [128.7, 127.2, 11.5], "the ORCID mark");
+  assert.deepEqual([m.envelope[0], m.envelope[2]], [97.6, 13], "the envelope");
+  assert.deepEqual([m.orcid[0], m.orcid[1], m.orcid[2]], [115.8, 114.5, 10.4], "the ORCID mark");
   assert.equal(m.envelopeOpacity, "0.7");
   assert.equal(m.linkInk, true);
   assert.deepEqual(m.aligned, ["justify", "justify", "justify", "start"]);
@@ -1833,9 +1852,9 @@ test("the rest of the block is set at the page's sizes and with the page's space
     range.selectNodeContents(name);
     return { columns: columns, name: range.getBoundingClientRect().width, rows: Math.round(name.getBoundingClientRect().height) };
   });
-  assert.ok(wide.columns[0] > 420 && wide.columns[0] >= wide.name - 0.5, "the column of the names is " + wide.columns[0] + "px for a name of " + wide.name);
-  assert.ok(Math.abs(wide.columns[0] + wide.columns[1] + 16 - 820) <= 0.5, "the two columns and their gap are not the column: " + wide.columns);
-  assert.equal(wide.rows, 24, "the long name was broken over two rows");
+  assert.ok(wide.columns[0] > 420 * PAGE && wide.columns[0] >= wide.name - 0.5, "the column of the names is " + wide.columns[0] + "px for a name of " + wide.name);
+  assert.ok(Math.abs(wide.columns[0] + wide.columns[1] + 16 * PAGE - 738) <= 0.5, "the two columns and their gap are not the column: " + wide.columns);
+  assert.equal(wide.rows, 22, "the long name was broken over two rows");
   assert.deepEqual(long.errors, []);
   await long.close();
 });
@@ -1859,11 +1878,12 @@ test("the categories and the description stand under the title as on the page", 
       names: round(r(".mdm-title-meta").top - at.top),
     };
   });
-  assert.deepEqual(m.tags, [79.2, 32.9]);
-  assert.deepEqual(m.tag, [24.9, "10.4px", "uppercase", "0.6", "1px", "6.375px"]);
-  assert.equal(m.gap, 6.4);
-  assert.deepEqual(m.description, [112, 27.2]);
-  assert.equal(m.names, 139.2);
+  // [79.2, 32.9], 24.9 and 10.4px, 6.4, [112, 27.2] and 139.2 at 1.
+  assert.deepEqual(m.tags, [71.3, 29.8]);
+  assert.deepEqual(m.tag, [22.6, "9.36px", "uppercase", "0.6", "1px", "5.7375px"]);
+  assert.equal(m.gap, 5.8);
+  assert.deepEqual(m.description, [101.1, 24.5]);
+  assert.equal(m.names, 125.6);
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -1873,10 +1893,11 @@ test("a block with no title carries the number of the header's first line and it
   // far under the head of the block its copy button stands: level with the
   // top of that part, which is under its own air for the tags and for the
   // word over an abstract.
+  // The offsets are the page's lengths, drawn at the zoom (12 and 11 at 1).
   const cases = [
-    ["abstract: |\n  Only an abstract.", "mdm-title-prose mdm-title-abstract", 12],
-    ['abstract: "On one line."\nkeywords: [k]', "mdm-title-prose mdm-title-abstract", 12],
-    ["categories: [a, b]\ndate: 2026-10-04", "mdm-title-categories", 11],
+    ["abstract: |\n  Only an abstract.", "mdm-title-prose mdm-title-abstract", 12 * PAGE],
+    ['abstract: "On one line."\nkeywords: [k]', "mdm-title-prose mdm-title-abstract", 12 * PAGE],
+    ["categories: [a, b]\ndate: 2026-10-04", "mdm-title-categories", 11 * PAGE],
     ["author: A\ndate: 2026-10-04", "", 0],
     ["author:\n  - name: A\n    affiliation: X", "", 0],
     ["doi: 10.1/x", "", 0],
@@ -1891,14 +1912,15 @@ test("a block with no title carries the number of the header's first line and it
       return {
         numbers: numbered.map((e) => e.getAttribute("data-mdm-line")),
         part: first ? (first.tagName === "P" ? "" : first.className) : null,
-        rail: parseFloat(chrome.style.top),
+        // As laid out: the offset is written at the zoom (zoomed in main.js).
+        rail: +parseFloat(getComputedStyle(chrome).top).toFixed(2),
         // Where the part's own top is, under the head of the block.
         partTop: first ? Math.round(first.getBoundingClientRect().top - block.getBoundingClientRect().top) : null,
       };
     });
     assert.deepEqual(seen.numbers, ["1"], header);
     assert.equal(seen.part, part, header);
-    assert.equal(seen.rail, top, header);
+    assert.ok(Math.abs(seen.rail - top) < 0.01, header + ": the button stands " + seen.rail + "px down");
     assert.ok(Math.abs(seen.partTop - seen.rail) <= 1, header + ": the part stands at " + seen.partTop + " and the button at " + seen.rail);
     assert.deepEqual(h.errors, []);
     await h.close();

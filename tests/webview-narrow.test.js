@@ -191,6 +191,7 @@ async function at(page, width) {
                 )
               : null,
             paneRight: px(scroller.getBoundingClientRect().right),
+            columnRight: px(content.getBoundingClientRect().right),
             // What the card itself holds back sideways, which is where the
             // end of a line too long for the column is reached now.
             held: long.scrollWidth - long.clientWidth,
@@ -243,7 +244,9 @@ test("a line of source keeps its line, and its card scrolls to the end of it", {
   // (twenty of them between 470 and 633 px on the python block of
   // example.mdm, measured at a 520 px pane).
   [wide, narrow].forEach(function (out) {
-    const column = out.code.paneRight - 50;
+    // The column's own edge. At 900 the page at 0.9 (738px) is narrower than
+    // the pane, which at 1 it filled less its 50px a side (2026-11-16).
+    const column = out.code.columnRight;
     ["ground", "shortGround", "tinyGround"].forEach(function (edge) {
       assert.ok(
         Math.abs(out.code[edge] - column) <= 1,
@@ -260,13 +263,14 @@ test("a line of source keeps its line, and its card scrolls to the end of it", {
   );
   // A card with nothing long in it holds nothing and draws no bar.
   assert.equal(narrow.code.tinyHeld, 0, "a card with room in it scrolls: " + narrow.code.tinyHeld);
-  // The copy button stands in the rail 10 px right of the column (the 50 px
-  // of the scroller's margin less the rail's 10 and the button's 24 leave
-  // 16 to the edge of the pane), level with the top of the card, and does not
-  // ride off to the end of the longest line.
+  // The copy button stands in the rail 10 px right of the column, its right
+  // edge 34 px past it with the button's 24 (where the column fills the
+  // pane, that leaves 16 of the scroller's 50 to the pane's edge), level
+  // with the top of the card, and does not ride off to the end of the
+  // longest line.
   [wide, narrow].forEach(function (out) {
     assert.ok(
-      Math.abs(out.code.copyRight - (out.code.paneRight - 16)) <= 1,
+      Math.abs(out.code.copyRight - (out.code.columnRight + 34)) <= 1,
       "the copy button is not in the rail beside the column at " + out.pane + ": " + out.code.copyRight
     );
     assert.ok(
@@ -562,6 +566,7 @@ test("a card keeps one offset through the rows CodeMirror builds and drops", { s
         rows: rows.length,
         offsets: rows.map((r) => r.scrollLeft).join("/"),
         first: rows.length ? rows[0].textContent.slice(0, 12) : null,
+        names: rows.map((r) => r.textContent.slice(0, 12)),
       };
     });
   await page.evaluate(() => {
@@ -575,13 +580,18 @@ test("a card keeps one offset through the rows CodeMirror builds and drops", { s
     "the card did not take the offset: " + before.offsets
   );
   // Down the document by more than the pane and less than the whole card, so
-  // that rows survive the move and rows are built for the first time.
+  // that rows survive the move and rows are built for the first time. Both
+  // halves are read: at the page's 0.9 a move of 1200px went past every row
+  // CodeMirror had built, none survived to carry the offset, and all of them
+  // came back at nothing (2026-11-16).
   await page.evaluate(() => {
-    document.querySelector("#app .cm-scroller").scrollTop += 1200;
+    document.querySelector("#app .cm-scroller").scrollTop += 1000;
   });
   await new Promise((r) => setTimeout(r, 500));
   const after = await read();
   assert.notEqual(after.first, before.first, "the pane did not move down the card");
+  assert.ok(after.names.some((n) => before.names.includes(n)), "no row survived the move, so nothing was tested: from " + after.first);
+  assert.ok(after.names.some((n) => !before.names.includes(n)), "no row was built by the move, so nothing was tested");
   assert.ok(after.rows > 10, "the card left the pane: " + JSON.stringify(after));
   assert.ok(
     after.offsets.split("/").every((n) => n === "60"),
@@ -955,9 +965,13 @@ test("the outline closing and the face changing keep the line too", { skip }, as
       there: { outline: "shown", outlineWidth: 400 },
       back: { outline: "hidden", outlineWidth: 400 },
     },
+    // A pane of 550 is at the page's 0.9 what 600 was at 1 (a column of 450
+    // at 14.4px for one of 500 at 16): at 600 the two faces wrapped this
+    // text into as many rows as each other, and neither shortened the page
+    // (2026-11-16).
     {
       what: "the sans taking over from the roman",
-      width: 600,
+      width: 550,
       there: { textFont: "roman" },
       back: { textFont: "sans" },
     },

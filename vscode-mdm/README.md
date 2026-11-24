@@ -51,6 +51,7 @@ One row. The button at its left opens the outline of the headings, and seven wor
 - **Paragraph**: the heading levels, the code block, the lists and the quote.
 - **Insert**: an equation, a table, a picture, a footnote, a rule, a music symbol.
 - **Page**: settings shared by every document, except the hyphenation, which each file keeps.
+  - **Zoom**: the size the page is drawn at, from 50% to 300%, 100% being the size an export prints it. `Ctrl++` and `Ctrl+-` (`Cmd` on a Mac) step it, as `Ctrl` with the mouse wheel does, and `Ctrl+NumPad0` (`Cmd+NumPad0`) brings it back to 100%. The words, the equations, the scores, the pictures and the width of the text grow together, so a line ends on the same word at any zoom; the toolbar, its menus and the numbers in the margin keep their size, and nothing of an export changes.
   - **Theme**: follows VS Code by default; MDM Light, MDM Dark and MDM White are the editor's own.
   - **LaTeX font**: Latin Modern Roman, the face of a LaTeX document, which comes with the extension; turned off, the system's sans. Code keeps its monospace.
   - **Justified text**: paragraphs justified, or ragged on the right. The lines break on the same words either way.

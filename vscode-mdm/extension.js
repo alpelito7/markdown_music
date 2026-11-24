@@ -139,11 +139,16 @@ const OWN_LOOKS = ["light", "dark", "white"];
 // A setting whose value is a number and not one of a handful of words. The
 // allowlist above does two jobs at once, and here a clamp does both: a
 // settings.json carries whatever it carries, and these values are written into
-// the webview HTML. The band is the webview's own (OUTLINE_MIN and
-// OUTLINE_MAX in media/main.js), so a width that comes back from here is one
-// the panel would have let the grip reach.
+// the webview HTML. Each band is the webview's own, so a value that comes
+// back from here is one the editor could have set itself: the outline's is
+// the reach of its grip (OUTLINE_MIN and OUTLINE_MAX in media/main.js), and
+// the zoom's the first and last of its steps, in per cent (ZOOM_STEPS).
 const NUMBER_SETTINGS = {
   outlineWidth: { min: 140, max: 1200, fallback: 250 },
+  // The size the page is drawn at, 100 being the size the export prints it
+  // at. Nothing of an export reads it (exportLook): it is the reader's
+  // magnifying glass and no part of the look.
+  zoom: { min: 50, max: 300, fallback: 100 },
 };
 
 function numberSetting(key, value) {
