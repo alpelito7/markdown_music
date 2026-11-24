@@ -1553,8 +1553,12 @@ test("a word opens its menu on a press, and with one open the pointer on another
   assert.deepEqual(seen.map((s) => s.slice(0, 2)), [["menu-format", "block"]]);
   [is, want] = await ground("menu-format", 22);
   assert.equal(is, want, "the word whose menu is open does not stand on the disc");
-  // The focus stays in the text, or goes there: the bar is not somewhere to be.
-  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, "opening a menu left the text unfocused");
+  // The focus stays where it was: the bar is not somewhere to be, and it
+  // makes no document somebody's. Nobody has been in this one yet, and it
+  // stays so (it went into the text here until 2026-11-20, which is how a
+  // score at the top of duet.mdm opened under a press on Score); the half
+  // with somebody in it is read after the press in the text, below.
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), false, "opening a menu put a caret in a document nobody had been in");
 
   // The pointer on another word, with no press.
   await over("menu-insert");
@@ -1588,6 +1592,12 @@ test("a word opens its menu on a press, and with one open the pointer on another
   await sleep(80);
   await clickAt(h.page, 3);
   assert.deepEqual(await open_(), [], "a press in the text left the menu open");
+  // With a caret in the text, a menu opened leaves the focus there.
+  await h.page.click('#app button[data-type="menu-page"]');
+  await sleep(80);
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, "opening a menu took the focus off the text");
+  await h.page.keyboard.press("Escape");
+  await sleep(80);
 
   // A press on another word, with one open, ends with that one open and no
   // other: the way a hand that does not know the pointer is enough does it.
@@ -2697,6 +2707,98 @@ test("a word, a button or a row of the bar held down leaves the caret's line sho
   await sleep(60);
   assert.deepEqual(h.errors, []);
   await h.close();
+});
+
+// The other side of the same rule: the bar keeps a document that is
+// somebody's, and it does not make one somebody's. A document carries a
+// selection before anybody has put a caret in it, at character 0, inside
+// whatever block the file opens on, and the rendering ignores it while
+// nobody is in the document. Every word of the bar handed the text the focus
+// on its press, which woke that selection: duet.mdm, whose first line is a
+// score, opened its ABC on a press on Score (the owner, 2026-11-20), and the
+// outline's button and the menus of the row of favorites did the same. The
+// headphones were mended of it before (webview-player.test.js, "the
+// headphones of a fresh document"). Every kind of block a file can open on,
+// the title block of its header with them, and every control of the bar that
+// writes nothing. What writes does take the reader into the text, and is
+// asked last. The switch of the score mode is not among those that write
+// nothing: the mode writes into the text, and leaving it gives the text the
+// focus so that Ctrl+Z reaches what it wrote (SM08), which opens the block at
+// the top of a document nobody had been in (FBP1 in tests/README.md).
+test("a press on the bar that writes nothing leaves a document nobody has been in as it was, whatever block it opens on", { skip }, async () => {
+  const { frontMatter } = require("../vscode-mdm/transforms.js");
+  const titled = "---\ntitle: A title\n---\n\nProse under the title.\n";
+  const cases = [
+    { name: "a score", text: "```abc\nX:1\nK:C\nCDEF|\n```\n\nProse after.\n", scores: 1 },
+    { name: "a table", text: "| a | b |\n|---|---|\n| 1 | 2 |\n\nProse after.\n", scores: 0 },
+    { name: "a display equation", text: "$$\ne^{i\\pi} + 1 = 0\n$$\n\nProse after.\n", scores: 0 },
+    { name: "the title block", text: titled, scores: 0, withFrontMatter: false, frontMatter: frontMatter(titled) },
+  ];
+  const WORDS = ["menu-edit", "menu-format", "menu-paragraph", "menu-insert", "menu-page", "menu-score", "menu-export"];
+  // The row of favorites' own menus: the heading levels, the face, the zoom.
+  const MENUS = ["headings", "mdm-text-font", "mdm-zoom"];
+  // Rows that change a setting or a panel, and write nothing.
+  const ROWS = ["mdm-staff-lines", "page-outline", "page-favorites", "mdm-match-substring"];
+  const state = (page) =>
+    page.evaluate(() => ({
+      source: document.querySelectorAll("#app .cm-line.mdm-src-line").length,
+      inline: document.querySelectorAll("#app .mdm-math-src").length,
+      header:
+        document.querySelectorAll("#app .cm-line.mdm-fm-line").length +
+        window.__posts.filter((m) => m.type === "header" && m.open).length,
+      focus: window.__mdm.view.hasFocus,
+      selection: window.__mdm.view.state.selection.ranges.map((r) => [r.from, r.to]),
+    }));
+  const asOpened = { source: 0, inline: 0, header: 0, focus: false, selection: [[0, 0]] };
+  for (const one of cases) {
+    const h = await open({
+      text: one.text,
+      scores: one.scores,
+      withFrontMatter: one.withFrontMatter,
+      frontMatter: one.frontMatter,
+      seed: { settings: { favorites: "shown" } },
+    });
+    assert.deepEqual(await state(h.page), asOpened, one.name + ": the fixture must open with the untouched caret on the block at the top");
+    const after = async (what) => {
+      await sleep(150);
+      assert.deepEqual(await state(h.page), asOpened, one.name + ": " + what + " opened a document nobody had been in");
+      await h.page.keyboard.press("Escape");
+      await sleep(80);
+    };
+    // The row's own buttons by the row: the face and the zoom are rows of
+    // the Page menu as well, under the same names.
+    for (const name of WORDS.concat(["outline"])) {
+      await h.page.click('#app .mdm-toolbar button[data-type="' + name + '"]');
+      await after(name);
+    }
+    for (const name of MENUS) {
+      await h.page.click('#app .mdm-favorites button[data-type="' + name + '"]');
+      await after("the row's " + name);
+    }
+    for (const name of ROWS) {
+      await pressBar(h.page, name);
+      await after(name);
+    }
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+  // What writes into the text takes the reader there, a row under a word and
+  // a button of the row of favorites alike, so that what is typed next goes
+  // where the mark was written.
+  for (const [how, press] of [
+    ["the Bold row", (page) => pressBar(page, "bold")],
+    ["the Bold button", (page) => page.click('#app .mdm-favorites button[data-type="bold"]')],
+  ]) {
+    const h = await open({ text: "Some words.\n", scores: 0, seed: { settings: { favorites: "shown" } } });
+    await press(h.page);
+    await sleep(150);
+    assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, how + " left the text without the focus");
+    await h.page.keyboard.type("x");
+    await sleep(100);
+    assert.equal(await docText(h.page), "**x**Some words.\n", how + ": what was typed after it went elsewhere");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
 });
 
 // ---- The rest of the block keys ----

@@ -5112,6 +5112,23 @@
     if (onBar || view.dom.contains(active)) active.blur();
   }
 
+  // The focus given back to the text after a press on the chrome, to a text
+  // that had it. The chrome keeps a document that is somebody's and does not
+  // make one somebody's, which is the rule somebodyInside states for the
+  // player's bar: given to a document nobody had been in, the focus woke the
+  // selection it carries at character 0, and the block there came up as
+  // source under a caret nobody had put in it. duet.mdm, whose first line is
+  // a score, opened its ABC on a press on the word Score (the owner,
+  // 2026-11-20), and every word of the bar, the outline's button and the
+  // menus of the row of favorites did the same. A press on the bar moves no
+  // focus of its own (its mousedown is prevented, buildToolbar), so what the
+  // text has when the press is answered is what it had before it. What
+  // writes into the text does take the reader there, and calls view.focus()
+  // itself (toolbarButton, fillMenu).
+  function giveFocusBack() {
+    if (view && view.state.field(focusField, false)) view.focus();
+  }
+
   // ---- KaTeX ----
 
   // Rendered HTML per source: the same equation is asked for on every
@@ -14818,6 +14835,13 @@
   // block, came back as one after a click in the dead margin, and the two in
   // the prose were gone).
   function dismissOpenBlock() {
+    // Nothing is open in a document nobody is in, whatever its selection
+    // says (activeRanges), so there is nothing to put away and the carets
+    // are left where they are. Moved anyway, the selection an untouched
+    // document carries at character 0 went out under the block at its top
+    // on a press on Page, and not on a press on Format, which is exempt: what
+    // Bold wrote next depended on which menu had been opened first.
+    if (!view.state.field(focusField, false)) return;
     const state = view.state;
     const sel = state.selection;
     let moved = false;
@@ -19949,6 +19973,13 @@
   // text as a button of the bar hands it back (toolbarButton), which is what
   // puts the caret back where it was as the mode is left; while the mode is
   // on the text cannot take it, and the keyboard stays the mode's.
+  //
+  // To a document nobody had been in as well, where the bar's switches give
+  // the focus back only to a text that had it (giveFocusBack): the mode
+  // writes into the text, and Ctrl+Z after it has to reach the steps it
+  // wrote (SM08). Left by the mode, such a document opens the block its
+  // caret is in, the score at the top of duet.mdm; whether it should is put
+  // to the owner (FBP1 in tests/README.md).
   function pressScoreMode() {
     toggleScoreMode();
     if (view) view.focus();
@@ -22369,10 +22400,11 @@
 
   // The button asks the host, the way every other button that holds a state
   // does; the panel opens when the setting comes back. The keyboard goes back
-  // to the text at once: that is the click's doing, not the setting's.
+  // to the text at once, when the text had it: that is the click's doing, not
+  // the setting's (giveFocusBack).
   function toggleOutline() {
     askSetting("outline", outlineOpen ? "hidden" : "shown");
-    if (view) view.focus();
+    giveFocusBack();
   }
 
   // The second modifier a block's letter carries: Shift on a PC, Option on a
@@ -22719,6 +22751,13 @@
           // of an open menu wrote into the frozen text before the row of
           // favorites came, and the row put such buttons a key away.
           if (scoreMode && (entry.caret || entry.edit)) return;
+          // A row that writes into the text, or works where the caret is,
+          // takes the reader into the text, and before it does its work, as
+          // the press on its word used to: the word gives the focus back
+          // only to a text that had it now (giveFocusBack), and Bold from
+          // the menu of a document nobody had been in wrote its marks where
+          // nothing typed after them could follow.
+          if ((entry.caret || entry.edit) && view) view.focus();
           entry.click();
         });
         // The pointer has come to a row that leads nowhere: a submenu left
@@ -23624,8 +23663,10 @@
         // it does from the buttons that act on the caret. Without this the
         // press left the document unfocused, and unfocused it draws itself
         // with nobody in it, so opening a menu would have closed the block
-        // being edited behind the panel.
-        if (view) view.focus();
+        // being edited behind the panel. To a text that had it, and to no
+        // other (giveFocusBack): a menu opened on a document nobody had been
+        // in opened the block at its top (duet.mdm, 2026-11-20).
+        giveFocusBack();
       });
       // The manners of a menu bar: with the menu of one word open, the
       // pointer coming to another word opens that one in its place, and no
@@ -23652,7 +23693,11 @@
         // 2026-11-16).
         if (spec.edit && scoreMode) return;
         spec.click();
-        if (view) view.focus();
+        // What writes goes on in the text, where what is typed next has to
+        // land; anything else gives the focus back to a text that had it
+        // (giveFocusBack).
+        if (!spec.edit) giveFocusBack();
+        else if (view) view.focus();
       });
     }
     // The tooltip goes away on a click, the manners of the whole editor now
@@ -23948,6 +23993,7 @@
 
   function toggleFavorites() {
     askSetting("favorites", favoritesShown ? "hidden" : "shown");
+    giveFocusBack();
   }
 
   function buildToolbar() {
