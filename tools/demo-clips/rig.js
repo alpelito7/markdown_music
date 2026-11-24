@@ -24,6 +24,31 @@ const { travel, stroke, keyGaps, readTime } = require("./motion.js");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The keys of a take are named on screen as the README's table names them,
+// Ctrl and Alt, and the editor names them so in its menus and its side panel
+// only on a page that is not a Mac's: on a Mac it says Control, Option and
+// Cmd, and puts the left and the right of the score's keys on Control and
+// Option (main.js, sideOf). A take recorded on a Mac tells the editor's page
+// it is on Linux (connect, below), the platform the takes were first
+// recorded on, as the test harness tells it (tests/webview/helpers.js), so
+// what the page does with a key and what it calls it are one thing.
+//
+// The workbench around the page is the Mac's all the same, and its own
+// shortcuts (closing the editors, Quick Open, the command palette, the side
+// bars) are Cmd's there: WB is the modifier for those.
+const MAC = process.platform === "darwin";
+const WB = MAC ? "Meta" : "Control";
+const PAGE_PLATFORM = "Linux x86_64";
+
+// The window, in the OS's points: what launch.sh opens it at, and what the
+// camera takes a frame at. On a Mac it is narrower and lower than the
+// 1440x900 of the Linux desktop, in the same shape (launch.sh says why), and
+// every zoom level a take asks for is lowered to match (zoomFor), so the page
+// inside is laid out at the size it has on Linux, 1000x625 at the takes'
+// zoom level 2, and only drawn with fewer pixels.
+const WINDOW = MAC ? { w: 1358, h: 849 } : { w: 1440, h: 900 };
+const zoomFor = (level) => level + Math.log(WINDOW.w / 1440) / Math.log(1.2);
+
 // How long the pointer is on a thing before it presses it (pressAt). A hand
 // that has arrived presses: a tenth of a second, where every press used to
 // wait a third to a half of one whatever it was on. A button the take leaves
@@ -268,6 +293,19 @@ class Rig {
     this.page = pages.find((p) => p.url().includes("workbench.html"));
     if (!this.page) throw new Error("no VS Code workbench on port " + PORT + ": is launch.sh running?");
     this.cdp = await this.page.target().createCDPSession();
+    // The editor's page, a frame inside a webview's frame, opened after this,
+    // reads the platform from its first script on. Set on the browser's side
+    // and not by a script run in each new document, as the test harness does
+    // it: VS Code writes the editor's page into its frame with
+    // document.write, and a script for new documents reached the webview's
+    // outer frame and not that one (the page went on saying MacIntel,
+    // 2026-11-22). It reaches the workbench as well, whose own keys are
+    // Cmd's all the same: VS Code takes the platform from the process and
+    // not from the page (Cmd+B still put the side bar away with it set).
+    if (MAC) {
+      const ua = await this.page.evaluate(() => navigator.userAgent);
+      await this.page.setUserAgent({ userAgent: ua, platform: PAGE_PLATFORM });
+    }
     return this;
   }
 
@@ -829,7 +867,10 @@ class Rig {
       }
     };
     this.cdp.on("Page.screencastFrame", this._onFrame);
-    await this.cdp.send("Page.startScreencast", { format: "png", quality: 100, everyNthFrame: 1 });
+    // At most the window's size in points, which is the frame the encodes
+    // are written for: a Mac's screen draws the window at twice that each
+    // way, four times the pixels to grab, send and write for every frame.
+    await this.cdp.send("Page.startScreencast", { format: "png", quality: 100, everyNthFrame: 1, maxWidth: WINDOW.w, maxHeight: WINDOW.h });
     // The screencast sends a frame only when the page changes, so a take
     // whose first second stands still could get its first frame late and
     // lose its opening. Not seen to happen (the 1.9% seam that prompted this
@@ -987,4 +1028,4 @@ function dissolveHome(frames, seconds, opts) {
   return out;
 }
 
-module.exports = { Rig, sleep, SETTLE, encodeMp4, encodeGif, encodePoster, seam, dissolveHome };
+module.exports = { Rig, sleep, SETTLE, WB, MAC, PAGE_PLATFORM, WINDOW, zoomFor, encodeMp4, encodeGif, encodePoster, seam, dissolveHome };

@@ -4,7 +4,8 @@
 #
 # SIGTERM first, so VS Code quits and takes its children with it. If it is
 # still up after ten seconds (a save dialog on an edited document keeps it
-# waiting), SIGKILL. A VS Code killed that way leaves its `gsettings monitor`
+# waiting), SIGKILL. On a Mac it did not quit on SIGTERM once, with no
+# dialog up (the three stops of 2026-11-22), and is killed every time. A VS Code killed that way leaves its `gsettings monitor`
 # child running, and that child inherited the listening DevTools socket, so
 # the port stays taken until the child is stopped too; the next launch then
 # comes up without its DevTools server.
@@ -22,7 +23,15 @@ if pgrep -f "$PATTERN" >/dev/null; then
   pkill -KILL -f "$PATTERN"
   sleep 1
 fi
-for pid in $(ss -ltnp "sport = :$PORT" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
-  echo "port $PORT was held by: $(ps -o cmd= -p "$pid")" >&2
+# ss on Linux, lsof on a Mac, which has no ss.
+holders() {
+  if [ "$(uname)" = Darwin ]; then
+    lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | sort -u
+  else
+    ss -ltnp "sport = :$PORT" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u
+  fi
+}
+for pid in $(holders); do
+  echo "port $PORT was held by: $(ps -o command= -p "$pid")" >&2
   kill "$pid" 2>/dev/null
 done

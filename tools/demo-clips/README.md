@@ -7,12 +7,24 @@ clips in place, to judge a change before it is published.
 
 ## Needs
 
-- VS Code at `/usr/share/code/code` (another path: `MDM_DEMO_CODE`), with its
-  DevTools on port 9333 (another port: `MDM_DEMO_PORT`). `launch.sh` opens the
-  port, `stop.sh` frees it and `record.js` connects to it through `paths.js`,
-  so the variable has to be set for all three.
+- VS Code at `/usr/share/code/code`, or on a Mac at
+  `/Applications/Visual Studio Code.app/Contents/MacOS/Code` (another path:
+  `MDM_DEMO_CODE`), with its DevTools on port 9333 (another port:
+  `MDM_DEMO_PORT`). `launch.sh` opens the port, `stop.sh` frees it and
+  `record.js` connects to it through `paths.js`, so the variable has to be
+  set for all three.
+- On a Mac the window opens on the screen, among the others, at 1358x849
+  points: the shape of the 1440x900 of the Linux desktop, in what the menu
+  bar and the Dock leave of a 1470x956 screen, and zoomed so the page inside
+  is the same 1000x625 (`launch.sh` and `WINDOW` in `rig.js` say how). It
+  goes on drawing behind other windows, but a pointer moved over it while a
+  take runs is in the take. The editor's page is told it is on Linux, so the
+  keys of a take and the names it puts on screen are Ctrl and Alt, as the
+  README's tables write them; VS Code's own shortcuts are Cmd's there.
+  The sound is off (`--mute-audio`) on both.
 - `puppeteer-core` from the test suite: `npm install` in `tests/`.
-- `ffmpeg`, `quarto` (its pandoc renders the README) and Chrome at
+- `ffmpeg` (on a Mac, Homebrew's in `/opt/homebrew/bin`, on the `PATH` of
+  `record.js`), `quarto` (its pandoc renders the README) and Chrome at
   `/usr/bin/google-chrome`. `abc-card.js` drives it through
   `tests/webview/helpers.js`, which has that path written in, so
   `MDM_DEMO_CHROME` does not reach it; `preview/shoot.js` takes another path
@@ -74,15 +86,16 @@ strips `muted` from a `<video>` and Chrome then shows only its poster.
   `vscode-mdm/docs/abc-card.png` and prints the `<img>` line for the README,
   whose alt text is the block itself.
 - `score-navigation.mdm` is the document the take of the score mode is
-  recorded on: an organ score of four empty bars, which the keys write two
-  bars of and copy into the other two. That take works from the
+  recorded on: an organ score of two empty bars, which the keys write, give
+  a third bar beside the second in every part, fill partly by a copy and
+  make a repeat with two endings of. That take works from the
   keyboard, so it names each key under the score as it is pressed, with a
   few words on what it does, and leaves each name up long enough to read;
   `MDM_DEMO_KEYS=caps node record.js ...` records it with the keys and no
   words, and `MDM_DEMO_KEYS=off` with nothing named. It is recorded at a
-  zoom level of its own (the clip's `settings`), a frame a seventh taller
-  in the editor's pixels, since two systems of three staves do not stand in
-  the pane of the other two. It copies with Ctrl+C, which goes through the
+  zoom level of its own (the clip's `settings`), a frame larger in the
+  editor's pixels, since the side panel the mode brings up leaves the score
+  too narrow a column in the pane of the other two. It copies with Ctrl+C, which goes through the
   clipboard of the desktop VS Code is started on; the text that was there
   is put back when the take ends, and a picture is not.
 - `rig.js` drives VS Code and encodes; the reasons for the frame size, the

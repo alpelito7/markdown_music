@@ -9,7 +9,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { Rig, sleep, encodeMp4, encodeGif, encodePoster, seam, dissolveHome } = require("./rig.js");
+const { Rig, sleep, MAC, PAGE_PLATFORM, zoomFor, encodeMp4, encodeGif, encodePoster, seam, dissolveHome } = require("./rig.js");
 const { clips, clearLayout, closeAll, openDoc, pinCaret, warmPiano, settleCaret, rest, picturesOf } = require("./clips.js");
 const { SETTINGS, FRAMES, CLIPS_OUT, DEMO, HERE, WORKSPACE } = require("./paths.js");
 
@@ -69,12 +69,16 @@ function writeSettings(look, extra) {
     "mdm.textAlign": "justify",
     // The score mode's side panel, up with the mode as it ships (2026-10-14),
     // on the face of buttons. The score's take shows it (the owner's word of
-    // 2026-10-15), and no take may inherit it hidden.
+    // 2026-10-15), on its Keys face (its settings), and no take may inherit
+    // it hidden.
     "mdm.scorePanel": "shown",
     "mdm.scorePanelFace": "buttons",
     ...LOOKS[look],
     ...(extra || {}),
   };
+  // The level asked for, as it lays the page out in the 1440x900 window of
+  // the first takes, in the window this machine has (rig.js, WINDOW).
+  settings["window.zoomLevel"] = zoomFor(settings["window.zoomLevel"]);
   fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
   fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2));
 }
@@ -146,6 +150,13 @@ async function take(rig, clip, look, keepFrames) {
   await rig.webview();
   await rig.waitFor(() => !!document.querySelector("#app .mdm-toolbar"), { timeout: 15000 });
   if ((await editorText(rig)) !== pristine(clip)) throw new Error(`${doc} did not open as it is in the repository`);
+  // On a Mac, the page told it is on Linux before its scripts ran (rig.js,
+  // connect): a page that says Mac names the keys Control, Option and Cmd,
+  // and the take's Ctrl and Alt do other things on it.
+  if (MAC) {
+    const said = await rig.evalFrame(() => navigator.platform);
+    if (said !== PAGE_PLATFORM) throw new Error(`the editor's page says it is on ${said}, not ${PAGE_PLATFORM}`);
+  }
   await pinCaret(rig);
   await rig.overlay();
   if (clip.needsPiano) {

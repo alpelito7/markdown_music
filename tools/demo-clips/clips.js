@@ -59,7 +59,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { sleep } = require("./rig.js");
+const { sleep, WB } = require("./rig.js");
 const { readTime } = require("./motion.js");
 const { REPO, WORKSPACE } = require("./paths.js");
 
@@ -82,11 +82,11 @@ async function clearLayout(rig) {
     const w = await widths();
     if (!w.side && !w.aux) return;
     if (w.aux) {
-      await rig.press("Control+Alt+b");
+      await rig.press(`${WB}+Alt+b`);
       await sleep(600);
     }
     if (w.side) {
-      await rig.press("Control+b");
+      await rig.press(`${WB}+b`);
       await sleep(600);
     }
   }
@@ -107,7 +107,7 @@ async function closeAll(rig) {
   await sleep(250);
   const inWebview = await rig.page.evaluate(() => (document.activeElement || {}).tagName === "IFRAME");
   if (inWebview) throw new Error("the keyboard is still in the webview; Ctrl+K would edit the document");
-  await rig.press("Control+k");
+  await rig.press(`${WB}+k`);
   await rig.press("w");
   await sleep(800);
   // A save dialog here means a take left a document edited; the check at the
@@ -127,7 +127,7 @@ async function closeAll(rig) {
 }
 
 async function openDoc(rig, name) {
-  await rig.press("Control+p");
+  await rig.press(`${WB}+p`);
   await sleep(600);
   await rig.type(name, 25);
   await sleep(800);
@@ -329,12 +329,17 @@ async function pickNow(rig, word, row) {
   await rig.click();
 }
 
-// The LaTeX font row of the Page menu, pressed. It is a switch, and the take
-// opens on the sans (mdm.textFont in the tour's settings), so the first press
-// sets the document in Latin Modern. frame() uses it off camera to measure
-// the page on the face the scroll will land in.
-async function pressTextFont(rig) {
-  await pickNow(rig, "menu-page", "mdm-text-font");
+// A face from the Font row of the Page menu, picked: Latin Modern Roman
+// unless another row is named. The take opens on the sans (mdm.textFont in
+// the tour's settings), so the pick sets the document in Latin Modern.
+// frame() uses it off camera to measure the page on the face the scroll
+// will land in, and then picks the sans to begin on: the row was a switch
+// until 2026-11-16, and the same press twice gave the sans back, which on
+// a list is Latin Modern picked twice (the takes of 2026-11-22 opened in
+// it, the owner's "el video empieza en font de latex en vez de usual
+// markdown").
+async function pressTextFont(rig, label) {
+  await pickNow(rig, "menu-page", { via: "mdm-text-font", label: label || "Latin Modern Roman" });
   // CodeMirror re-measures the width of a character and the height of a line
   // on a face swap (applyTextFont in main.js); the prose is not at its new
   // height until that has been through.
@@ -420,7 +425,10 @@ const tour = {
     scoreView.scrollTop = await rig.atScrollTop();
     scoreView.top = await scoreTop(rig);
     await rig.scrollTop(0);
-    await pressTextFont(rig);
+    await pressTextFont(rig, "System sans");
+    if (await rig.evalFrame(() => document.getElementById("app").classList.contains("mdm-text--roman"))) {
+      throw new Error("the tour would open in Latin Modern and not in the sans its first press turns from");
+    }
   },
   async beats(rig) {
     const edit = tour.edit;
@@ -429,7 +437,7 @@ const tour = {
     // The face, first of the four, from the Page menu. What changes is every
     // word on the page and not one row, so the pointer stays on a little
     // longer after this press than after the next ones.
-    await pick(rig, "menu-page", "mdm-text-font", "LaTeX font");
+    await pick(rig, "menu-page", { via: "mdm-text-font", label: "Latin Modern Roman" }, "Latin Modern Roman");
     await sleep(520);
 
     // The three settings after it, each in the menu of its kind: the theme
@@ -553,11 +561,14 @@ const tour = {
       await rig.click();
       await sleep(900);
     }
-    await rig.evalFrame(() => window.__mdm.view.focus());
-    for (let i = 0; i < 6 && !(await ctx.isPristine()); i++) {
-      await rig.press("Control+z");
-      await sleep(350);
-    }
+    // The file as it is on disk, as the other two takes put theirs back.
+    // Undone with Ctrl+Z it read as it had, and on a Mac VS Code went on
+    // holding it as edited, so the next take's closeAll met the save
+    // dialog (2026-11-22): there Ctrl+Z is only the page's undo, which
+    // writes the text back as one more edit, and not also the workbench's,
+    // which takes the edits off the document's own history as on Linux.
+    await revertFile(rig);
+    if (!(await ctx.isPristine())) throw new Error("the tour's document did not come back as it is on disk");
     // From the top, where the blank line above the fence shows with the
     // source still open, for settleCaret to click.
     await rig.scrollTop(0);
@@ -738,7 +749,7 @@ async function revertFile(rig) {
     if (tab) tab.focus();
   });
   await sleep(250);
-  await rig.press("Control+Shift+p");
+  await rig.press(`${WB}+Shift+p`);
   await sleep(600);
   await rig.type("File: Revert File", 10);
   await sleep(700);
