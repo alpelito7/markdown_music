@@ -8144,12 +8144,14 @@ test("the score panel stands down the right edge on the outline's ground, its fi
       [
         ["score-note-1", "score-note-2", "score-note-3", "score-note-4", "score-note-5", "score-note-6", "score-note-7"],
         ["score-rest", "score-chord", "score-take-out"],
+        ["score-dot", "score-sharp", "score-flat", "score-natural"],
       ],
       side + ": the pad"
     );
-    assert.deepEqual(alone.pad.flat().map((k) => k.cap), ["1", "2", "3", "4", "5", "6", "7", "0", "Enter", "Delete"], side + ": the keys under the glyphs");
+    assert.deepEqual(alone.pad.flat().map((k) => k.cap), ["1", "2", "3", "4", "5", "6", "7", "0", "Enter", "Delete", ".", "Shift+\u2191", "Shift+\u2193", "Shift+\u2191+\u2193"], side + ": the keys under the glyphs");
     for (const run of alone.pad) assert.equal(new Set(run.map((k) => k.top)).size, 1, side + ": a run of the pad is not one row");
     assert.ok(alone.pad[1][0].top > alone.pad[0][0].top, side + ": the rest is not under the figures");
+    assert.ok(alone.pad[2][0].top > alone.pad[1][0].top, side + ": the dot is not under the rest");
     for (const k of alone.pad.flat()) {
       assert.deepEqual(k.glyph, [15, 15, alone.brass], side + ": " + k.name + " is not a glyph of the bar's, 15px in the brass");
       assert.ok(k.w >= 30 && k.h === 42, side + ": " + k.name + " is " + k.w + " by " + k.h);
@@ -8294,6 +8296,84 @@ test("Rest wears abcjs's quarter rest and Rest of given length its eighth rest, 
   assert.deepEqual([drawn.rest.length, drawn.given.length], [3, 2], "a rest is not drawn where it should be, or is drawn as more than one path");
   drawn.rest.forEach((d, i) => assert.equal(differs(d, QUARTER), null, "Rest, the " + ["pad", "Keys face", "menu"][i] + "'s: not the quarter rest"));
   drawn.given.forEach((d, i) => assert.equal(differs(d, EIGHTH), null, "Rest of given length, the " + ["Keys face", "menu"][i] + "'s: not the eighth rest"));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// Sharp, Flat and Natural wear abcjs's own outlines, the signs the score
+// draws, as Rest wears its quarter rest; and at the scale of that quarter
+// rest, all three, so the four glyphs of the run share one weight (my
+// choice of 2026-11-16, with the round). Dot wears the quarter note's glyph
+// with a dot past its stem. Read wherever each is drawn: the pad, the Keys
+// face and the Score menu.
+test("Sharp, Flat and Natural wear abcjs's accidentals at the scale of Rest's quarter rest, and Dot the quarter note with its dot, wherever each is drawn", { skip }, async () => {
+  const bundle = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "vscode-mdm", "media", "vendor", "abcjs", "abcjs-basic-min.js"), "utf8");
+  const outline = (name) => {
+    const at = bundle.indexOf('"' + name + '":{d:');
+    const end = bundle.indexOf("]],w:", at);
+    return JSON.parse(bundle.slice(at + name.length + 6, end + 2).replace(/(?<![0-9])\./g, "0."));
+  };
+  // The scale a path's `d` is the outline at, or why it is not the outline
+  // at one scale: its commands in order, the first move anywhere, every
+  // other length the outline's times that scale to the thousandth.
+  const scaleOf = (d, cmds) => {
+    const segs = [...d.matchAll(/([A-Za-z])([^A-Za-z]*)/g)].map((m) => [m[1], (m[2].match(/-?\d*\.?\d+/g) || []).map(Number)]);
+    if (segs.map((s) => s[0]).join("") !== cmds.map((c) => c[0]).join("")) return "its commands are not the outline's";
+    let ours = 0;
+    let theirs = 0;
+    segs.forEach((s, i) => {
+      if (s[0] === "M") return;
+      s[1].forEach((v, j) => {
+        ours += Math.abs(v);
+        theirs += Math.abs(cmds[i][j + 1]);
+      });
+    });
+    const k = ours / theirs;
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i][0] === "M") continue;
+      for (let j = 0; j < segs[i][1].length; j++) {
+        if (Math.abs(segs[i][1][j] - k * cmds[i][j + 1]) > 0.003) return "its segment " + i + " is not the outline's at " + k.toFixed(3);
+      }
+    }
+    return k;
+  };
+  const h = await open({ text: PANEL_DOC, scores: 1, seed: { settings: { scorePanel: "shown" } } });
+  await pressBar(h.page, "mdm-score-navigation");
+  await sleep(200);
+  const drawn = await h.page.evaluate(() => {
+    const d = (name) =>
+      [
+        `#app .mdm-score-panel [data-type="${name}"] svg`,
+        `#app .mdm-score-panel [data-line="${name}"] .mdm-menu__icon svg`,
+        `#app .mdm-toolbar [data-type="${name}"] .mdm-menu__icon svg`,
+      ].map((sel) => {
+        const svg = document.querySelector(sel);
+        return svg ? [...svg.children].map((c) => c.outerHTML) : null;
+      });
+    return { rest: d("score-rest"), sharp: d("score-sharp"), flat: d("score-flat"), natural: d("score-natural"), dot: d("score-dot"), quarter: d("score-note-3") };
+  });
+  const quarter = scaleOf(/d="([^"]+)"/.exec(drawn.rest[0][0])[1], outline("rests.quarter"));
+  assert.equal(typeof quarter, "number", "Rest is not the quarter rest: " + quarter);
+  for (const [name, glyph] of [
+    ["sharp", "accidentals.sharp"],
+    ["flat", "accidentals.flat"],
+    ["natural", "accidentals.nat"],
+  ]) {
+    drawn[name].forEach((paths, i) => {
+      const where = ["pad", "Keys face", "menu"][i];
+      assert.ok(paths && paths.length === 1, name + ", the " + where + "'s: not one path");
+      const k = scaleOf(/d="([^"]+)"/.exec(paths[0])[1], outline(glyph));
+      assert.equal(typeof k, "number", name + ", the " + where + "'s: " + k);
+      assert.ok(Math.abs(k - quarter) < 0.002, name + ", the " + where + "'s, is at " + k.toFixed(4) + " where Rest's quarter rest is at " + quarter.toFixed(4));
+    });
+  }
+  // The dot: the quarter note's glyph, the very one, and a circle after it.
+  drawn.dot.forEach((parts, i) => {
+    const where = ["pad", "Keys face", "menu"][i];
+    assert.ok(parts, "Dot is not drawn on the " + where);
+    assert.deepEqual(parts.slice(0, -1), drawn.quarter[2], "Dot, the " + where + "'s, is not the quarter note's glyph");
+    assert.match(parts[parts.length - 1], /^<circle /, "Dot, the " + where + "'s, has no dot");
+  });
   assert.deepEqual(h.errors, []);
   await h.close();
 });

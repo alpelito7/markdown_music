@@ -359,7 +359,7 @@ test("the README shows the score mode's clip at the head of Score navigation, af
     .join(" ")
     .split(/\s+/)
     .filter((w) => /[A-Za-z0-9]/.test(w)).length;
-  assert.ok(words <= 250, `Score navigation has ${words} words; it was written with 230 on 2026-10-05, the keys of its table among them, had 235 once the drag of a line's end was named, and has 250 since Ctrl+B and Alt+B, a barline and a bar beside a selection (2026-11-08 and 2026-11-22)`);
+  assert.ok(words <= 277, `Score navigation has ${words} words; it was written with 230 on 2026-10-05, the keys of its table among them, had 235 once the drag of a line's end was named, 250 with Ctrl+B and Alt+B, a barline and a bar beside a selection (2026-11-08 and 2026-11-22), and has 277 since the dot and the signs (2026-11-16)`);
 });
 
 // The table under the clip names the keys the mode answers to, and is not
@@ -377,6 +377,21 @@ test("the README's table of Score navigation names Ctrl+B and Alt+B for a barlin
   assert.match(bar[0], /^\| `Ctrl\+B` `Alt\+B` \| Put a barline in /);
   const across = [String.fromCharCode(0x2190), String.fromCharCode(0x2192)].map((arrow) => "`Ctrl+" + arrow + "`");
   assert.deepEqual(rows.filter((l) => across.some((key) => l.indexOf(key) >= 0)), [], "a row names Ctrl with Left or Right");
+});
+
+// The dot and the signs, the owner's keys of 2026-11-16: `.`, and Shift
+// with Up for a sharp, with Down for a flat and with the two held together
+// for a natural, each taken off by the same key again. One row of the
+// table, which nothing else holds to the keys (above).
+test("the README's table of Score navigation names the dot's key and the signs', and that the same key takes each off", () => {
+  const mode = readmeSection(read(EXT, "README.md"), "Score navigation");
+  assert.ok(mode, "the README has no Score navigation section");
+  const rows = mode.text.split("\n").filter((l) => /^\| `/.test(l));
+  const signs = rows.filter((l) => /sharp/.test(l));
+  assert.equal(signs.length, 1, "no one row of the table writes a sign");
+  const [up, down] = [String.fromCharCode(0x2191), String.fromCharCode(0x2193)];
+  assert.ok(signs[0].indexOf("| `.`, `Shift+" + up + "` `" + down + "` |") === 0, "the row does not name `.` and Shift with Up and Down: " + signs[0]);
+  assert.match(signs[0], /A dot .*a sharp or a flat .*a natural with both arrows held\. Pressed again, taken off\. \|$/);
 });
 
 

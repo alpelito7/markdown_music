@@ -326,8 +326,8 @@ body {
 #app .mdm-menu__legend.mdm-score-panel__line {
   color: var(--mdm-ink);
 }
-/* The pad: the figures in a row, and under them the rest, the chord and what
-   takes a note out. A key of it is a button of the bar with the key of the
+/* The pad: the figures in a row, under them the rest, the chord and what
+   takes a note out, and under those the dot and the three signs. A key of it is a button of the bar with the key of the
    keyboard that does the same written under its glyph, so it is as tall as
    the two and as wide as the wider of them; the one that is the figure in
    use stands on the disc, the mark a button of the bar wears. */

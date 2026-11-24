@@ -34,6 +34,7 @@ The text is the file, and the editor reads it as the export does: Pandoc's Markd
 | `1` to `7`, `0` | Write a note where the cursor stands, from a whole note down to a sixty-fourth, or a rest. |
 | `Ctrl` or `Alt` with them | Put it in before the cursor's note, or after it. |
 | `Enter`, `Delete`, `Backspace` | Add a note to a chord, and take one or a rest out; `Backspace` steps back. |
+| `.`, `Shift+↑` `↓` | A dot on the cursor's note or rest; a sharp or a flat on its note, a natural with both arrows held. Pressed again, taken off. |
 | `Shift+←` `→` | Select in the cursor's part; with `Ctrl`, in every part. |
 | `Ctrl+Shift+↑` `↓` `Space` | With a selection: walk the parts, and leave one out or take it back. |
 | `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z` | Select all, copy, cut, paste, undo. |

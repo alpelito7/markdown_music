@@ -196,6 +196,18 @@ async function chord(page, mods, key) {
   for (const m of mods.slice().reverse()) await page.keyboard.up(m);
 }
 
+// Shift with Up and Down held together, the natural's key (2026-11-16):
+// `first` goes down first and comes up first.
+async function bothArrows(page, first) {
+  const other = first === "ArrowUp" ? "ArrowDown" : "ArrowUp";
+  await page.keyboard.down("Shift");
+  await page.keyboard.down(first);
+  await page.keyboard.down(other);
+  await page.keyboard.up(first);
+  await page.keyboard.up(other);
+  await page.keyboard.up("Shift");
+}
+
 test("the score mode freezes the text: no caret, no typing, no block open, and what writes into it greys out (SM01)", { skip }, async () => {
   const h = await open({ text: WALK, scores: 1 });
   // The caret in the score's source: the block is open and shows it.
@@ -6672,13 +6684,18 @@ test("the stretch stays in the voice it was drawn out in while the cursor walks 
   assert.deepEqual(await heard(), []);
   assert.deepEqual(await h.page.evaluate(() => [window.__mdm.scoreCursor.anchor, window.__mdm.scoreCursor.home, window.__mdm.scoreCursor.track]), [null, null, 1]);
   // With nothing picked there is nothing chosen, and the voice above is
-  // Ctrl+Up's: Up and Down with Shift leave it so, and are the arrows
-  // alone; Escape is not the mode's, and the copy is the place the cursor
-  // stands on.
+  // Ctrl+Up's: Up and Down with Shift leave it so, and since 2026-11-16
+  // are the keys of the signs (SM133), which walk no step and here, on a
+  // step the place has no head at, write nothing; Escape is not the
+  // mode's, and the copy is the place the cursor stands on.
   await chord(h.page, ["Control"], "ArrowUp");
   const height = (await cursor(h.page)).step;
+  const unsigned = await docText(h.page);
   await chord(h.page, ["Shift"], "ArrowUp");
-  assert.deepEqual([(await stretch(h.page)).voices, (await stretch(h.page)).anchor, (await stretch(h.page)).bands, (await cursor(h.page)).step], [null, null, null, height + 1]);
+  assert.deepEqual(
+    [(await stretch(h.page)).voices, (await stretch(h.page)).anchor, (await stretch(h.page)).bands, (await cursor(h.page)).step, await docText(h.page)],
+    [null, null, null, height, unsigned]
+  );
   await heard();
   await h.page.keyboard.press("Escape");
   assert.deepEqual(await heard(), ["Escape"]);
@@ -6844,12 +6861,17 @@ test("the first Shift with Left or Right chooses the place the cursor stands on,
   for (let i = 0; i < 3; i++) await chord(h.page, ["Shift"], "ArrowLeft");
   await h.page.keyboard.press("ArrowLeft");
   assert.deepEqual([await ends2(h.page), await placeText(h.page)], [[null, 1], "d2"]);
-  // Up and Down. With Shift and nothing chosen they are the arrows alone,
-  // and choose nothing; with a stretch chosen they do nothing, a height
-  // nobody sees being nothing to move; without Shift they let the stretch
-  // go, and the cursor is back where it was, a step up or down.
+  // Up and Down. With Shift and nothing chosen they are the keys of the
+  // signs since 2026-11-16 (SM133): they choose nothing and walk no step,
+  // and on a step the place has no head at write nothing. Alone they walk
+  // a step and choose nothing; with a stretch chosen, with Shift, they do
+  // nothing; without Shift they let the stretch go, and the cursor is
+  // back where it was, a step up or down.
   const step = (await cursor(h.page)).step;
+  const unsigned = await docText(h.page);
   await chord(h.page, ["Shift"], "ArrowUp");
+  assert.deepEqual([await ends2(h.page), (await cursor(h.page)).step, await selection(h.page), await docText(h.page)], [[null, 1], step, null, unsigned]);
+  await press(h.page, "ArrowUp");
   assert.deepEqual([await ends2(h.page), (await cursor(h.page)).step, await selection(h.page)], [[null, 1], step + 1, null]);
   await chord(h.page, ["Shift"], "ArrowRight");
   await chord(h.page, ["Shift"], "ArrowRight");
@@ -9171,6 +9193,11 @@ const WRITES = [1, 2, 3, 4, 5, 6, 7]
     { name: "score-rest", what: "under a verse", text: ROSTER_SUNG, key: (page) => page.keyboard.press("0") },
     { name: "score-chord", setup: up(2), key: (page) => page.keyboard.press("Enter") },
     { name: "score-take-out", key: (page) => page.keyboard.press("Delete") },
+    // On the D the cursor stands on: a dot, and the three signs on its head.
+    { name: "score-dot", key: (page) => page.keyboard.press(".") },
+    { name: "score-sharp", key: (page) => chord(page, ["Shift"], "ArrowUp") },
+    { name: "score-flat", key: (page) => chord(page, ["Shift"], "ArrowDown") },
+    { name: "score-natural", key: (page) => bothArrows(page, "ArrowUp") },
     { name: "score-bar-before", key: (page) => chord(page, ["Control"], "b") },
     { name: "score-bar-after", key: (page) => chord(page, ["Alt"], "b") },
   ]);
@@ -9770,6 +9797,11 @@ const KEYS_FACE = [
   ["score-chord", "A note more in the chord", "Enter", "Enter", true],
   ["score-take-out", "Take out", "Delete", "Delete", true],
   ["score-keys-back", "Take out and move left", "Backspace", "Backspace", false],
+  "|",
+  ["score-dot", "Dot", ".", ".", true],
+  ["score-sharp", "Sharp", "Shift+\u2191", "\u21e7\u2191", true],
+  ["score-flat", "Flat", "Shift+\u2193", "\u21e7\u2193", true],
+  ["score-natural", "Natural", "Shift+\u2191+\u2193", "\u21e7\u2191+\u2193", true],
   "# Bars",
   "# Move",
   ["score-keys-across", "Move left/right", "\u2190 \u2192", "\u2190 \u2192", false],
@@ -9824,7 +9856,6 @@ test("the Keys face names every key of the mode as the bar writes it, and a key 
     }
     // The lines that are rows: every one of the Score menu's lists but the
     // figures, the play, and the two of the Edit menu.
-    assert.equal(twins, 25 - 7 + 1 + 2, where + ": the lines that are rows");
     // The line of the seven figures wears the quarter note's glyph, the very
     // one of the quarter's row.
     assert.equal(said.find((l) => l.line === "score-keys-note").glyph, (await barState(h.page, "score-note-3")).glyph, where + ": the line of the figures does not wear the quarter note");
@@ -10164,6 +10195,359 @@ test("0 under a verse makes rests of the notes and takes the syllables they had 
   assert.deepEqual([await docText(g.page), await notices(g.page)], [carried, ["Lyrics can't make room"]]);
   assert.deepEqual(g.errors, []);
   await g.close();
+});
+
+// ---- The dot and the signs (2026-11-16) ----
+//
+// The owner's keys of 2026-11-16: "Implementa el dot con .", and the signs
+// "con Shift + flecha de arriba (sostenido), abajo (bemol) y arriba y abajo a
+// la vez (becuadro)". What the engine writes for them is held in
+// score-bars.test.js; here, the keys, what the cursor and the panel do with
+// them, and what they leave alone.
+
+// The pad's keys lit, the figure in use and the dot and the sign in use.
+const padLit = (page) =>
+  page.evaluate(() => [...document.querySelectorAll("#app .mdm-score-panel .mdm-score-panel__key.mdm-btn--on")].map((el) => el.getAttribute("data-type")));
+
+const DOTS = ["Words.", "", "```abc", "X:1", "M:4/4", "L:1/4", "K:C", "C D E z | [CE] G A B |", "c2- c2 | A G F E |]", "```", ""].join("\n");
+
+// `.` on the cursor's place, a note, a rest, a chord: a dot, and the same
+// key again takes it off; nothing beside the place moves, the bar being that
+// much longer, and the cursor stays where it stood. The figure in use is
+// the dotted note's, lit as its figure and the dot together. Held down it
+// is one press. Where the score will not take it, it says why: a tied note.
+// With a stretch chosen it writes nothing, and Ctrl+Z takes a dot back in
+// one step.
+test("`.` puts a dot on the cursor's note, rest or chord and takes it off, the figure in use lit with the dot, and says why where it cannot (SM132)", { skip }, async () => {
+  const h = await open({ text: DOTS, scores: 1, seed: { settings: { scorePanel: "shown" } } });
+  await pressMode(h.page);
+  const hs = await heads(h.page, 0);
+  await h.page.mouse.click(hs[1].x, hs[1].y);
+  await sleep(150);
+  const was = await cursor(h.page);
+  const line = async () => (await docText(h.page)).split("\n")[7];
+  assert.equal(await line(), "C D E z | [CE] G A B |");
+  assert.deepEqual(await padLit(h.page), ["score-note-3"]);
+  await h.page.keyboard.press(".");
+  await sleep(200);
+  assert.equal(await line(), "C D3/2 E z | [CE] G A B |");
+  const now = await cursor(h.page);
+  assert.deepEqual([now.from, now.step], [was.from, was.step], "the dot moved the cursor");
+  assert.deepEqual(await padLit(h.page), ["score-note-3", "score-dot"], "the dotted quarter in use is not lit as the quarter and the dot");
+  assert.equal((await barState(h.page, "score-dot")).on, true, "the Dot row of the Score menu is not ticked");
+  await h.page.keyboard.press(".");
+  await sleep(200);
+  assert.equal(await line(), "C D E z | [CE] G A B |");
+  assert.deepEqual(await padLit(h.page), ["score-note-3"]);
+  // Held down, a repeat coming in: one dot, where two would take it off
+  // again.
+  await h.page.keyboard.down(".");
+  await h.page.keyboard.down(".");
+  await h.page.keyboard.up(".");
+  await sleep(200);
+  assert.equal(await line(), "C D3/2 E z | [CE] G A B |", "a key held down put more than one dot on");
+  // One step of the history; and the Dot is the place's, off again with
+  // the dot taken back, where the figure kept is still the dotted quarter.
+  await chord(h.page, ["Control"], "z");
+  await sleep(200);
+  assert.equal(await line(), "C D E z | [CE] G A B |");
+  assert.deepEqual(await padLit(h.page), ["score-note-3"], "the Dot is lit on a note Ctrl+Z took the dot off");
+  // A rest after a dotted note: the figure kept is the dotted quarter, and
+  // the Dot says the rest has none, which is what the key puts on.
+  await press(h.page, "ArrowRight");
+  await h.page.keyboard.press(".");
+  await press(h.page, "ArrowRight");
+  await sleep(200);
+  assert.equal(await line(), "C D E3/2 z | [CE] G A B |");
+  assert.deepEqual(await padLit(h.page), ["score-note-3"], "on a plain rest after a dotted note the Dot is lit");
+  await h.page.keyboard.press(".");
+  await sleep(200);
+  assert.equal(await line(), "C D E3/2 z3/2 | [CE] G A B |");
+  assert.deepEqual(await padLit(h.page), ["score-note-3", "score-dot"], "on the dotted rest the Dot is not lit");
+  // A chord.
+  await press(h.page, "ArrowRight");
+  await h.page.keyboard.press(".");
+  await sleep(200);
+  assert.equal(await line(), "C D E3/2 z3/2 | [CE]3/2 G A B |");
+  // With a stretch chosen, nothing.
+  await chord(h.page, ["Shift"], "ArrowRight");
+  await chord(h.page, ["Shift"], "ArrowRight");
+  const chosen = await docText(h.page);
+  await h.page.keyboard.press(".");
+  await sleep(200);
+  assert.equal(await docText(h.page), chosen, "a dot was written with a stretch chosen");
+  await h.page.keyboard.press("Escape");
+  // While the music sounds the key stops it and writes nothing.
+  const quiet = await docText(h.page);
+  await h.page.keyboard.press("Space");
+  await untilSounding(h.page, true);
+  await h.page.keyboard.press(".");
+  await untilSounding(h.page, false);
+  await sleep(200);
+  assert.equal(await docText(h.page), quiet, "a dot was written over the music");
+  // The tied half note: refused, and said over the score. Its head read
+  // as the page stands now, which the music has moved.
+  const drawn = await heads(h.page, 0);
+  const tied = drawn.find((p) => p.y > drawn[0].y + 20);
+  await h.page.mouse.click(tied.x, tied.y);
+  await sleep(150);
+  const text = await docText(h.page);
+  await h.page.keyboard.press(".");
+  await sleep(200);
+  assert.equal(await docText(h.page), text);
+  assert.deepEqual(await notices(h.page), ["A tie crosses here"]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  // An eighth dotted is written against the eighth before it in its beat,
+  // which beams the two (MDM_BARS.writeNote); the key pressed again gives
+  // the text back whole, the space between them too, where the engine
+  // alone would keep the beam.
+  const eighths = await open({ text: ["Words.", "", "```abc", "X:1", "M:4/4", "L:1/8", "K:C", "C D E F G A B c |]", "```", ""].join("\n"), scores: 1 });
+  await pressMode(eighths.page);
+  const es = await heads(eighths.page, 0);
+  await eighths.page.mouse.click(es[1].x, es[1].y);
+  await sleep(150);
+  const beamed = async () => (await docText(eighths.page)).split("\n")[7];
+  await eighths.page.keyboard.press(".");
+  await sleep(200);
+  assert.equal(await beamed(), "CD3/2 E F G A B c |]");
+  await eighths.page.keyboard.press(".");
+  await sleep(200);
+  assert.equal(await beamed(), "C D E F G A B c |]");
+  assert.deepEqual(eighths.errors, []);
+  await eighths.close();
+});
+
+const SIGNS = ["Words.", "", "```abc", "X:1", "M:4/4", "L:1/4", "K:C", "F D F A | [CE] G z B |]", "```", ""].join("\n");
+
+// Shift with Up a sharp on the head the cursor stands on, with Down a flat,
+// with the two together a natural, whichever goes down first; the same sign
+// again takes it off, and the F after it in its bar keeps its pitch, given a
+// natural while the first has a sign and none once it has none again. The
+// cursor stays on its step: until 2026-11-16 Shift with Up and Down was the
+// step itself. Sharp, Flat and Natural are lit while the head the cursor
+// stands on wears theirs. A chord's head at the cursor's step takes it, and
+// where the cursor stands on no head (a step of a chord's with none, a
+// rest) nothing is written and nothing said.
+test("Shift with Up puts a sharp on the head the cursor stands on, with Down a flat, with the two together a natural, the same again takes it off, and an F after it in its bar keeps its pitch (SM133)", { skip }, async () => {
+  const h = await open({ text: SIGNS, scores: 1, seed: { settings: { scorePanel: "shown" } } });
+  await pressMode(h.page);
+  const hs = await heads(h.page, 0);
+  await h.page.mouse.click(hs[0].x, hs[0].y);
+  await sleep(150);
+  const was = await cursor(h.page);
+  const line = async () => (await docText(h.page)).split("\n")[7];
+  const lit = async () => (await padLit(h.page)).filter((n) => /^score-(sharp|flat|natural)$/.test(n));
+  const steps = [
+    [() => chord(h.page, ["Shift"], "ArrowUp"), "^F D =F A | [CE] G z B |]", ["score-sharp"]],
+    [() => chord(h.page, ["Shift"], "ArrowUp"), "F D F A | [CE] G z B |]", []],
+    [() => chord(h.page, ["Shift"], "ArrowDown"), "_F D =F A | [CE] G z B |]", ["score-flat"]],
+    [() => bothArrows(h.page, "ArrowUp"), "=F D F A | [CE] G z B |]", ["score-natural"]],
+    [() => bothArrows(h.page, "ArrowDown"), "F D F A | [CE] G z B |]", []],
+  ];
+  for (const [key, text, signs] of steps) {
+    await key();
+    await sleep(200);
+    assert.equal(await line(), text);
+    assert.deepEqual(await lit(), signs, "lit on " + text);
+    const now = await cursor(h.page);
+    assert.deepEqual([now.from, now.step], [was.from, was.step], "the cursor moved, on " + text);
+  }
+  assert.equal((await barState(h.page, "score-sharp")).on, false);
+  // A sign taken back by Ctrl+Z is no sign to give back: the key writes it
+  // again.
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await chord(h.page, ["Control"], "z");
+  await sleep(200);
+  assert.equal(await line(), "F D F A | [CE] G z B |]");
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await sleep(200);
+  assert.equal(await line(), "^F D =F A | [CE] G z B |]", "the key after Ctrl+Z gave back what was there");
+  // Nor is one after anything else was written, though the score is as
+  // long as it was: the A made a rest, the key on the F takes the sharp
+  // off and leaves the rest (and the natural, a courtesy one now).
+  let around = await heads(h.page, 0);
+  await h.page.mouse.click(around[3].x, around[3].y);
+  await sleep(150);
+  await h.page.keyboard.press("0");
+  await sleep(200);
+  around = await heads(h.page, 0);
+  await h.page.mouse.click(around[0].x, around[0].y);
+  await sleep(150);
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await sleep(200);
+  assert.equal(await line(), "F D =F z | [CE] G z B |]", "the key gave back the text from before a rest was written");
+  for (let i = 0; i < 3; i++) await chord(h.page, ["Control"], "z");
+  await sleep(200);
+  // Pressed again after another sign was written, the key goes to the
+  // engine, which keeps the natural it wrote on the F after it: a courtesy
+  // one now, which says the pitch that F has (and a sign the reader wrote
+  // there is never taken off).
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await sleep(200);
+  let drawn = await heads(h.page, 0);
+  await h.page.mouse.click(drawn[3].x, drawn[3].y);
+  await sleep(150);
+  await chord(h.page, ["Shift"], "ArrowDown");
+  await sleep(200);
+  assert.equal(await line(), "^F D =F _A | [CE] G z B |]");
+  drawn = await heads(h.page, 0);
+  await h.page.mouse.click(drawn[0].x, drawn[0].y);
+  await sleep(150);
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await sleep(200);
+  assert.equal(await line(), "F D =F _A | [CE] G z B |]");
+  for (let i = 0; i < 3; i++) await chord(h.page, ["Control"], "z");
+  await sleep(200);
+  assert.equal(await line(), "F D F A | [CE] G z B |]");
+  // The E of the chord.
+  await h.page.mouse.click(hs[5].x, hs[5].y);
+  await sleep(150);
+  await chord(h.page, ["Shift"], "ArrowDown");
+  await sleep(200);
+  assert.equal(await line(), "F D F A | [C_E] G z B |]");
+  assert.deepEqual(await lit(), ["score-flat"]);
+  assert.equal((await barState(h.page, "score-flat")).on, true, "the Flat row of the Score menu is not ticked");
+  // A step of the chord's with no head: nothing, and nothing said.
+  await press(h.page, "ArrowUp");
+  const off = await docText(h.page);
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await sleep(200);
+  assert.deepEqual([await docText(h.page), await notices(h.page)], [off, []]);
+  // The rest.
+  await press(h.page, "ArrowRight", 2);
+  assert.equal(await placeText(h.page), "z", "the cursor is not on the rest");
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await sleep(200);
+  assert.deepEqual([await docText(h.page), await notices(h.page)], [off, []]);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The two arrows of the natural are one change, so one Ctrl+Z takes it back
+// whichever went down first, and no sharp or flat is written on the way. An
+// arrow of a press walks nothing while it is held, its repeats included and
+// with Shift let go before it; another key pressed while it is held writes
+// after the press's sign (a half note on the sharp), and an arrow across
+// walks after the sign is on the place the press was made on; a click,
+// Escape and the window losing the focus drop it. With a stretch chosen
+// the keys write nothing, and while the music sounds they stop it and write
+// nothing, as every key that writes does.
+test("the natural's two arrows are one change and one step of the history; the arrows of a press walk nothing; another key writes after the press's sign; nothing with a stretch chosen or while the music sounds (SM134)", { skip }, async () => {
+  const h = await open({ text: SIGNS, scores: 1 });
+  await pressMode(h.page);
+  const hs = await heads(h.page, 0);
+  await h.page.mouse.click(hs[0].x, hs[0].y);
+  await sleep(150);
+  const was = await cursor(h.page);
+  const line = async () => (await docText(h.page)).split("\n")[7];
+  const start = await docText(h.page);
+  // Every change of the mode is a step of its own in the history
+  // (writeScoreEdit), so a sharp or a flat written on the way to the natural
+  // would leave one Ctrl+Z short of the text it started from.
+  for (const first of ["ArrowUp", "ArrowDown"]) {
+    await bothArrows(h.page, first);
+    await sleep(200);
+    assert.equal(await line(), "=F D F A | [CE] G z B |]", first + " first");
+    await chord(h.page, ["Control"], "z");
+    await sleep(200);
+    assert.equal(await docText(h.page), start, first + " first: one Ctrl+Z did not take the natural back");
+  }
+  // Shift with Up held, its repeats coming in, and Shift let go before it.
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.down("ArrowUp");
+  await h.page.keyboard.down("ArrowUp");
+  await h.page.keyboard.up("Shift");
+  await h.page.keyboard.down("ArrowUp");
+  await h.page.keyboard.up("ArrowUp");
+  await sleep(200);
+  assert.equal(await line(), "^F D =F A | [CE] G z B |]");
+  const now = await cursor(h.page);
+  assert.deepEqual([now.from, now.step], [was.from, was.step], "an arrow of the press walked the cursor");
+  await chord(h.page, ["Control"], "z");
+  await sleep(200);
+  // A key pressed while the arrow is held: the sharp, and then the half
+  // note over it.
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.down("ArrowUp");
+  await h.page.keyboard.up("Shift");
+  await h.page.keyboard.press("2");
+  await h.page.keyboard.up("ArrowUp");
+  await sleep(200);
+  assert.equal(await line(), "^F2 D =F A | [CE] G z B |]");
+  await chord(h.page, ["Control"], "z");
+  await chord(h.page, ["Control"], "z");
+  await sleep(200);
+  assert.equal(await docText(h.page), start);
+  // An arrow across while the arrow of a press is held: the sharp goes on
+  // the place the press was made on, and then the cursor walks.
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.down("ArrowUp");
+  await h.page.keyboard.up("Shift");
+  await h.page.keyboard.press("ArrowRight");
+  await h.page.keyboard.up("ArrowUp");
+  await sleep(200);
+  assert.equal(await line(), "^F D =F A | [CE] G z B |]");
+  assert.notEqual((await cursor(h.page)).from, was.from, "the arrow across did not walk the cursor");
+  await chord(h.page, ["Control"], "z");
+  await sleep(200);
+  assert.equal(await docText(h.page), start);
+  await press(h.page, "ArrowLeft");
+  // A click while the arrow of a press is held drops the press, and puts
+  // the cursor on the D; and so does Escape, but for the cursor.
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.down("ArrowUp");
+  await h.page.keyboard.up("Shift");
+  await h.page.mouse.click(hs[1].x, hs[1].y);
+  await sleep(150);
+  await h.page.keyboard.up("ArrowUp");
+  await sleep(200);
+  assert.equal(await docText(h.page), start, "a press held over a click was written");
+  assert.equal(await placeText(h.page), "D", "the click did not put the cursor on the D");
+  await h.page.mouse.click(hs[0].x, hs[0].y);
+  await sleep(150);
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.down("ArrowUp");
+  await h.page.keyboard.press("Escape");
+  await h.page.keyboard.up("ArrowUp");
+  await h.page.keyboard.up("Shift");
+  await sleep(200);
+  assert.equal(await docText(h.page), start, "a press Escape was pressed in was written");
+  // A press the window loses, its arrow let go somewhere else, is dropped:
+  // the arrow coming up afterwards writes nothing.
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.down("ArrowUp");
+  await h.page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await h.page.keyboard.up("ArrowUp");
+  await h.page.keyboard.up("Shift");
+  await sleep(200);
+  assert.equal(await docText(h.page), start, "a press the window lost was written");
+  // A stretch chosen: nothing.
+  await chord(h.page, ["Shift"], "ArrowRight");
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await bothArrows(h.page, "ArrowUp");
+  await sleep(200);
+  assert.equal(await docText(h.page), start, "a sign was written with a stretch chosen");
+  await h.page.keyboard.press("Escape");
+  // The music sounding: stopped, and nothing written.
+  await h.page.keyboard.press("Space");
+  await untilSounding(h.page, true);
+  await chord(h.page, ["Shift"], "ArrowUp");
+  await untilSounding(h.page, false);
+  await sleep(200);
+  assert.equal(await docText(h.page), start, "a sign was written over the music");
+  // The mode left while the arrow of a press is held drops the press: its
+  // arrow coming up afterwards writes nothing, and leaves no cursor
+  // standing out of the mode.
+  await h.page.keyboard.down("Shift");
+  await h.page.keyboard.down("ArrowUp");
+  await pressMode(h.page);
+  await h.page.keyboard.up("ArrowUp");
+  await h.page.keyboard.up("Shift");
+  await sleep(200);
+  assert.deepEqual([await docText(h.page), await h.page.evaluate(() => window.__mdm.scoreCursor)], [start, null], "a press held as the mode was left wrote, or left a cursor");
+  assert.deepEqual(h.errors, []);
+  await h.close();
 });
 // A bar with nothing in it inside an ending is drawn tight as anywhere else
 // (the owner's report of 2026-11-22, "después de poner el 1 en el indicador

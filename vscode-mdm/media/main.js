@@ -15801,6 +15801,14 @@
       // a rest: what the figure the mode writes with is read from (below).
       duration: elem.duration || 0,
       rest: !!elem.rest,
+      // The sign each head wears as abcjs names it ("sharp", "flat",
+      // "natural", or none), in the order of `steps`: what Sharp, Flat and
+      // Natural say of the head the cursor stands on (tellScorePlace).
+      signs: elem.pitches
+        ? elem.pitches.map(function (pitch) {
+            return pitch.accidental || "";
+          })
+        : [],
       // What abcjs drew for it (its elemset), for the ink of a stretch.
       child: child,
     };
@@ -16607,9 +16615,11 @@
   // text: the cursor is out of sight while a stretch is chosen
   // (drawScoreCursor), and one place on from where it could not be seen
   // would be anywhere. Up and down, with no Shift, it comes back where it
-  // was, a step up or down; with Shift and a stretch chosen they do
-  // nothing, a height nobody sees being nothing to move, and with none
-  // chosen they are the arrow alone.
+  // was, a step up or down. With Shift they are the keys of the signs
+  // since 2026-11-16 (pressScoreSign) and do not come here; until then,
+  // with a stretch chosen they did nothing, a height nobody sees being
+  // nothing to move, which a call with `extend` and no `across` still
+  // does, and with none chosen they were the arrow alone.
   //
   // At either end of the voice the cursor stays where it is. A score
   // scrolled out of CodeMirror's reach has no drawing to walk: the pane is
@@ -17548,6 +17558,7 @@
       refreshScoreEdits();
     }
     tellScoreFigure(place);
+    tellScorePlace(place);
     if (!svg) return;
     let group = svg.querySelector(":scope > .mdm-score-cursor");
     if (!group) {
@@ -18589,7 +18600,8 @@
 
   // What the engine says to a change asked of a source: a move of bars
   // (MDM_BARS.moveBars), a bar added (MDM_BARS.addBar), a note written
-  // (MDM_BARS.writeNote), a place put in (MDM_BARS.insertPlace) or taken
+  // (MDM_BARS.writeNote), a dot put on or taken off (MDM_BARS.dotNote), a
+  // sign (MDM_BARS.writeSign), a place put in (MDM_BARS.insertPlace) or taken
   // out (MDM_BARS.takeOut), a barline put in (MDM_BARS.insertBar), a bar with
   // nothing in it taken out (MDM_BARS.takeEmptyBar), music pasted or a
   // stretch taken out
@@ -18615,6 +18627,10 @@
       if (action.kind === "note") {
         const note = action.rest ? { rest: true, duration: action.duration } : { step: action.step, duration: action.duration };
         result = window.MDM_BARS.writeNote(window.ABCJS, source, action.at, note);
+      } else if (action.kind === "dot") {
+        result = window.MDM_BARS.dotNote(window.ABCJS, source, action.at);
+      } else if (action.kind === "sign") {
+        result = window.MDM_BARS.writeSign(window.ABCJS, source, action.at, action.step, action.sign);
       } else if (action.kind === "out") {
         result = window.MDM_BARS.takeOut(window.ABCJS, source, action.at, action.step);
       } else if (action.kind === "insert") {
@@ -18637,6 +18653,7 @@
       result = null;
     }
     if (!result || (typeof result.source !== "string" && !result.refused)) {
+      result = { refused: /^(?:note|dot|sign|out|insert|barline|gap|paste|rests)$/.test(action.kind) ? "noteUnsafe" : action.kind === "add" ? "addUnsafe" : "unsafe" };
     }
     if (SCORE_EDIT_RUNS.size >= 64) SCORE_EDIT_RUNS.clear();
     SCORE_EDIT_RUNS.set(key, result);
@@ -18987,6 +19004,53 @@
     scoreInUse = figure;
     Object.keys(FIGURE_KEYS).forEach(function (digit) {
       syncRow("score-note-" + digit);
+    });
+  }
+
+  // The figure a length is, and its dots: { figure, dots } for a figure
+  // with none, one or two, from the breve down, or null for a length no
+  // one note has (five eighths). A dotted figure in use is lit as the
+  // figure it is of (since the dot of 2026-11-16; until then no figure was
+  // lit for it), the Dot beside it saying the place the cursor stands on.
+  function figureParts(length) {
+    if (!(length > 0)) return null;
+    for (let figure = 2; figure > 1 / 256; figure /= 2) {
+      if (Math.abs(length - figure) < 1e-9) return { figure: figure, dots: 0 };
+      if (Math.abs(length - figure * 1.5) < 1e-9) return { figure: figure, dots: 1 };
+      if (Math.abs(length - figure * 1.75) < 1e-9) return { figure: figure, dots: 2 };
+    }
+    return null;
+  }
+
+  // What the place the cursor stands on is, where the keys that put a
+  // thing on it or take it off say so by being on, as the state their
+  // key would take off: the sign the head at the cursor's step wears,
+  // "^" a sharp, "_" a flat, "=" a natural, or "" (none, or a double
+  // one), for Sharp, Flat and Natural; and whether the place has a dot,
+  // for Dot (the second reading of 2026-11-16: read off the figure kept,
+  // Dot said a rest after a dotted note was dotted, and stayed lit after
+  // Ctrl+Z took the dot back). Told as the figure is, as the cursor is
+  // drawn (drawScoreCursor).
+  let scoreHeadSign = "";
+  let scorePlaceDotted = false;
+  const HEAD_SIGNS = { sharp: "^", flat: "_", natural: "=" };
+  function tellScorePlace(place) {
+    let sign = "";
+    let dotted = false;
+    if (place && !unwritten(place.stop)) {
+      const i = place.stop.rest ? -1 : place.stop.steps.indexOf(place.step);
+      if (i >= 0) sign = HEAD_SIGNS[place.stop.signs[i]] || "";
+      const parts = figureParts(place.stop.duration);
+      dotted = !!parts && parts.dots > 0;
+    }
+    if (dotted !== scorePlaceDotted) {
+      scorePlaceDotted = dotted;
+      syncRow("score-dot");
+    }
+    if (sign === scoreHeadSign) return;
+    scoreHeadSign = sign;
+    ["score-sharp", "score-flat", "score-natural"].forEach(function (name) {
+      syncRow(name);
     });
   }
 
@@ -19824,6 +19888,8 @@
     scoreMode = false;
     scoreCursor = null;
     scoreFigure = null;
+    scoreSignPress = null;
+    scoreLastToggle = null;
     scorePause = null;
     scorePlayFrom = null;
     scoreStopKind = null;
@@ -19882,6 +19948,11 @@
   //                     chosen, the stretch let go and the cursor on its
   //                     first place, or its last
   //   Up, Down          a step of the staff
+  //   Shift+Up, Down,   a sharp, a flat, or with the two held together a
+  //     both            natural, on the head at the cursor's step, or the
+  //                     same taken off; written as the press ends
+  //                     (pressScoreSign)
+  //   .                 a dot on the cursor's place, or taken off
   //   Shift+Left, Right the place the cursor stands on chosen, and then one
   //                     place more at each press, in the cursor's voice
   //   Ctrl+Shift+Left,  the same over every voice, or over the ones picked
@@ -19948,6 +20019,10 @@
   // either. On 2026-11-08 the owner gave Ctrl+B and Alt+B a barline to the
   // left and to the right of the cursor's place, as Ctrl and Alt put a note
   // in, and took the bar of rest off the keys: Ctrl with Left and Right is
+  // no key of the mode's since. On 2026-11-16 he gave `.` the dot and Shift
+  // with Up and Down the signs: until then Shift with them was the step
+  // alone, and with a stretch chosen nothing. The rest reach the workbench
+  // like any key the mode does not take.
   const SCORE_KEYS = {
     ArrowLeft: [-1, 0],
     ArrowRight: [1, 0],
@@ -20096,6 +20171,175 @@
     commitScoreBar(scoreCursor.pos, source, result);
   }
 
+  // The key of the dot or of a sign pressed again on the place it was just
+  // pressed on, with nothing written since. The dot's gives the text it
+  // changed back whole, as Ctrl+Z would, as a change of its own. A sign's
+  // gives it back for the same sign, and for another writes that one on the
+  // text as it was before the first of the run, so the signs tried on a
+  // head one after another replace each other and leave the text as the
+  // last alone would. The engine keeps every sign the reader wrote, and so
+  // cannot tell from one of theirs a natural it wrote to keep a later note
+  // at its pitch (MDM_BARS.writeSign); and a dot taken off leaves the beam
+  // it was written into. So a sharp put on and taken off again leaves
+  // `F G F` as it found it, and a flat after the sharp `_F G =F`, where
+  // through the engine alone they would leave `F G =F`, and the natural of
+  // the sharp on the way to the flat's (found by the second reading of
+  // 2026-11-16). After anything else is written the keys go to the engine
+  // as they are. `kind` is "dot" or the sign; `pos` the score's place in the
+  // document after the change; `before` the source the first of the run
+  // was pressed on and `after` the one the last left; `at` and `step` the
+  // place and the step pressed on.
+  let scoreLastToggle = null;
+  function lastToggleHere(place, source) {
+    const last = scoreLastToggle;
+    if (!last || last.pos !== scoreCursor.pos || last.after !== source || last.at !== place.stop.from) return null;
+    if (last.kind !== "dot" && last.step !== place.step) return null;
+    return last;
+  }
+
+  // `.`: a dot put on the cursor's place, a note, a chord or a rest, or
+  // taken off where it has one (MDM_BARS.dotNote). The owner's ask of
+  // 2026-11-16, "Implementa el dot con .", the key MuseScore gives the dot.
+  // The bar is that much longer or shorter, as for a figure's key. A note
+  // dotted is the figure kept from then on, as a note walked onto is
+  // (takeScoreFigure), so the figure in use reads it, and a rest gives none;
+  // the Dot is lit by the place itself, dotted or not (tellScorePlace).
+  // While the music sounds on the cursor's score the key stops it and writes
+  // nothing, and with a stretch chosen it writes nothing, as a figure's key
+  // does; nothing stands at the open end, nor in a bar with nothing in it,
+  // to be given a dot.
+  function scoreDots() {
+    if (scoreSoundingHere()) {
+      scoreTakeFromPlayer();
+      return;
+    }
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    if (scoreChosen(place).length) return;
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    if (unwritten(place.stop)) return;
+    const source = scoreSource(place.block);
+    const last = lastToggleHere(place, source);
+    const back = last && last.kind === "dot" ? { source: last.before } : null;
+    const result = back || scoreEditRun(source, { kind: "dot", at: place.stop.from });
+    if (result.refused) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    if (result.same) return;
+    if (!back && !result.rest) scoreFigure = result.duration;
+    commitScoreNote(scoreCursor.pos, source, result);
+    scoreLastToggle = back ? null : { kind: "dot", pos: scoreCursor.pos, before: source, after: result.source, at: result.at, step: place.step };
+  }
+
+  // A sign on the head the cursor stands on: `sign` is "^" (a sharp), "_"
+  // (a flat) or "=" (a natural), and a head that wears it already has it
+  // taken off (MDM_BARS.writeSign, which keeps the notes after it in the bar
+  // at their pitch). Nothing where the cursor stands on no head, at another
+  // step than the place's heads, on a rest, at the open end, as Delete takes
+  // nothing out there; and as for every key that writes, nothing with a
+  // stretch chosen, and the music stopped and nothing written while it
+  // sounds. The cursor stays on its place and its step.
+  function scoreSigns(sign) {
+    if (scoreSoundingHere()) {
+      scoreTakeFromPlayer();
+      return;
+    }
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    if (scoreChosen(place).length) return;
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    const stop = place.stop;
+    if (unwritten(stop) || stop.rest || stop.steps.indexOf(place.step) < 0) return;
+    const source = scoreSource(place.block);
+    const last = lastToggleHere(place, source);
+    const signed = last && last.kind !== "dot" ? last : null;
+    const back = signed && signed.kind === sign ? { source: signed.before } : null;
+    // The text the sign is written on: as it was before the signs of the
+    // run, a sign written over another (lastToggleHere).
+    const base = signed ? signed.before : source;
+    const result = back || scoreEditRun(base, { kind: "sign", at: stop.from, step: place.step, sign: sign });
+    if (result.refused) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    commitScoreNote(scoreCursor.pos, source, result);
+    scoreLastToggle = back ? null : { kind: sign, pos: scoreCursor.pos, before: base, after: result.source, at: result.at, step: place.step };
+  }
+
+  // The keys of the signs, the owner's of 2026-11-16: Shift with Up a sharp,
+  // with Down a flat, "y arriba y abajo a la vez (becuadro)". The two arrows
+  // come down one after the other however together they are pressed, so a
+  // press is told by what it was once it is over: the natural as soon as
+  // the second arrow is down with the first still held, and a sharp or a
+  // flat when the one arrow pressed comes up with none other having joined
+  // it. Written when the press ends, and not as the first arrow comes down,
+  // so the natural is one change, one step for Ctrl+Z to take back, and no
+  // sharp is seen on the way to it. While a press is held, an arrow is the
+  // press's, with Shift or without (Shift let go before the arrow walks no
+  // step), and its repeats are nothing; any other key ends it, and what it
+  // said is written before that key does anything (settleScoreSign). What
+  // is no typing drops it, and nothing is written: Escape, the pointer going
+  // down (a sign written there would engrave the score again under the
+  // press, and the click found no score: seen in the harness), and the
+  // window losing the focus, its arrows let go somewhere else.
+  // Pressed while the music sounds, it stops the music and writes nothing,
+  // as every key that writes does, as it comes down.
+  //
+  // `arrow` and `repeat` are the key's, read before the key is taken, which
+  // may write its name over (takeScoreKey).
+  let scoreSignPress = null;
+  function pressScoreSign(arrow, repeat) {
+    const press = scoreSignPress;
+    if (press) {
+      if (repeat || press.down[arrow]) return;
+      press.down[arrow] = true;
+      if (press.down.ArrowUp && press.down.ArrowDown && !press.done) {
+        press.done = true;
+        scoreSigns("=");
+      }
+      return;
+    }
+    // A key held from before the press began, repeating: nothing.
+    if (repeat) return;
+    scoreSignPress = { first: arrow, down: {}, done: false };
+    scoreSignPress.down[arrow] = true;
+    if (scoreSoundingHere()) {
+      scoreTakeFromPlayer();
+      scoreSignPress.done = true;
+    }
+  }
+  function releaseScoreSign(e) {
+    const press = scoreSignPress;
+    if (!press || !press.down[e.key]) return;
+    delete press.down[e.key];
+    if (press.down.ArrowUp || press.down.ArrowDown) return;
+    scoreSignPress = null;
+    if (!press.done) scoreSigns(press.first === "ArrowUp" ? "^" : "_");
+  }
+  function settleScoreSign() {
+    const press = scoreSignPress;
+    scoreSignPress = null;
+    if (press && !press.done) scoreSigns(press.first === "ArrowUp" ? "^" : "_");
+  }
+
+  // The dot's key: `.` as the reader's layout writes it, with Shift where
+  // the layout keeps it there (a French one), or the numeric pad's own while
+  // NumLock is on, which writes a point or a comma by the layout; with
+  // NumLock off that key is Delete, and takes out. Not with Ctrl or Alt, nor
+  // with AltGr, which makes it another key.
+  function dotKey(e) {
+    if (e.ctrlKey || e.metaKey || e.altKey || keyState(e, "AltGraph")) return false;
+    return e.key === "." || (e.code === "NumpadDecimal" && keyState(e, "NumLock") && e.key !== "Delete");
+  }
 
   // Ctrl+X. While the music sounds on the cursor's score the key stops it,
   // as the keys that write do, and takes nothing out.
@@ -20221,6 +20465,32 @@
     const pad = shiftedPad(e);
     const move = pad ? undefined : SCORE_KEYS[e.key];
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    // The signs: Shift with Up or Down, or with the two together, and an
+    // arrow while a press of them is held (pressScoreSign); any other key
+    // ends a press, the sign it said written first (settleScoreSign).
+    // Ahead of the arrows, which with Shift walked a step until then.
+    if (scoreSignPress && (e.key === "ArrowUp" || e.key === "ArrowDown") && !pad) {
+      const arrow = e.key;
+      const repeat = e.repeat;
+      takeScoreKey(e);
+      pressScoreSign(arrow, repeat);
+      return;
+    }
+    if (scoreSignPress && e.key === "Escape") scoreSignPress = null;
+    if (scoreSignPress && e.key !== "Shift") settleScoreSign();
+    if (move && !move[0] && e.shiftKey && bare) {
+      const arrow = e.key;
+      const repeat = e.repeat;
+      takeScoreKey(e);
+      pressScoreSign(arrow, repeat);
+      return;
+    }
+    if (dotKey(e)) {
+      takeScoreKey(e);
+      // Held down is one press, as a figure's key is.
+      if (!e.repeat) scoreDots();
+      return;
+    }
     if (move && bare) {
       takeScoreKey(e);
       scoreTakeFromPlayer();
@@ -21274,6 +21544,20 @@
     window.addEventListener("keydown", followKeys, true);
     window.addEventListener("keyup", followKeys, true);
     window.addEventListener("keydown", scoreKeys, true);
+    // The end of a press of the signs' keys, told by its arrows coming up
+    // (releaseScoreSign), and a press dropped as the window loses the
+    // focus or the pointer goes down (pressScoreSign).
+    window.addEventListener("keyup", releaseScoreSign, true);
+    window.addEventListener("blur", function () {
+      scoreSignPress = null;
+    });
+    window.addEventListener(
+      "mousedown",
+      function () {
+        scoreSignPress = null;
+      },
+      true
+    );
     // After the mode's keys, which keep what they take (zoomKeys).
     window.addEventListener("keydown", zoomKeys, true);
     window.addEventListener("wheel", zoomWheel, { capture: true, passive: false });
@@ -21625,7 +21909,7 @@
   // reaches 2.77 right of its centre, where the stem stands, 1.5 wide as
   // theirs are. Fill only, since the stylesheet zeroes strokes: the open
   // head of a half note is the ellipse with a smaller one cut out of it.
-  function noteIcon(flags, open) {
+  function noteIcon(flags, open, dot) {
     const head = open
       ? '<path fill-rule="evenodd" transform="rotate(-25 5.9 11.6)" d="M3 11.6a2.9 2.05 0 1 0 5.8 0a2.9 2.05 0 1 0-5.8 0ZM4.1 11.6a1.8 .95 0 1 0 3.6 0a1.8 .95 0 1 0-3.6 0Z"/>'
       : '<ellipse cx="5.9" cy="11.6" rx="2.9" ry="2.05" transform="rotate(-25 5.9 11.6)"/>';
@@ -21633,6 +21917,8 @@
     [1.4, 3.5, 5.6, 7.7].slice(0, flags).forEach(function (y) {
       out += '<path d="M8.67 ' + y + 'c.3 1.5 2.9 1.9 2.7 4.5-.5-1.4-1.9-1.8-2.7-2.1z"/>';
     });
+    // A dot, past the stem beside the head, where a score writes it.
+    if (dot) out += '<circle cx="11.3" cy="11.1" r="1.25"/>';
     return '<svg viewBox="0 0 16 16">' + out + "</svg>";
   }
   // By the key that writes each (FIGURE_KEYS). The whole note has no stem: a
@@ -21664,6 +21950,18 @@
   // Taking out: the key that does it, as keyboards draw it.
   const TAKE_OUT_ICON =
     '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M5.3 3.2h8.2c.8 0 1.5.7 1.5 1.5v6.6c0 .8-.7 1.5-1.5 1.5H5.3L1 8l4.3-4.8Zm.6 1.3L2.8 8l3.1 3.5h7.6a.2.2 0 0 0 .2-.2V4.7a.2.2 0 0 0-.2-.2H5.9Z"/><path d="m7.3 6 .9-.9L9.7 6.6l1.5-1.5.9.9L10.6 7.5l1.5 1.5-.9.9-1.5-1.5-1.5 1.5-.9-.9 1.5-1.5z"/></svg>';
+  // The dot (`.`): the quarter note's glyph with its dot.
+  const DOT_ICON = noteIcon(0, false, true);
+  // The three signs (Shift with Up, with Down, with both): abcjs's own
+  // outlines (`accidentals.sharp`, `.flat`, `.nat`, 6.7.0), the signs the
+  // score draws, at the scale the quarter rest of Rest is drawn at, so the
+  // four share a weight, and each centred in the box.
+  const SHARP_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M8.941 1.442c0.123 -0.07 0.317 -0.018 0.387 0.141c0.035 0.07 0.035 0.123 0.035 1.355c0 0.722 0 1.302 0.018 1.302c0 0 0.158 -0.07 0.352 -0.141c0.405 -0.158 0.458 -0.176 0.563 -0.088c0.123 0.088 0.123 0.106 0.123 0.81c0 0.598 0 0.651 -0.035 0.704c-0.018 0.035 -0.053 0.07 -0.07 0.088c-0.035 0.018 -0.246 0.123 -0.493 0.211l-0.44 0.194l-0.018 1.425c0 0.774 0 1.425 0.018 1.425c0 0 0.158 -0.07 0.352 -0.141c0.405 -0.158 0.458 -0.176 0.563 -0.088c0.123 0.088 0.123 0.106 0.123 0.81c0 0.598 0 0.651 -0.035 0.704c-0.018 0.035 -0.053 0.07 -0.07 0.088c-0.035 0.018 -0.246 0.123 -0.493 0.211l-0.44 0.194l-0.018 1.478c0 1.337 -0.018 1.496 -0.035 1.549c-0.123 0.211 -0.422 0.211 -0.546 0c-0.018 -0.053 -0.035 -0.194 -0.035 -1.425l0 -1.355l-0.757 0.299l-0.739 0.299l0 1.425c0 1.513 0 1.478 -0.088 1.566c-0.035 0.053 -0.158 0.106 -0.211 0.106c-0.07 0 -0.194 -0.053 -0.229 -0.106c-0.088 -0.088 -0.088 -0.053 -0.088 -1.425c0 -0.722 0 -1.302 -0.018 -1.302c0 0 -0.158 0.07 -0.352 0.141c-0.405 0.158 -0.458 0.176 -0.563 0.088c-0.123 -0.088 -0.123 -0.106 -0.123 -0.81c0 -0.598 0 -0.651 0.035 -0.704c0.018 -0.035 0.053 -0.07 0.07 -0.088c0.035 -0.018 0.246 -0.123 0.493 -0.211l0.458 -0.194l0 -1.425c0 -0.774 0 -1.425 -0.018 -1.425c0 0 -0.158 0.07 -0.352 0.141c-0.405 0.158 -0.458 0.176 -0.563 0.088c-0.123 -0.088 -0.123 -0.106 -0.123 -0.81c0 -0.598 0 -0.651 0.035 -0.704c0.018 -0.035 0.053 -0.07 0.07 -0.088c0.035 -0.018 0.246 -0.123 0.493 -0.211l0.458 -0.194l0 -1.478c0 -1.337 0.018 -1.496 0.035 -1.549c0.123 -0.211 0.422 -0.211 0.546 0c0.018 0.053 0.035 0.194 0.035 1.425l0.018 1.355l0.739 -0.299l0.739 -0.299l0 -1.425c0 -1.337 0 -1.425 0.035 -1.496c0.035 -0.07 0.07 -0.106 0.158 -0.141zm-0.194 6.247l0 -1.425l-0.757 0.299l-0.739 0.299l0 1.443l0 1.425l0.053 -0.018c0.035 -0.018 0.37 -0.158 0.757 -0.299l0.686 -0.282l0 -1.443z"/></svg>';
+  const FLAT_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M6.248 2.499c0.194 -0.035 0.51 0 0.634 0.088c0.035 0.018 0.035 0.211 -0.018 3.08c-0.035 1.672 -0.053 3.044 -0.053 3.044c0 0.018 0.07 -0.018 0.141 -0.07c0.37 -0.246 0.827 -0.387 1.285 -0.422c0.475 -0.018 0.862 0.123 1.197 0.458c0.334 0.317 0.51 0.739 0.546 1.197c0.018 0.334 -0.053 0.634 -0.211 0.95c-0.246 0.475 -0.598 0.81 -1.654 1.531c-0.669 0.458 -0.845 0.598 -1.056 0.845c-0.106 0.106 -0.229 0.229 -0.264 0.246c-0.158 0.106 -0.334 0.088 -0.475 -0.035c-0.035 -0.053 -0.07 -0.106 -0.088 -0.158c-0.018 -0.035 -0.053 -1.918 -0.106 -4.892c-0.053 -2.657 -0.088 -5.033 -0.106 -5.297l0 -0.458l0.07 -0.035c0.035 -0.018 0.106 -0.053 0.158 -0.07zm1.865 6.458c-0.123 -0.07 -0.317 -0.088 -0.475 -0.035c-0.317 0.088 -0.581 0.37 -0.686 0.739c-0.035 0.176 -0.07 1.689 -0.035 2.27c0.018 0.246 0.018 0.475 0.035 0.528l0.018 0.07l0.264 -0.229c0.37 -0.317 0.739 -0.686 0.915 -0.933c0.176 -0.246 0.352 -0.581 0.422 -0.827c0.106 -0.405 0.053 -0.862 -0.106 -1.214c-0.088 -0.176 -0.194 -0.299 -0.352 -0.37z"/></svg>';
+  const NATURAL_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M6.659 1.326c0.141 -0.035 0.458 0 0.581 0.088c0.018 0.018 0.018 0.282 0 1.531c-0.018 0.845 -0.018 1.531 -0.018 1.531c0 0.018 0.44 -0.053 0.985 -0.141c0.563 -0.106 1.003 -0.158 1.021 -0.158c0.088 0.018 0.158 0.088 0.211 0.176l0.035 0.07l0.053 5.086c0.053 4.083 0.07 5.086 0.053 5.086c-0.018 0.018 -0.07 0.035 -0.123 0.053c-0.141 0.053 -0.422 0.053 -0.563 0c-0.053 -0.018 -0.106 -0.035 -0.123 -0.053c-0.018 -0.018 -0.018 -0.282 0 -1.531c0.018 -0.845 0.018 -1.531 0.018 -1.531c0 -0.018 -0.44 0.053 -0.985 0.141c-0.563 0.106 -1.003 0.158 -1.021 0.158c-0.088 -0.018 -0.158 -0.088 -0.211 -0.176l-0.035 -0.088l-0.053 -4.417c-0.035 -2.429 -0.053 -4.716 -0.07 -5.086l0 -0.651l0.088 -0.035c0.053 -0.018 0.123 -0.035 0.158 -0.053zm2.2 4.927c0 -0.194 0 -0.246 -0.018 -0.246c-0.07 0 -1.637 0.264 -1.637 0.282c-0.018 0 -0.053 3.696 -0.053 3.713c0.018 0 1.637 -0.264 1.654 -0.282c0 0 0.053 -2.657 0.053 -3.467z"/></svg>';
   // A bar put in: the barlines it stands beside, and a plus on the side it
   // goes to.
   const BAR_BEFORE_ICON =
@@ -22110,7 +22408,6 @@
   }
   function keyLabel(bind) {
     const k = keyParts(bind);
-    return modsLabel(k) + (KEY_SIGNS[k.key] || k.key);
   }
 
   // Two keys that differ in their modifiers alone, written as one the way
@@ -22140,6 +22437,11 @@
   // And as aria-keyshortcuts wants it, for whoever reads the bar without
   // seeing it.
   function keyAria(bind) {
+    // Two keys held together have none: a shortcut of that attribute is
+    // modifiers and one key more (WAI-ARIA 1.2), and the natural's two
+    // arrows are two (found by the second reading of 2026-11-16). Its
+    // name and the key written under it say them.
+    if (bind.with) return "";
     const k = keyParts(bind);
     // The plus is the joint of that attribute, and the key is named Plus in
     // it (the WAI-ARIA definition of aria-keyshortcuts).
@@ -22290,7 +22592,7 @@
       key.className = "mdm-menu__key";
       key.textContent = bind ? keyLabel(bind) : keysLabel(entry.keys);
       row.appendChild(key);
-      if (bind) row.setAttribute("aria-keyshortcuts", keyAria(bind));
+      if (bind && keyAria(bind)) row.setAttribute("aria-keyshortcuts", keyAria(bind));
     }
     return row;
   }
@@ -22489,8 +22791,29 @@
     };
     // An entry of the pad on the score panel, where the rest of the roster
     // stands as rows.
-    const pad = function (entry) {
+    // In the run of the pad `run` says: 0 the figures, 1 the rest, the chord
+    // and what takes out, 2 the dot and the signs.
+    const pad = function (entry, run) {
       entry.pad = true;
+      entry.run = run || 0;
+      return entry;
+    };
+    // A sign's command: on while the head the cursor stands on wears it.
+    // The natural's key is the two arrows held with Shift (`with`).
+    const signEntry = function (name, tip, sign, bind, icon) {
+      const entry = command(
+        name,
+        tip,
+        null,
+        function () {
+          scoreSigns(sign);
+        },
+        icon
+      );
+      entry.bind = bind;
+      entry.on = function () {
+        return scoreHeadSign === sign;
+      };
       return entry;
     };
     const figures = Object.keys(FIGURE_KEYS).map(function (digit) {
@@ -22503,9 +22826,11 @@
         },
         NOTE_ICONS[digit]
       );
-      // The figure in use (tellScoreFigure).
+      // The figure in use (tellScoreFigure), or the one a dotted figure in
+      // use is of, the dot being lit with it (figureParts).
       entry.on = function () {
-        return scoreInUse === FIGURE_KEYS[digit];
+        const parts = figureParts(scoreInUse);
+        return !!parts && parts.figure === FIGURE_KEYS[digit];
       };
       return pad(entry);
     });
@@ -22552,7 +22877,8 @@
               scoreWrites("rest");
             },
             REST_ICON
-          )
+          ),
+          1
         ),
         { name: "score-keys-rest", tip: "Rest of given length", icon: REST_GIVEN_ICON, keys: { first: { key: "Shift-1" }, to: "7" } },
         "|",
@@ -22585,6 +22911,24 @@
             TAKE_OUT_ICON
           )
         ),
+        "|",
+        // The dot and the three signs, the owner's ask of 2026-11-16
+        // ("Implementa el dot con .", the signs with Shift and the arrows,
+        // "Añadelo a Keys y a los botones"): rows of their own here, a run
+        // of their own on the pad, a line each on the Keys face. The dot is
+        // on while the place the cursor stands on has one, and a sign while
+        // the head it stands on wears it: what the key would take off.
+        pad(
+          Object.assign(command("score-dot", "Dot", ".", scoreDots, DOT_ICON), {
+            on: function () {
+              return scorePlaceDotted;
+            },
+          }),
+          2
+        ),
+        pad(signEntry("score-sharp", "Sharp", "^", { key: "Shift-ArrowUp" }, SHARP_ICON), 2),
+        pad(signEntry("score-flat", "Flat", "_", { key: "Shift-ArrowDown" }, FLAT_ICON), 2),
+        pad(signEntry("score-natural", "Natural", "=", { key: "Shift-ArrowUp", with: "ArrowDown" }, NATURAL_ICON), 2),
       ]),
       // Ctrl+B and Alt+B: a barline to the left and to the right of the
       // cursor's place, as for a note (scoreKeys). The names are the ones the
@@ -22715,6 +23059,11 @@
       row("score-chord"),
       row("score-take-out"),
       { name: "score-keys-back", tip: "Take out and move left", bind: { key: "Backspace" } },
+      "|",
+      row("score-dot"),
+      row("score-sharp"),
+      row("score-flat"),
+      row("score-natural"),
       { title: "Bars" },
       row("score-bar-before"),
       row("score-bar-after"),
@@ -22918,7 +23267,8 @@
     const buttons = faces.buttons.face;
     title(buttons, "Notes");
     // The pad: the figures in a row, then the rest, the chord and what takes
-    // out, and under them the line that names the key under the pointer or
+    // out, then the dot and the three signs, and under them the line that
+    // names the key under the pointer or
     // the focus, as the panel of the music symbols names its cells (a glyph
     // carries no words of its own, and a tip would be cut by the panel's
     // edge, which scrolls).
@@ -22930,11 +23280,12 @@
       caption.textContent = (key && key.getAttribute("aria-label")) || "\u00a0";
     };
     name(null);
-    const keys = roster.notes.filter(function (entry) {
-      return !!entry.pad;
+    // In the runs the roster puts them in (scoreRoster's pad).
+    const runs = [];
+    roster.notes.forEach(function (entry) {
+      if (entry.pad) (runs[entry.run] = runs[entry.run] || []).push(entry);
     });
-    const figures = Object.keys(FIGURE_KEYS).length;
-    [keys.slice(0, figures), keys.slice(figures)].forEach(function (run) {
+    runs.forEach(function (run) {
       const pad = document.createElement("div");
       pad.className = "mdm-score-panel__pad";
       run.forEach(function (entry) {
@@ -22943,7 +23294,7 @@
         btn.className = "mdm-btn mdm-score-panel__key";
         btn.setAttribute("data-type", entry.name);
         btn.setAttribute("aria-label", entry.tip);
-        btn.setAttribute("aria-keyshortcuts", keyAria(entry.bind));
+        if (keyAria(entry.bind)) btn.setAttribute("aria-keyshortcuts", keyAria(entry.bind));
         btn.innerHTML = entry.icon;
         const cap = document.createElement("span");
         cap.className = "mdm-score-panel__cap";

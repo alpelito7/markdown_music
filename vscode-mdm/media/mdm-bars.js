@@ -2681,6 +2681,349 @@
     return { source: now, after: -1, edits: edits, key: found.voice.key };
   }
 
+  // ---------- A dot put on a place, or taken off ----------
+  //
+  // The score mode's `.` (main.js), the owner's ask of 2026-11-16
+  // ("Implementa el dot con ."): the place under the cursor, a note, a chord
+  // or a rest, made half as long again, or given back its figure where it
+  // has a dot already, or two. Written as a figure's key writes a length
+  // (writeNote), so the place changes itself and nothing beside it, and its
+  // bar is that much longer or shorter, which is the reader's to settle (the
+  // owner's call of 2026-10-04); and refused where a figure's key is: on a
+  // note tied to another, on a note of a tuplet, and on one of a broken
+  // rhythm, whose dot is the rhythm's (`c>d` reads c as a dotted eighth,
+  // and a length written on it reads otherwise, which the reading back
+  // finds). A length that is no figure, with dots or without (five eighths,
+  // a half tied to an eighth written as one note), has no dot to put on or
+  // take off.
+  //
+  // Returns what writeNote returns, or { refused }.
+  function dotNote(A, src, at) {
+    if (!A || typeof A.parseOnly !== "function") return refuse("engine");
+    const tune = parsed(A, src);
+    if (!tune) return refuse("parse");
+    const found = placeOf(
+      tune.lines.filter(function (line) {
+        return line.staff;
+      }),
+      at
+    );
+    if (!found) return refuse("notePlace");
+    const el = found.voice.elems[found.index];
+    // A rest of whole bars (`Z`) lasts what its bar does, which is no figure
+    // a dot is put on, whatever the meter.
+    if (el.rest && el.rest.type === "multimeasure") return refuse("noteDot");
+    if (el.rest ? !/^(?:rest|whole)$/.test(el.rest.type) : !el.pitches || !el.pitches.length) return refuse("notePlace");
+    const length = dotLength(el.duration);
+    if (length === null) return refuse("noteDot");
+    // A head the place has already, which keeps every head as it is.
+    return writeNote(A, src, at, el.rest ? { rest: true, duration: length } : { step: el.pitches[0].verticalPos, duration: length });
+  }
+
+  // The length a dot gives a place, or takes from it: a figure made half as
+  // long again, and a figure with one dot or two given back the figure. From
+  // the breve down to the 128th, which is a 64th's dot. Null for a length
+  // that is no figure with dots or without.
+  function dotLength(length) {
+    for (let figure = 2; figure > 1 / 256; figure /= 2) {
+      if (Math.abs(length - figure) < EPS) return (figure * 3) / 2;
+      if (Math.abs(length - (figure * 3) / 2) < EPS || Math.abs(length - (figure * 7) / 4) < EPS) return figure;
+    }
+    return null;
+  }
+
+  // ---------- A sign put on a head, or taken off ----------
+  //
+  // The score mode's accidentals (main.js), the owner's keys of 2026-11-16:
+  // Shift with Up a sharp, with Down a flat, and with the two together a
+  // natural, on the head of the cursor's place at the cursor's step. The
+  // sign asked for is written in front of that head, or taken off where the
+  // head wears it already; nothing else of the place is touched, its length,
+  // its other heads, what is written on it.
+  //
+  // A sign holds to the end of its bar, for the same note in the same octave
+  // (measured on abcjs 6.7.0: after `^F` an `F` sounds F sharp and an `f` F
+  // natural), so a sign put on or taken off would change the notes after the
+  // head in its bar that wear none. They keep the pitch they had: the first
+  // of them is given the sign that says it, and the rest read it from there
+  // (`F G F` with a sharp on the first F is `^F G =F`). A sign of their own
+  // is theirs and stays, one the change leaves saying nothing too: nothing
+  // tells a natural written here from one the reader wrote (found by the
+  // second reading of 2026-11-16, `F G ^F A` losing its second sharp), so
+  // the same key again leaves `^F` taken off and the natural on the F after
+  // it, which says the pitch that F has. The editor gives the text back
+  // whole where the key is pressed again with nothing else changed
+  // (scoreLastToggle in main.js). The notes past a key changed inside the
+  // bar are left to the reading back. My call of
+  // 2026-11-16, put to the owner with what the page would read otherwise
+  // (tests/README.md); the rule a barline put in keeps, which is refused
+  // where it would stop a sign from carrying (insertBar).
+  //
+  // Refused on a head tied to another, which would be left tying two
+  // pitches, as writeNote refuses a length there; and where the head is not
+  // written plainly enough to find (a chord with two heads at one pitch, a
+  // quarter tone). Read back with abcjs: the voice reads as it did but for
+  // the signs written, every other voice as it did, and every note sounds as
+  // it did but the head's own.
+  //
+  // `at` is a character of the place, `step` the head's (verticalPos, the
+  // step the cursor stands on) and `sign` "^", "_" or "=". Returns
+  // { source, at }, with where the place begins in the new source, or
+  // { refused }.
+  const SIGN_TEXT = { sharp: "^", flat: "_", natural: "=", dblsharp: "^^", dblflat: "__" };
+  const SIGN_STEP = { "^^": 2, "^": 1, "=": 0, _: -1, __: -2 };
+  const STEP_SIGN = { 2: "^^", 1: "^", 0: "=", "-1": "_", "-2": "__" };
+
+  function writeSign(A, src, at, step, sign) {
+    if (!A || typeof A.parseOnly !== "function") return refuse("engine");
+    if (sign !== "^" && sign !== "_" && sign !== "=") return refuse("notePlace");
+    const tune = parsed(A, src);
+    if (!tune) return refuse("parse");
+    const systems = tune.lines.filter(function (line) {
+      return line.staff;
+    });
+    const found = placeOf(systems, at);
+    if (!found) return refuse("notePlace");
+    const s = found.system;
+    const key = found.voice.key;
+    const elems = found.voice.elems;
+    const first = found.index;
+    const el = elems[first];
+    const pitch = el.rest
+      ? null
+      : (el.pitches || []).filter(function (one) {
+          return one.verticalPos === step;
+        })[0];
+    if (!pitch) return refuse("notePlace");
+    if (pitch.startTie || pitch.endTie) return refuse("noteTie");
+    const had = pitch.accidental ? SIGN_TEXT[pitch.accidental] : "";
+    if (had === undefined) return refuse("noteUnsafe");
+    const own = headText(src, el, pitch.pitch);
+    if (!own || own.sign !== had) return refuse("noteUnsafe");
+    const now = had === sign ? "" : sign;
+    const edits = [{ from: own.from, to: own.from + had.length, insert: now }];
+
+    // The notes after it in its bar that read the sign it leaves: as long
+    // as the head sounds as it did, so do they; else the first of them is
+    // written with what it sounded.
+    const music = voiceOn(src, elems);
+    let run = null;
+    barsOf(elems, music).forEach(function (bar) {
+      if (bar.indexOf(first) >= 0) run = bar;
+    });
+    if (!run) return refuse("noteUnsafe");
+    const bare = carriedIn(systems, key, s, elems, run, first, pitch.pitch);
+    const was = had ? SIGN_STEP[had] : bare;
+    const will = now ? SIGN_STEP[now] : bare;
+    let mended = -1;
+    if (was !== will) {
+      for (let k = run.indexOf(first) + 1; k < run.length && mended < 0; k++) {
+        const later = elems[run[k]];
+        // A key changed inside the bar: past it a note reads the sign
+        // carried across it or the new key, and what it sounded is not the
+        // head's to say; it is left to the reading back, which refuses a
+        // change there (the review's `F [K:G] F` with a sharp on the first F
+        // was refused for mending the second as if it read the head).
+        if (later.el_type === "key") break;
+        if (later.el_type !== "note" || later.rest || !later.pitches) continue;
+        const same = later.pitches.filter(function (one) {
+          return one.pitch === pitch.pitch;
+        })[0];
+        if (!same) continue;
+        // One with a sign of its own reads none from the head, nor does
+        // anything after it, and its sign is the reader's.
+        if (same.accidental) break;
+        const text = headText(src, later, same.pitch);
+        if (!text || text.sign !== "") return refuse("noteUnsafe");
+        edits.push({ from: text.from, to: text.from, insert: STEP_SIGN[was] });
+        mended = run[k];
+      }
+    }
+    const out = apply(src, edits);
+    if (out === null) return refuse("noteUnsafe");
+    const check = verifySign(A, src, out, { key: key, s: s, first: first, mended: mended, step: step, sign: now, at: el.startChar });
+    if (check) return refuse(check);
+    return { source: out, at: el.startChar };
+  }
+
+  // The step from its letter a head of the pitch `p` sounds with where it
+  // wears no sign of its own, just before the element `first` of `run`, its
+  // bar: the sign the last head of that pitch before it in the bar wears,
+  // a key changed between them or not (abcjs carries a sign across one:
+  // `_F [K:G] F` plays both F flat, measured on 6.7.0), or else the key's
+  // for its letter, in any octave, the key being the one in force there
+  // (keyAt).
+  function carriedIn(systems, key, s, elems, run, first, p) {
+    let carried = null;
+    run.forEach(function (i) {
+      const el = elems[i];
+      if (i >= first || el.el_type !== "note" || el.rest || !el.pitches) return;
+      el.pitches.forEach(function (one) {
+        if (one.pitch === p && one.accidental && SIGN_TEXT[one.accidental]) carried = SIGN_STEP[SIGN_TEXT[one.accidental]];
+      });
+    });
+    if (carried !== null) return carried;
+    const letter = "cdefgab".charAt(((p % 7) + 7) % 7);
+    let step = 0;
+    const k = keyAt(systems, key, s, first);
+    ((k && k.accidentals) || []).forEach(function (a) {
+      if (String(a.note).toLowerCase() === letter) step = SIGN_STEP[SIGN_TEXT[a.acc]] || 0;
+    });
+    return step;
+  }
+
+  // The key a voice is in at its element `e` of the system `s`: the last one
+  // its staff names on a line up to there, or one written inline in the
+  // voice before it, as abcjs keeps them (a key written on a line of its own
+  // is the staff's of the next line, its naturals listed with it).
+  function keyAt(systems, key, s, e) {
+    const staff = Number(key.split("/")[0]);
+    let found = null;
+    for (let i = 0; i <= s; i++) {
+      const line = systems[i].staff[staff];
+      if (line && line.key) found = line.key;
+      const voice = voiceIn(systems[i], key);
+      if (!voice) continue;
+      const last = i === s ? e : voice.elems.length - 1;
+      for (let j = 0; j <= last && j < voice.elems.length; j++) {
+        if (voice.elems[j].el_type === "key") found = voice.elems[j];
+      }
+    }
+    return found;
+  }
+
+  // Where the head of a place at the pitch `p` is written, as abcjs numbers
+  // pitches (0 the C under the treble staff, 7 the `c` over it): { from,
+  // sign }, `from` where its sign stands or would stand and `sign` the sign
+  // written there, or "". A chord's heads are read one by one, each with
+  // the length it may carry and a tie after it. abcjs counts a voice's
+  // octave in its pitches (`octave=-1` makes a written F the F below), so
+  // the heads written are matched to its pitches by the one shift between
+  // the two, read off the place itself (found by the second reading of
+  // 2026-11-16: until then a voice with `octave=` refused every sign). Null
+  // for a place this does not read: anything else inside a chord's
+  // brackets, heads that do not match its pitches by one shift, two heads
+  // at that pitch, none, or a quarter tone.
+  function headText(src, el, p) {
+    const parts = noteParts(src, el);
+    if (!parts || !el.pitches) return null;
+    const chord = src.charAt(parts.from) === "[";
+    const base = chord ? parts.from + 1 : parts.from;
+    const text = src.slice(base, chord ? parts.body - 1 : parts.body);
+    const head = /\s*(\^\^|\^|__|_|=)?([A-Ga-g])([,']*)[0-9]*(?:\/[0-9]*)*-?\s*/y;
+    const heads = [];
+    let i = 0;
+    while (i < text.length) {
+      head.lastIndex = i;
+      const m = head.exec(text);
+      if (!m || !m[0].length) return null;
+      let pitch = "CDEFGAB".indexOf(m[2].toUpperCase()) + (m[2] === m[2].toLowerCase() ? 7 : 0);
+      for (let k = 0; k < m[3].length; k++) pitch += m[3].charAt(k) === "'" ? 7 : -7;
+      const lead = m[0].length - m[0].replace(/^\s+/, "").length;
+      heads.push({ from: base + i + lead, sign: m[1] || "", pitch: pitch });
+      i += m[0].length;
+    }
+    const written = heads.map(function (one) {
+      return one.pitch;
+    }).sort(function (a, b) {
+      return a - b;
+    });
+    const read = el.pitches.map(function (one) {
+      return one.pitch;
+    }).sort(function (a, b) {
+      return a - b;
+    });
+    if (!written.length || written.length !== read.length) return null;
+    const shift = read[0] - written[0];
+    for (let k = 1; k < read.length; k++) if (read[k] - written[k] !== shift) return null;
+    const found = heads.filter(function (one) {
+      return one.pitch + shift === p;
+    });
+    return found.length === 1 ? { from: found[0].from, sign: found[0].sign } : null;
+  }
+
+  // What the synth plays, track by track, each note with where it was read
+  // from: the place it sounds for (startChar), its pitch, and the rest of
+  // it (how long, on what, with what gap after it). Null where the synth
+  // cannot read the tune.
+  function soundsOf(A, src) {
+    const tune = parsed(A, src);
+    if (!tune) return null;
+    try {
+      const played = tune.setUpAudio({ chordsOff: true });
+      return (played.tracks || []).map(function (track) {
+        return track
+          .filter(function (event) {
+            return event.cmd === "note";
+          })
+          .map(function (event) {
+            return { at: event.startChar, pitch: event.pitch, rest: [event.duration, event.instrument, event.gap].join(",") };
+          });
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // A voice's item as it reads with the signs of its heads left out: what
+  // a sign written changes of it, and nothing else.
+  function unsigned(item) {
+    const value = JSON.parse(item);
+    (value.pitches || []).forEach(function (one) {
+      delete one.accidental;
+      if (typeof one.name === "string") one.name = one.name.replace(/^(?:\^\^|\^|__|_|=)/, "");
+    });
+    return JSON.stringify(value);
+  }
+
+  // Null when a sign went on as it should, or why it did not: every other
+  // voice reads as it did; the voice reads as it did but for the signs of
+  // the place (the element `first` of the system `s`) and of the one
+  // mended after it, which wear the signs planned; every note sounds as it
+  // did but the head's own, which the synth reads at the place (`at`, where
+  // the place begins, which a sign written inside it does not move); and
+  // every line has the bars it had.
+  function verifySign(A, before, after, plan) {
+    const was = reading(A, before, true);
+    const now = reading(A, after);
+    if (!was || !now) return "parse";
+    const keys = Object.keys(was.voices).sort();
+    if (keys.join() !== Object.keys(now.voices).sort().join()) return "noteUnsafe";
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i] !== plan.key && was.voices[keys[i]].join("\n") !== now.voices[keys[i]].join("\n")) return "noteUnsafe";
+    }
+    const a = was.voices[plan.key];
+    const b = now.voices[plan.key];
+    if (a.length !== b.length) return "noteUnsafe";
+    const x = placeIndex(was.at[plan.key], plan);
+    const y = plan.mended >= 0 ? placeIndex(was.at[plan.key], { s: plan.s, first: plan.mended }) : -1;
+    if (x < 0 || (plan.mended >= 0 && y < 0)) return "noteUnsafe";
+    for (let j = 0; j < a.length; j++) {
+      if (a[j] === b[j]) continue;
+      if ((j !== x && j !== y) || unsigned(a[j]) !== unsigned(b[j])) return "noteUnsafe";
+    }
+    const head = (JSON.parse(b[x]).pitches || []).filter(function (one) {
+      return one.verticalPos === plan.step;
+    })[0];
+    if (!head || (head.accidental ? SIGN_TEXT[head.accidental] : "") !== plan.sign) return "noteUnsafe";
+    const heard = soundsOf(A, before);
+    const heardNow = soundsOf(A, after);
+    if (!heard || !heardNow || heard.length !== heardNow.length) return "noteUnsafe";
+    for (let t = 0; t < heard.length; t++) {
+      if (heard[t].length !== heardNow[t].length) return "noteUnsafe";
+      for (let i = 0; i < heard[t].length; i++) {
+        const p = heard[t][i];
+        const q = heardNow[t][i];
+        if (p.rest !== q.rest) return "noteUnsafe";
+        if (p.pitch !== q.pitch && (p.at !== plan.at || q.at !== plan.at)) return "noteUnsafe";
+      }
+    }
+    const bars = systemBars(before, A, plan.key);
+    const next = systemBars(after, A, plan.key);
+    if (!bars || !next || bars.join() !== next.join()) return "noteUnsafe";
+    return null;
+  }
+
   // What a stretch of a voice goes as, before anything is asked of what it
   // leaves behind: the lines it is cut on, the edit of each, and the
   // elements that go with it. `slices` names it line by line, and `music`
@@ -4508,6 +4851,10 @@
     // is that long (lengthOne): my wording of 2026-10-06 until the owner
     // chooses.
     noteLength: "No note is that long",
+    // A dot put on a place (dotNote), my wording of 2026-11-16 until the
+    // owner chooses: a length that is no figure, which has no dot to
+    // put on or take off.
+    noteDot: "No dot for this length",
     // A place taken out (takeOut) and a bar (takeBarOut), my wording of
     // 2026-10-02 until the owner chooses: a slur on the place, and the last
     // bar of the score. A stretch that is all of its voice (pasteMusic),
@@ -4672,6 +5019,8 @@
     moveBars: moveBars,
     addBar: addBar,
     writeNote: writeNote,
+    dotNote: dotNote,
+    writeSign: writeSign,
     insertPlace: insertPlace,
     insertBar: insertBar,
     takeEmptyBar: takeEmptyBar,
@@ -4689,6 +5038,7 @@
     verify: verify,
     verifyAdd: verifyAdd,
     verifyNote: verifyNote,
+    verifySign: verifySign,
     verifyInsert: verifyInsert,
     verifyBar: verifyBar,
     verifyPaste: verifyPaste,

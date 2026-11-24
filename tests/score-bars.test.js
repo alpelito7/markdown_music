@@ -4150,3 +4150,235 @@ test("what is taken out takes what the verses under it gave it: a syllable with 
   // Every one of them: 3n - 4 stretches of a score of n places, and n places.
   assert.deepEqual([made, places], [84, 32]);
 });
+
+// ---------- A dot, and a sign ----------
+//
+// The score mode's `.` and its Shift with Up, with Down and with the two
+// together (the owner's keys of 2026-11-16): a dot put on the cursor's place
+// or taken off (dotNote), and a sharp, a flat or a natural put on the head
+// the cursor stands on or taken off (writeSign).
+
+function dot(source, needle, nth) {
+  let at = bodyOf(source) - 1;
+  for (let i = 0; i <= (nth || 0); i++) at = source.indexOf(needle, at + 1);
+  assert.ok(at >= 0, "no " + needle + " in the fixture");
+  return MDM_BARS.dotNote(ABCJS, source, at);
+}
+
+function sign(source, needle, step, which, nth) {
+  let at = bodyOf(source) - 1;
+  for (let i = 0; i <= (nth || 0); i++) at = source.indexOf(needle, at + 1);
+  assert.ok(at >= 0, "no " + needle + " in the fixture");
+  return MDM_BARS.writeSign(ABCJS, source, at, step, which);
+}
+
+// What the synth plays, track by track, note by note: the pitch and how
+// long, in the order played. Read apart from the module's own check.
+function played(source) {
+  return ABCJS.parseOnly(source)[0]
+    .setUpAudio({ chordsOff: true })
+    .tracks.map((track) => track.filter((e) => e.cmd === "note").map((e) => e.pitch + "/" + e.duration));
+}
+
+test("a dot makes a place half as long again, and gives a dotted one back its figure: a note, a chord, a rest; the bar is that much longer or shorter", () => {
+  const plain = COMMON + "C2 D2 E2 F2 |]";
+  const on = dot(plain, "D2");
+  assert.equal(lastLine(on), "C2 D3 E2 F2 |]");
+  assert.equal(on.duration, 3 / 8);
+  // Again: the figure back, to the character.
+  assert.equal(lastLine(dot(on.source, "D3")), "C2 D2 E2 F2 |]");
+  // Two dots are taken off at once.
+  assert.equal(lastLine(dot(COMMON + "C2 D7/2 E/2 F2 |]", "D7/2")), "C2 D2 E/2 F2 |]");
+  assert.equal(lastLine(dot(COMMON + "C2 z2 E2 F2 |]", "z2")), "C2 z3 E2 F2 |]");
+  assert.equal(lastLine(dot(COMMON + "[CE]2 D2 E2 F2 |]", "[CE]")), "[CE]3 D2 E2 F2 |]");
+  // A half in 3/4 dotted fills its bar.
+  assert.equal(lastLine(dot(WALTZ + "G2 A | B3 |]", "G2")), "G3 A | B3 |]");
+  // Nothing beside the place moves: the bar is an eighth longer than its
+  // meter, which is the reader's to settle (the owner's call of 2026-10-04).
+  const before = music(plain)["0/0"];
+  const after = music(on.source)["0/0"];
+  assert.deepEqual(after.filter((_, i) => i !== 1), before.filter((_, i) => i !== 1));
+  assert.deepEqual([before[1], after[1]], ["1 0.25 ", "1 0.375 "]);
+  // An eighth dotted beside an eighth in its beat is written against it, as
+  // a figure's key writes one, so the two are beamed.
+  assert.equal(lastLine(dot(COMMON + "C D E F G A B c |]", "D")), "CD3/2 E F G A B c |]");
+});
+
+test("a dot is refused where a figure's key is, on a tie, a tuplet and the dot of a broken rhythm, and on a length that is no figure, in words of its own", () => {
+  assert.equal(dot(COMMON + "C2- C2 E2 F2 |]", "C2-").refused, "noteTie");
+  assert.equal(dot(COMMON + "(3CDE F2 G2 z2 |]", "D").refused, "noteUnsafe");
+  // `C>D` reads C as a dotted eighth: the dot is the rhythm's, and taking
+  // it off is refused. The sixteenth after it takes one, written as abcjs
+  // reads it under the rhythm (D3/2 halved is a dotted sixteenth).
+  assert.equal(dot(COMMON + "C>D E2 F2 z2 |]", "C>").refused, "noteUnsafe");
+  const second = dot(COMMON + "C>D E2 F2 z2 |]", "D E2");
+  assert.equal(lastLine(second), "C>D3/2 E2 F2 z2 |]");
+  assert.equal(second.duration, 3 / 32);
+  // Five eighths: no figure, so no dot to put on or take off.
+  assert.equal(dot(COMMON + "C5 D3 |]", "C5").refused, "noteDot");
+  assert.equal(MDM_BARS.reasonText("noteDot"), "No dot for this length");
+  assertShortReason("noteDot");
+  // A rest that draws nothing is no place, and a rest of whole bars lasts
+  // what its bar does, which is no figure.
+  assert.equal(dot(COMMON + "x2 D2 E2 F2 |]", "x2").refused, "notePlace");
+  assert.equal(dot("X:1\nM:3/4\nL:1/4\nK:C\nZ | C D E |]", "Z").refused, "noteDot");
+});
+
+test("a sign goes on the head at the step asked for and the same sign again takes it off, another sign takes its place, and nothing else of the place is touched", () => {
+  const plain = COMMON + "F2 G2 A2 B2 |]";
+  const sharp = sign(plain, "F2", 3, "^");
+  assert.equal(lastLine(sharp), "^F2 G2 A2 B2 |]");
+  assert.equal(lastLine(sign(sharp.source, "^F2", 3, "^")), "F2 G2 A2 B2 |]");
+  assert.equal(lastLine(sign(sharp.source, "^F2", 3, "_")), "_F2 G2 A2 B2 |]");
+  assert.equal(lastLine(sign(plain, "F2", 3, "_")), "_F2 G2 A2 B2 |]");
+  assert.equal(lastLine(sign(plain, "F2", 3, "=")), "=F2 G2 A2 B2 |]");
+  assert.equal(lastLine(sign(COMMON + "^^F2 G2 A2 B2 |]", "^^F2", 3, "^")), "^F2 G2 A2 B2 |]");
+  // A chord symbol, a decoration, a slur and a length stay as written.
+  assert.equal(lastLine(sign(COMMON + '"Am"!p!(F2 G2) A2 B2 |]', "F2", 3, "^")), '"Am"!p!(^F2 G2) A2 B2 |]');
+  // A chord's head at the step, its other heads and their lengths kept.
+  assert.equal(lastLine(sign(COMMON + "[CEG]2 D2 c2 d2 |]", "[CEG]", 2, "_")), "[C_EG]2 D2 c2 d2 |]");
+  assert.equal(lastLine(sign(COMMON + "[C2E2] D2 c2 d2 |]", "[C2E2]", 0, "^")), "[^C2E2] D2 c2 d2 |]");
+  // Where there is no head to put it on: a rest, and a step the place has
+  // no head at.
+  assert.equal(sign(COMMON + "z2 G2 A2 B2 |]", "z2", 3, "^").refused, "notePlace");
+  assert.equal(sign(plain, "F2", 5, "^").refused, "notePlace");
+  // A head tied to another, which would be left tying two pitches.
+  assert.equal(sign(COMMON + "F2- F2 A2 B2 |]", "F2-", 3, "^").refused, "noteTie");
+  assert.equal(sign(COMMON + "F2- F2 A2 B2 |]", "F2 A2", 3, "^").refused, "noteTie");
+  // Two heads at one pitch in a chord: which one is meant cannot be read;
+  // nor a quarter tone, which no sign of these is.
+  assert.equal(sign(COMMON + "[F^F]2 G2 A2 B2 |]", "[F^F]", 3, "^").refused, "noteUnsafe");
+  assert.equal(sign(COMMON + "^/F2 G2 A2 B2 |]", "^/F2", 3, "^").refused, "noteUnsafe");
+});
+
+test("a sign keeps the notes after it in its bar at their pitch: the first that read it is given the sign it sounded with; a sign of their own stays, the next bar and another octave are left as they are, and a sign is carried across a key changed in the bar as abcjs plays it", () => {
+  const cases = [
+    // [source, needle, step, sign, what the line becomes, which note of the
+    // line the head is, where it is not the first]
+    [COMMON + "F2 G2 F2 f2 | F2 z6 |]", "F2", 3, "^", "^F2 G2 =F2 f2 | F2 z6 |]"],
+    // Taken off: the F after it read the sharp, and keeps it.
+    [COMMON + "^F2 G2 F2 F2 |]", "^F2", 3, "^", "F2 G2 ^F2 F2 |]"],
+    [COMMON + "^F2 G2 F2 F2 |]", "^F2", 3, "_", "_F2 G2 ^F2 F2 |]"],
+    // In G, an F reads the key's sharp: a natural on the first leaves the
+    // next a sharp of its own.
+    [WALTZ + "F2 F | F3 |]", "F2", 3, "=", "=F2 ^F | F3 |]"],
+    // A sign that changes nothing of what sounds, in G a sharp on an F:
+    // nothing after it changes either.
+    [WALTZ + "F2 F | F3 |]", "F2", 3, "^", "^F2 F | F3 |]"],
+    // A later F with a sign of its own reads none from the head.
+    [COMMON + "F2 G2 =F2 F2 |]", "F2", 3, "^", "^F2 G2 =F2 F2 |]"],
+    // In a chord after it.
+    [COMMON + "F2 G2 [DF]2 A2 |]", "F2", 3, "_", "_F2 G2 [D=F]2 A2 |]"],
+    // A head that reads the sign of an F before it: the F after it read the
+    // same sharp, and keeps it.
+    [COMMON + "^F G F A F G A B |]", "F A", 3, "_", "^F G _F A ^F G A B |]", 2],
+    // A sign of a later note's own is the reader's and stays, one the change
+    // leaves saying nothing too (the second reading of 2026-11-16): the
+    // sharp taken off leaves the natural on the F after it, which says the
+    // pitch that F has; and a sharp the reader wrote on a later F stays.
+    [COMMON + "^F2 G2 =F2 f2 | F2 z6 |]", "^F2", 3, "^", "F2 G2 =F2 f2 | F2 z6 |]"],
+    [COMMON + "_F2 G2 =F2 A2 |]", "_F2", 3, "_", "F2 G2 =F2 A2 |]"],
+    [WALTZ + "^F2 =F | F3 |]", "^F2", 3, "^", "F2 =F | F3 |]"],
+    [COMMON + "F G ^F A F G A B |]", "F G", 3, "^", "^F G ^F A F G A B |]"],
+    // A key changed inside the bar: abcjs carries a sign across it (`_F
+    // [K:G] F` plays both F flat), so a head past it reads the sign before
+    // it; and the notes past a key changed after the head are left as they
+    // are when they sound as they did (here G's F sharp, and the sharp).
+    [COMMON + "F [K:G] F G2 z4 |]", "F [K", 3, "^", "^F [K:G] F G2 z4 |]"],
+    [COMMON + "^F [K:G] F G2 F z3 |]", "F G2", 3, "=", "^F [K:G] =F G2 ^F z3 |]", 1],
+    [COMMON + "_F [K:G] F G2 F z3 |]", "F G2", 3, "=", "_F [K:G] =F G2 _F z3 |]", 1],
+    // A tie after a head inside a chord's brackets.
+    [COMMON + "[F-A]2 [FA]2 z4 |]", "[F-A]", 5, "_", "[F-_A]2 [F=A]2 z4 |]", 1],
+  ];
+  for (const [source, needle, step, which, line, head] of cases) {
+    const out = sign(source, needle, step, which);
+    assert.equal(lastLine(out), line, needle + " " + which + " in " + source.split("\n").pop());
+    // Every note sounds as it did but the head's own, the first of the line
+    // unless the case says which.
+    const was = played(source);
+    const now = played(out.source);
+    assert.equal(now[0].length, was[0].length);
+    now[0].forEach((p, i) => {
+      if (i !== (head || 0)) assert.equal(p, was[0][i], "note " + i + " of " + line + " sounds otherwise");
+    });
+  }
+});
+
+test("a sign is read in the key in force where it is written, at the step of the clef in force, and in a voice an octave away from what it writes", () => {
+  // In F after a key changed inline, B is B flat: a natural on the first
+  // leaves the second a flat of its own.
+  assert.equal(lastLine(sign("X:1\nL:1/8\nK:G\nF G [K:F] B B |]", "B B", 6, "=")), "F G [K:F] =B _B |]");
+  // A key changed on a line of its own is the next line's.
+  assert.equal(lastLine(sign("X:1\nL:1/8\nK:C\nC D E F |\nK:Bb\nB B c d |]", "B B", 6, "=")), "=B _B c d |]");
+  // In the bass clef the head of F, is at its own step.
+  const bass = "X:1\nL:1/8\nK:C clef=bass\nF,2 G,2 F,2 C2 |]";
+  const step = ABCJS.parseOnly(bass)[0].lines[0].staff[0].voices[0].find((el) => el.el_type === "note").pitches[0].verticalPos;
+  assert.notEqual(step, -4, "the bass clef draws F, where the treble would: the test reads nothing");
+  assert.equal(lastLine(sign(bass, "F,2", step, "^")), "^F,2 G,2 =F,2 C2 |]");
+  // A voice or a key with `octave=` counts its octave in abcjs's pitches and
+  // not in its text: the head is found all the same (the second reading of
+  // 2026-11-16: until then every sign was refused there).
+  for (const source of ["X:1\nL:1/8\nK:C\nV:1 octave=-1\nF2 G2 F2 B2 |]", "X:1\nL:1/8\nK:C octave=1\nF2 G2 F2 B2 |]"]) {
+    const at = ABCJS.parseOnly(source)[0].lines[0].staff[0].voices[0].find((el) => el.el_type === "note").pitches[0].verticalPos;
+    assert.equal(lastLine(sign(source, "F2", at, "^")), "^F2 G2 =F2 B2 |]", source.split("\n")[3]);
+  }
+});
+
+// The check a sign passes before it is handed out (verifySign), put to work
+// on its own: what the writing above gets right, the check must also refuse
+// when it is wrong, or a fault there would pass unseen.
+test("the check of a sign refuses a later note left to read it, a note that sounds otherwise, a sign other than the one planned, and a voice that reads otherwise", () => {
+  const source = COMMON + "F2 G2 F2 A2 |]";
+  const plan = (mended, sign_) => ({ key: "0/0", s: 0, first: 0, mended: mended, step: 3, sign: sign_, at: source.indexOf("F2") });
+  const good = COMMON + "^F2 G2 =F2 A2 |]";
+  assert.equal(MDM_BARS.verifySign(ABCJS, source, good, plan(2, "^")), null);
+  // The later F left without its natural sounds F sharp now.
+  assert.equal(MDM_BARS.verifySign(ABCJS, source, COMMON + "^F2 G2 F2 A2 |]", plan(-1, "^")), "noteUnsafe");
+  // Another note changed.
+  assert.equal(MDM_BARS.verifySign(ABCJS, source, COMMON + "^F2 G2 =F2 _A2 |]", plan(2, "^")), "noteUnsafe");
+  // The head wears another sign than the one planned.
+  assert.equal(MDM_BARS.verifySign(ABCJS, source, COMMON + "_F2 G2 =F2 A2 |]", plan(2, "^")), "noteUnsafe");
+  // A length changed with it.
+  assert.equal(MDM_BARS.verifySign(ABCJS, source, COMMON + "^F3 G2 =F2 A2 |]", plan(2, "^")), "noteUnsafe");
+  // Something else written on the head, which sounds the same: the voice
+  // reads otherwise than by its signs.
+  assert.equal(MDM_BARS.verifySign(ABCJS, source, COMMON + '"Am"^F2 G2 =F2 A2 |]', plan(2, "^")), "noteUnsafe");
+  // A voice that is not the head's reads otherwise.
+  const duet = COMMON + "V:1\nF2 G2 F2 A2 |]\nV:2\nC2 D2 E2 F2 |]";
+  const p = { key: "0/0", s: 0, first: 0, mended: 2, step: 3, sign: "^", at: duet.indexOf("F2") };
+  assert.equal(MDM_BARS.verifySign(ABCJS, duet, duet.replace("F2 G2 F2 A2", "^F2 G2 =F2 A2"), p), null);
+  assert.equal(MDM_BARS.verifySign(ABCJS, duet, duet.replace("F2 G2 F2 A2", "^F2 G2 =F2 A2").replace("C2 D2", "C2 _D2"), p), "noteUnsafe");
+  // And one that reads otherwise and sounds the same: a chord symbol.
+  assert.equal(MDM_BARS.verifySign(ABCJS, duet, duet.replace("F2 G2 F2 A2", "^F2 G2 =F2 A2").replace("C2 D2", '"Am"C2 D2'), p), "noteUnsafe");
+});
+
+// The engine keeps a sign a later note wears, so the same sign twice gives
+// back what sounds and not always the text (a natural it wrote stays, as a
+// courtesy one); the editor gives the text back whole where the key is
+// pressed again with nothing written between (SM133).
+test("the same sign twice on a head takes it off again, on every head of a bar and with every sign, in C and in G: every note sounds as it did and the head wears what it wore", () => {
+  for (const source of [COMMON + "F2 G2 F2 f2 | F2 [DF]2 c2 F2 |]", WALTZ + "F2 F | [DF] F G |]"]) {
+    const tune = ABCJS.parseOnly(source)[0];
+    const voice = tune.lines[0].staff[0].voices[0];
+    let count = 0;
+    voice.forEach((el) => {
+      if (el.el_type !== "note" || el.rest) return;
+      el.pitches.forEach((p) => {
+        for (const which of ["^", "_", "="]) {
+          const once = MDM_BARS.writeSign(ABCJS, source, el.startChar, p.verticalPos, which);
+          assert.equal(once.refused, undefined, which + " on " + p.name + ": " + once.refused);
+          const twice = MDM_BARS.writeSign(ABCJS, once.source, el.startChar, p.verticalPos, which);
+          assert.equal(twice.refused, undefined, which + " again on " + p.name + ": " + twice.refused);
+          assert.deepEqual(played(twice.source), played(source), which + " twice on " + p.name + " at " + el.startChar + " sounds otherwise");
+          const head = (src) =>
+            ABCJS.parseOnly(src)[0]
+              .lines[0].staff[0].voices[0].find((e) => e.startChar === el.startChar)
+              .pitches.find((q) => q.verticalPos === p.verticalPos).accidental;
+          assert.equal(head(twice.source), head(source), which + " twice on " + p.name + ": the head wears another sign");
+          count++;
+        }
+      });
+    });
+    assert.ok(count >= 15, "the sweep put signs on " + count + " heads only");
+  }
+});
