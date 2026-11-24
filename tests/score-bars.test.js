@@ -1016,6 +1016,12 @@ const lastLine = (out) => {
   assert.equal(out.refused, undefined, "refused: " + out.refused);
   return out.source.split("\n").pop();
 };
+// The verse lines of a score, for a sweep to tell those a change wrote.
+const wordLines = (source) =>
+  source
+    .split("\n")
+    .filter((line) => /^w:/.test(line))
+    .join("\n");
 const COMMON = "X:1\nM:4/4\nL:1/8\nK:C\n";
 const JIG = "X:1\nM:6/8\nL:1/8\nK:D\n";
 const WALTZ = "X:1\nM:3/4\nL:1/4\nK:G\n";
@@ -1265,11 +1271,12 @@ test("a head with no figure on a rest is a note as long as the rest: a bar's, a 
   assert.equal(lastLine(write("X:1\nM:5/4\nL:1/4\nK:C\nz5 | Z |]", "Z", { step: 6 })), "z5 | B5 |]");
   // The step is the staff's, and the clef says which note it is.
   assert.equal(lastLine(write("X:1\nM:4/4\nL:1/4\nK:C clef=bass\nz2 z2 |]", "z2", { step: 6 })), "D,2 z2 |]");
-  // Not on the rest of several bars, nor on the one that draws nothing, nor
-  // over a verse, which gives the note a syllable and moves the rest of them.
+  // Not on the rest of several bars, nor on the one that draws nothing.
+  // Over a verse it is given no syllable (2026-11-22): here the verse has
+  // none left for it, and stays as it was.
   assert.equal(write(COMMON + "Z2 | c8 |]", "Z2", { step: 6 }).refused, "noteUnsafe");
   assert.equal(write(COMMON + "x4 c4 |]", "x4", { step: 6 }).refused, "noteUnsafe");
-  assert.equal(write(COMMON + "c2 z2 z4 |]\nw: la", "z2", { step: 6 }).refused, "noteLyrics");
+  assert.equal(write(COMMON + "c2 z2 z4 |]\nw: la", "z2", { step: 6 }).source, COMMON + "c2 B2 z4 |]\nw: la");
 });
 
 test("a head put on or taken off leaves everything else written on the place where it was, each head as it was written", () => {
@@ -1342,12 +1349,14 @@ test("a tie on the place, a verse that would shift under it and voices laid over
   assert.equal(MDM_BARS.takeOut(ABCJS, tied, tied.indexOf("c4"), 7).refused, "noteTie");
   assert.equal(write(tied, "c4", { rest: true }).refused, "noteTie");
   // A syllable goes to every note and to no rest: a head more or less on a
-  // note keeps every one where it was, and a rest made a note would move
-  // the ones after it. A note made a rest gives its syllable up, the
-  // owner's call of 2026-10-15 (the test of what 0 takes from the verses).
+  // note keeps every one where it was, and a rest made a note is given a
+  // `*`, which keeps the ones after it where they were (the owner's call of
+  // 2026-11-22; the test of what the verses give what is put in). A note
+  // made a rest gives its syllable up, his call of 2026-10-15 (the test of
+  // what 0 takes from the verses).
   const sung = COMMON + "C2 z2 E2 F2 |\nw: do mi fa";
   assert.equal(write(sung, "C2", { step: 4 }).source, COMMON + "[CG]2 z2 E2 F2 |\nw: do mi fa");
-  assert.equal(write(sung, "z2", { step: 4, duration: QUARTER }).refused, "noteLyrics");
+  assert.equal(write(sung, "z2", { step: 4, duration: QUARTER }).source, COMMON + "C2 G2 E2 F2 |\nw: do * mi fa");
   assert.equal(write(sung, "E2", { rest: true }).source, COMMON + "C2 z2 z2 F2 |\nw: do fa");
   // A note taken out takes its syllable with it, and none moves (the test
   // of what the verses give up, below).
@@ -1851,12 +1860,13 @@ test("a rest put in goes after the place or before it, in the same bar, set apar
   assert.equal(insert(marked, "C D", QUARTER, "before").source, marked.replace("[V:1] C", "[V:1] z C"));
   assert.equal(lastLine(insert("X:1\nM:4/4\nL:1/4\nK:C\nC D E F |", "C D", HALF, "after")), "C z2 D E F |");
   // A rest takes no syllable, and a verse stays on its notes; but a `*`
-  // takes a rest as a note, and one before the C would give the C the b.
+  // takes a rest as a note, and the one before the C would have given the C
+  // the b: the rest has a `*` of its own (2026-11-22).
   assert.equal(insert(COMMON + "C2 D2 |\nw: a b", "C2", QUARTER, "after").source, COMMON + "C2 z2 D2 |\nw: a b");
-  assert.equal(insert(COMMON + "C2 D2 |\nw: * b", "C2", QUARTER, "before").refused, "noteLyrics");
+  assert.equal(insert(COMMON + "C2 D2 |\nw: * b", "C2", QUARTER, "before").source, COMMON + "z2 C2 D2 |\nw: * * b");
 });
 
-test("a place that would cut a tie, go into a tuplet, pair with a broken rhythm, shift a verse, or go into one of two voices laid over each other, is not put in", () => {
+test("a place that would cut a tie, go into a tuplet, pair with a broken rhythm, or go into one of two voices laid over each other, is not put in; under a verse it is, with nothing under it", () => {
   assert.equal(insert(COMMON + "c4- c4 |", "c4-", QUARTER, "after").refused, "noteTie");
   assert.equal(insert(COMMON + "c4- c4 |", "c4 |", QUARTER, "before", 4).refused, "noteTie");
   // On the side the tie is not, it goes in.
@@ -1865,8 +1875,10 @@ test("a place that would cut a tie, go into a tuplet, pair with a broken rhythm,
   assert.equal(insert(COMMON + "(3CDE z6 |", "E z6", EIGHTH, "before", 4).refused, "noteUnsafe");
   assert.equal(insert(COMMON + "C>D z6 |", "C>", EIGHTH, "after", 4).refused, "noteUnsafe");
   assert.equal(insert(COMMON + "C>D z6 |", "D z6", EIGHTH, "before").refused, "noteUnsafe");
-  // A syllable goes to every note: one more would take the next one's.
-  assert.equal(insert(COMMON + "C2 D2 |\nw: a b", "C2", QUARTER, "after", 4).refused, "noteLyrics");
+  // A syllable goes to every note: one more would have taken the next
+  // one's, and was refused until the owner's call of 2026-11-22; it is
+  // given a `*` (the test of what the verses give what is put in).
+  assert.equal(insert(COMMON + "C2 D2 |\nw: a b", "C2", QUARTER, "after", 4).source, COMMON + "C2 G2 D2 |\nw: a * b");
   assert.equal(insert(COMMON + "C2 D2 & c4 |", "C2", QUARTER, "after").refused, "noteUnsafe");
   assert.equal(insert(COMMON + "C8 | D8 |", "|", QUARTER, "after", 4).refused, "notePlace");
 });
@@ -1875,11 +1887,12 @@ test("a place that would cut a tie, go into a tuplet, pair with a broken rhythm,
 // and at one on it, of several lengths, after it and before it: refused for
 // a reason of the engine's, or the voice as it was with that place beside
 // it, every other voice as it was, and every line with the bars it had.
-test("a sweep of every place, a rest or a note after it and before it: refused, or that place there and nothing else", () => {
+test("a sweep of every place, a rest or a note after it and before it: refused, or that place there and nothing else, with nothing under it where a verse is", () => {
   const reasons = new Set(["noteTie", "noteLyrics", "noteUnsafe"]);
   let rests = 0;
   let notes = 0;
   let refused = 0;
+  let given = 0;
   Object.keys(NOTE_FIXTURES).forEach((name) => {
     const [source] = NOTE_FIXTURES[name];
     const voices = places(source);
@@ -1917,6 +1930,10 @@ test("a sweep of every place, a rest or a note after it and before it: refused, 
                 assert.deepEqual([!!put.rest, put.pitches.map((p) => p.verticalPos)], [false, [step]], label);
                 notes++;
               }
+              // Under a verse, nothing (the owner's call of 2026-11-22), the
+              // verse written for it where a syllable would have moved.
+              assert.ok((put.lyric || []).every((l) => !l.syllable), label + ": the place put in has a syllable");
+              if (wordLines(result.source) !== wordLines(source)) given++;
             }
           }
         }
@@ -1925,7 +1942,11 @@ test("a sweep of every place, a rest or a note after it and before it: refused, 
   });
   assert.ok(rests > 1000, "the sweep put in only " + rests + " rests");
   assert.ok(notes > 2000, "the sweep put in only " + notes + " notes");
-  assert.ok(refused > 500, "the sweep met only " + refused + " refusals");
+  // Fewer since 2026-11-22, when a place put in under a verse stopped being
+  // refused (286 that day: ties, tuplets, broken rhythms, voices laid over
+  // each other).
+  assert.ok(refused > 250, "the sweep met only " + refused + " refusals");
+  assert.ok(given > 300, "the sweep wrote a verse for only " + given + " places put in");
 });
 
 // The check every place put in passes, on its own.
@@ -2042,8 +2063,12 @@ test("music that would change what it is pasted beside is not pasted, nor a text
   // A tie that reaches the place from the note before it would be cut.
   assert.equal(paste(COMMON + "C2 D2- D2 F2 |", "D2 F2", "c").refused, "noteTie");
   assert.equal(paste(COMMON + "C2 D2- D2 F2 |", "D2-", "c", "after").refused, "noteTie");
-  // The syllables of a verse would move along.
-  assert.equal(paste(bar + "\nw: la la la la", "E2", "c").refused, "noteLyrics");
+  // The syllables of a verse would move along: the music is given a `*`
+  // for each of its notes instead (the owner's call of 2026-11-22), and
+  // where the verse is one the engine cannot read as abcjs does, it is
+  // refused as it was.
+  assert.equal(paste(bar + "\nw: la la la la", "E2", "c").source, COMMON + "C2 D2 c E2 F2 |\nw: la la * la la");
+  assert.equal(paste(bar + "\ns: !f! !p! !f! !p!", "E2", "c").refused, "noteLyrics");
   // Voices laid over each other share the bar's time, which is not counted.
   assert.equal(paste(COMMON + "C2 D2 & E2 F2 |", "D2", "c").refused, "noteUnsafe");
   // Text that is no music: abcjs warns of it, or reads no note in it.
@@ -2128,8 +2153,9 @@ test("the unit a place's lengths are counted in is read at the head of its line:
 // refused for a reason of the engine's, or the voice as it was with the
 // music put in at the place and nothing gone, every other voice as it was.
 // Read apart from the module's own check, as the sweeps above are.
-test("a sweep of every place, music pasted on it and after it: refused, or the music there and everything else where it was", () => {
+test("a sweep of every place, music pasted on it and after it: refused, or the music there and everything else where it was, with nothing under it where a verse is", () => {
   const reasons = new Set(["noteTie", "noteLyrics", "noteUnsafe", "noteSlur"]);
+  let given = 0;
   const pieces = ["c", "c2 d2", "c4 | d4", "z", "(3cde", '"G"c8', "(c d)", "x2 c"];
   // What each piece reads as, by itself, in the order music() lists a voice.
   const counts = { c: 1, "c2 d2": 2, "c4 | d4": 3, z: 1, "(3cde": 3, '"G"c8': 1, "(c d)": 2, "x2 c": 2 };
@@ -2164,6 +2190,12 @@ test("a sweep of every place, music pasted on it and after it: refused, or the m
             const k = counts[piece];
             assert.deepEqual(now[key].slice(0, y), was[key].slice(0, y), label + ": before the place");
             assert.deepEqual(now[key].slice(y + k), was[key].slice(y), label + ": after the music");
+            // Under a verse, nothing (the owner's call of 2026-11-22): an
+            // entry of music() ends in the syllables under it.
+            now[key].slice(y, y + k).forEach((entry) => {
+              if (!/^bar /.test(entry)) assert.ok(/ $/.test(entry), label + ": the music pasted has a syllable: " + entry);
+            });
+            if (wordLines(result.source) !== wordLines(source)) given++;
             if (el.rest && where === "on") rests++;
             made++;
           }
@@ -2173,7 +2205,10 @@ test("a sweep of every place, music pasted on it and after it: refused, or the m
   });
   assert.ok(made > 2800, "the sweep pasted only " + made + " times");
   assert.ok(rests > 200, "the sweep pasted before only " + rests + " rests");
-  assert.ok(refused > 400, "the sweep met only " + refused + " refusals");
+  // Fewer since 2026-11-22, when music pasted under a verse stopped being
+  // refused (112 that day: ties, slurs, tuplets, broken rhythms).
+  assert.ok(refused > 90, "the sweep met only " + refused + " refusals");
+  assert.ok(given > 300, "the sweep wrote a verse for music pasted only " + given + " times");
 });
 
 // The check every paste passes, on its own: what it is handed is the plan
@@ -3272,12 +3307,13 @@ test("a note made a rest takes the syllables the verses gave it, and every other
   assert.equal(refused(inline, "D"), "noteLyrics");
   assert.equal(MDM_BARS.restMusic(ABCJS, H + inline, [at(inline, "D"), at(inline, "E")]).refused, "noteLyrics");
   assert.equal(zero(inline, "d"), "[V:1] C D E F | [V:2] c z e f |\nw: a c d");
-  // And a rest is made no note under a verse, where the note would take
-  // the syllable of the note after it, and where no syllable would move as
-  // well: what a rest made a note gives the verse is not decided.
-  const note = (body, needle) => MDM_BARS.writeNote(ABCJS, H + body, at(body, needle), { step: 4, duration: QUARTER }).refused;
-  assert.equal(note("C z E F |]\nw: a b c", "z"), "noteLyrics");
-  assert.equal(note("C D z2 |]\nw: a b", "z2"), "noteLyrics");
+  // And a rest made a note under a verse, which was refused here until the
+  // owner's call of 2026-11-22, is given nothing: a `*` where it would take
+  // the syllable of the note after it, and nothing where no syllable is
+  // left for it (the test of what the verses give what is put in).
+  const note = (body, needle) => left(MDM_BARS.writeNote(ABCJS, H + body, at(body, needle), { step: 4, duration: QUARTER }), body + " at " + needle);
+  assert.equal(note("C z E F |]\nw: a b c", "z"), "C G E F |]\nw: a * b c");
+  assert.equal(note("C D z2 |]\nw: a b", "z2"), "C D G |]\nw: a b");
 });
 
 // Verses written with everything a verse read here is written with, under
@@ -3364,6 +3400,151 @@ test("a sweep of every place and every stretch of verses made rests: nothing ref
   });
   assert.ok(made > 300, "the sweep made rests only " + made + " times");
   assert.ok(sung > 600, "the sweep took only " + sung + " notes' syllables");
+});
+
+// ---------- What the verses give what is put in ----------
+
+// The owner's call of 2026-11-22 on S16 of tests/README.md, after Control
+// with a figure's key beside a note under a verse had said Lyrics can't
+// make room: "la nota nueva se inserta sin nada debajo, habría que ir al
+// código abc para ponérsela". A note put in, a rest made a note and music
+// pasted are given nothing (wordsGiven), and every note that was there
+// keeps its syllable.
+test("what is put in under a verse is given nothing and every note keeps its syllable: a star for each of its notes and rests, the rests a syllable passed over given theirs, a hold or a hyphen of their own kind after one written against its syllable, a | for a barline where the verse skips one, a verse longer than its line, two verses; what the engine cannot read as abcjs does is refused as it was (2026-11-22)", () => {
+  const H = "X:1\nM:4/4\nL:1/8\nK:C\n";
+  const at = (body, needle) => {
+    const i = body.indexOf(needle);
+    assert.ok(i >= 0, "no " + needle + " in " + body);
+    return H.length + i;
+  };
+  const left = (result, label) => {
+    assert.equal(result.refused, undefined, label + ": refused: " + result.refused);
+    return result.source.slice(H.length);
+  };
+  const before = (body, needle) => left(MDM_BARS.insertPlace(ABCJS, H + body, at(body, needle), { step: 4, duration: QUARTER }, "before"), body + " before " + needle);
+  const after = (body, needle, rest) => left(MDM_BARS.insertPlace(ABCJS, H + body, at(body, needle), rest ? { rest: true, duration: QUARTER } : { step: 4, duration: QUARTER }, "after"), body + " after " + needle);
+  // The owner's score: Control (before) and Option (after) beside every
+  // note keep the degrees under their notes.
+  const degrees = "A2 B2 :|1 c2 d2 | e2 f2 | ^g2 a2\nw: I II III IV V VI VII I";
+  assert.equal(before(degrees, "c2"), "A2 B2 :|1 G2 c2 d2 | e2 f2 | ^g2 a2\nw: I II * III IV V VI VII I");
+  assert.equal(after(degrees, "c2"), "A2 B2 :|1 c2 G2 d2 | e2 f2 | ^g2 a2\nw: I II III * IV V VI VII I");
+  assert.equal(before(degrees, "A2"), "G2 A2 B2 :|1 c2 d2 | e2 f2 | ^g2 a2\nw: * I II III IV V VI VII I");
+  // After the last note no syllable is left to move, as before.
+  assert.equal(after(degrees, "a2"), "A2 B2 :|1 c2 d2 | e2 f2 | ^g2 a2 G2\nw: I II III IV V VI VII I");
+  // A rest takes no syllable, and goes in with the verse as it was; but it
+  // takes a star, and one in front of the star of the note after it is
+  // given its own.
+  assert.equal(after("C2 D2 E2 |\nw: do re mi", "C2", true), "C2 z2 D2 E2 |\nw: do re mi");
+  assert.equal(after("C2 D2 E2 |\nw: do * mi", "C2", true), "C2 z2 D2 E2 |\nw: do * * mi");
+  // A rest the syllable passed over, before the note put in, would take the
+  // note's star: it has one of its own.
+  assert.equal(after("C2 z2 E2 |\nw: do mi", "z2"), "C2 z2 G2 E2 |\nw: do * * mi");
+  // A word spread over its notes: the hyphen stays on its syllable.
+  assert.equal(after("C2 D2 |\nw: la-ri", "C2"), "C2 G2 D2 |\nw: la- * ri");
+  // A hold written against its syllable, a hyphen standing alone and the
+  // hyphens of a word: one more of the same after them, drawn over the note
+  // put in, and the syllable before them drawn as it was.
+  assert.equal(after("C2 D2 E2 |\nw: do_ mi", "C2"), "C2 G2 D2 E2 |\nw: do__ mi");
+  assert.equal(after("C2 D2 E2 |\nw: do _ mi", "C2"), "C2 G2 D2 E2 |\nw: do _ _ mi");
+  assert.equal(after("C2 D2 E2 |\nw: Glo - ri", "C2"), "C2 G2 D2 E2 |\nw: Glo -- ri");
+  assert.equal(after("C2 D2 E2 F2 |\nw: Glo--ri a", "D2"), "C2 D2 G2 E2 F2 |\nw: Glo-- * ri a");
+  // A verse that skips to the next barline with `|`: the note put in passes
+  // over it, as the notes it skips do.
+  assert.equal(after("C2 D2 | E2 F2 |\nw: do | mi fa", "D2"), "C2 D2 G2 | E2 F2 |\nw: do | mi fa");
+  // A verse longer than its line: nothing for the note put in there either.
+  assert.equal(after("C2 D2 |\nw: do re mi", "D2"), "C2 D2 G2 |\nw: do re * mi");
+  // Every verse.
+  assert.equal(after("C2 D2 E2 |\nw: do re mi\nw: one two three", "C2"), "C2 G2 D2 E2 |\nw: do * re mi\nw: one * two three");
+  // A rest made a note: a star where it would take the next syllable, and
+  // nothing where it took a star itself, which the note takes in its turn.
+  const write = (body, needle) => left(MDM_BARS.writeNote(ABCJS, H + body, at(body, needle), { step: 4, duration: QUARTER }), body + " at " + needle);
+  assert.equal(write("C2 z2 E2 |\nw: do mi", "z2"), "C2 G2 E2 |\nw: do * mi");
+  assert.equal(write("C2 z2 E2 |\nw: do * mi", "z2"), "C2 G2 E2 |\nw: do * mi");
+  // Music pasted: a star for each of its notes and rests, and a | for its
+  // barline where the verse waits for one.
+  const paste = (body, needle, text, where) => left(MDM_BARS.pasteMusic(ABCJS, H + body, [{ at: at(body, needle), text: text, where: where }]), body + " " + where + " " + needle);
+  assert.equal(paste("C2 D2 E2 F2 |\nw: la la la la", "E2", "z c", "on"), "C2 D2 z c E2 F2 |\nw: la la * * la la");
+  assert.equal(paste("C2 D2 E2 F2 |\nw: la la | la", "D2", "c | d", "after"), "C2 D2 c | d E2 F2 |\nw: la la | | la");
+  // Into two voices at once, each with its verse: what the first wrote in
+  // its verse moves the place the second is pasted at.
+  const duet = "V:1\nC2 D2 E2 F2 |\nw: do re mi fa\nV:2\nC,2 D,2 E,2 F,2 |\nw: one two three four";
+  const both = MDM_BARS.pasteMusic(ABCJS, H + duet, [
+    { at: at(duet, "E2"), text: "c", where: "on" },
+    { at: at(duet, "E,2"), text: "C,", where: "on" },
+  ]);
+  assert.equal(left(both, "two voices"), "V:1\nC2 D2 c E2 F2 |\nw: do re * mi fa\nV:2\nC,2 D,2 C, E,2 F,2 |\nw: one two * three four");
+  // What the engine cannot read as abcjs does is refused, with the reason
+  // it had: a line of symbols.
+  assert.equal(MDM_BARS.insertPlace(ABCJS, H + "C2 D2 |\ns: !f! !p!", at("C2 D2 |\ns: !f! !p!", "C2"), { step: 4, duration: QUARTER }, "after").refused, "noteLyrics");
+});
+
+// Every place of the fixtures of verses, a note and a rest put in on either
+// side of it, a rest made a note, and three pieces of music pasted on it and
+// after it: nothing refused, every note that was there drawn with the
+// syllables it had, and nothing under what was put in. Read apart from the
+// module's own check, as the sweeps above are.
+test("a sweep of every place of verses, a note or a rest put in beside it, a rest made a note, music pasted on it and after it: nothing refused, every note that was there drawn as it was, nothing under what was put in (2026-11-22)", () => {
+  let made = 0;
+  let given = 0;
+  const rows = (source) => {
+    const out = {};
+    ABCJS.parseOnly(source)[0].lines.forEach((line) => {
+      (line.staff || []).forEach((staff, s) => {
+        (staff.voices || []).forEach((voice, v) => {
+          const list = out[s + "/" + v] || (out[s + "/" + v] = []);
+          voice.forEach((el) => {
+            if (el.el_type !== "note") return;
+            const drawn = (el.lyric || []).map((l) => l.syllable + (l.divider === " " ? "" : l.divider));
+            while (drawn.length && !drawn[drawn.length - 1]) drawn.pop();
+            list.push({ el: el, rest: !!el.rest, name: source.slice(el.startChar, el.endChar).trim(), drawn: drawn.join("/") });
+          });
+        });
+      });
+    });
+    return out;
+  };
+  const kept = (a, b) => a.map((row) => row.name + "=" + row.drawn).join(" ") === b.map((row) => row.name + "=" + row.drawn).join(" ");
+  Object.keys(SUNG_FIXTURES).forEach((name) => {
+    const source = SUNG_FIXTURES[name];
+    const was = rows(source);
+    Object.keys(was).forEach((key) => {
+      was[key].forEach((row, index) => {
+        if (row.rest && row.el.rest.type !== "rest") return;
+        const tries = [];
+        for (const side of ["before", "after"]) {
+          const y = side === "after" ? index + 1 : index;
+          tries.push([side + " a note", MDM_BARS.insertPlace(ABCJS, source, row.el.startChar, { step: 4, duration: QUARTER }, side), y, 1]);
+          tries.push([side + " a rest", MDM_BARS.insertPlace(ABCJS, source, row.el.startChar, { rest: true, duration: QUARTER }, side), y, 1]);
+        }
+        if (row.rest) tries.push(["a rest made a note", MDM_BARS.writeNote(ABCJS, source, row.el.startChar, { step: 4, duration: QUARTER }), index, 0]);
+        for (const where of ["on", "after"]) {
+          for (const piece of ["c d", "z c", "c | d"]) {
+            tries.push([where + " " + piece, MDM_BARS.pasteMusic(ABCJS, source, [{ at: row.el.startChar, text: piece, where: where }]), where === "after" ? index + 1 : index, 2]);
+          }
+        }
+        tries.forEach(([what, result, y, k]) => {
+          const label = [name, key, index, row.name, what].join(" ");
+          assert.equal(result.refused, undefined, label + ": refused: " + result.refused);
+          made++;
+          if (wordLines(result.source) !== wordLines(source)) given++;
+          const now = rows(result.source);
+          Object.keys(was).forEach((other) => {
+            if (other !== key) assert.ok(kept(now[other], was[other]), label + ": voice " + other + " changed");
+          });
+          const a = was[key];
+          const b = now[key];
+          // A rest made a note takes its place, and no other.
+          const n = k === 0 ? 1 : k;
+          assert.equal(b.length, a.length + k, label + ": " + b.length + " places");
+          assert.ok(kept(b.slice(0, y), a.slice(0, y)), label + ": a place before it changed");
+          assert.ok(kept(b.slice(y + n), a.slice(y + (k === 0 ? 1 : 0))), label + ": a place after it changed\n" + result.source);
+          b.slice(y, y + n).forEach((put) => assert.equal(put.drawn, "", label + ": " + put.name + " put in has " + put.drawn + "\n" + result.source));
+        });
+      });
+    });
+  });
+  assert.ok(made > 700, "the sweep put in only " + made + " times");
+  assert.ok(given > 450, "the sweep wrote a verse only " + given + " times");
 });
 
 // ---------- A place taken out ----------

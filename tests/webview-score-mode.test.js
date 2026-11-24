@@ -10607,6 +10607,66 @@ test("on a Mac Control puts a note, a rest and a barline to the left and Option 
   await h.close();
 });
 
+// A note put in under a verse is given nothing, and every note keeps its
+// syllable: the owner's call of 2026-11-22 on S16 of tests/README.md, from
+// the degrees under the harmonic minor scale of his referencias.mdm, where
+// Control with a figure's key beside a note said Lyrics can't make room
+// and Option had gone in only after the last note (MDM_BARS.wordsGiven).
+test("on a Mac Control and Option with a figure's key put a note in beside a note under a verse, which keeps every syllable under its note and gives the new one none; Cmd+Z takes each back (SM139)", { skip }, async () => {
+  const source = ["%%staffwidth 320pt", "X:1", "L:1", "K:Am", "A B :|1 c d | e f | ^g a", "w: I II III IV V VI VII I"].join("\n");
+  const h = await open({ text: ["Degrees.", "", "```abc", source, "```", ""].join("\n"), scores: 1, platform: "MacIntel" });
+  await pressMode(h.page);
+  const verse = async () => (await staged(h.page)).split("\n")[5];
+  // The syllables drawn, left to right, each with the head it stands under.
+  const drawn = () =>
+    h.page.evaluate(() => {
+      const svg = document.querySelector("#app .mdm-score code.language-abc svg");
+      const heads = Array.from(svg.querySelectorAll(".abcjs-notehead")).map((el) => {
+        const r = el.getBoundingClientRect();
+        return (r.left + r.right) / 2;
+      });
+      return Array.from(svg.querySelectorAll(".abcjs-lyric"))
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          const x = (r.left + r.right) / 2;
+          let near = 0;
+          heads.forEach((hx, i) => {
+            if (Math.abs(hx - x) < Math.abs(heads[near] - x)) near = i;
+          });
+          return { text: el.textContent.trim(), head: near };
+        })
+        // A `*` is drawn as a text of nothing.
+        .filter((s) => s.text !== "")
+        .sort((a, b) => a.head - b.head);
+    });
+  const was = await drawn();
+  assert.deepEqual(was.map((s) => s.text), ["I", "II", "III", "IV", "V", "VI", "VII", "I"]);
+  // On the c, the III.
+  await press(h.page, "ArrowRight", 2);
+  assert.equal(await placeText(h.page), "c");
+  await chord(h.page, ["Control"], "3");
+  await sleep(150);
+  assert.deepEqual([await verse(), await notices(h.page)], ["w: I II * III IV V VI VII I", []], "Control+3");
+  // Every syllable on the head it was on, the heads from the new one on
+  // one further along.
+  let now = await drawn();
+  assert.deepEqual(now.map((s) => s.text), was.map((s) => s.text));
+  assert.deepEqual(now.map((s) => s.head), [0, 1, 3, 4, 5, 6, 7, 8]);
+  await chord(h.page, ["Meta"], "z");
+  await sleep(150);
+  assert.equal(await verse(), "w: I II III IV V VI VII I");
+  assert.equal(await placeText(h.page), "c");
+  await chord(h.page, ["Alt"], "3");
+  await sleep(150);
+  assert.deepEqual([await verse(), await notices(h.page)], ["w: I II III * IV V VI VII I", []], "Option+3");
+  now = await drawn();
+  assert.deepEqual(now.map((s) => s.head), [0, 1, 2, 4, 5, 6, 7, 8]);
+  await chord(h.page, ["Meta"], "z");
+  await sleep(150);
+  assert.equal(await staged(h.page), source);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
 
 // A bar with nothing in it inside an ending is drawn tight as anywhere else
 // (the owner's report of 2026-11-22, "después de poner el 1 en el indicador

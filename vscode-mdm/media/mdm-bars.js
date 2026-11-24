@@ -720,6 +720,111 @@
     return { edits: versesLeft(src, verses, runs) };
   }
 
+  // ---------- The syllables of what is put in ----------
+  //
+  // The owner's call of 2026-11-22 on S16 of tests/README.md, after Control
+  // with a figure's key beside a note under a verse had said Lyrics can't
+  // make room (Option had gone in after the last note of the line, where no
+  // syllable is left to move): "la nota nueva se inserta sin nada debajo,
+  // habría que ir al código abc para ponérsela". A note put in under a
+  // verse is given nothing, and every note after it keeps the syllable it
+  // had; until that day it was refused wherever a syllable would have
+  // moved along.
+  //
+  // abcjs gives a verse's pieces out in their order (alignLyrics), so what
+  // the music put in would take is the piece the verse holds next when it
+  // is reached: the first one the elements before it did not take. Where
+  // any element of the music would take that piece, pieces of nothing are
+  // written in front of it, one for each element of the music up to the
+  // last that would, for each to take one: a `*` for every note and rest,
+  // since a rest takes a `*` as a note does (a rest put in before a note
+  // would otherwise take the note's star, and the note the syllable), a
+  // `_` for a note where the piece is a `_`, which holds the syllable over
+  // it as it holds it over the note after; or, where the piece is a `|`, a
+  // `|` for every barline. The music after the last element that would
+  // take the piece is offered the piece itself and passes over it, as it
+  // did. A piece that no element took before, of a verse longer than its
+  // line, is no different: the music put in is given nothing there either,
+  // as it is everywhere else, and what was written past the last note
+  // stays there unseen, for the reader to give a note in the text.
+  //
+  // `index` is where the music goes in among the voice's elements on its
+  // line, `gone` how many of them it takes the place of (a rest made a
+  // note, writeNote), and `put` the elements it is, as abcjs reads them
+  // with the music put in (only what kind each is counts). Returns
+  // { edits }, the verses' text as edits of `src`, or { failed } where the
+  // verses are not read as abcjs reads them (versesOf).
+  function wordsGiven(src, elems, music, index, gone, put) {
+    if (!wordsBelow(src, elems, music)) return { edits: [] };
+    const block = versesOf(src, elems, music);
+    if (block.failed) return block;
+    // What alignLyrics gives an element.
+    const takes = function (el, token) {
+      if (token.skip === "bar") return el.el_type === "bar";
+      if (token.skip) return el.el_type === "note" && el.pitches !== null;
+      return el.el_type === "note" && el.rest === undefined;
+    };
+    const edits = [];
+    block.verses.forEach(function (verse) {
+      const read = readVerse(verse, elems);
+      const tokens = read.tokens;
+      let t = 0;
+      while (t < tokens.length && read.taker[t] >= 0 && read.taker[t] < index) t++;
+      if (t >= tokens.length) return;
+      // Taken by what the music takes the place of: a rest's `*` or `_`,
+      // which the note written over it takes in its turn.
+      if (read.taker[t] >= index && read.taker[t] < index + gone) return;
+      const token = tokens[t];
+      let last = -1;
+      put.forEach(function (el, k) {
+        if (takes(el, token)) last = k;
+      });
+      if (last < 0) return;
+      // The rests before the music that a syllable passed over, waiting for
+      // the next note: the first piece of nothing would be theirs, and the
+      // music's last the syllable, so each has its own, which it takes and
+      // shows nothing for, as wordsCut writes them.
+      const fill = [];
+      if (token.skip === null) {
+        for (let i = t > 0 ? read.taker[t - 1] + 1 : 0; i < index; i++) {
+          if (elems[i].el_type === "note" && elems[i].pitches !== null) fill.push("*");
+        }
+      }
+      for (let k = 0; k <= last; k++) {
+        const el = put[k];
+        if (token.skip === "bar") {
+          if (el.el_type === "bar") fill.push("|");
+        } else if (el.el_type === "note" && el.pitches !== null) {
+          fill.push(token.skip === "slur" && el.rest === undefined ? "_" : "*");
+        }
+      }
+      const text = verse.text;
+      let at = token.from;
+      while (at < token.to && /\s/.test(text.charAt(at))) at++;
+      const sign = text.charAt(at);
+      const glued = at > 0 && !/\s/.test(text.charAt(at - 1));
+      // A hyphen standing alone, and a `_` written against the syllable
+      // before it, are part of how the piece before them is drawn: `la -`
+      // and `la-` are one syllable with its hyphen, `world_` one held
+      // (lyricTokens), and anything written in front of them would take
+      // that from it. The pieces of nothing go after them instead, of their
+      // own kind, so that the music takes the piece and all of them but the
+      // last, which the element after it takes as it took the piece: one
+      // hyphen or one hold more, drawn over the music put in, as a word
+      // spread over its notes or a syllable held over them is.
+      if (token.skip !== null && (sign === "-" || (sign === "_" && glued))) {
+        const after = verse.from + at + 1;
+        edits.push({ from: after, to: after, insert: new Array(fill.length + 1).join(sign) });
+        return;
+      }
+      // Anywhere else, where the piece begins, apart from a syllable it was
+      // written against (`la-ri` is `la- * ri`).
+      const lead = token.skip === null && glued ? " " : "";
+      edits.push({ from: verse.from + at, to: verse.from + at, insert: lead + fill.join(" ") + " " });
+    });
+    return { edits: edits };
+  }
+
   // ---------- The move ----------
 
   // A barline that opens a numbered ending (`|1`, `:|2`, `|[1`) is two
@@ -1762,7 +1867,8 @@
   // off a note inside a tuplet or a broken rhythm; a new length there is
   // refused, and so is a place with a tie on it, which would be left tying
   // what is no longer the same note. Under a verse a note made a rest takes
-  // its syllables with it (wordsRested), and a rest is made no note.
+  // its syllables with it (wordsRested), and a rest made a note is given
+  // none, every other note keeping its own (wordsGiven).
   //
   // A note shorter than a quarter, written on a rest or given a new length,
   // is written against the one beside it, with no space between, when both
@@ -1868,13 +1974,14 @@
     // A verse gives a syllable to every note and none to a rest. A note made
     // a rest gives up the syllables the verses gave it and every other note
     // keeps its own, the owner's call of 2026-10-15 for 0 (wordsRested);
-    // until then it was refused. A rest made a note is refused still, also
-    // where no syllable after it would move: what a note written where a rest
-    // was should be given is not decided (tests/README.md, Pending).
+    // until then it was refused. A rest made a note is given nothing, and
+    // every other note keeps its own as well, his call of 2026-11-22
+    // (wordsGiven); until then it was refused, also where no syllable after
+    // it would have moved.
     const sung = !el.rest !== !rest && wordsBelow(src, elems, music);
     let words = { edits: [] };
-    if (sung && !rest) return refuse("noteLyrics");
-    if (sung) words = wordsRested(src, elems, music, [first]);
+    if (sung && !rest) words = wordsGiven(src, elems, music, first, 1, [{ el_type: "note", pitches: [] }]);
+    else if (sung) words = wordsRested(src, elems, music, [first]);
     if (words.failed) return refuse(words.failed);
     const times = barTimes(elems, run);
     if (!same && times[first].tuplet) return refuse("noteUnsafe");
@@ -2006,9 +2113,10 @@
   // is (writeNote): eighths put in one after the other come out beamed. A
   // tie it would cut is refused; a tuplet that would take it in, or a
   // broken rhythm that would pair with it (`C>` before `D` is a dotted C
-  // and a short D), the reading back finds, and refuses. How its length is
-  // written, and at which step a pitch is drawn, are read off the place
-  // put there with no length, as for a note written.
+  // and a short D), the reading back finds, and refuses. Under a verse it
+  // is given nothing, and every other note keeps its syllable (wordsGiven).
+  // How its length is written, and at which step a pitch is drawn, are read
+  // off the place put there with no length, as for a note written.
   //
   // `at` is a character of the place, `what` is { step, duration } for a
   // note at a step of the staff or { rest: true, duration } for a rest, and
@@ -2087,11 +2195,20 @@
     const b = after && right !== null ? right : pos;
     const lead = left !== null ? "" : after ? " " : spaced(pos - 1);
     const tail = right !== null ? "" : after ? spaced(pos) : " ";
+    // Under a verse, what the new place is given there, nothing, written
+    // with it (wordsGiven). Where the verses cannot be read here, it goes in
+    // with them as they are, and the reading back says whether any syllable
+    // moved.
+    const index = after ? first + 1 : first;
+    const words = wordsGiven(src, elems, music, index, 0, [rest ? { el_type: "note", rest: { type: "rest" } } : { el_type: "note", pitches: [] }]);
+    const verses = words.failed ? [] : words.edits;
     const draft = function (text) {
+      if (verses.length) return apply(src, [{ from: a, to: b, insert: lead + text + tail }].concat(verses.map(function (e) {
+        return { from: e.from, to: e.to, insert: e.insert };
+      })));
       return src.slice(0, a) + lead + text + tail + src.slice(b);
     };
 
-    const index = after ? first + 1 : first;
     const probe = parsed(A, draft(rest ? "z" : pitchText(what.step)));
     const seen = probe ? elementAt(probe, s, key, index) : null;
     if (!seen || seen.el_type !== "note" || !!seen.rest !== rest) return refuse("noteUnsafe");
@@ -2630,11 +2747,38 @@
     const from = trimStart(src, el.startChar, el.endChar);
     const pos = after ? trimEnd(src, el.endChar, from) : from;
     const insert = (after || glued(src, pos - 1) ? " " : "") + music + (!after || glued(src, pos) ? " " : "");
-    const out = src.slice(0, pos) + insert + src.slice(pos);
+    const edits = [{ from: pos, to: pos, insert: insert }];
+    let out = src.slice(0, pos) + insert + src.slice(pos);
+    // Under a verse, what the music is given there, nothing, written with
+    // it (wordsGiven): its elements are read where it went in, and the
+    // reading back says whether anything else moved.
+    const pasted = parsed(A, out);
+    const line = pasted
+      ? pasted.lines.filter(function (one) {
+          return one.staff;
+        })[found.system]
+      : null;
+    const now = line ? voiceIn(line, found.voice.key) : null;
+    if (now && now.elems.length > elems.length) {
+      const index = after ? found.index + 1 : found.index;
+      const words = wordsGiven(src, elems, onLine, index, 0, now.elems.slice(index, index + now.elems.length - elems.length));
+      if (!words.failed && words.edits.length) {
+        words.edits.forEach(function (e) {
+          edits.push(e);
+        });
+        out = apply(
+          src,
+          edits.map(function (e) {
+            return { from: e.from, to: e.to, insert: e.insert };
+          })
+        );
+        if (out === null) return refuse("noteUnsafe");
+      }
+    }
     const plan = { key: found.voice.key, s: found.system, first: found.index, side: after ? "after" : "before", gone: [], music: true };
     const check = verifyPaste(A, src, out, plan);
     if (check.refused) return OWN_REASONS.test(check.refused) ? check : refuse(wordsBelow(src, elems, onLine) ? "noteLyrics" : check.refused);
-    return { source: out, after: check.after, edits: [{ from: pos, to: pos, insert: insert }], key: found.voice.key };
+    return { source: out, after: check.after, edits: edits, key: found.voice.key };
   }
 
   // Whether a length is one a single note has: a figure, with a dot or
