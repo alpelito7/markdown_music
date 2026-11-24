@@ -24,7 +24,11 @@ const { spawnSync } = require("node:child_process");
 const ROOT = path.join(__dirname, "..");
 const MDM = path.join(ROOT, "bin", "mdm");
 const DIR = path.join(__dirname, "tmp", "html-browser");
-const CHROME = "/usr/bin/google-chrome";
+// Chrome where it is installed: the Linux package, or the application on a
+// Mac; MDM_CHROME names another.
+const CHROME =
+  process.env.MDM_CHROME ||
+  (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 
 let puppeteer = null;
 try {

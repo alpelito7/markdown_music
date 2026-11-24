@@ -17,7 +17,11 @@ const test = require("node:test");
 
 const { toEditor, hiddenLines } = require("../../vscode-mdm/transforms.js");
 
-const CHROME = "/usr/bin/google-chrome";
+// Chrome where it is installed: the Linux package, or the application on a
+// Mac; MDM_CHROME names another.
+const CHROME =
+  process.env.MDM_CHROME ||
+  (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 const HARNESS = "file://" + path.join(__dirname, "harness.html");
 const EXAMPLE = fs.readFileSync(path.join(__dirname, "..", "..", "example.mdm"), "utf8");
 
@@ -203,12 +207,12 @@ async function open(options) {
   }, opts.seed || {});
   // `platform`: what navigator.platform says, read before the page's scripts
   // run, for what CodeMirror and main.js decide per platform (Cmd for `Mod`
-  // on a Mac).
-  if (opts.platform) {
-    await page.evaluateOnNewDocument((platform) => {
-      Object.defineProperty(Navigator.prototype, "platform", { get: () => platform });
-    }, opts.platform);
-  }
+  // on a Mac). Linux unless a test names another: the suite's keys and the
+  // names its tips give them were written there, and run on a Mac the page
+  // took the Mac's (Option+Cmd+0 for Ctrl+0, 2026-11-20).
+  await page.evaluateOnNewDocument((platform) => {
+    Object.defineProperty(Navigator.prototype, "platform", { get: () => platform });
+  }, opts.platform || "Linux x86_64");
   if (opts.clipboard) {
     // Headless has no clipboard to write to; what was copied is recorded,
     // and is what a paste reads back (a test puts a text of its own there

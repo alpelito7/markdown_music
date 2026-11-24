@@ -10582,6 +10582,18 @@ webview that press Backspace, by name: 11 of 11 in
 suite was not run. The count of `webview-editing.test.js` in the table
 above was 154 since before 0.7.3 and the file held 159; it says 160 now.
 
+### The suite on a Mac (2026-11-20)
+
+The owner's editor runs on a Mac now (Apple silicon, macOS 26; the extension's link there dates from 2026-11-18), which has no Node of its own. What it takes to run the suite there, all of it outside the repository but for two lines of the helpers:
+
+- **Node**: VS Code's own Electron, which is Node 24 with `ELECTRON_RUN_AS_NODE=1` (a two-line `node` script on the PATH: `ELECTRON_RUN_AS_NODE=1 exec "/Applications/Visual Studio Code.app/Contents/MacOS/Code" "$@"`). `node --test` and `node --check` work as they do.
+- **npm and puppeteer-core**: npm's own package from the registry, its integrity checked, run by that Node; `npm ci --ignore-scripts` in `tests/` installs the 25 packages of `tests/package-lock.json`, lockfile unchanged.
+- **Chrome**: `tests/webview/helpers.js` and `html.test.js` find it at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` on a Mac, `/usr/bin/google-chrome` elsewhere, or where `MDM_CHROME` says.
+- **The platform**: the harness tells the page it runs on Linux unless a test names another (`opts.platform`), since the suite's keys and the names its tips give them were written there; on a Mac the page took the Mac's (Option+Cmd+0 for Ctrl+0, and FV03 and FV07 failed on that alone).
+- **Not ported**: the guards of `tests/tmp/*/run-tests.sh` read Linux's thermal zones and take `flock`, neither of which a Mac has; files were run one at a time instead, one Chrome each.
+
+What fails there on the tree as on any change to it, measured on 2026-11-20: 19 of `test:fast`'s 450 in the tree (the export's tests of `extension-host.test.js` that expect Quarto, TeX and Chrome where Linux has them; three more in a copy of the tree without `LICENSE` and the notices), ZM03 of `webview-zoom.test.js` (a line of the sans, the Mac's San Francisco, does not end on the same word at every step), and once, on the tree and not on the change, *a document too long to read in the time the panel has keeps its rows live* of `webview-audio-export.test.js`. And, the same on the tree and on the change that morning: eleven of `webview-look.test.js`, one of `webview-score-mode.test.js` and five of `webview-editing.test.js` (the scrollbars macOS draws over the page, and the roman measured as its fallback, by another session's reading of the same failures).
+
 ## Pending
 
 1. A long line of code is whole on both surfaces and each of them now

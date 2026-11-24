@@ -150,6 +150,16 @@ function heads(page, score) {
 
 // The staves of a score, top to bottom: the heights of the top and the
 // bottom line on the screen, and the left and right ends.
+// The scale a score is drawn at, its box on the screen over its own units:
+// the page's 0.9 at the zoom's 100 (drawAtZoom), so that a length abcjs
+// gives in the drawing's units is read on the screen at that size.
+function drawnScale(page, score) {
+  return page.evaluate((n) => {
+    const svg = document.querySelectorAll("#app .mdm-score code.language-abc svg")[n || 0];
+    return svg.getBoundingClientRect().width / svg.viewBox.baseVal.width;
+  }, score);
+}
+
 function staves(page, score) {
   return page.evaluate((i) => {
     const svg = document.querySelectorAll("#app .mdm-score")[i].querySelector("code.language-abc svg");
@@ -4376,15 +4386,19 @@ test("past the drawing's ink the cursor is given the room a note there would hav
         return (b.top + b.bottom) / 2;
       });
       const v = window.__mdm.view;
+      // In the drawing's own units, which abcjs's lengths below are: the
+      // drawing stands on the screen at the page's 0.9 (drawAtZoom).
+      const k = r.width / svg.viewBox.baseVal.width;
       return {
         box: svg.getAttribute("viewBox"),
         height: Number(svg.getAttribute("height")),
         room: svg.hasAttribute("data-mdm-room"),
         // The top line under the drawing's top edge, and its bottom edge
         // under the bottom line.
-        over: Math.min(...ys) - r.top,
-        under: r.bottom - Math.max(...ys),
-        space: (Math.max(...ys) - Math.min(...ys)) / 8,
+        over: (Math.min(...ys) - r.top) / k,
+        under: (r.bottom - Math.max(...ys)) / k,
+        space: (Math.max(...ys) - Math.min(...ys)) / 8 / k,
+        k: k,
         cut: Math.max(0, r.top - beat.top, beat.bottom - r.bottom),
         // Where CodeMirror has the line after the score.
         after: v.lineBlockAt(v.state.doc.length).top,
@@ -4420,7 +4434,7 @@ test("past the drawing's ink the cursor is given the room a note there would hav
   assert.ok(up.over - was.over > 12, "the staff moved " + (up.over - was.over));
   assert.ok(near(up.under, was.under) && near(up.height - was.height, up.over - was.over));
   // CodeMirror was told: the line after the score is that much lower.
-  assert.ok(near(up.after - was.after, up.over - was.over, 0.6), "the line after it moved " + (up.after - was.after));
+  assert.ok(near(up.after - was.after, (up.over - was.over) * up.k, 0.6), "the line after it moved " + (up.after - was.after));
   // The note written there: the staff stays where the cursor had put it,
   // in a box that is the drawing's own now.
   await h.page.keyboard.press("3");
@@ -4495,8 +4509,9 @@ test("a voice no barline closes has one place more, past its last note: the curs
   assert.equal(await placeText(h.page), "");
   assert.equal(end.from, NOTES_SOURCE.indexOf("z8 | z8 |]") + "C2 D2 E2".length);
   // The middle of the head a note there will have: half a head past the end
-  // the staff has now.
-  assert.ok(Math.abs(end.x - (staffEnd + 4.9)) < 0.3, "the end stands " + (end.x - staffEnd) + " past the staff");
+  // the staff has now, 4.9 of the drawing's units.
+  const k = await drawnScale(h.page, 0);
+  assert.ok(Math.abs(end.x - (staffEnd + 4.9 * k)) < 0.3, "the end stands " + (end.x - staffEnd) + " past the staff");
   // And no further.
   await h.page.keyboard.press("ArrowRight");
   assert.equal((await cursor(h.page)).x, end.x);
@@ -4515,8 +4530,9 @@ test("a voice no barline closes has one place more, past its last note: the curs
     });
   const drawn = await stubs();
   assert.equal(drawn.count, 5);
-  assert.ok(Math.abs(drawn.left - staffEnd) < 0.3 && Math.abs(drawn.right - (end.x + 6.9)) < 0.3, "the lines run from " + (drawn.left - staffEnd) + " to " + (drawn.right - end.x));
-  assert.ok(Math.abs(drawn.top + 0.35) < 0.2 && Math.abs(drawn.bottom - 0.35) < 0.2, "they stand " + drawn.top + " and " + drawn.bottom + " off the staff's own");
+  // 6.9 and 0.35 of the drawing's units, read on the screen at its scale.
+  assert.ok(Math.abs(drawn.left - staffEnd) < 0.3 && Math.abs(drawn.right - (end.x + 6.9 * k)) < 0.3, "the lines run from " + (drawn.left - staffEnd) + " to " + (drawn.right - end.x));
+  assert.ok(Math.abs(drawn.top + 0.35 * k) < 0.2 && Math.abs(drawn.bottom - 0.35 * k) < 0.2, "they stand " + drawn.top + " and " + drawn.bottom + " off the staff's own");
   assert.equal(drawn.fill, "rgb(163, 163, 163)");
   // Off the staff, its ledger lines as well.
   await toStep(h.page, 12);
@@ -4611,7 +4627,10 @@ test("a voice no barline closes has one place more, past its last note: the curs
       const svg = document.querySelector("#app .mdm-score code.language-abc svg");
       const r = svg.getBoundingClientRect();
       const beat = svg.querySelector(".mdm-score-cursor__beat").getBoundingClientRect();
-      return { width: Number(svg.getAttribute("width")), cut: Math.max(0, beat.right - r.right), staff: svg.querySelector("g.abcjs-staff").getBoundingClientRect().right - r.left };
+      // Where the staff ends in the drawing's own units, which its width is
+      // given in: the drawing stands at the page's 0.9 (drawAtZoom).
+      const k = r.width / svg.viewBox.baseVal.width;
+      return { width: Number(svg.getAttribute("width")), cut: Math.max(0, beat.right - r.right), staff: (svg.querySelector("g.abcjs-staff").getBoundingClientRect().right - r.left) / k };
     });
   const narrow = await wide();
   assert.ok(narrow.staff > narrow.width - 1, "the staff ends at " + narrow.staff + " of " + narrow.width);
