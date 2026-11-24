@@ -359,8 +359,26 @@ test("the README shows the score mode's clip at the head of Score navigation, af
     .join(" ")
     .split(/\s+/)
     .filter((w) => /[A-Za-z0-9]/.test(w)).length;
-  assert.ok(words <= 238, `Score navigation has ${words} words; it was written with 230 on 2026-10-05, the keys of its table among them, and has 235 since the drag of a line's end was named`);
+  assert.ok(words <= 250, `Score navigation has ${words} words; it was written with 230 on 2026-10-05, the keys of its table among them, had 235 once the drag of a line's end was named, and has 250 since Ctrl+B and Alt+B, a barline and a bar beside a selection (2026-11-08 and 2026-11-22)`);
 });
+
+// The table under the clip names the keys the mode answers to, and is not
+// read off the roster as the score panel and the Score menu are, so nothing
+// else holds it to them. Ctrl+B and Alt+B put a barline in before the
+// cursor's note and after it (the owner's keys of 2026-11-08), and Ctrl with
+// Left and Right, which added a bar of rest until that day, is no key of
+// the mode's.
+test("the README's table of Score navigation names Ctrl+B and Alt+B for a barline, and not Ctrl with Left and Right", () => {
+  const mode = readmeSection(read(EXT, "README.md"), "Score navigation");
+  assert.ok(mode, "the README has no Score navigation section");
+  const rows = mode.text.split("\n").filter((l) => /^\| `/.test(l));
+  const bar = rows.filter((l) => /barline/.test(l));
+  assert.equal(bar.length, 1, "no one row of the table puts a barline in");
+  assert.match(bar[0], /^\| `Ctrl\+B` `Alt\+B` \| Put a barline in /);
+  const across = [String.fromCharCode(0x2190), String.fromCharCode(0x2192)].map((arrow) => "`Ctrl+" + arrow + "`");
+  assert.deepEqual(rows.filter((l) => across.some((key) => l.indexOf(key) >= 0)), [], "a row names Ctrl with Left or Right");
+});
+
 
 // The takes, as tools/demo-clips/clips.js holds them, whether the README
 // shows them or not: the test above reads only the alt texts the README

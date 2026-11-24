@@ -84,6 +84,12 @@ const DUET_SOURCE = [
   "A, B, C D | C4 |",
 ].join("\n");
 const DUET = ["Two voices.", "", "```abc", DUET_SOURCE, "```", ""].join("\n");
+// DUET with its voices ended by a final barline, written at the same length
+// (`c4|]` for `c4 |`) so that every offset read off DUET_SOURCE holds: for
+// the walks that count a voice's places to its last note, which a plain
+// barline leaves an open end past since the owner's call of 2026-11-08.
+const DUET_ENDED_SOURCE = DUET_SOURCE.replace("| c4 |", "| c4|]").replace("| C4 |", "| C4|]");
+const DUET_ENDED = ["Two voices.", "", "```abc", DUET_ENDED_SOURCE, "```", ""].join("\n");
 
 // The switch of the mode pressed where a hand finds it: the first row of the
 // Score menu, under its word. The pointer then goes back up to the bar, where
@@ -216,7 +222,9 @@ test("the score mode freezes the text: no caret, no typing, no block open, and w
   // the text takes none.
   await h.page.keyboard.type("xyz");
   for (const key of ["Enter", "Backspace", "Delete"]) await chord(h.page, ["Shift"], key);
-  await chord(h.page, ["Control"], "b");
+  // Ctrl+B is the mode's own since 2026-11-08 (a bar, SM64 and SM126): the
+  // text's italics stand for the formatting keys.
+  await chord(h.page, ["Control"], "i");
   await chord(h.page, ["Control"], "Enter");
   // Nor does a click on the prose: no caret, no selection, no block opened.
   const prose = await coordsAt(h.page, await posOf(h.page, "prose to click"));
@@ -1607,6 +1615,39 @@ function plus(page, score) {
     return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2, system: Number(add.getAttribute("data-mdm-system")), bar: Number(add.getAttribute("data-mdm-bar")), off: add.classList.contains("mdm-score-edit--off"), label: add.getAttribute("aria-label") };
   }, score || 0);
 }
+// The cursor in a bar with nothing in it: the two barlines drawn on its staff
+// nearest it on either side, how far apart they stand, edge to edge, and how
+// far the middle of its column is from the middle of that clear space, in the
+// score's units (the cursor's place there is the middle of what abcjs leaves
+// the bar, 16 units from one plain barline to the next, emptyStop in
+// main.js); null where no two barlines have it between them.
+const gapAt = (page) =>
+  page.evaluate(() => {
+    const g = document.querySelector("#app .mdm-score-cursor");
+    if (!g) return null;
+    const svg = g.ownerSVGElement;
+    const m = svg.getScreenCTM();
+    const b = g.querySelector(".mdm-score-cursor__beat").getBoundingClientRect();
+    const x = ((b.left + b.right) / 2 - m.e) / m.a;
+    const on = Array.from(svg.querySelectorAll(".abcjs-bar"))
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => (r.top + r.bottom) / 2 > b.top && (r.top + r.bottom) / 2 < b.bottom)
+      .map((r) => ({ left: (r.left - m.e) / m.a, right: (r.right - m.e) / m.a }))
+      .sort((p, q) => p.left - q.left);
+    for (let i = 0; i + 1 < on.length; i++) {
+      if (on[i].right < x && x < on[i + 1].left) return { width: on[i + 1].left - on[i].right, off: x - (on[i].right + on[i + 1].left) / 2 };
+    }
+    return null;
+  });
+// Two plain barlines leave 15.4 units clear between them (16 from the middle
+// of one to the middle of the next, each 0.6 across); a heavier one (`|]`, a
+// repeat's) less, and the cursor stands in the middle of whatever is left.
+// `width` is the figure where the test has an exact one.
+const assertGap = (gap, what, width) => {
+  assert.ok(gap, what + ": the cursor is between no two barlines");
+  assert.ok(width === undefined ? gap.width > 14 : Math.abs(gap.width - width) < 0.3, what + ": the bar is " + gap.width + " across");
+  assert.ok(Math.abs(gap.off) < 0.5, what + ": the cursor is " + gap.off + " off the middle of the bar");
+};
 // Every button of a score's chrome, the + when it is up among them,
 // answered by the engine while the page was idle (askScoreEdit).
 function asked(page, score) {
@@ -1903,7 +1944,7 @@ test("the switch of the mode wears the whole note alone in the cursor's box, in 
   await h.close();
 });
 
-test("a + at the barline nearest the pointer adds a bar of rest in every voice, the cursor goes onto it, and undo takes it back (SM34)", { skip }, async () => {
+test("a + at the barline nearest the pointer adds a bar with nothing in it in every voice, the cursor goes into it between its two barlines, and undo takes it back (SM34)", { skip }, async () => {
   const h = await open({ text: DUET, scores: 1 });
   await pressMode(h.page);
   const st = await staves(h.page, 0);
@@ -1934,16 +1975,25 @@ test("a + at the barline nearest the pointer adds a bar of rest in every voice, 
   );
   assert.ok(Math.abs(column.middle - bars[0].x) < 1.5 && column.top < st[0].top && column.bottom > st[1].bottom, "the column stands at " + JSON.stringify(column));
   await h.page.mouse.click(add.x, add.y);
-  const added = DUET_SOURCE.replace("c G A F |", "c G A F | z4 |").replace("C, D, E, F, |", "C, D, E, F, | z4 |");
+  // The bar holds no rest (the owner's call of 2026-11-08): two barlines
+  // with nothing between them, in both voices.
+  const added = DUET_SOURCE.replace("c G A F |", "c G A F | |").replace("C, D, E, F, |", "C, D, E, F, | |");
   assert.equal(await staged(h.page), added);
-  assert.equal(await noteAtCursor(h.page), "z");
+  assertGap(await gapAt(h.page), "the bar added", 15.4);
   assert.equal(await docText(h.page), DUET.replace(DUET_SOURCE, added));
+  // The arrow takes the cursor out of it, to the next note, and the bar
+  // stays drawn as the two barlines it is.
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "G");
+  assert.equal(await staged(h.page), added);
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "back in the bar");
   await chord(h.page, ["Control"], "z");
   assert.equal(await staged(h.page), DUET_SOURCE);
   await chord(h.page, ["Control"], "y");
   assert.equal(await staged(h.page), added);
-  // Made again, the bar has the cursor on it again.
-  assert.equal(await noteAtCursor(h.page), "z");
+  // Made again, the bar has the cursor in it again.
+  assertGap(await gapAt(h.page), "the bar made again");
   await chord(h.page, ["Control"], "z");
   // The tip of a line's upper button clears the whole system, whose middle,
   // where the pair stands, is between the two staves.
@@ -1962,8 +2012,9 @@ test("a + at the barline nearest the pointer adds a bar of rest in every voice, 
   assert.deepEqual([add.system, add.bar], [1, -1]);
   await h.page.mouse.move(add.x, add.y, { steps: 4 });
   await h.page.mouse.click(add.x, add.y);
-  const headed = DUET_SOURCE.replace("V:1\ne d c B", "V:1\nz4 | e d c B").replace("V:2\nA, B, C D", "V:2\nz4 | A, B, C D");
+  const headed = DUET_SOURCE.replace("V:1\ne d c B", "V:1\n| | e d c B").replace("V:2\nA, B, C D", "V:2\n| | A, B, C D");
   assert.equal(await staged(h.page), headed);
+  assertGap(await gapAt(h.page), "the bar at the head");
   // Out of the mode: the text takes it.
   await pressMode(h.page);
   assert.equal(await docText(h.page), DUET.replace(DUET_SOURCE, headed));
@@ -2440,10 +2491,11 @@ test("an undo in the mode leaves the page where it is, though the text's caret i
 });
 
 // The owner's pick of design-score-editing-2.html (A, 2026-09-29): with no
-// meter, a bar of eight quarters is given two whole rests. One rest eight
-// quarters long is one abcjs 6.7.0 cannot draw: it writes "pitch is
+// meter, a bar of eight quarters was given two whole rests, one rest eight
+// quarters long being one abcjs 6.7.0 cannot draw: it writes "pitch is
 // undefined" in red in its place (what the partials of example.mdm got).
-test("a bar added where there is no meter is drawn with the rests that make it, and abcjs has nothing to say against it (SM47)", { skip }, async () => {
+// The bar holds no rest since 2026-11-08, and is no length to get wrong.
+test("a bar added where there is no meter is drawn as two barlines with nothing between them, and abcjs has nothing to say against it (SM47)", { skip }, async () => {
   const source = ["X:1", "L:1/4", "K:C", "C D E F G A B c | d e f g |"].join("\n");
   const h = await open({ text: ["Free.", "", "```abc", source, "```", ""].join("\n"), scores: 1 });
   await pressMode(h.page);
@@ -2458,12 +2510,12 @@ test("a bar added where there is no meter is drawn with the rests that make it, 
   await sleep(100);
   await h.page.mouse.click(add.x, add.y);
   await sleep(100);
-  assert.equal(await staged(h.page), source.replace("B c |", "B c | z4 z4 |"));
-  assert.equal(await rests(), 2);
+  assert.equal(await staged(h.page), source.replace("B c |", "B c | |"));
+  assert.equal(await rests(), 0);
   const said = await h.page.evaluate(() => document.querySelector("#app .mdm-score code.language-abc svg").textContent);
   assert.ok(!/undefined/.test(said), "abcjs wrote: " + said);
-  // The cursor on the first of them.
-  assert.equal(await noteAtCursor(h.page), "z");
+  // The cursor in it.
+  assertGap(await gapAt(h.page), "the bar added");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -2488,19 +2540,24 @@ test("a score with no barline takes a + at the end of its staff, which closes th
   const column = await markLook(h.page, "#app .mdm-score-edit-preview");
   assert.ok(Math.abs(column.middle - st[0].right) < 1.5, "the column stands at " + column.middle + ", the staff ends at " + st[0].right);
   await h.page.mouse.click(add.x, add.y);
-  assert.equal(await staged(h.page), "C | z");
-  assert.equal(await noteAtCursor(h.page), "z");
-  // The new bar is open as the first was, and its end takes a + in turn.
+  // The bar after the barline it closes the first with is the voice's open
+  // end, which holds nothing: the cursor is there.
+  assert.equal(await staged(h.page), "C |");
+  assert.equal(await placeText(h.page), "");
+  // The barline takes a + in turn, which adds a bar of nothing before the
+  // open end, and the cursor goes into it.
   assert.equal((await barlines(h.page)).length, 1);
   const again = await staves(h.page, 0);
-  await pointAt(h.page, { x: again[0].right - 3, y: (again[0].top + again[0].bottom) / 2 });
+  const bar = (await barlines(h.page))[0];
+  await pointAt(h.page, { x: bar.x + 3, y: (again[0].top + again[0].bottom) / 2 });
   add = await plus(h.page);
-  assert.ok(add, "no + at the end of the new bar");
-  assert.deepEqual([add.system, add.bar], [0, 1]);
+  assert.ok(add, "no + at the barline");
+  assert.deepEqual([add.system, add.bar], [0, 0]);
   await h.page.mouse.move(add.x, add.y, { steps: 4 });
   await h.page.mouse.click(add.x, add.y);
-  assert.equal(await staged(h.page), "C | z | z");
-  assert.equal(await docText(h.page), ["Bare.", "", "```abc", "C | z | z", "```", ""].join("\n"));
+  assert.equal(await staged(h.page), "C | |");
+  assertGap(await gapAt(h.page), "the bar between the two");
+  assert.equal(await docText(h.page), ["Bare.", "", "```abc", "C | |", "```", ""].join("\n"));
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -2996,7 +3053,8 @@ test("a key that writes, while the music sounds on the cursor's score, stops it 
     [["Shift"], "3"],
     [["Control", "Shift"], "3"],
     [["Alt", "Shift"], "3"],
-    [["Control"], "ArrowRight"],
+    [["Control"], "b"],
+    [["Alt"], "b"],
     [["Control"], "ArrowDown"],
   ]) {
     await h.page.keyboard.press("Space");
@@ -3028,9 +3086,9 @@ test("the keys that write stop at the mode, Ctrl with the arrows and the figures
   await pressMode(h.page);
   await heard();
   for (const key of ["Enter", "3", "0", "7", "Delete", "Backspace"]) await h.page.keyboard.press(key);
-  // Ctrl+1 is VS Code's for the first group of editors, Ctrl+0 for the side
-  // bar and Ctrl+Up for a line of scrolling, and the mode's while it holds
-  // the keyboard. So are the figures' keys with Shift, which write rests,
+  // Ctrl+1 is VS Code's for the first group of editors, Ctrl+0 and Ctrl+B
+  // for the side bar and Ctrl+Up for a line of scrolling, and the mode's
+  // while it holds the keyboard. So are the figures' keys with Shift, which write rests,
   // and Ctrl+Shift+Space, which picks the cursor's voice for a stretch (a
   // key of VS Code's as well: its parameter hints, and in 1.133 a
   // push-to-talk, read off its bundle).
@@ -3040,8 +3098,7 @@ test("the keys that write stop at the mode, Ctrl with the arrows and the figures
     [["Shift"], "3"],
     [["Shift"], "7"],
     [["Control", "Shift"], "3"],
-    [["Control"], "ArrowRight"],
-    [["Control"], "ArrowLeft"],
+    [["Control"], "b"],
     [["Control"], "ArrowUp"],
     [["Control"], "ArrowDown"],
     [["Control", "Shift"], "ArrowUp"],
@@ -3067,10 +3124,11 @@ test("the keys that write stop at the mode, Ctrl with the arrows and the figures
     [["Alt"], "3"],
     [["Alt"], "0"],
     [["Shift", "Alt"], "1"],
+    [["Alt"], "b"],
   ]) {
     await chord(h.page, mods, key);
   }
-  assert.deepEqual(await heard(), ["Alt+", "Alt+", "Shift+Alt+"]);
+  assert.deepEqual(await heard(), ["Alt+", "Alt+", "Shift+Alt+", "Alt+"]);
   const written = await staged(h.page);
   assert.notEqual(written, NOTES_SOURCE);
   for (const [mods, key] of [
@@ -3095,6 +3153,10 @@ test("the keys that write stop at the mode, Ctrl with the arrows and the figures
     // again, an editor moved into the next group or the one before it.
     [["Control", "Alt"], "ArrowRight"],
     [["Control", "Alt"], "ArrowLeft"],
+    // Ctrl with Left and Right added a bar until the owner gave it Ctrl+B
+    // and Alt+B (2026-11-08, SM64).
+    [["Control"], "ArrowRight"],
+    [["Control"], "ArrowLeft"],
     // Ctrl+Shift+Alt is no chord of the mode's: the walk over the voices
     // and its Space were under it until the owner took Alt out of them
     // (2026-10-06), and a stretch was drawn out under it as well.
@@ -3103,6 +3165,11 @@ test("the keys that write stop at the mode, Ctrl with the arrows and the figures
     [["Control", "Shift", "Alt"], "ArrowRight"],
     [["Control", "Shift", "Alt"], "ArrowLeft"],
     [["Control", "Shift", "Alt"], "Space"],
+    // The bar is Ctrl's or Alt's alone, and with no Shift: Ctrl+Shift+B is
+    // VS Code's build task.
+    [["Control", "Shift"], "b"],
+    [["Control", "Alt"], "b"],
+    [["Shift", "Alt"], "b"],
     // The cut and the whole are Ctrl's alone.
     [["Control", "Shift"], "x"],
     [["Control", "Shift"], "a"],
@@ -3129,11 +3196,16 @@ test("the keys that write stop at the mode, Ctrl with the arrows and the figures
     "Alt+ArrowUp",
     "Ctrl+Alt+ArrowRight",
     "Ctrl+Alt+ArrowLeft",
+    "Ctrl+ArrowRight",
+    "Ctrl+ArrowLeft",
     "Ctrl+Shift+Alt+ArrowDown",
     "Ctrl+Shift+Alt+ArrowUp",
     "Ctrl+Shift+Alt+ArrowRight",
     "Ctrl+Shift+Alt+ArrowLeft",
     "Ctrl+Shift+Alt+Space",
+    "Ctrl+Shift+KeyB",
+    "Ctrl+Alt+KeyB",
+    "Shift+Alt+KeyB",
     "Ctrl+Shift+KeyX",
     "Ctrl+Shift+KeyA",
     "Ctrl+Alt+KeyX",
@@ -3291,12 +3363,14 @@ test("off the staff the cursor stands on grey ledger lines, the ones a note writ
 // The owner's report of 2026-10-02: in `C | | G` only the first barline
 // wore a +.
 test("every barline wears a +, a barline that closes no bar as well, which adds the bar past itself (SM62)", { skip }, async () => {
-  const source = ["X:1", "M:2/4", "L:1/4", "K:C", "C2 | | G2 | |]"].join("\n");
+  // Three in a row, which the mode draws apart as they are written: a pair
+  // is one double barline there (SM131) and has the one +.
+  const source = ["X:1", "M:2/4", "L:1/4", "K:C", "C2 | | | G2 | |]"].join("\n");
   const h = await open({ text: ["Empty bars.", "", "```abc", source, "```", ""].join("\n"), scores: 1 });
   await pressMode(h.page);
   const st = await staves(h.page, 0);
   const bars = await barlines(h.page);
-  assert.equal(bars.length, 4);
+  assert.equal(bars.length, 5);
   const point = (bar) => pointAt(h.page, { x: bar.x + 1, y: (st[0].top + st[0].bottom) / 2 });
   const seen = [];
   for (const bar of bars) {
@@ -3306,8 +3380,9 @@ test("every barline wears a +, a barline that closes no bar as well, which adds 
     assert.ok(Math.abs(add.x - bar.x) < 2, "the + stands at " + add.x + ", the barline at " + bar.x);
     seen.push(add.bar);
   }
-  assert.deepEqual(seen, [0, 1, 2, 3]);
-  // The second: a bar past it, before the G's, and the cursor on it.
+  assert.deepEqual(seen, [0, 1, 2, 3, 4]);
+  // The second, which closes no bar: a bar past the barlines that stand
+  // before the G's, and the cursor in it.
   await point(bars[1]);
   let add = await plus(h.page);
   await h.page.mouse.move(add.x, add.y, { steps: 4 });
@@ -3316,16 +3391,17 @@ test("every barline wears a +, a barline that closes no bar as well, which adds 
   const column = await markLook(h.page, "#app .mdm-score-edit-preview");
   assert.ok(Math.abs(column.middle - bars[1].x) < 1.5, "the column stands at " + column.middle + ", the barline at " + bars[1].x);
   await h.page.mouse.click(add.x, add.y);
-  assert.equal(await staged(h.page), source.replace("C2 | | G2", "C2 | | z2 | G2"));
-  assert.equal(await noteAtCursor(h.page), "z");
+  assert.equal(await staged(h.page), source.replace("C2 | | | G2", "C2 | | | | G2"));
+  assertGap(await gapAt(h.page), "the bar past the barlines");
   await chord(h.page, ["Control"], "z");
   // The last, after the line's last bar: the bar after that one, as at the
-  // barline that closes it.
-  await point(bars[3]);
+  // barline that closes it, which is before the barline that ends the tune.
+  await point(bars[4]);
   add = await plus(h.page);
   await h.page.mouse.move(add.x, add.y, { steps: 4 });
   await h.page.mouse.click(add.x, add.y);
-  assert.equal(await staged(h.page), source.replace("G2 | |]", "G2 | z2 | |]"));
+  assert.equal(await staged(h.page), source.replace("G2 | |]", "G2 | | |]"));
+  assertGap(await gapAt(h.page), "the bar before the last barline");
   assert.deepEqual(h.errors, []);
   await h.close();
 });
@@ -3692,68 +3768,478 @@ test("a digit of the numeric pad pressed with Shift under NumLock comes by its o
   await h.close();
 });
 
-test("Ctrl+Right and Ctrl+Left add a bar of rest after the cursor's bar or before it in the cursor's voice alone, and in every voice of the line once they are chosen with Ctrl+Shift and an arrow; the cursor goes onto it at its height (SM64)", { skip }, async () => {
-  const source = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "C4 | D4 |]", "V:2 clef=bass", "C,4 | D,4 |]"].join("\n");
+// The owner's keys of 2026-11-08, "Ctrl/Alt + b añadirá la barra a la
+// izquierda/derecha de donde el cabezal esté situado", and the example that
+// set my first reading of them right (a bar of rest beside the cursor's
+// bar, which they added for an hour): "Ctrl+B inserte la barra justo a la
+// izquierda de donde está el cabezal: A2 | B2 c2". Ctrl on the left and Alt
+// on the right, as they put a note in (SM63). Until that day Ctrl with
+// Right and Left added a bar of rest, which the owner had taken off the
+// keys the same day.
+test("Ctrl+B and Alt+B put a barline in just before the cursor's place or just after it, in its voice alone, and the cursor stays on its note; where a barline stands already, or before the first note, they add a bar with nothing in it beside the cursor's and the cursor goes in (SM126); the key is the B the layout writes, or the key on B's place where it writes no letter; and Ctrl with Left and Right puts nothing in (SM64)", { skip }, async () => {
+  const source = ["X:1", "M:4/4", "L:1/8", "K:C", "V:1", "A2 B2 c2 d2 |]", "V:2 clef=bass", "C,4 E,4 |]"].join("\n");
   const h = await open({ text: ["Bars.", "", "```abc", source, "```", ""].join("\n"), scores: 1 });
   await pressMode(h.page);
-  assert.equal(await placeText(h.page), "C4");
-  await toStep(h.page, 4);
-  // Ctrl alone: the upper voice, and the lower as it was.
+  assert.equal(await placeText(h.page), "A2");
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "B2");
+  const step = (await cursor(h.page)).step;
+  const left = source.replace("A2 B2 c2 d2", "A2 | B2 c2 d2");
+  const right = source.replace("A2 B2 c2 d2", "A2 B2 | c2 d2");
+  const stays = async (text, what) => assert.deepEqual([await staged(h.page), await placeText(h.page), (await cursor(h.page)).step], [text, "B2", step], what);
+  const lastNotice = async () => (await notices(h.page)).pop();
+  // Ctrl+B, the owner's example: to the left of the B, in the upper voice
+  // alone, and the cursor on the B at its step.
+  await chord(h.page, ["Control"], "b");
+  await stays(left, "Ctrl+B");
+  // Alt+B, to the right of the same note.
+  await chord(h.page, ["Alt"], "b");
+  await stays(source.replace("A2 B2 c2 d2", "A2 | B2 | c2 d2"), "Alt+B");
+  // A barline on either side now: the key adds a bar with nothing in it
+  // beside the cursor's, on the side it names, and the cursor goes into it
+  // (the owner's ask of 2026-11-08); undone, it is on the B at its step.
+  const both = source.replace("A2 B2 c2 d2", "A2 | B2 | c2 d2");
+  await chord(h.page, ["Control"], "b");
+  assert.deepEqual([await staged(h.page), await lastNotice()], [source.replace("A2 B2 c2 d2", "A2 | | B2 | c2 d2"), undefined]);
+  assertGap(await gapAt(h.page), "Ctrl+B");
+  assert.equal((await cursor(h.page)).step, step);
+  await chord(h.page, ["Control"], "z");
+  await stays(both, "the bar to the left undone");
+  await chord(h.page, ["Alt"], "b");
+  assert.equal(await staged(h.page), source.replace("A2 B2 c2 d2", "A2 | B2 | | c2 d2"));
+  assertGap(await gapAt(h.page), "Alt+B");
+  await chord(h.page, ["Control"], "z");
+  await stays(both, "the bar to the right undone");
+  // Each a step of its own for Ctrl+Z, the cursor kept on the B.
+  await chord(h.page, ["Control"], "z");
+  await stays(left, "one undone");
+  await chord(h.page, ["Control"], "z");
+  await stays(source, "both undone");
+  // A key held down is one barline.
+  await h.page.keyboard.down("Alt");
+  await h.page.keyboard.down("b");
+  await h.page.keyboard.down("b");
+  await h.page.keyboard.up("b");
+  await h.page.keyboard.up("Alt");
+  await stays(right, "held down");
+  await chord(h.page, ["Control"], "z");
+  await stays(source, "held down, undone");
+  // Ctrl with Left and Right puts nothing in since the owner's keys of
+  // 2026-11-08 (it goes on to VS Code, SM57), and the cursor stays.
   await chord(h.page, ["Control"], "ArrowRight");
-  const upper = source.replace("C4 | D4", "C4 | z4 | D4");
-  assert.equal(await staged(h.page), upper);
-  assert.deepEqual([await placeText(h.page), (await cursor(h.page)).step], ["z4", 4]);
+  await chord(h.page, ["Control"], "ArrowLeft");
+  await stays(source, "Ctrl with an arrow across");
+  // The key as other keyboards send it (letterKey): by the letter it
+  // writes, and by its place where it writes no letter of a to z. Option on
+  // a Mac writes the integral sign with the B of a US layout, and a Russian
+  // layout writes its own letter on that place; Dvorak has its B on the
+  // place of the N, and on the B's place its X, which is no key of the
+  // mode's with Alt. Sent as such a keyboard sends them, the modifier going
+  // down first and up last.
+  const cdp = await h.page.target().createCDPSession();
+  const send = async (key, code, vk, alt) => {
+    const mod = alt ? { key: "Alt", code: "AltLeft", vk: 18, bit: 1 } : { key: "Control", code: "ControlLeft", vk: 17, bit: 2 };
+    const event = (type, k, c, v, modifiers) =>
+      cdp.send("Input.dispatchKeyEvent", { type, key: k, code: c, windowsVirtualKeyCode: v, nativeVirtualKeyCode: v, modifiers });
+    await event("rawKeyDown", mod.key, mod.code, mod.vk, mod.bit);
+    await event("rawKeyDown", key, code, vk, mod.bit);
+    await event("keyUp", key, code, vk, mod.bit);
+    await event("keyUp", mod.key, mod.code, mod.vk, 0);
+  };
+  for (const [what, key, code, vk, alt, after] of [
+    ["Ctrl+B on a Russian layout", String.fromCharCode(0x438), "KeyB", 66, false, left],
+    ["Alt+B on Dvorak", "b", "KeyN", 66, true, right],
+    ["Ctrl+B on Dvorak", "b", "KeyN", 66, false, left],
+    ["Alt with the key on B's place on Dvorak", "x", "KeyB", 88, true, source],
+  ]) {
+    await send(key, code, vk, alt);
+    await stays(after, what);
+    if (after !== source) await chord(h.page, ["Control"], "z");
+    await stays(source, what + ", undone");
+  }
+  // Before the first note of a voice there is no bar to close: the bar goes
+  // at the head of the line, and the cursor into it.
+  await h.page.keyboard.press("ArrowLeft");
+  assert.equal(await placeText(h.page), "A2");
+  await chord(h.page, ["Control"], "b");
+  assert.equal(await staged(h.page), source.replace("V:1\nA2", "V:1\n| | A2"));
+  assertGap(await gapAt(h.page), "Ctrl+B before the first note");
   await chord(h.page, ["Control"], "z");
   assert.equal(await staged(h.page), source);
-  assert.equal(await placeText(h.page), "C4");
-  // In both: the voices are chosen first, with Ctrl+Shift and an arrow,
-  // and the same key adds the bar to the ones chosen (the owner's call of
-  // 2026-10-06, which took Ctrl+Alt out; SM103). Asked of the same place on
-  // the same source, it is another question to the engine, and another
-  // answer. The stretch is let go, and the cursor is on the new bar's rest
-  // in the voice it was drawn out in, at its height.
-  await chord(h.page, ["Control", "Shift"], "ArrowRight");
-  assert.deepEqual([(await stretch(h.page)).voices, await ends2(h.page)], ["all", [0, 0]]);
-  await chord(h.page, ["Control"], "ArrowRight");
-  const both = upper.replace("C,4 | D,4", "C,4 | z4 | D,4");
-  assert.equal(await staged(h.page), both);
-  assert.deepEqual([await placeText(h.page), (await cursor(h.page)).step, await ends2(h.page), await cursorShown(h.page)], ["z4", 4, [null, 1], true]);
-  // Before the stretch's bar, which is the one just added, and onto it.
-  await chord(h.page, ["Control", "Shift"], "ArrowLeft");
-  await chord(h.page, ["Control"], "ArrowLeft");
-  const three = source.replace("C4 | D4", "C4 | z4 | z4 | D4").replace("C,4 | D,4", "C,4 | z4 | z4 | D,4");
-  assert.equal(await staged(h.page), three);
-  assert.match((await staged(h.page)).slice(0, (await cursor(h.page)).from), /\nC4 \|$/);
-  // At the head of the line, in the one voice.
-  await h.page.keyboard.press("ArrowLeft");
-  assert.equal(await placeText(h.page), "C4");
-  await chord(h.page, ["Control"], "ArrowLeft");
-  const headed = three.replace("V:1\nC4", "V:1\nz4 | C4");
-  assert.equal(await staged(h.page), headed);
-  // Before the barline that ends the tune, and a key held down is one bar.
-  await press(h.page, "ArrowRight", 4);
-  assert.equal(await placeText(h.page), "D4");
-  await h.page.keyboard.down("Control");
-  await h.page.keyboard.down("ArrowRight");
-  await h.page.keyboard.down("ArrowRight");
-  await h.page.keyboard.up("ArrowRight");
-  await h.page.keyboard.up("Control");
-  assert.equal(await staged(h.page), headed.replace("D4 |]", "D4 | z4 |]"));
-  assert.equal(await placeText(h.page), "z4");
-  // Each a step of its own for Ctrl+Z, the last of them back to the
-  // stretch the first bar was added beside, chosen over both voices.
-  for (let i = 0; i < 4; i++) await chord(h.page, ["Control"], "z");
-  assert.equal(await staged(h.page), source);
-  assert.deepEqual([(await stretch(h.page)).voices, await ends2(h.page)], ["all", [0, 0]]);
-  // From the lower voice, Ctrl adds it in the lower voice alone.
+  assert.equal(await placeText(h.page), "A2");
+  // From the lower voice, in the lower voice alone.
   await chord(h.page, ["Control"], "ArrowDown");
   assert.equal(await placeText(h.page), "C,4");
-  await chord(h.page, ["Control"], "ArrowRight");
-  const lower = source.replace("C,4 | D,4", "C,4 | z4 | D,4");
-  assert.equal(await staged(h.page), lower);
-  assert.equal((await cursor(h.page)).from, lower.indexOf("z4") - 1);
+  await chord(h.page, ["Alt"], "b");
+  assert.deepEqual([await staged(h.page), await placeText(h.page)], [source.replace("C,4 E,4", "C,4 | E,4"), "C,4"]);
+  await chord(h.page, ["Control"], "z");
+  // With AltGr the key is the one of its third level and nobody's here, as
+  // the figures' keys are not (SM98): Ctrl held with it puts nothing in.
+  // X11 names AltGr in no modifier of the event, and its state is answered
+  // by the test.
+  await chord(h.page, ["Control"], "ArrowUp");
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "B2");
+  await h.page.evaluate(() => {
+    const real = KeyboardEvent.prototype.getModifierState;
+    KeyboardEvent.prototype.getModifierState = function (k) {
+      return k === "AltGraph" ? !!window.__altGraph : real.call(this, k);
+    };
+    window.__altGraph = true;
+  });
+  await chord(h.page, ["Control"], "b");
+  assert.equal(await staged(h.page), source);
+  await h.page.evaluate(() => (window.__altGraph = false));
+  await chord(h.page, ["Control"], "b");
+  assert.equal(await staged(h.page), left);
   assert.deepEqual(h.errors, []);
   await h.close();
+});
+
+// The owner's ask of 2026-11-08: "si al final de un compás el cabezal está
+// digamos en la nota Do ... C | y se presiona Alt+B, deben aparecer cuantos
+// compases se añadan ... C | | y en cada uno el cabezal debe moverse adentro
+// del compás". The bar holds nothing, so it is two barlines drawn 16 units
+// apart, with the cursor between them.
+test("Alt+B on the last note of a bar adds a bar with nothing in it to the right of it, the cursor goes in, and each press adds one more; Ctrl+B at the head of a bar does it to the left; the arrows leave the bar and come back into it; every press is a step for Ctrl+Z (SM126)", { skip }, async () => {
+  const source = ["X:1", "M:4/4", "L:1/4", "K:C", "C D E F | G A B c |"].join("\n");
+  const h = await open({ text: ["Bars.", "", "```abc", source, "```", ""].join("\n"), scores: 1 });
+  await pressMode(h.page);
+  await press(h.page, "ArrowRight", 3);
+  assert.equal(await placeText(h.page), "F");
+  const step = (await cursor(h.page)).step;
+  // Alt+B on the F, which a barline closes: C | becomes C | |, and the
+  // cursor is in the bar between the two, at the step it was at.
+  for (let n = 1; n <= 3; n++) {
+    await chord(h.page, ["Alt"], "b");
+    assert.equal(await staged(h.page), source.replace("F |", "F |" + " |".repeat(n)), "Alt+B " + n);
+    assertGap(await gapAt(h.page), "Alt+B " + n, 15.4);
+    assert.equal((await cursor(h.page)).step, step);
+  }
+  assert.deepEqual(await notices(h.page), []);
+  // The arrow takes it out of the last of them, onto the G, and into it again.
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "G");
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "back in");
+  // Ctrl+B on the G, the first note of its bar: a bar to its left, and the
+  // cursor goes into the one that opens it.
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "G");
+  await chord(h.page, ["Control"], "b");
+  assert.equal(await staged(h.page), source.replace("F |", "F | | | | |"));
+  assertGap(await gapAt(h.page), "Ctrl+B");
+  // In a bar with nothing in it the keys add one beside it, as the arrows
+  // walk: Alt+B to the right, Ctrl+B to the left, one more each press.
+  await chord(h.page, ["Alt"], "b");
+  assert.equal(await staged(h.page), source.replace("F |", "F | | | | | |"));
+  assertGap(await gapAt(h.page), "Alt+B in a bar of nothing");
+  await chord(h.page, ["Control"], "b");
+  assert.equal(await staged(h.page), source.replace("F |", "F | | | | | | |"));
+  assertGap(await gapAt(h.page), "Ctrl+B in a bar of nothing");
+  // Each a step of its own: undone one by one, the cursor goes back to
+  // where it stood, and the score to what it read.
+  const written = [source.replace("F |", "F | | | | | |"), source.replace("F |", "F | | | | |")];
+  for (const text of written) {
+    await chord(h.page, ["Control"], "z");
+    assert.equal(await staged(h.page), text);
+    assertGap(await gapAt(h.page), "undone");
+  }
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await staged(h.page), source.replace("F |", "F | | | |"));
+  assert.equal(await placeText(h.page), "G");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+test("at the open end past a barline Alt+B and Ctrl+B add a bar with nothing in it as well: Alt+B one that the cursor leaves behind it, at the new end, and Ctrl+B one that it goes into; before the barline that ends the tune, Alt+B on the last note adds it before the end (SM127)", { skip }, async () => {
+  const source = ["X:1", "M:4/4", "L:1/4", "K:C", "C D E F | G A B c |"].join("\n");
+  const h = await open({ text: ["Bars.", "", "```abc", source, "```", ""].join("\n"), scores: 1 });
+  await pressMode(h.page);
+  await press(h.page, "ArrowRight", 8);
+  assert.equal(await placeText(h.page), "");
+  // The open end past the last barline: Alt+B closes the bar the cursor was
+  // in, which has nothing in it, with a barline, and the cursor is in the
+  // open end past that one.
+  await chord(h.page, ["Alt"], "b");
+  assert.equal(await staged(h.page), source + " |");
+  assert.equal(await placeText(h.page), "");
+  assert.equal(await gapAt(h.page), null);
+  // Back one place: the bar between the two, with the cursor in it.
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "the bar between the two");
+  await h.page.keyboard.press("ArrowRight");
+  // Ctrl+B there: one more bar, and the cursor in it, to the left of the end.
+  await chord(h.page, ["Control"], "b");
+  assert.equal(await staged(h.page), source + " | |");
+  assertGap(await gapAt(h.page), "Ctrl+B at the open end");
+  assert.deepEqual(await notices(h.page), []);
+  await chord(h.page, ["Control"], "z");
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await staged(h.page), source);
+  // Before the barline that ends the tune: the last note's Alt+B puts the
+  // bar before it, and the cursor goes in.
+  const ended = source.replace("c |", "c |]");
+  const g = await open({ text: ["Bars.", "", "```abc", ended, "```", ""].join("\n"), scores: 1 });
+  await pressMode(g.page);
+  await press(g.page, "ArrowRight", 7);
+  assert.equal(await placeText(g.page), "c");
+  await chord(g.page, ["Alt"], "b");
+  assert.equal(await staged(g.page), source.replace("c |", "c | |]"));
+  assertGap(await gapAt(g.page), "before the end");
+  assert.deepEqual(h.errors.concat(g.errors), []);
+  await g.close();
+  await h.close();
+});
+
+test("a bar with nothing in it is a place of its own: the arrows walk through it, and a figure's key, 0, Ctrl and Alt write into it, the first of a bar of its own, with the cursor on what was written; Enter has no length to give it (SM128)", { skip }, async () => {
+  const line = "A2 B2 c2 d2 | | e2 f2 g2 a2 |]";
+  const h = await open({ text: notesDoc(line), scores: 1 });
+  await pressMode(h.page);
+  await press(h.page, "ArrowRight", 3);
+  assert.equal(await placeText(h.page), "d2");
+  // The next place is the bar between the two barlines, which has nothing
+  // written on it, and then the note after.
+  await h.page.keyboard.press("ArrowRight");
+  assertGap(await gapAt(h.page), "the arrow");
+  assert.equal(await placeText(h.page), "");
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "e2");
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "the arrow back");
+  // Up and down choose the step, as at any place.
+  await toStep(h.page, 6);
+  // Enter has no length to take from it.
+  const sent = (await edits(h.page)).length;
+  await h.page.keyboard.press("Enter");
+  assert.equal((await edits(h.page)).length, sent);
+  // A figure's key writes a note there: the bar holds it, and the cursor is
+  // on it, at the step it was at.
+  await h.page.keyboard.press("3");
+  assert.equal(await music(h.page), "A2 B2 c2 d2 | B2 | e2 f2 g2 a2 |]");
+  assert.deepEqual([await placeText(h.page), (await cursor(h.page)).step], ["B2", 6]);
+  await chord(h.page, ["Control"], "z");
+  assertGap(await gapAt(h.page), "undone");
+  // 0 writes a rest, as long as the figure kept.
+  await h.page.keyboard.press("0");
+  assert.equal(await music(h.page), "A2 B2 c2 d2 | z2 | e2 f2 g2 a2 |]");
+  assert.equal(await placeText(h.page), "z2");
+  await chord(h.page, ["Control"], "z");
+  // Ctrl and Alt put the note in before the cursor's place and after it, and
+  // a bar of nothing has the one side to put it in on.
+  await chord(h.page, ["Alt"], "4");
+  assert.equal(await music(h.page), "A2 B2 c2 d2 | B | e2 f2 g2 a2 |]");
+  assert.equal(await placeText(h.page), "B");
+  await chord(h.page, ["Control"], "z");
+  await chord(h.page, ["Control"], "4");
+  assert.equal(await music(h.page), "A2 B2 c2 d2 | B | e2 f2 g2 a2 |]");
+  await chord(h.page, ["Control"], "z");
+  assertGap(await gapAt(h.page), "all undone");
+  assert.equal(await music(h.page), line);
+  assert.equal(await docText(h.page), notesDoc(line));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The bar the + adds holds no rest since 2026-11-08, and Delete took a bar
+// that was a rest and nothing else out with its barline: these keys are what
+// takes the bar of nothing back.
+test("Delete and Backspace in a bar with nothing in it take the bar out, in the cursor's voice alone, Delete leaving the cursor on what comes into its place and Backspace on the place before; two barlines that are no plain ones are left, and the score says so (SM129)", { skip }, async () => {
+  const source = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "C D E F | | G A B c |]", "V:2 clef=bass", "C, D, E, F, | | G, A, B, C |]"].join("\n");
+  const h = await open({ text: ["Bars.", "", "```abc", source, "```", ""].join("\n"), scores: 1 });
+  await pressMode(h.page);
+  await press(h.page, "ArrowRight", 4);
+  assertGap(await gapAt(h.page), "the bar of nothing");
+  const taken = source.replace("F | | G A", "F | G A");
+  // Delete: the upper voice's bar goes, the lower voice as it was, and the
+  // cursor is on the G that comes into the bar's index.
+  await h.page.keyboard.press("Delete");
+  assert.equal(await staged(h.page), taken);
+  assert.equal(await placeText(h.page), "G");
+  assert.deepEqual(await notices(h.page), []);
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await staged(h.page), source);
+  assertGap(await gapAt(h.page), "Delete undone");
+  // Backspace: the same bar, and the cursor on the place before it.
+  await h.page.keyboard.press("Backspace");
+  assert.equal(await staged(h.page), taken);
+  assert.equal(await placeText(h.page), "F");
+  await chord(h.page, ["Control"], "z");
+  assertGap(await gapAt(h.page), "Backspace undone");
+  // The lower voice's own: Ctrl+Down lands on its G, the place that sounds
+  // with the upper voice's, and one place to the left is its bar of nothing.
+  await chord(h.page, ["Control"], "ArrowDown");
+  assert.equal(await placeText(h.page), "G,");
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "the lower voice's bar");
+  await h.page.keyboard.press("Delete");
+  assert.equal(await staged(h.page), source.replace("F, | | G,", "F, | G,"));
+  await h.page.keyboard.press("ArrowLeft");
+  assert.equal(await placeText(h.page), "F,");
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  // The end of one repeat and the start of the next, written apart, are two
+  // barlines that stand for something each: neither goes.
+  const repeats = ["X:1", "M:4/4", "L:1/4", "K:C", "|: C D E F :| |: G A B c :|"].join("\n");
+  const g = await open({ text: ["Repeats.", "", "```abc", repeats, "```", ""].join("\n"), scores: 1 });
+  await pressMode(g.page);
+  await press(g.page, "ArrowRight", 4);
+  assertGap(await gapAt(g.page), "between the repeats");
+  await g.page.keyboard.press("Delete");
+  assert.equal(await staged(g.page), repeats);
+  assert.deepEqual(await notices(g.page), [await g.page.evaluate(() => window.MDM_BARS.reasonText("noteUnsafe"))]);
+  assert.deepEqual(g.errors, []);
+  await g.close();
+});
+
+test("a stretch chosen across a bar with nothing in it takes the notes on either side and none for the bar: a copy carries the barlines, 0 makes the notes rests and Delete takes them out; a paste in the bar goes in after its barline, and Space plays from the next note (SM130)", { skip }, async () => {
+  const line = "A2 B2 c2 d2 | | e2 f2 g2 a2 |]";
+  // At 120 to the quarter, the e is 4 quarters in, 2 seconds.
+  const h = await open({ text: ["Notes.", "", "```abc", "X:1", "M:4/4", "L:1/8", "Q:1/4=120", "K:C", line, "```", ""].join("\n"), scores: 1, clipboard: true });
+  await listenSources(h.page);
+  await pressMode(h.page);
+  await press(h.page, "ArrowRight", 3);
+  assert.equal(await placeText(h.page), "d2");
+  // The stretch from the d to the e, over the bar between: the first press
+  // chooses the d, the next two take in the bar and the e.
+  for (let i = 0; i < 3; i++) await chord(h.page, ["Shift"], "ArrowRight");
+  assert.equal(await placeText(h.page), "e2");
+  await chord(h.page, ["Control"], "c");
+  assert.deepEqual(await copied(h.page), ["d2 | | e2"]);
+  await h.page.keyboard.press("0");
+  assert.equal(await music(h.page), "A2 B2 c2 z2 | | z2 f2 g2 a2 |]");
+  await chord(h.page, ["Control"], "z");
+  await h.page.keyboard.press("Delete");
+  assert.equal(await music(h.page), "A2 B2 c2 f2 g2 a2 |]");
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await music(h.page), line);
+  assert.deepEqual(await notices(h.page), []);
+  // Let go, and back into the bar: a paste there puts the music in after
+  // the barline that opens it, the first of a bar of its own, and the cursor
+  // is on the last of it.
+  await h.page.keyboard.press("Escape");
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "the bar of nothing");
+  await clip(h.page, "G2 A2");
+  await chord(h.page, ["Control"], "v");
+  await h.page.waitForFunction(() => document.querySelector("#app .mdm-score").getAttribute("data-mdm-source").includes("G2 A2"), { timeout: 5000 });
+  assert.equal(await music(h.page), "A2 B2 c2 d2 | G2 A2 | e2 f2 g2 a2 |]");
+  assert.equal(await placeText(h.page), "A2");
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await music(h.page), line);
+  // A stretch drawn out from the bar chooses the note beside it with the
+  // first press, as from a note it chooses that note, on the side of the
+  // arrow; and one that ends in the bar takes no place for it, so that a
+  // copy of it begins at the note after.
+  await h.page.keyboard.press("ArrowLeft");
+  await h.page.keyboard.press("ArrowRight");
+  assertGap(await gapAt(h.page), "back in the bar");
+  await chord(h.page, ["Shift"], "ArrowRight");
+  assert.equal(await placeText(h.page), "e2");
+  await chord(h.page, ["Control"], "c");
+  assert.deepEqual(await copied(h.page), ["e2"]);
+  await h.page.keyboard.press("Escape");
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "in the bar again");
+  await chord(h.page, ["Shift"], "ArrowLeft");
+  assert.equal(await placeText(h.page), "d2");
+  await h.page.keyboard.press("Escape");
+  await h.page.keyboard.press("ArrowRight");
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "e2");
+  await chord(h.page, ["Shift"], "ArrowLeft");
+  await chord(h.page, ["Shift"], "ArrowLeft");
+  assertGap(await gapAt(h.page), "the end of a stretch drawn out to the left");
+  await chord(h.page, ["Control"], "c");
+  assert.deepEqual(await copied(h.page), ["e2"]);
+  await h.page.keyboard.press("Escape");
+  await h.page.keyboard.press("ArrowRight");
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "back in the bar again");
+  // Space from the bar of nothing plays from the next note, where the music
+  // goes on, and not from the one before.
+  await h.page.keyboard.press("Space");
+  await untilSounding(h.page, true);
+  assert.ok(Math.abs((await lastStart(h.page)) - 2) < 0.05, "the sound started at " + (await lastStart(h.page)));
+  await h.page.keyboard.press("Space");
+  await untilSounding(h.page, false);
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The owner's ask of 2026-11-08, after seeing the two barlines of a bar of
+// nothing stand 16 units apart with the cursor gone from it: "verifica que
+// cuando el cursor salga del compas vacio, el espacio entre barras se reduzca
+// como mismo sale cuando se hace por ejemplo C || G que las barras salen
+// pegaditas".
+test("a bar with nothing in it is drawn as a double barline while the cursor is out of it and opens its room as the cursor comes in, the places and the keys the same either way; out of the mode every score is drawn as written (SM131)", { skip }, async () => {
+  const source = ["X:1", "M:4/4", "L:1/4", "K:C", "C D E F | | G A B c |"].join("\n");
+  const h = await open({ text: ["Bars.", "", "```abc", source, "```", ""].join("\n"), scores: 1 });
+  // The width of the staff and of the first barline, in the score's units,
+  // and how many barlines are drawn.
+  const drawn = () =>
+    h.page.evaluate(() => {
+      const svg = document.querySelector("#app .mdm-score code.language-abc svg");
+      const m = svg.getScreenCTM();
+      const bars = Array.from(svg.querySelectorAll(".abcjs-bar")).map((el) => el.getBoundingClientRect());
+      return { bars: bars.length, first: bars[0].width / m.a, staff: svg.querySelector("g.abcjs-staff").getBoundingClientRect().width / m.a };
+    });
+  // As written, out of the mode: two barlines apart, the third the line's.
+  const written = await drawn();
+  assert.equal(written.bars, 3);
+  await pressMode(h.page);
+  // In the mode with the cursor on the C: the pair is one double barline,
+  // 4 across where a plain one is 0.6, and the staff 12 units shorter.
+  const tight = await drawn();
+  assert.equal(tight.bars, 2);
+  assert.ok(tight.first > 3 && tight.first < 4.5, "the double barline is " + tight.first + " across");
+  assert.ok(Math.abs(written.staff - tight.staff - 12) < 1.5, "the staff is " + (written.staff - tight.staff) + " shorter");
+  // The places are the same: four notes, then the bar of nothing, which the
+  // cursor comes into, and the drawing opens for it.
+  await press(h.page, "ArrowRight", 3);
+  assert.equal(await placeText(h.page), "F");
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "");
+  assert.deepEqual([(await drawn()).bars, Math.abs((await drawn()).staff - written.staff) < 0.5], [3, true]);
+  assertGap(await gapAt(h.page), "the bar the cursor is in", 15.4);
+  // Out of it again, and it closes up; the G is where the text has it, and a
+  // key writes on it there.
+  await h.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(h.page), "G");
+  assert.deepEqual([(await drawn()).bars, Math.abs((await drawn()).staff - tight.staff) < 0.5], [2, true]);
+  await h.page.keyboard.press("0");
+  assert.equal(await staged(h.page), source.replace("G A", "z A"));
+  assert.deepEqual(await notices(h.page), []);
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await staged(h.page), source);
+  // Back in with the arrow, and out with a click on a note; the other way
+  // round the bar closes as the cursor goes.
+  await h.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(h.page), "back in");
+  const hs = await heads(h.page, 0);
+  await h.page.mouse.click(hs[0].x, hs[0].y);
+  assert.equal(await placeText(h.page), "C");
+  assert.equal((await drawn()).bars, 2);
+  // Left, the mode gives every score back as it was written.
+  await pressMode(h.page);
+  assert.deepEqual([(await drawn()).bars, Math.abs((await drawn()).staff - written.staff) < 0.5], [3, true]);
+  assert.equal(await docText(h.page), ["Bars.", "", "```abc", source, "```", ""].join("\n"));
+  assert.deepEqual(h.errors, []);
+  await h.close();
+  // A field written before the bar is no note to take the space after it into
+  // its own range, and the first barline begins one character before its
+  // sign: the bar is the same place for all that, tight and open.
+  const fielded = ["X:1", "M:4/4", "L:1/4", "K:C", "C D [K:G] | | E F"].join("\n");
+  const f = await open({ text: ["Bars.", "", "```abc", fielded, "```", ""].join("\n"), scores: 1 });
+  await pressMode(f.page);
+  await press(f.page, "ArrowRight", 2);
+  assertGap(await gapAt(f.page), "the bar after a field");
+  await f.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(f.page), "E");
+  await f.page.keyboard.press("ArrowLeft");
+  assertGap(await gapAt(f.page), "back in the bar after a field");
+  assert.deepEqual(f.errors, []);
+  await f.close();
 });
 
 // VS Code takes the focus into its File menu on a clean press and release
@@ -3883,7 +4369,7 @@ test("Ctrl+Down and Ctrl+Up take the cursor to the staff under it or over it, as
   await h.close();
 
   // Two voices on two staves, over two lines: four staves down the page.
-  const d = await open({ text: DUET, scores: 1 });
+  const d = await open({ text: DUET_ENDED, scores: 1 });
   await pressMode(d.page);
   const stands = async () => [(await cursor(d.page)).from, await trackOf(d.page)];
   const upper = await placesAhead(d.page);
@@ -4121,7 +4607,7 @@ test("on a staff two voices share, the cursor taken to the other voice comes to 
 });
 
 test("Ctrl+Shift+Down and Ctrl+Shift+Up, with no stretch chosen, take the cursor to the line of staves below or above in its own voice, over the staves between, at the place nearest across; nowhere where there is no line, and they choose nothing (SM66)", { skip }, async () => {
-  const h = await open({ text: DUET, scores: 1 });
+  const h = await open({ text: DUET_ENDED, scores: 1 });
   await pressMode(h.page);
   const stands = async () => [(await cursor(h.page)).from, await trackOf(h.page), await selection(h.page)];
   const upper = await placesAhead(h.page);
@@ -4497,7 +4983,7 @@ test("past the drawing's ink the cursor is given the room a note there would hav
 // figura, quiero que cuando el cuadradito esté en la última nota y se dé
 // click hacia el lado derecho, el cuadradito camine y entonces uno pueda
 // moverse arriba o abajo y seleccionar la nota que quiera".
-test("a voice no barline closes has one place more, past its last note: the cursor walks onto it, on the staff's lines drawn on in grey, and a note written there is put in after the last (SM71)", { skip }, async () => {
+test("a voice no barline closes, or a plain one does, has one place more past the last of it: the cursor walks onto it, on the staff's lines drawn on in grey, and a note written there is put in after the last; a final barline ends the voice (SM71)", { skip }, async () => {
   const h = await open({ text: notesDoc("C2 D2 E2"), scores: 1 });
   await pressMode(h.page);
   await press(h.page, "ArrowRight", 2);
@@ -4570,15 +5056,35 @@ test("a voice no barline closes has one place more, past its last note: the curs
   assert.equal(await placeText(h.page), "A");
   await h.page.keyboard.press("ArrowRight");
   assert.equal(await placeText(h.page), "");
-  // Ctrl+Right there closes the bar and adds one, whose rest ends the voice
-  // open again.
-  await chord(h.page, ["Control"], "ArrowRight");
-  assert.equal(await music(h.page), "C2 D2 E2 G2 z2 GA | z8");
-  assert.equal(await placeText(h.page), "z8");
+  // Alt+B there closes the bar with a barline, and the voice stays open
+  // past it (the owner's call of 2026-11-08): the cursor is at its end
+  // still, now past the barline, where the next bar begins, and the note
+  // written there stands where the cursor did.
+  const closing = await cursor(h.page);
+  await chord(h.page, ["Alt"], "b");
+  assert.equal(await music(h.page), "C2 D2 E2 G2 z2 GA |");
+  const past = await cursor(h.page);
+  assert.equal(await placeText(h.page), "");
+  assert.ok(past.x > closing.x, "the end stands " + (past.x - closing.x) + " from where it stood before the barline");
+  // A barline there is one there already, and Ctrl+B adds a bar with nothing
+  // in it to the left of the cursor's, the cursor going into it (the owner's
+  // ask of 2026-11-08); undone, the cursor is at the end again.
+  await chord(h.page, ["Control"], "b");
+  assert.equal(await music(h.page), "C2 D2 E2 G2 z2 GA | |");
+  assertGap(await gapAt(h.page), "the bar to the left of the end");
+  await chord(h.page, ["Control"], "z");
+  assert.equal(await music(h.page), "C2 D2 E2 G2 z2 GA |");
+  assert.equal(await placeText(h.page), "");
+  assert.ok(Math.abs((await cursor(h.page)).x - past.x) < 0.3, "the end is not where it was");
+  await h.page.keyboard.press("3");
+  assert.equal(await music(h.page), "C2 D2 E2 G2 z2 GA | A2");
+  const first = await cursor(h.page);
+  assert.equal(await placeText(h.page), "A2");
+  assert.ok(Math.abs(first.x - past.x) < 0.3, "the cursor moved " + (first.x - past.x) + " across as the note was written past the barline");
   await h.page.keyboard.press("ArrowRight");
   assert.equal(await placeText(h.page), "");
   // Each a step of its own for Ctrl+Z.
-  for (let i = 0; i < 5; i++) await chord(h.page, ["Control"], "z");
+  for (let i = 0; i < 6; i++) await chord(h.page, ["Control"], "z");
   assert.equal(await music(h.page), "C2 D2 E2");
   // A click past the last note is a click on the end, and one on the note
   // on the note.
@@ -4590,9 +5096,10 @@ test("a voice no barline closes has one place more, past its last note: the curs
   assert.equal(await placeText(h.page), "E2");
   assert.deepEqual(h.errors, []);
   await h.close();
-  // A barline after the last note closes the voice: the cursor stops on the
-  // note. In a duet each voice ends by itself.
-  const duet = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "c G A F |", "V:2 clef=bass", "C, D, E, F,"].join("\n");
+  // A final barline after the last note closes the voice: the cursor stops
+  // on the note (a plain one leaves a place past it since the owner's call
+  // of 2026-11-08, above). In a duet each voice ends by itself.
+  const duet = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "c G A F |]", "V:2 clef=bass", "C, D, E, F,"].join("\n");
   const g = await open({ text: ["Two voices.", "", "```abc", duet, "```", ""].join("\n"), scores: 1 });
   await pressMode(g.page);
   await press(g.page, "ArrowRight", 6);
@@ -4642,6 +5149,21 @@ test("a voice no barline closes has one place more, past its last note: the curs
   assert.equal((await wide()).width, narrow.width);
   assert.deepEqual(long.errors, []);
   await long.close();
+  // A final barline ends the voice: no place past it, and a bar added there
+  // goes before it, which ends the voice still.
+  const f = await open({ text: notesDoc("C2 D2 E2 F2 |]"), scores: 1 });
+  await pressMode(f.page);
+  await press(f.page, "ArrowRight", 4);
+  assert.equal(await placeText(f.page), "F2");
+  await chord(f.page, ["Alt"], "b");
+  assert.deepEqual([await music(f.page), (await notices(f.page)).pop()], ["C2 D2 E2 F2 | |]", undefined]);
+  // Nothing is past the barline that ends the voice: the arrow leaves the
+  // cursor in the bar.
+  assertGap(await gapAt(f.page), "the bar before the end");
+  await f.page.keyboard.press("ArrowRight");
+  assertGap(await gapAt(f.page), "no place past the end");
+  assert.deepEqual(f.errors, []);
+  await f.close();
 });
 
 // The owner's picture of 2026-10-03, the day the open end came in: the
@@ -5843,14 +6365,16 @@ test("Ctrl+V puts what was copied in at the cursor: after a note and after a res
   await chord(g.page, ["Control"], "v");
   await g.page.waitForFunction(() => /G2 A2 G2 A2/.test(document.querySelector("#app .mdm-score").getAttribute("data-mdm-source")));
   assert.deepEqual([await music(g.page), await placeText(g.page)], ["C2 D2 E2 G2 A2 G2 A2", ""]);
-  // Music that brings the barline the voice lacked leaves no open end to
-  // stay at: the cursor is on the last note of it.
+  // Music that brings the barline the voice lacked leaves the open end
+  // past that barline (the owner's call of 2026-11-08), and the cursor at
+  // it, as music with no barline does. Until that day the voice was closed
+  // by it, and the cursor went to its last note.
   await chord(g.page, ["Control"], "z");
   await clip(g.page, "B2 |");
   assert.equal(await placeText(g.page), "");
   await chord(g.page, ["Control"], "v");
   await g.page.waitForFunction(() => /A2 B2 \|/.test(document.querySelector("#app .mdm-score").getAttribute("data-mdm-source")));
-  assert.deepEqual([await music(g.page), await placeText(g.page), await ends2(g.page)], ["C2 D2 E2 G2 A2 B2 |", "B2", [null, 5]]);
+  assert.deepEqual([await music(g.page), await placeText(g.page), await ends2(g.page)], ["C2 D2 E2 G2 A2 B2 |", "", [null, 6]]);
   await chord(g.page, ["Control"], "z");
   await clip(g.page, "G2 A2");
   // On its last note, and not at the end: after the note all the same, and
@@ -6068,7 +6592,9 @@ test("what cannot be pasted is not, and the score says why: a voice it has not, 
 // was drawn out in, and the place of another voice that goes with one of
 // its own is the one sounding with it, which is not always the nearest
 // across: past the last quarter the nearest was the open end of the voice.
-const UNEVEN_SOURCE = ["X:1", "M:4/4", "L:1/4", "Q:1/4=120", "K:C", "V:1", "c d e f | g a b c'", "V:2 clef=bass", "C,4 | G,2 C,2 |"].join("\n");
+// The upper voice open, the bass ended: by a final barline since the owner's
+// call of 2026-11-08, after which a plain one leaves an open end past it.
+const UNEVEN_SOURCE = ["X:1", "M:4/4", "L:1/4", "Q:1/4=120", "K:C", "V:1", "c d e f | g a b c'", "V:2 clef=bass", "C,4 | G,2 C,2|]"].join("\n");
 
 test("the stretch stays in the voice it was drawn out in while the cursor walks the others, which it does by what sounds together; the open end is no place of a stretch (SM75)", { skip }, async () => {
   const h = await open({ text: ["Uneven.", "", "```abc", UNEVEN_SOURCE, "```", ""].join("\n"), scores: 1, clipboard: true });
@@ -7246,7 +7772,9 @@ test("a stretch over several voices takes in the note of each that is still soun
     await chord(t.page, all, "ArrowRight");
     first.push(await notes());
     await t.page.keyboard.press("Escape");
-    await t.page.keyboard.press("ArrowRight");
+    // On to the next place, and from the last to none: past it is the open
+    // end the voice's plain barline leaves (2026-11-08).
+    if (i < 7) await t.page.keyboard.press("ArrowRight");
   }
   assert.deepEqual(first, [
     "v0 l0 m0 n0, v1 l0 m0 n0, v2 l0 m0 n0",
@@ -7349,127 +7877,185 @@ test("a stretch over several voices takes in the note of each that is still soun
   await d.close();
 });
 
-// The owner's call of 2026-10-06: "quita el ctrl alt -> y sustituyelo por: una
-// vez estén marcadas con ctrl shift, se hace ctrl -> y debe añadirse el compás
-// de silencio al lado". Until then Ctrl+Alt with the arrow added the bar to
-// every voice, and with a stretch chosen Ctrl with it did nothing.
-test("Ctrl+Right and Ctrl+Left with a stretch chosen add the bar of rest beside the stretch, after the bar of its last place or before the bar of its first, in the voices it is chosen over and in no other; the stretch is let go, the cursor is on the new rest, and undo gives the stretch back (SM103)", { skip }, async () => {
+// With a stretch chosen the barline keys add a bar with nothing in it beside
+// it: Alt+B after the bar of its last place and Ctrl+B before the bar of its
+// first, in the voices it is chosen over, every voice of the line where it
+// was drawn out over them all. The owner's ask of 2026-11-22, "que uno pueda
+// si tiene marcado las tres voces (con Shift ->) hacer option B y que se
+// agregue el compás en las voces marcadas". Ctrl with Right and Left did it
+// from 2026-10-06 (his "una vez estén marcadas con ctrl shift, se hace ctrl
+// -> y debe añadirse el compás de silencio al lado") with a bar of rest, and
+// from 2026-11-08, when Ctrl+B and Alt+B became the barline's and the bar of
+// rest was taken off the keys, a press with a stretch chosen put nothing in.
+// The stretch is let go and the cursor stands in the new bar, in the voice
+// the stretch was drawn out in; one Ctrl+Z gives the text and the stretch
+// back.
+test("Ctrl+B and Alt+B with a stretch chosen add a bar with nothing in it before or after it, in the voice it is chosen in or in every voice it is drawn out over, the cursor going into the bar; Ctrl+Z gives the stretch back (SM103)", { skip }, async () => {
   const t = await open({ text: TRIO, scores: 1 });
   await pressMode(t.page);
-  const walk = ["Control", "Shift"];
-  const lines = async (page) => (await staged(page)).split("\n").filter((l) => /\|/.test(l));
-  const was = await lines(t.page);
-  const undo = (page) => chord(page, ["Control"], "z");
-  // What the cursor stands on, in which voice, at what height, with no
-  // stretch left, and drawn.
-  const landed = async (page) => [await placeText(page), (await stretch(page)).track, (await cursor(page)).step, await ends2(page), await cursorShown(page), await selection(page)];
-  const height = (await cursor(t.page)).step;
-  // In one voice, drawn out with Shift: the bar goes into that voice alone,
-  // after the bar the stretch is in. One change of the text.
   await t.page.keyboard.press("ArrowRight");
   await chord(t.page, ["Shift"], "ArrowRight");
   await chord(t.page, ["Shift"], "ArrowRight");
   assert.deepEqual([await ends2(t.page), (await stretch(t.page)).voices], [[1, 2], null]);
-  const sent = (await edits(t.page)).length;
-  await chord(t.page, ["Control"], "ArrowRight");
-  assert.deepEqual(await lines(t.page), ["c d e f | z4 | g a b c' |", was[1], was[2]]);
-  assert.deepEqual(await landed(t.page), ["z4", 0, height, [null, 4], true, null]);
-  assert.equal((await edits(t.page)).length, sent + 1);
-  // Undo gives the stretch back, chosen as it was.
-  await undo(t.page);
-  assert.deepEqual([await lines(t.page), await ends2(t.page), (await stretch(t.page)).voices, await cursorShown(t.page)], [was, [1, 2], null, false]);
-  // Before the bar of its first place, here the head of the line. A key
-  // held down is one bar.
-  await t.page.keyboard.down("Control");
-  await t.page.keyboard.down("ArrowLeft");
-  await t.page.keyboard.down("ArrowLeft");
-  await t.page.keyboard.up("ArrowLeft");
-  await t.page.keyboard.up("Control");
-  assert.deepEqual(await lines(t.page), ["z4 | c d e f | g a b c' |", was[1], was[2]]);
-  assert.deepEqual(await landed(t.page), ["z4", 0, height, [null, 0], true, null]);
-  await undo(t.page);
-  // Across a barline: after the bar of its last place, and before the bar
-  // of its first.
-  await chord(t.page, ["Shift"], "ArrowRight");
-  await chord(t.page, ["Shift"], "ArrowRight");
-  assert.deepEqual(await ends2(t.page), [1, 4]);
-  await chord(t.page, ["Control"], "ArrowRight");
-  assert.deepEqual([await lines(t.page), (await landed(t.page)).slice(0, 4)], [["c d e f | g a b c' | z4 |", was[1], was[2]], ["z4", 0, height, [null, 8]]]);
-  await undo(t.page);
-  await chord(t.page, ["Control"], "ArrowLeft");
-  assert.deepEqual([await lines(t.page), (await landed(t.page)).slice(0, 4)], [["z4 | c d e f | g a b c' |", was[1], was[2]], ["z4", 0, height, [null, 0]]]);
-  await undo(t.page);
-  assert.deepEqual(await ends2(t.page), [1, 4]);
-  // Over every voice, which the first Ctrl+Shift with an arrow marks, the
-  // bass by the note it holds under the d (SM102): the bar in each.
-  await t.page.keyboard.press("ArrowLeft");
-  assert.equal(await placeText(t.page), "d");
-  await chord(t.page, walk, "ArrowRight");
-  assert.deepEqual([(await stretch(t.page)).voices, await ends2(t.page)], ["all", [1, 1]]);
-  await chord(t.page, ["Control"], "ArrowRight");
-  assert.deepEqual(await lines(t.page), ["c d e f | z4 | g a b c' |", "E F G A | z4 | B c d e |", "C,4 | z4 | G,2 C,2 |"]);
-  assert.deepEqual(await landed(t.page), ["z4", 0, height, [null, 4], true, null]);
-  await undo(t.page);
-  assert.deepEqual([await lines(t.page), await ends2(t.page), (await stretch(t.page)).voices], [was, [1, 1], "all"]);
-  // Over the voices picked: the second let go of, and the bar in the two
-  // others; the cursor in the voice the stretch was drawn out in.
-  await chord(t.page, walk, "ArrowDown");
-  await chord(t.page, walk, "Space");
-  assert.deepEqual((await stretch(t.page)).voices, [0, 2]);
-  await chord(t.page, ["Control"], "ArrowLeft");
-  assert.deepEqual(await lines(t.page), ["z4 | c d e f | g a b c' |", was[1], "z4 | C,4 | G,2 C,2 |"]);
-  assert.deepEqual((await landed(t.page)).slice(0, 4), ["z4", 0, height, [null, 0]]);
-  await undo(t.page);
-  assert.deepEqual([await lines(t.page), (await stretch(t.page)).voices], [was, [0, 2]]);
-  // With the voice it was drawn out in let go of as well, the bar goes into
-  // the one left, beside the note it holds, and the cursor onto its rest.
-  await chord(t.page, walk, "ArrowUp");
-  await chord(t.page, walk, "Space");
-  assert.deepEqual((await stretch(t.page)).voices, [2]);
-  await chord(t.page, ["Control"], "ArrowRight");
-  assert.deepEqual(await lines(t.page), [was[0], was[1], "C,4 | z4 | G,2 C,2 |"]);
-  assert.deepEqual((await landed(t.page)).slice(0, 2), ["z4", 2]);
-  await undo(t.page);
-  assert.deepEqual([await lines(t.page), (await stretch(t.page)).voices], [was, [2]]);
-  assert.deepEqual(await notices(t.page), []);
+  const lines = async () => (await staged(t.page)).split("\n").filter((l) => /\|/.test(l));
+  const was = await lines();
+  // The cursor's voice, the top one: d and e of its first bar chosen.
+  const choose = async (every) => {
+    await press(t.page, "ArrowLeft", 9);
+    await t.page.keyboard.press("ArrowRight");
+    await chord(t.page, every ? ["Control", "Shift"] : ["Shift"], "ArrowRight");
+    await chord(t.page, every ? ["Control", "Shift"] : ["Shift"], "ArrowRight");
+    assert.deepEqual([await ends2(t.page), (await stretch(t.page)).voices], [[1, 2], every ? "all" : null]);
+  };
+  const undo = async () => {
+    await chord(t.page, ["Control"], "z");
+    await sleep(150);
+  };
+  await choose(false);
+  await chord(t.page, ["Alt"], "b");
+  assert.deepEqual(await lines(), ["c d e f | | g a b c' |", was[1], was[2]]);
+  // The stretch let go, and the cursor in the bar, between its barlines.
+  assert.equal((await stretch(t.page)).anchor, null);
+  assertGap(await gapAt(t.page), "Alt+B beside a stretch of one voice");
+  const top = (await staves(t.page, 0))[0];
+  const on = await cursor(t.page);
+  assert.ok(on.stepY > top.top - 20 && on.stepY < top.bottom + 20, "the cursor is not on the top staff");
+  await undo();
+  assert.deepEqual([await lines(), await ends2(t.page)], [was, [1, 2]]);
+  await chord(t.page, ["Control"], "b");
+  assert.deepEqual(await lines(), ["| | c d e f | g a b c' |", was[1], was[2]]);
+  await undo();
+  assert.deepEqual([await lines(), await ends2(t.page)], [was, [1, 2]]);
+  // Over every voice: the bar goes into all three.
+  await t.page.keyboard.press("Escape");
+  await choose(true);
+  await chord(t.page, ["Alt"], "b");
+  assert.deepEqual(await lines(), ["c d e f | | g a b c' |", "E F G A | | B c d e |", "C,4 | | G,2 C,2 |"]);
+  assertGap(await gapAt(t.page), "Alt+B beside a stretch over every voice");
+  await undo();
+  assert.deepEqual([await lines(), (await stretch(t.page)).voices], [was, "all"]);
+  await chord(t.page, ["Control"], "b");
+  assert.deepEqual(await lines(), ["| | c d e f | g a b c' |", "| | E F G A | B c d e |", "| | C,4 | G,2 C,2 |"]);
+  await undo();
+  assert.deepEqual([await lines(), await notices(t.page)], [was, []]);
+  // Over two bars in every voice, the top one let go of, where the stretch
+  // was drawn out: the bar goes after the second bar of the two others, and
+  // not after the first, where their first places chosen are.
+  await t.page.keyboard.press("Escape");
+  await press(t.page, "ArrowLeft", 9);
+  for (let i = 0; i < 5; i++) await chord(t.page, ["Control", "Shift"], "ArrowRight");
+  await chord(t.page, ["Control", "Shift"], "Space");
+  assert.deepEqual((await stretch(t.page)).voices, [1, 2]);
+  await chord(t.page, ["Alt"], "b");
+  assert.deepEqual(await lines(), [was[0], "E F G A | B c d e | |", "C,4 | G,2 C,2 | |"]);
+  await undo();
+  assert.deepEqual([await lines(), await notices(t.page)], [was, []]);
   assert.deepEqual(t.errors, []);
   await t.close();
+  // Drawn out over every voice, every voice of the line takes the bar, one
+  // that has nothing chosen in the stretch as well: a bass whose first bar
+  // is an invisible rest, which is no place (scoreStop), is given the bar
+  // with the voices above.
+  const EMPTY = TRIO_SOURCE.replace("C,4 | G,2 C,2 |", "x4 | G,2 C,2 |");
+  const e = await open({ text: ["Three voices.", "", "```abc", EMPTY, "```", ""].join("\n"), scores: 1 });
+  await pressMode(e.page);
+  const elines = async () => (await staged(e.page)).split("\n").filter((l) => /\|/.test(l));
+  for (let i = 0; i < 2; i++) await chord(e.page, ["Control", "Shift"], "ArrowRight");
+  assert.equal((await stretch(e.page)).voices, "all");
+  await chord(e.page, ["Alt"], "b");
+  assert.deepEqual(await elines(), ["c d e f | | g a b c' |", "E F G A | | B c d e |", "x4 | | G,2 C,2 |"]);
+  assert.deepEqual(e.errors, []);
+  await e.close();
+});
 
-  // On two lines, over the voices picked: the bar goes beside the end of
-  // the stretch on the line that end is on, in each of them. The lower
-  // voice is in the stretch on its first line by the whole note it holds
-  // there (SM102), and takes the bar before it for that.
-  const d = await open({ text: DUET, scores: 1 });
-  await pressMode(d.page);
-  const duet = await lines(d.page);
-  await press(d.page, "ArrowRight", 6);
-  for (let i = 0; i < 4; i++) await chord(d.page, walk, "ArrowRight");
-  await chord(d.page, walk, "Space");
-  await chord(d.page, walk, "Space");
-  assert.deepEqual([(await stretch(d.page)).voices, await ends2(d.page)], [[0, 1], [6, 9]]);
-  await chord(d.page, ["Control"], "ArrowRight");
-  assert.deepEqual(await lines(d.page), [duet[0], duet[1], "e d c B | z4 | c4 |", "A, B, C D | z4 | C4 |"]);
-  await undo(d.page);
-  await chord(d.page, ["Control"], "ArrowLeft");
-  assert.deepEqual(await lines(d.page), ["c G A F | z4 | G E F D |", "C, D, E, F, | z4 | G,4 |", duet[2], duet[3]]);
-  assert.deepEqual(await notices(d.page), []);
-  assert.deepEqual(d.errors, []);
-  await d.close();
-
-  // What the text cannot be made to say is not written, and the score says
-  // why over the stretch still chosen: every voice asked for a bar where
-  // one of them has none to put it beside.
-  const short = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "c d e f | g a b c' | c4 |", "V:2 clef=bass", "C,4 | G,4 |"].join("\n");
-  const u = await open({ text: ["Short.", "", "```abc", short, "```", ""].join("\n"), scores: 1 });
-  await pressMode(u.page);
-  await press(u.page, "ArrowRight", 8);
-  assert.equal(await placeText(u.page), "c4");
-  await chord(u.page, walk, "ArrowRight");
-  const before = (await edits(u.page)).length;
-  await chord(u.page, ["Control"], "ArrowRight");
-  assert.deepEqual([await staged(u.page), (await edits(u.page)).length, await notices(u.page), await ends2(u.page), (await stretch(u.page)).voices], [short, before, ["Voices don't match"], [8, 8], "all"]);
-  assert.deepEqual(u.errors, []);
-  await u.close();
+// A bar with nothing in it in one voice is a place whatever the other voices
+// hold there. Where they hold music the bar is given its time as a rest
+// nobody sees (MDM_BARS.evenBars), and that rest is no place, so the bar was
+// none either: a bar added to an organ score with the + and written into in
+// the right hand could not be gone into in the left hand or the pedal, by
+// the arrows, a click or Ctrl with Up and Down, and a paste of the two with
+// the cursor in a bar with nothing in it put their music at the end of the
+// bar before (found as the README's take of the mode was planned,
+// 2026-11-22, and the owner's "arreglarlo antes").
+test("a bar with nothing in it in one voice is a place of its own whatever the others hold in it: a paste there puts each voice's music in its own bar, a figure writes there, and a click and Ctrl with Up and Down go into it (SM143)", { skip }, async () => {
+  const OPEN = TRIO_SOURCE.replace("g a b c' |", "g a b c' | |]").replace("B c d e |", "B c d e | |]").replace("G,2 C,2 |", "G,2 C,2 | |]");
+  const t = await open({ text: ["Three voices.", "", "```abc", OPEN, "```", ""].join("\n"), scores: 1, clipboard: true });
+  await pressMode(t.page);
+  const lines = async () => (await staged(t.page)).split("\n").filter((l) => /\|/.test(l));
+  const was = await lines();
+  const onTop = async () => {
+    const top = (await staves(t.page, 0))[0];
+    const at = await cursor(t.page);
+    return at.stepY > top.top - 20 && at.stepY < top.bottom + 20;
+  };
+  // The second bar of the two lower voices copied, from the bass's last
+  // place, with the top voice let go of.
+  await chord(t.page, ["Control"], "ArrowDown");
+  await chord(t.page, ["Control"], "ArrowDown");
+  await press(t.page, "ArrowRight", 2);
+  assert.equal(await placeText(t.page), "C,2");
+  await chord(t.page, ["Control", "Shift"], "ArrowLeft");
+  await chord(t.page, ["Control", "Shift"], "ArrowLeft");
+  assert.equal((await inked(t.page)).length, 10);
+  await chord(t.page, ["Control", "Shift"], "ArrowUp");
+  await chord(t.page, ["Control", "Shift"], "ArrowUp");
+  await chord(t.page, ["Control", "Shift"], "Space");
+  await chord(t.page, ["Control"], "c");
+  assert.deepEqual(await copied(t.page), ["V:2\nB c d e\nV:3\nG,2 C,2"]);
+  // Into the top voice's third bar, where no voice has anything yet: the
+  // arrow lets the stretch go on the bass's C, the next goes into the
+  // bass's third bar, and Ctrl with Up twice to the top voice's. Pasted
+  // there, the two voices the copy names go into their own third bars, and
+  // not at the end of their second.
+  await t.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(t.page), "C,2");
+  await t.page.keyboard.press("ArrowRight");
+  assert.equal(await placeText(t.page), "");
+  await chord(t.page, ["Control"], "ArrowUp");
+  await chord(t.page, ["Control"], "ArrowUp");
+  assert.ok(await onTop(), "Ctrl+Up did not reach the top staff");
+  assert.equal(await placeText(t.page), "");
+  assertGap(await gapAt(t.page), "the top voice's third bar");
+  await chord(t.page, ["Control"], "v");
+  await t.page.waitForFunction(() => document.querySelector("#app .mdm-score").getAttribute("data-mdm-source").includes("| B c d e |]"));
+  assert.deepEqual(await lines(), [was[0], "E F G A | B c d e | B c d e |]", "C,4 | G,2 C,2 | G,2 C,2 |]"]);
+  // The top voice's bar is still a place, now beside music: the cursor is
+  // in it, and a figure writes there.
+  assert.ok(await onTop(), "the cursor left the top voice");
+  assert.equal(await placeText(t.page), "");
+  assertGap(await gapAt(t.page), "the top voice's third bar, beside music");
+  await t.page.keyboard.press("1");
+  assert.match((await lines())[0], /\| g a b c' \| [a-g]'*4 \|\]$/);
+  await chord(t.page, ["Control"], "z");
+  await sleep(150);
+  assert.equal((await lines())[0], was[0]);
+  // A click on the top staff in the middle of that bar goes into it, and
+  // Ctrl with Down and Up comes back to it from the voice below.
+  await t.page.keyboard.press("Escape");
+  const bars = await t.page.evaluate(() =>
+    Array.from(document.querySelectorAll("#app .mdm-score code.language-abc svg .abcjs-bar.abcjs-v0"))
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return (r.left + r.right) / 2;
+      })
+      .sort((a, b) => a - b)
+  );
+  const top = (await staves(t.page, 0))[0];
+  const hs = await heads(t.page, 0);
+  await t.page.mouse.click(hs[0].x, hs[0].y);
+  assert.equal(await gapAt(t.page), null);
+  await t.page.mouse.click((bars[bars.length - 2] + bars[bars.length - 1]) / 2, stepAt(top, 6));
+  assert.ok(await onTop(), "the click did not put the cursor on the top staff");
+  assert.equal(await placeText(t.page), "");
+  assertGap(await gapAt(t.page), "a click in the top voice's third bar");
+  await chord(t.page, ["Control"], "ArrowDown");
+  assert.equal(await placeText(t.page), "B");
+  await chord(t.page, ["Control"], "ArrowUp");
+  assert.ok(await onTop(), "Ctrl+Up did not come back to the top staff");
+  assert.equal(await placeText(t.page), "");
+  assertGap(await gapAt(t.page), "Ctrl+Up into the top voice's third bar");
+  assert.deepEqual([await notices(t.page), t.errors], [[], []]);
+  await t.close();
 });
 
 // The owner's call of 2026-10-06, on the whole note of a bass under one
@@ -8585,8 +9171,8 @@ const WRITES = [1, 2, 3, 4, 5, 6, 7]
     { name: "score-rest", what: "under a verse", text: ROSTER_SUNG, key: (page) => page.keyboard.press("0") },
     { name: "score-chord", setup: up(2), key: (page) => page.keyboard.press("Enter") },
     { name: "score-take-out", key: (page) => page.keyboard.press("Delete") },
-    { name: "score-bar-before", key: (page) => chord(page, ["Control"], "ArrowLeft") },
-    { name: "score-bar-after", key: (page) => chord(page, ["Control"], "ArrowRight") },
+    { name: "score-bar-before", key: (page) => chord(page, ["Control"], "b") },
+    { name: "score-bar-after", key: (page) => chord(page, ["Alt"], "b") },
   ]);
 
 test("a row of the Score menu that writes, and its key on the score panel, do what the key of the keyboard does (SM109)", { skip }, async () => {
@@ -9185,8 +9771,6 @@ const KEYS_FACE = [
   ["score-take-out", "Take out", "Delete", "Delete", true],
   ["score-keys-back", "Take out and move left", "Backspace", "Backspace", false],
   "# Bars",
-  ["score-bar-before", "Add bar to the left", "Ctrl+\u2190", "\u2318\u2190", true],
-  ["score-bar-after", "Add bar to the right", "Ctrl+\u2192", "\u2318\u2192", true],
   "# Move",
   ["score-keys-across", "Move left/right", "\u2190 \u2192", "\u2190 \u2192", false],
   ["score-keys-step", "Step up/down", "\u2191 \u2193", "\u2191 \u2193", false],
@@ -9580,4 +10164,50 @@ test("0 under a verse makes rests of the notes and takes the syllables they had 
   assert.deepEqual([await docText(g.page), await notices(g.page)], [carried, ["Lyrics can't make room"]]);
   assert.deepEqual(g.errors, []);
   await g.close();
+});
+// A bar with nothing in it inside an ending is drawn tight as anywhere else
+// (the owner's report of 2026-11-22, "después de poner el 1 en el indicador
+// de repetición, se pierde la opción de squeeze la doble barra"), and the
+// ending's bracket runs on past it as the ending does in the text
+// (MDM_BARS.keepEndings): read as abcjs reads the tight text, it stopped at
+// the double barline the pair is drawn as.
+test("inside an ending a bar with nothing in it is drawn tight while the cursor is not in it, and the bracket runs on past it to where the ending ends; the cursor in it opens it (SM140)", { skip }, async () => {
+  const source = ["%%staffwidth 320pt", "X:1", "L:1", "K:Am", "A B :|1 c d | | e f | ^g a", "w: I II III IV V VI VII I"].join("\n");
+  const h = await open({ text: ["Ends.", "", "```abc", source, "```", ""].join("\n"), scores: 1, platform: "MacIntel" });
+  const look = () =>
+    h.page.evaluate(() => {
+      const svg = document.querySelector("#app .mdm-score code.language-abc svg");
+      const m = svg.getScreenCTM();
+      const units = (x) => (x - m.e) / m.a;
+      const bars = Array.from(svg.querySelectorAll(".abcjs-bar")).map((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: units(r.left), right: units(r.right), x: (r.left + r.right) / 2 };
+      });
+      const ending = svg.querySelector(".abcjs-ending").getBoundingClientRect();
+      const staff = svg.querySelector("g.abcjs-staff").getBoundingClientRect();
+      return { bars: bars, ending: units(ending.right), staff: units(staff.right) };
+    });
+  // Out of the mode, as written: the pair apart, and the bracket to the end.
+  let seen = await look();
+  assert.equal(seen.bars.length, 4);
+  assert.ok(seen.bars[2].left - seen.bars[1].right > 14, "the bar with nothing in it is " + (seen.bars[2].left - seen.bars[1].right) + " across out of the mode");
+  assert.ok(Math.abs(seen.ending - seen.staff) < 2, "the bracket ends at " + seen.ending + ", the staff at " + seen.staff);
+  // In the mode, with the cursor on the A: one double barline, and the
+  // bracket past it to the end of the staff.
+  await pressMode(h.page);
+  seen = await look();
+  assert.equal(seen.bars.length, 3, "the pair is not drawn tight");
+  assert.ok(seen.bars[1].right - seen.bars[1].left < 6, "the double barline is " + (seen.bars[1].right - seen.bars[1].left) + " across");
+  assert.ok(Math.abs(seen.ending - seen.staff) < 2, "the bracket stops at " + seen.ending + ", the staff ends at " + seen.staff);
+  // The cursor walked into it opens it, and out of it closes it again.
+  await press(h.page, "ArrowRight", 4);
+  assert.equal(await placeText(h.page), "");
+  assertGap(await gapAt(h.page), "the bar with nothing in it, the cursor in it");
+  assert.equal((await look()).bars.length, 4);
+  await press(h.page, "ArrowRight");
+  assert.equal(await placeText(h.page), "e");
+  assert.equal((await look()).bars.length, 3);
+  assert.equal(await docText(h.page), ["Ends.", "", "```abc", source, "```", ""].join("\n"));
+  assert.deepEqual(h.errors, []);
+  await h.close();
 });

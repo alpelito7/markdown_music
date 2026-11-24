@@ -172,13 +172,11 @@ test("a button with nothing to act on says so in its own words", () => {
   assert.equal(MDM_BARS.reasonText("next"), "No bar to bring up");
 });
 
-// Three the owner cut short, the tip's place being the "here" they said
-// (2026-09-30).
+// Two the owner cut short, the tip's place being the "here" they said
+// (2026-09-30); a third, "Bar length unknown", went with the rest a bar
+// added was written with (2026-11-08).
 test("a refusal says what stands in the way, and not where", () => {
-  assert.deepEqual(
-    ["voices", "addVoices", "lyrics", "addMeter"].map(MDM_BARS.reasonText),
-    ["Voices don't match", "Voices don't match", "Lyrics can't split", "Bar length unknown"]
-  );
+  assert.deepEqual(["voices", "addVoices", "lyrics"].map(MDM_BARS.reasonText), ["Voices don't match", "Voices don't match", "Lyrics can't split"]);
   // And a change its check finds different once written, moved or added
   // (the owner's pick, A, 2026-09-30).
   assert.deepEqual(["unsafe", "overlap", "addUnsafe"].map(MDM_BARS.reasonText), Array(3).fill("Can't keep the music as written"));
@@ -567,11 +565,12 @@ function add(source, needle, where, nth) {
 }
 
 // The music after a bar was added, read apart from the module's own check:
-// in every voice of the line, the music before with rests and one plain
-// barline more, together, and nothing else changed; the rests lasting
-// `length` whole notes between them, and `pieces` one by one when it is
-// given; and the line one bar longer.
-function assertAddedBar(before, after, length, pieces) {
+// in every voice of the line that took it, the music before with plain
+// barlines more (`count` of them: one, or two at the head of a line no
+// barline opens), together, at one place, and nothing else changed; and every
+// line with the bars it had, a bar with nothing in it being none of those the
+// notes are counted in.
+function assertAddedBar(before, after, count) {
   const was = music(before);
   const now = music(after);
   assert.deepEqual(Object.keys(now).sort(), Object.keys(was).sort());
@@ -583,192 +582,155 @@ function assertAddedBar(before, after, length, pieces) {
       assert.deepEqual(b, a, "voice " + key + " changed");
       return;
     }
-    const count = b.length - a.length - 1;
-    assert.ok(count >= 1, "voice " + key + " grew by " + (b.length - a.length));
+    const grew = b.length - a.length;
+    assert.equal(grew, count || 1, "voice " + key + " grew by " + grew);
     let i = 0;
     while (i < a.length && a[i] === b[i]) i++;
-    const run = b.slice(i, i + count + 1);
-    // Before the barline that ends the tune, and after a bar left open, the
-    // barline comes first.
-    const bar = /^bar /.test(run[0]) ? run[0] : run[count];
-    const rests = /^bar /.test(run[0]) ? run.slice(1) : run.slice(0, count);
-    rests.forEach((rest) => assert.match(rest, /^rest (rest|whole) /, "voice " + key + ": no rest where the bar went in: " + rest));
-    const lengths = rests.map((rest) => Number(rest.split(" ")[2]));
-    const total = lengths.reduce((x, y) => x + y, 0);
-    assert.ok(Math.abs(total - length) < 1e-9, "voice " + key + ": the rests last " + lengths.join(" + "));
-    if (pieces) assert.deepEqual(lengths, pieces, "voice " + key + ": the rests are " + lengths.join(" + "));
-    assert.match(bar, /^bar bar_thin$/);
-    assert.deepEqual(b.slice(i + count + 1), a.slice(i), "voice " + key + " changed after the bar");
+    b.slice(i, i + grew).forEach((item) => assert.match(item, /^bar bar_thin$/, "voice " + key + ": no plain barline where the bar went in: " + item));
+    assert.deepEqual(b.slice(i + grew), a.slice(i), "voice " + key + " changed after the bar");
     added++;
   });
   assert.ok(added > 0, "no voice has the bar");
-  const total = (list) => list.reduce((x, y) => x + y, 0);
-  assert.equal(total(layout(after)), total(layout(before)) + 1);
+  assert.deepEqual(layout(after), layout(before), "a bar with nothing in it is no bar of its line");
 }
 
-test("the owner's example: a bar of rest at a barline, at the end of a line, at the head of one, and before the barline that ends the tune", () => {
+// Where, in the new source, the barline that opens the new bar begins, read
+// as the cursor finds it: the barline and then what follows it on its line.
+const opening = (out) => out.source.slice(out.bar).trim().split("\n")[0];
+
+test("the owner's example: an empty bar at a barline, at the end of a line, at the head of one, and before the barline that ends the tune", () => {
   const cases = [
-    ["C D", "after", 0, "C D | z2 | E F |"],
-    ["E F", "after", 0, "C D | E F | z2 |"],
-    ["C D", "head", 0, "z2 | C D | E F |"],
-    ["d e", "after", 0, "G A | B c | d e | z2 |]"],
+    ["C D", "after", 0, "C D | | E F |", 1, "| | E F |"],
+    ["E F", "after", 0, "C D | E F | |", 1, "| |"],
+    ["C D", "head", 0, "| | C D | E F |", 2, "| | C D | E F |"],
+    ["d e", "after", 0, "G A | B c | d e | |]", 1, "| |]"],
   ];
-  for (const [needle, where, nth, line] of cases) {
+  for (const [needle, where, nth, line, count, opens] of cases) {
     const out = add(OWNER, needle, where, nth);
     assert.ok(!out.refused, needle + " " + where + ": " + out.refused);
     assert.ok(out.source.split("\n").indexOf(line) >= 0, needle + " " + where + " wrote " + JSON.stringify(out.source));
-    assert.equal(out.source.slice(out.rest).trim().slice(0, 2), "z2");
-    assertAddedBar(OWNER, out.source, 0.5);
+    // The cursor goes into the bar between the barline it names and the next.
+    assert.equal(opening(out), opens, needle + " " + where);
+    assertAddedBar(OWNER, out.source, count);
   }
 });
 
-// A bar no barline closes, the last of a tune written with none or of one
-// that stops without one (the owner's report, 2026-09-30, on a score of one
-// C): the new bar's barline closes it, and the new bar is left open as it
-// was; what was written in the bar stays in it, an inline field and a
-// comment included.
 test("a bar no barline closes is closed by the barline of the bar added after it, and the new one is left open", () => {
   const cases = [
-    ["C", "C", "C | z", 0.125],
-    ["X:1\nL:1/4\nK:C\nC D E F", "C D", "C D E F | z4", 1],
-    ["X:1\nL:1/4\nM:3/4\nK:C\nC D E", "C D", "C D E | z3", 0.75],
-    ["X:1\nL:1/8\nM:6/8\nK:C\nCDE FGA", "CDE", "CDE FGA | z6", 0.75],
-    ["X:1\nL:1/4\nK:C\nC D | E F", "E F", "C D | E F | z2", 0.5],
-    ["X:1\nL:1/4\nK:C\nC D E F [K:G]", "C D", "C D E F [K:G] | z4", 1],
-    ["X:1\nL:1/4\nK:C\nC D E F %end", "C D", "C D E F | z4 %end", 1],
+    ["C", "C", "C |"],
+    ["X:1\nL:1/4\nK:C\nC D E F", "C D", "C D E F |"],
+    ["X:1\nL:1/4\nM:3/4\nK:C\nC D E", "C D", "C D E |"],
+    ["X:1\nL:1/8\nM:6/8\nK:C\nCDE FGA", "CDE", "CDE FGA |"],
+    ["X:1\nL:1/4\nK:C\nC D | E F", "E F", "C D | E F |"],
+    ["X:1\nL:1/4\nK:C\nC D E F [K:G]", "C D", "C D E F [K:G] |"],
+    ["X:1\nL:1/4\nK:C\nC D E F %end", "C D", "C D E F | %end"],
     // A chord symbol left after the last note: abcjs ends the note, and then
-    // the rest, one past the space before it.
-    ["X:1\nL:1/4\nK:C\nC D E F \"Am\"", "C D", "C D E F | z4 \"Am\"", 1],
-    ["X:1\nL:1/4\nK:C\nC D E F\nw: a b c d", "C D", "C D E F | z4", 1],
-    ["X:1\nL:1/4\nK:C\nV:1\nC D | E F\nV:2\nC, D, | E, F, |", "E F", "C D | E F | z2", 0.5],
+    // the barline, one past the space before it.
+    ["X:1\nL:1/4\nK:C\nC D E F \"Am\"", "C D", "C D E F | \"Am\""],
+    ["X:1\nL:1/4\nK:C\nC D E F\nw: a b c d", "C D", "C D E F |"],
+    ["X:1\nL:1/4\nK:C\nV:1\nC D | E F\nV:2\nC, D, | E, F, |", "E F", "C D | E F |"],
   ];
-  for (const [source, needle, line, length] of cases) {
+  for (const [source, needle, line] of cases) {
     const out = add(source, needle);
     assert.ok(!out.refused, JSON.stringify(source) + ": " + out.refused);
     assert.ok(out.source.split("\n").indexOf(line) >= 0, JSON.stringify(source) + " wrote " + JSON.stringify(out.source));
-    assert.equal(out.source.slice(out.rest).trim().charAt(0), "z");
-    assertAddedBar(source, out.source, length);
+    // The cursor goes to the open end past the barline written: nothing
+    // follows it but what was written after the bar.
+    assert.match(opening(out), /^\|( %end| "Am")?$/, JSON.stringify(source));
+    assertAddedBar(source, out.source);
   }
   // A voice closed where another is open is given its bar as at any barline.
-  assert.ok(add(cases[9][0], "E F").source.split("\n").indexOf("C, D, | E, F, | z2 |") >= 0);
+  assert.ok(add(cases[9][0], "E F").source.split("\n").indexOf("C, D, | E, F, | |") >= 0);
   // A tie at the end of the bar would be cut by the barline.
   assert.equal(add("X:1\nL:1/4\nK:C\nC D E F-", "C D").refused, "addTie");
 });
 
-test("the rest lasts a bar of the meter in force, written in the unit in force, or the bar beside it where there is no meter", () => {
+// A bar with nothing in it needs no length, and so no meter to measure it:
+// the owner's call of 2026-11-08 took the rest out of it. Written as a sum,
+// changed inside the line, with none at all, with bars of seven and eight
+// quarters (the partials of example.mdm), each is one barline more, which
+// used to be a rest of the bar (or of its groups, or the longest rests first)
+// and a refusal where no length could be told.
+test("a bar is written with no rest and no meter to measure it: one barline more, whatever the bars about it last", () => {
   const tune = (head, body) => ["X:1"].concat(head, ["K:C"], body).join("\n");
   const cases = [
-    [tune(["M:3/4", "L:1/8"], ["CDEFGA | ABcdef |"]), "CDEF", "z6", 0.75],
-    [tune(["M:6/8", "L:1/8"], ["CDEFGA | ABcdef |"]), "CDEF", "z6", 0.75],
-    [tune(["M:C", "L:1/8"], ["CDEFGABc | cBAGFEDC |"]), "CDEF", "z8", 1],
-    [tune(["M:C|", "L:1/4"], ["C D E F | G A B c |"]), "C D", "z4", 1],
-    [tune(["M:2+3/8", "L:1/8"], ["CDEFG | ABcde |"]), "CDEF", "z2 z3", 0.625],
-    [tune(["M:5/8", "L:1/4"], ["C D E/ | F G A/ |"]), "C D", "z5/2", 0.625],
-    [tune(["M:2/4", "L:1/8"], ["CD EF | [L:1/16] CDEF GABc | c2d2 e2f2 |"]), "CDEF", "z8", 0.5],
-    [tune(["M:4/4", "L:1/4"], ["C D E F | [M:3/4] G A B | c d e |"]), "G A B", "z3", 0.75],
-    [tune(["L:1/4"], ["C D | E F |"]), "C D", "z2", 0.5],
-    [tune(["L:1/8"], ["(3CDE F | G2 A |"]), "(3CDE", "z3", 0.375],
+    [tune(["M:4/4", "L:1/4"], ["C D E F | G A B c |"]), "C D", "C D E F | | G A B c |"],
+    [tune(["M:6/8", "L:1/8"], ["CDE FGA | ABc def |"]), "CDE", "CDE FGA | | ABc def |"],
+    [tune(["M:2+3/8", "L:1/8"], ["CDEFG | ABcde |"]), "CDE", "CDEFG | | ABcde |"],
+    [tune(["M:3+2+2/8", "L:1/8"], ["CDEFGAB | cdefgab |"]), "CDE", "CDEFGAB | | cdefgab |"],
+    [tune(["M:C|", "L:1/4"], ["C D E F | G A B c |"]), "C D", "C D E F | | G A B c |"],
+    [tune(["M:2/4", "L:1/8"], ["CD EF | [L:1/16] CDEF GABc | c2d2 e2f2 |"]), "CDEF", "CD EF | [L:1/16] CDEF GABc | | c2d2 e2f2 |"],
+    [tune(["M:4/4", "L:1/4"], ["C D E F | [M:3/4] G A B | c d e |"]), "G A B", "C D E F | [M:3/4] G A B | | c d e |"],
+    [tune(["L:1/4"], ["C D E F G A B | c d |"]), "C D", "C D E F G A B | | c d |"],
+    [tune(["M:none", "L:1/4"], ["C D E F G A B | c d |"]), "C D", "C D E F G A B | | c d |"],
+    [tune(["L:1/8"], ["(3CDE F | G2 A |"]), "(3CDE", "(3CDE F | | G2 A |"],
   ];
+  for (const [source, needle, line] of cases) {
+    const out = add(source, needle);
+    assert.ok(!out.refused, source + ": " + out.refused);
+    assert.ok(out.source.split("\n").indexOf(line) >= 0, source + " wrote " + JSON.stringify(out.source));
+    assertAddedBar(source, out.source);
+  }
   // At the head of a line that opens on a field of its own, after the field:
   // the bar opens the line in the line's meter.
   const opened = tune(["M:3/4", "L:1/4"], ["d e f | g a b |", "[M:2/4] c' b | a g |]"]);
   const head = add(opened, "c' b", "head");
-  assert.equal(head.source.split("\n").pop(), "[M:2/4] z2 | c' b | a g |]");
-  assertAddedBar(opened, head.source, 0.5);
-  for (const [source, needle, rests, length] of cases) {
-    const out = add(source, needle);
-    assert.ok(!out.refused, source + ": " + out.refused);
-    assert.equal(out.source.slice(out.rest).trim().split(" |")[0], rests, source);
-    assertAddedBar(source, out.source, length);
-  }
-  // A voice with a unit of its own writes the same bar in its own unit.
-  const voices = ["X:1", "M:2/4", "L:1/8", "K:C", "V:1", "CD EF | GA Bc |", "V:2", "L:1/4", "C D | E F |"].join("\n");
-  const out = add(voices, "CD EF");
-  assert.equal(out.source, voices.replace("CD EF |", "CD EF | z4 |").replace("C D |", "C D | z2 |"));
-  assertAddedBar(voices, out.source, 0.5);
-});
-
-// The owner's pick of design-score-editing-2.html (A, 2026-09-29): one
-// rest where abcjs knows the bar, which it draws as the whole-bar rest, and
-// where it does not, the rests a musician writes. The partials of
-// example.mdm have no meter and bars of eight and seven quarters: one rest
-// of eight quarters is one abcjs cannot draw ("pitch is undefined", in red).
-test("a new bar has the rest of the bar where abcjs knows the bar, a rest a group for a sum, and the longest rests first where there is no meter", () => {
-  const tune = (head, body) => ["X:1"].concat(head, ["K:C"], body).join("\n");
-  const cases = [
-    [tune(["M:4/4", "L:1/4"], ["C D E F | G A B c |"]), "C D", "z4", [1]],
-    [tune(["M:3/4", "L:1/4"], ["C D E | G A B |"]), "C D", "z3", [0.75]],
-    [tune(["M:6/8", "L:1/8"], ["CDE FGA | ABc def |"]), "CDE", "z6", [0.75]],
-    [tune(["M:5/8", "L:1/8"], ["CDEFG | ABcde |"]), "CDE", "z5", [0.625]],
-    [tune(["M:7/8", "L:1/8"], ["CDEFGAB | cdefgab |"]), "CDE", "z7", [0.875]],
-    [tune(["M:2+3/8", "L:1/8"], ["CDEFG | ABcde |"]), "CDE", "z2 z3", [0.25, 0.375]],
-    [tune(["M:3+2+2/8", "L:1/8"], ["CDEFGAB | cdefgab |"]), "CDE", "z3 z2 z2", [0.375, 0.25, 0.25]],
-    [tune(["L:1/4"], ["C D | E F |"]), "C D", "z2", [0.5]],
-    [tune(["L:1/4"], ["C D E F | G A B c |"]), "C D", "z4", [1]],
-    [tune(["L:1/4"], ["C D E F G | c d |"]), "C D", "z4 z", [1, 0.25]],
-    [tune(["L:1/4"], ["C D E F G A B | c d |"]), "C D", "z4 z3", [1, 0.75]],
-    [tune(["M:none", "L:1/4"], ["C D E F G A B | c d |"]), "C D", "z4 z3", [1, 0.75]],
-    [tune(["L:1/8"], ["CDEFG | cd |"]), "CDE", "z4 z", [0.5, 0.125]],
-    // A meter changed inside a line abcjs's engraver does not read: the
-    // bar's one rest there, drawn as the rest of its length.
-    [tune(["M:4/4", "L:1/4"], ["C D E F | [M:3/4] G A B | c d e |"]), "G A B", "z3", [0.75]],
-  ];
-  for (const [source, needle, rests, pieces] of cases) {
-    const out = add(source, needle);
-    assert.ok(!out.refused, source + ": " + out.refused);
-    assert.equal(out.source.slice(out.rest).trim().split(" |")[0], rests, source);
-    assertAddedBar(source, out.source, pieces.reduce((a, b) => a + b, 0), pieces);
-  }
-  // The partials: two wholes after the bar of eight, a whole and a dotted
-  // half after the bar of seven, the verses under them left on their notes.
+  assert.equal(head.source.split("\n").pop(), "[M:2/4] | | c' b | a g |]");
+  assertAddedBar(opened, head.source, 2);
+  // The partials: bars of eight and of seven quarters with no meter, the
+  // verses under them left on their notes.
   const first = add(PARTIALS, "C, C G");
-  assert.ok(first.source.split("\n").indexOf('C, C G c e g "^-31c"_b c\' | z4 z4 |') >= 0, JSON.stringify(first));
-  assertAddedBar(PARTIALS, first.source, 2, [1, 1]);
+  assert.ok(first.source.split("\n").indexOf('C, C G c e g "^-31c"_b c\' | |') >= 0, JSON.stringify(first));
+  assertAddedBar(PARTIALS, first.source);
   const second = add(PARTIALS, "[C,C]");
-  assert.ok(second.source.split("\n").indexOf("[C,C] [CG] [Gc] [ce] [eg] [g_b] [_bc'] | z4 z3 |") >= 0, JSON.stringify(second));
-  assertAddedBar(PARTIALS, second.source, 1.75, [1, 0.75]);
+  assert.ok(second.source.split("\n").indexOf("[C,C] [CG] [Gc] [ce] [eg] [g_b] [_bc'] | |") >= 0, JSON.stringify(second));
+  assertAddedBar(PARTIALS, second.source);
 });
 
-test("a verse makes room for every rest of the new bar: a `*` apiece where a rest would take one", () => {
+test("a verse is left as it was, but for a `|` that the new barline would take from the bar it was meant for", () => {
   const verse = (words) => ["X:1", "L:1/4", "K:C", "A B C D E F G | C D |", "w: " + words].join("\n");
+  // A `*` is taken by the next note, and the new bar has none: nothing is
+  // written for it, where a bar of rest took one apiece.
   const out = add(verse("a b c d e f g * i"), "A B");
-  assert.equal(out.source, verse("a b c d e f g * * * i").replace("G |", "G | z4 z3 |"));
-  assertAddedBar(verse("a b c d e f g * i"), out.source, 1.75, [1, 0.75]);
+  assert.equal(out.source, verse("a b c d e f g * i").replace("G |", "G | |"));
+  assertAddedBar(verse("a b c d e f g * i"), out.source);
 });
 
 test("every voice of the line takes the bar at the same place, in blocks, line by line or marked inline", () => {
   // Asked from the second voice, as from the first.
   const block = add(DUET, "c G A F");
-  assert.equal(block.source, DUET.replace("[EGc]2 [FAc]2 |", "[EGc]2 [FAc]2 | z4 |").replace("c G A F |", "c G A F | z4 |"));
-  assertAddedBar(DUET, block.source, 1);
+  assert.equal(block.source, DUET.replace("[EGc]2 [FAc]2 |", "[EGc]2 [FAc]2 | |").replace("c G A F |", "c G A F | |"));
+  assertAddedBar(DUET, block.source);
   const head = add(DUET, "[CFA]2 [CFA]2", "head");
-  assert.equal(head.source, DUET.replace("[CFA]2 [CFA]2", "z4 | [CFA]2 [CFA]2").replace("F D2  F", "z4 | F D2  F"));
-  assertAddedBar(DUET, head.source, 1);
+  assert.equal(head.source, DUET.replace("[CFA]2 [CFA]2", "| | [CFA]2 [CFA]2").replace("F D2  F", "| | F D2  F"));
+  assertAddedBar(DUET, head.source, 2);
   const inline = ["X:1", "L:1/4", "M:4/4", "K:C", "[V:1] cdef | gabc' |", "[V:2] CDEF | GABc |"].join("\n");
   const marked = add(inline, "cdef", "head");
-  assert.equal(marked.source, inline.replace("[V:1] cdef", "[V:1] z4 | cdef").replace("[V:2] CDEF", "[V:2] z4 | CDEF"));
-  assertAddedBar(inline, marked.source, 1);
+  assert.equal(marked.source, inline.replace("[V:1] cdef", "[V:1] | | cdef").replace("[V:2] CDEF", "[V:2] | | CDEF"));
+  assertAddedBar(inline, marked.source, 2);
 });
 
-test("the verses keep every syllable on its note: a `*` or a `|` goes in where the rest or the new barline would take one", () => {
+test("the verses keep every syllable on its note: a `|` goes in where the new barlines would take one", () => {
   const verse = (words) => ["X:1", "L:1/4", "K:C", "A B | C D | E F |", "w: " + words].join("\n");
   const cases = [
     ["a b c d e f", "a b c d e f"],
-    ["a b * d e f", "a b * * d e f"],
+    ["a b * d e f", "a b * d e f"],
     ["a b | | e f", "a b | | | e f"],
+    // A syllable held over the barline (`b_`) is taken by the note after it,
+    // which a bar of nothing leaves as it was.
+    ["a b_ c d", "a b_ c d"],
   ];
   for (const [words, written] of cases) {
     const out = add(verse(words), "A B");
-    assert.equal(out.source, verse(written).replace("A B |", "A B | z2 |"), words);
-    assertAddedBar(verse(words), out.source, 0.5);
+    assert.equal(out.source, verse(written).replace("A B |", "A B | |"), words);
+    assertAddedBar(verse(words), out.source);
   }
-  // Words that begin a bar late, with a bar before the line's first.
+  // Words that begin a bar late, with a bar before the line's first: one `|`
+  // for each of the two barlines the head is given.
   const late = ["X:1", "L:1/4", "K:C", "A B | C D |", "w: | c d"].join("\n");
   const out = add(late, "A B", "head");
-  assert.equal(out.source, ["X:1", "L:1/4", "K:C", "z2 | A B | C D |", "w: | | c d"].join("\n"));
-  assertAddedBar(late, out.source, 0.5);
-  // A syllable held over the barline (`b_`) can have nothing put in it.
-  assert.equal(add(verse("a b_ c d"), "A B").refused, "addLyrics");
+  assert.equal(out.source, ["X:1", "L:1/4", "K:C", "| | A B | C D |", "w: | | | c d"].join("\n"));
+  assertAddedBar(late, out.source, 2);
   // A symbol line is read against the notes as a verse is, and is not
   // rewritten.
   assert.equal(add(["X:1", "L:1/4", "K:C", "A B | C D |", "s: * * | !fermata! *"].join("\n"), "A B").refused, "addLyrics");
@@ -776,69 +738,62 @@ test("the verses keep every syllable on its note: a `*` or a `|` goes in where t
 
 test("a repeat or an ending keeps its sign: the bar goes in after the barline, inside what it opens", () => {
   const cases = [
-    ["G2 A2", "head", "|: z8 | G2 A2 B2 c2 | d2 c2 B2 A2 |"],
-    ["e2 d2", "after", "e2 d2 c2 B2 |1 z8 | A2 G2 F2 G2 :|2 G8 |]"],
-    ["A2 G2 F2", "after", "e2 d2 c2 B2 |1 A2 G2 F2 G2 :|2 z8 | G8 |]"],
-    ["G8", "after", "e2 d2 c2 B2 |1 A2 G2 F2 G2 :|2 G8 | z8 |]"],
+    ["G2 A2", "head", "|: | G2 A2 B2 c2 | d2 c2 B2 A2 |"],
+    ["e2 d2", "after", "e2 d2 c2 B2 |1 | A2 G2 F2 G2 :|2 G8 |]"],
+    ["A2 G2 F2", "after", "e2 d2 c2 B2 |1 A2 G2 F2 G2 :|2 | G8 |]"],
+    ["G8", "after", "e2 d2 c2 B2 |1 A2 G2 F2 G2 :|2 G8 | |]"],
   ];
   const source = ["X:1", "L:1/8", "M:4/4", "K:G", "|: G2 A2 B2 c2 | d2 c2 B2 A2 |", "e2 d2 c2 B2 |1 A2 G2 F2 G2 :|2 G8 |]"].join("\n");
   for (const [needle, where, line] of cases) {
     const out = add(source, needle, where);
     assert.ok(out.source && out.source.split("\n").indexOf(line) >= 0, needle + ": " + JSON.stringify(out));
-    assertAddedBar(source, out.source, 1);
+    assertAddedBar(source, out.source);
   }
 });
 
-// The owner's report of 2026-10-02: in `C | | G` only the first barline
-// wore a +. The second closes no bar, and adds one past itself, before the
-// bar after it; asked of a bar with no barline of its own before it, the
-// bar goes after the one that closes the bar before.
 test("a bar asked for before a bar goes past the barlines that open it, or past the one that closes the bar before", () => {
   const empty = "X:1\nL:1/4\nM:2/4\nK:C\nC2 | | G2 |";
   const out = add(empty, "G2", "before");
-  assert.equal(out.source.split("\n").pop(), "C2 | | z2 | G2 |");
-  assert.equal(out.source.slice(out.rest).trim().slice(0, 2), "z2");
-  assertAddedBar(empty, out.source, 0.5);
+  assert.equal(out.source.split("\n").pop(), "C2 | | | G2 |");
+  assert.equal(opening(out), "| | G2 |");
+  assertAddedBar(empty, out.source);
   const plain = "X:1\nL:1/4\nM:2/4\nK:C\nC2 | G2 |";
-  assert.equal(add(plain, "G2", "before").source.split("\n").pop(), "C2 | z2 | G2 |");
+  assert.equal(add(plain, "G2", "before").source.split("\n").pop(), "C2 | | G2 |");
   // Before the first bar of a line is at its head.
-  assert.equal(add(plain, "C2", "before").source.split("\n").pop(), "z2 | C2 | G2 |");
+  assert.equal(add(plain, "C2", "before").source.split("\n").pop(), "| | C2 | G2 |");
   // Every voice of the line, each past its own barlines.
   const duet = ["X:1", "L:1/4", "M:2/4", "K:C", "V:1", "C2 | | G2 |", "V:2", "E2 | B2 |"].join("\n");
   const both = add(duet, "G2", "before");
-  assert.equal(both.source, duet.replace("C2 | | G2", "C2 | | z2 | G2").replace("E2 | B2", "E2 | z2 | B2"));
-  assertAddedBar(duet, both.source, 0.5);
+  assert.equal(both.source, duet.replace("C2 | | G2", "C2 | | | G2").replace("E2 | B2", "E2 | | B2"));
+  assertAddedBar(duet, both.source);
 });
 
-// The owner's call of 2026-10-03 for the keys: Ctrl with an arrow adds the
-// bar in the cursor's voice alone, and Ctrl+Alt in every voice there is;
-// and of 2026-10-06, which took Ctrl+Alt out: the voices are chosen first,
-// and the bar goes into the ones chosen (the test after this one).
 test("with `own`, a bar goes into the voice asked and into no other, after its bar or before it", () => {
   const duet = ["X:1", "L:1/4", "M:2/4", "K:C", "V:1", "C2 | G2 |", "V:2", "E2 | B2 |"].join("\n");
   const upper = MDM_BARS.addBar(ABCJS, duet, duet.indexOf("C2"), "after", true);
-  assert.equal(upper.source, duet.replace("C2 | G2", "C2 | z2 | G2"));
-  assert.equal(upper.source.slice(upper.rest).trim().slice(0, 2), "z2");
+  assert.equal(upper.source, duet.replace("C2 | G2", "C2 | | G2"));
+  assert.equal(opening(upper), "| | G2 |");
   const lower = MDM_BARS.addBar(ABCJS, duet, duet.indexOf("B2"), "before", true);
-  assert.equal(lower.source, duet.replace("E2 | B2", "E2 | z2 | B2"));
-  assert.equal(lower.source.slice(lower.rest).trim().slice(0, 2), "z2");
-  assert.equal(MDM_BARS.addBar(ABCJS, duet, duet.indexOf("E2"), "head", true).source, duet.replace("E2 | B2", "z2 | E2 | B2"));
+  assert.equal(lower.source, duet.replace("E2 | B2", "E2 | | B2"));
+  assert.equal(opening(lower), "| | B2 |");
+  assert.equal(MDM_BARS.addBar(ABCJS, duet, duet.indexOf("E2"), "head", true).source, duet.replace("E2 | B2", "| | E2 | B2"));
   // Without it, every voice of the line, as the + adds it.
-  assert.equal(MDM_BARS.addBar(ABCJS, duet, duet.indexOf("C2"), "after").source, duet.replace("C2 | G2", "C2 | z2 | G2").replace("E2 | B2", "E2 | z2 | B2"));
-  // A voice that differs from the others is no obstacle to its own bar.
+  assert.equal(MDM_BARS.addBar(ABCJS, duet, duet.indexOf("C2"), "after").source, duet.replace("C2 | G2", "C2 | | G2").replace("E2 | B2", "E2 | | B2"));
+  // A voice that differs from the others is no obstacle to its own bar, which
+  // lasts nothing and leaves it as long as the others.
   const uneven = ["X:1", "L:1/4", "K:C", "V:1", "C D | E F | G A |", "V:2", "C, D, | E, F, |"].join("\n");
   assert.equal(MDM_BARS.addBar(ABCJS, uneven, uneven.indexOf("G A"), "after").refused, "addVoices");
-  assert.equal(MDM_BARS.addBar(ABCJS, uneven, uneven.indexOf("G A"), "after", true).source, uneven.replace("G A |", "G A | z2 |"));
+  assert.equal(MDM_BARS.addBar(ABCJS, uneven, uneven.indexOf("G A"), "after", true).source, uneven.replace("G A |", "G A | |"));
 });
 
 test("with a list for `own`, a bar goes into the voice asked and into the voices the list names, and into no other", () => {
   const trio = ["X:1", "L:1/4", "M:2/4", "K:C", "V:1", "C2 | G2 |", "V:2", "E2 | B2 |", "V:3", "A,2 | D2 |"].join("\n");
-  const upper = trio.replace("C2 | G2", "C2 | z2 | G2");
-  // The first and the third: the second is left as it was. The rest handed
-  // back is the one of the voice asked.
+  const upper = trio.replace("C2 | G2", "C2 | | G2");
+  // The first and the third: the second is left as it was. The barline
+  // handed back is the one of the voice asked.
   const two = MDM_BARS.addBar(ABCJS, trio, trio.indexOf("C2"), "after", [trio.indexOf("A,2")]);
-  assert.equal(two.source, upper.replace("A,2 | D2", "A,2 | z2 | D2"));
-  assert.ok(two.rest > two.source.indexOf("C2") && two.rest < two.source.indexOf("V:2"), "the rest handed back is not the first voice's");
+  assert.equal(two.source, upper.replace("A,2 | D2", "A,2 | | D2"));
+  assert.ok(two.bar > two.source.indexOf("C2") && two.bar < two.source.indexOf("V:2"), "the barline handed back is not the first voice's");
   // Any note of a voice on the line names it, the bar being told by the
   // place asked alone; a voice named twice, or the one asked named as
   // well, is that voice once.
@@ -853,7 +808,7 @@ test("with a list for `own`, a bar goes into the voice asked and into the voices
   assert.equal(MDM_BARS.addBar(ABCJS, trio, trio.indexOf("C2"), "after", [trio.indexOf("V:2")]).refused, "addPlace");
   const lines = ["X:1", "L:1/4", "M:2/4", "K:C", "V:1", "C2 | G2 |", "A2 | c2 |", "V:2", "E2 | B2 |", "F2 | d2 |"].join("\n");
   assert.equal(MDM_BARS.addBar(ABCJS, lines, lines.indexOf("C2"), "after", [lines.indexOf("F2")]).refused, "addPlace");
-  assert.equal(MDM_BARS.addBar(ABCJS, lines, lines.indexOf("C2"), "after", [lines.indexOf("E2")]).source, lines.replace("C2 | G2", "C2 | z2 | G2").replace("E2 | B2", "E2 | z2 | B2"));
+  assert.equal(MDM_BARS.addBar(ABCJS, lines, lines.indexOf("C2"), "after", [lines.indexOf("E2")]).source, lines.replace("C2 | G2", "C2 | | G2").replace("E2 | B2", "E2 | | B2"));
   // A voice named that has no such bar is the reason the others get none.
   const uneven = ["X:1", "L:1/4", "K:C", "V:1", "C D | E F | G A |", "V:2", "C, D, | E, F, |"].join("\n");
   assert.equal(MDM_BARS.addBar(ABCJS, uneven, uneven.indexOf("G A"), "after", [uneven.indexOf("C, D,")]).refused, "addVoices");
@@ -936,115 +891,115 @@ test("a bar that would cut a tie, or go into one of two voices laid over each ot
   assert.equal(add(["X:1", "L:1/4", "K:C", "V:1", "C D | E F | G A |", "V:2", "C, D, | E, F, |"].join("\n"), "G A").refused, "addVoices");
   // Each has words of its own, but a bar that would change the music, whose
   // words are those of a move that would.
-  for (const reason of ["addPlace", "addVoices", "addLyrics", "addMeter", "addTie", "next", "last"]) {
+  for (const reason of ["addPlace", "addVoices", "addLyrics", "addTie", "next", "last"]) {
     assert.notEqual(MDM_BARS.reasonText(reason), MDM_BARS.reasonText("unsafe"), reason + " has no words of its own");
   }
-  for (const reason of ["addPlace", "addVoices", "addLyrics", "addMeter", "addTie", "addUnsafe", "next", "last"]) {
+  for (const reason of ["addPlace", "addVoices", "addLyrics", "addTie", "addUnsafe", "next", "last"]) {
     assertShortReason(reason);
   }
+  // The length of a bar is no reason any longer: a bar with nothing in it
+  // has none (it was "Bar length unknown").
+  assert.equal(MDM_BARS.reasonText("addMeter"), MDM_BARS.reasonText("unsafe"));
 });
 
 // Every barline and every head of line of every fixture: refused with a
-// reason of its own, or a bar of the meter's length where it was asked.
-test("a sweep of every barline and every head of line: refused, or the same music with one bar of rest more", () => {
-  // With the length of a bar where the fixture has a meter, and null where
-  // it has none and a bar is as long as the one beside it.
+// reason of its own, or one bar of nothing more where it was asked, which is
+// two barlines at the head of a line that none opens.
+test("a sweep of every barline and every head of line: refused, or the same music with one empty bar more", () => {
   const fixtures = {
-    OWNER: [OWNER, null],
-    PARTIALS: [PARTIALS, null],
-    DUET: [DUET, 1],
-    SONG: [SONG, 0.75],
-    ENDINGS: [ENDINGS, 1],
-    tuplets: ["X:1\nL:1/8\nM:2/4\nK:C\n(3CDE F2 | (3GAB c2- |\nc2 (3dcB | A4 |]", 0.5],
-    ornaments: ["X:1\nL:1/8\nM:4/4\nK:D\n{g}A2 !trill!B2 z4 | .c .d ~e2 z4 |\n!fermata!f8 | {ag}f4 e4 |]", 1],
-    pickup: ["X:1\nL:1/4\nM:3/4\nK:G\nD | G A B | c2 B |\nA G F | G2 z |]", 0.75],
-    rests: ["X:1\nL:1/4\nM:4/4\nK:C\nC D E F | Z4 |\nG A B c | z4 |]", 1],
-    repeats: ["X:1\nL:1/4\nM:2/4\nK:C\n|: C D | E F :|\n|1 G A | B c :|2 d e | f g |]", 0.5],
+    OWNER: OWNER,
+    PARTIALS: PARTIALS,
+    DUET: DUET,
+    SONG: SONG,
+    ENDINGS: ENDINGS,
+    tuplets: "X:1\nL:1/8\nM:2/4\nK:C\n(3CDE F2 | (3GAB c2- |\nc2 (3dcB | A4 |]",
+    ornaments: "X:1\nL:1/8\nM:4/4\nK:D\n{g}A2 !trill!B2 z4 | .c .d ~e2 z4 |\n!fermata!f8 | {ag}f4 e4 |]",
+    pickup: "X:1\nL:1/4\nM:3/4\nK:G\nD | G A B | c2 B |\nA G F | G2 z |]",
+    rests: "X:1\nL:1/4\nM:4/4\nK:C\nC D E F | Z4 |\nG A B c | z4 |]",
+    repeats: "X:1\nL:1/4\nM:2/4\nK:C\n|: C D | E F :|\n|1 G A | B c :|2 d e | f g |]",
     // Bars no barline closes, at the end of the tune and of a line.
-    bare: ["C", null],
-    unbarred: ["X:1\nL:1/4\nK:C\nC D E F G A B c", null],
-    open: ["X:1\nL:1/4\nM:2/4\nK:C\nC D | E F\nG A | B c", 0.5],
+    bare: "C",
+    unbarred: "X:1\nL:1/4\nK:C\nC D E F G A B c",
+    open: "X:1\nL:1/4\nM:2/4\nK:C\nC D | E F\nG A | B c",
   };
-  const reasons = new Set(["addTie", "addVoices", "addLyrics", "addMeter"]);
+  const reasons = new Set(["addTie", "addVoices", "addLyrics"]);
   let made = 0;
   Object.keys(fixtures).forEach((name) => {
-    const [source, meter] = fixtures[name];
+    const source = fixtures[name];
     const tune = ABCJS.parseOnly(source)[0];
     tune.lines.forEach((line) => {
       if (!line.staff) return;
-      // Each bar's first note, and how long the bar lasts by its notes.
+      // Each bar's first note, and whether the line opens on a barline.
+      const voice = line.staff[0].voices[0];
+      const opens = voice.length > 0 && voice[0].el_type === "bar";
       const asks = [];
       let note = null;
-      let sum = 0;
-      line.staff[0].voices[0].forEach((el) => {
-        if (el.el_type === "note") {
-          if (note === null) note = el.startChar;
-          sum += el.duration;
-        }
+      voice.forEach((el) => {
+        if (el.el_type === "note" && note === null) note = el.startChar;
         if (el.el_type === "bar" && note !== null) {
-          if (!asks.length) asks.push([note, "head", sum]);
-          asks.push([note, "after", sum]);
+          if (!asks.length) asks.push([note, "head", opens ? 1 : 2]);
+          asks.push([note, "after", 1]);
           note = null;
-          sum = 0;
         }
       });
       // And the end of a bar no barline closes.
       if (note !== null) {
-        if (!asks.length) asks.push([note, "head", sum]);
-        asks.push([note, "after", sum]);
+        if (!asks.length) asks.push([note, "head", opens ? 1 : 2]);
+        asks.push([note, "after", 1]);
       }
-      asks.forEach(([at, where, beside]) => {
+      asks.forEach(([at, where, count]) => {
         const out = MDM_BARS.addBar(ABCJS, source, at, where);
         if (out.refused) {
           assert.ok(reasons.has(out.refused), name + " at " + at + " " + where + ": " + out.refused);
           return;
         }
         made++;
-        assertAddedBar(source, out.source, meter === null ? beside : meter);
+        assertAddedBar(source, out.source, count);
+        // The barline handed back is a barline of the new source.
+        assert.match(out.source.slice(out.bar).trim(), /^[|:\[]/, name + " at " + at + " " + where);
       });
     });
   });
   assert.ok(made > 30, "the sweep added only " + made + " bars");
 });
 
-// A line of seven quarters, with no meter: the bar after it has two rests.
-const SEVEN = ["X:1", "L:1/4", "K:C", "C D E F G A B | c d |"].join("\n");
-
 // The check every bar added passes, on its own: what it is handed is where
 // the bar was asked for (the plan addBar makes: the voice, where in its
-// line, and how long the rest is to last), and it lets through the bar put
+// line, and how many barlines go in), and it lets through the barlines put
 // there and nothing else.
-test("the check a bar added passes lets the bar through where it was asked, and stops one of another length, in another place, or anything else changed", () => {
+test("the check a bar added passes lets the bar through where it was asked, and stops one of another kind, in another place, or anything else changed", () => {
   // The first barline of the owner's first line is element 2 of its voice.
-  const plan = [{ key: "0/0", kind: "after", last: 2, length: 0.5 }];
+  const plan = [{ key: "0/0", kind: "after", last: 2, bars: 1 }];
   const check = (after) => MDM_BARS.verifyAdd(ABCJS, OWNER, after, 0, plan, "0/0");
-  const right = OWNER.replace("C D |", "C D | z2 |");
+  const right = OWNER.replace("C D |", "C D | |");
   assert.equal(check(right), null);
-  assert.equal(check(OWNER.replace("C D |", "C D | z3 |")), "addUnsafe", "a rest of another length");
-  assert.equal(check(OWNER.replace("E F |", "E F | z2 |")), "addUnsafe", "a bar in another place");
-  assert.equal(check(OWNER.replace("C D |", "C D | x2 |")), "addUnsafe", "a rest nobody sees");
-  assert.equal(check(OWNER.replace("C D |", "C D | z2 ||")), "addUnsafe", "a barline of another kind");
+  assert.equal(check(OWNER.replace("E F |", "E F | |")), "addUnsafe", "a bar in another place");
+  assert.equal(check(OWNER.replace("C D |", "C D | z2 |")), "addUnsafe", "a rest in it");
+  assert.equal(check(OWNER.replace("C D |", "C D | ||")), "addUnsafe", "a barline of another kind");
+  assert.equal(check(OWNER.replace("C D |", "C D | | |")), "addUnsafe", "a barline more");
   assert.equal(check(right.replace("E F", "E G")), "addUnsafe", "a note changed");
-  assert.equal(check(right.replace("G A |", "G A | z2 |")), "addUnsafe", "a second bar");
+  assert.equal(check(right.replace("G A |", "G A | |")), "addUnsafe", "a second bar");
   assert.equal(check(right.replace("E F |\n", "E F | ")), "addUnsafe", "two lines made one");
   // A line break moved along with the bar: every voice reads the same, and
   // only the lines tell it, as they tell a move (verify).
   assert.equal(check(right.replace("E F |\nG A |", "E F | G A |\n")), "addUnsafe", "a line break moved");
-  // A bar of several rests: the rests of the plan, in their order.
-  const partials = [{ key: "0/0", kind: "after", last: 7, length: 1.75, rests: [1, 0.75] }];
-  const bars = (after) => MDM_BARS.verifyAdd(ABCJS, SEVEN, after, 0, partials, "0/0");
-  assert.equal(bars(SEVEN.replace("B |", "B | z4 z3 |")), null);
-  assert.equal(bars(SEVEN.replace("B |", "B | z3 z4 |")), "addUnsafe", "the rests in another order");
-  assert.equal(bars(SEVEN.replace("B |", "B | z7 |")), "addUnsafe", "one rest for two");
-  assert.equal(bars(SEVEN.replace("B |", "B | z4 z2 |")), "addUnsafe", "rests short of the bar");
-  assert.equal(bars(SEVEN.replace("B |", "B | z4 C3 |")), "addUnsafe", "a note among the rests");
-  // A bar left open: the barline first, and the rests after it.
+  // Two barlines at the head of a line that none opens.
+  const head = [{ key: "0/0", kind: "head", last: -1, bars: 2 }];
+  const heads = (after) => MDM_BARS.verifyAdd(ABCJS, OWNER, after, 0, head, "0/0");
+  assert.equal(heads(OWNER.replace("C D |", "| | C D |")), null);
+  assert.equal(heads(OWNER.replace("C D |", "| C D |")), "addUnsafe", "one barline of the two");
+  // A bar left open: the barline after the last note, and nothing else.
   const unbarred = "X:1\nL:1/4\nK:C\nC D E F";
-  const open = [{ key: "0/0", kind: "open", last: 3, length: 1 }];
+  const open = [{ key: "0/0", kind: "open", last: 3, bars: 1 }];
   const opened = (after) => MDM_BARS.verifyAdd(ABCJS, unbarred, after, 0, open, "0/0");
-  assert.equal(opened(unbarred + " | z4"), null);
-  assert.equal(opened(unbarred + " z4 |"), "addUnsafe", "the rest before the barline");
-  assert.equal(opened(unbarred + " | z4 |"), "addUnsafe", "a barline more");
+  assert.equal(opened(unbarred + " |"), null);
+  assert.equal(opened(unbarred + " | |"), "addUnsafe", "a barline more");
+  assert.equal(opened(unbarred + " | z4"), "addUnsafe", "a rest after it");
+  // The barline that ends the tune stays the end: the new one goes before.
+  const ended = [{ key: "0/0", kind: "end", last: 7, bars: 1 }];
+  const closing = (after) => MDM_BARS.verifyAdd(ABCJS, OWNER, after, 1, ended, "0/0");
+  assert.equal(closing(OWNER.replace("d e |]", "d e | |]")), null);
+  assert.equal(closing(OWNER.replace("d e |]", "d e |] |")), "addUnsafe", "a bar after the end of the tune");
 });
 
 // ---------- A note written ----------
@@ -1402,6 +1357,257 @@ test("a tie on the place, a verse that would shift under it and voices laid over
   // Nothing to write on at a barline.
   assert.equal(write(COMMON + "C8 |", "|", { step: 4, duration: QUARTER }).refused, "notePlace");
   for (const reason of ["noteTie", "noteLyrics", "notePlace", "noteUnsafe", "noteSlur", "barOnly", "cutAll"]) assertShortReason(reason);
+});
+
+// The owner's keys of 2026-11-08: Ctrl+B and Alt+B put a barline in just
+// before the cursor's place and just after it, "A2 | B2 c2" with the cursor
+// on the B and Ctrl (insertBar).
+function barline(source, needle, side, nth) {
+  let at = -1;
+  for (let i = 0; i <= (nth || 0); i++) at = source.indexOf(needle, at + 1);
+  assert.ok(at >= 0, "no " + needle + " in the fixture");
+  return MDM_BARS.insertBar(ABCJS, source, at, side);
+}
+
+test("a barline put in goes just before the place or just after it, in that voice alone, set apart by a space, and every note stays as it was", () => {
+  assert.equal(lastLine(barline(COMMON + "A2 B2 c2", "B2", "before")), "A2 | B2 c2");
+  assert.equal(lastLine(barline(COMMON + "A2 B2 c2", "B2", "after")), "A2 B2 | c2");
+  // At the end of a voice no barline closes, it closes the last bar.
+  assert.equal(lastLine(barline(COMMON + "A2 B2 c2", "c2", "after")), "A2 B2 c2 |");
+  // Between two eighths beamed together, which it parts.
+  assert.equal(lastLine(barline(COMMON + "ABcd e4", "c", "before")), "AB | cd e4");
+  // Before everything written on the place, and after everything on it.
+  assert.equal(lastLine(barline(COMMON + '"Am"!f!A2 "G"B2', "B2", "before")), '"Am"!f!A2 | "G"B2');
+  assert.equal(lastLine(barline(COMMON + '"Am"!f!A2 B2', "A2", "after")), '"Am"!f!A2 | B2');
+  assert.equal(lastLine(barline(COMMON + "[CE]2 [DF]2", "[DF]", "before")), "[CE]2 | [DF]2");
+  // Before a tuplet's first note and after its last; a tie crosses it.
+  assert.equal(lastLine(barline(COMMON + "d2 (3ABc d2", "A", "before")), "d2 | (3ABc d2");
+  assert.equal(lastLine(barline(COMMON + "d2 (3ABc d2", "c", "after")), "d2 (3ABc | d2");
+  assert.equal(lastLine(barline(COMMON + "A2- A2 B2", "A2", "before", 1)), "A2- | A2 B2");
+  // An accidental written again after it sounds as it did.
+  assert.equal(lastLine(barline(COMMON + "^F2 ^F2 G2", "^F2", "before", 1)), "^F2 | ^F2 G2");
+  // At the head of a line, where the bar of the line above runs on.
+  assert.equal(barline(COMMON + "A2 B2\nc2 d2 |", "c2", "before").source, COMMON + "A2 B2\n| c2 d2 |");
+  // In one voice of two, the other as it was.
+  const duet = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "C D E F |", "V:2", "C, D, E, F, |"].join("\n");
+  assert.equal(barline(duet, "E,", "before").source, duet.replace("D, E,", "D, | E,"));
+  // Under a verse that counts no bars, every syllable stays on its note.
+  const sung = COMMON + "A2 B2 c2 d2\nw: one two three four";
+  assert.equal(barline(sung, "c2", "before").source, COMMON + "A2 B2 | c2 d2\nw: one two three four");
+});
+
+test("no barline goes in before the first note of a line that begins a voice, inside a tuplet or a broken rhythm, where an accidental would stop carrying, or where a verse counts bars, each for its reason", () => {
+  const refused = (source, needle, side, nth) => barline(source, needle, side, nth).refused;
+  // The closing barline that ends the tune is no place for a bar after it.
+  const ended = COMMON + "A2 B2 |]";
+  assert.equal(MDM_BARS.insertBar(ABCJS, ended, ended.lastIndexOf("|"), "after").refused, "barThere");
+  assert.equal(refused(COMMON + "d2 (3ABc d2", "B", "before"), "barTuplet");
+  assert.equal(refused(COMMON + "d2 (3ABc d2", "A", "after"), "barTuplet");
+  assert.equal(refused(COMMON + "c2 A>B c2", "B", "before"), "barRhythm");
+  assert.equal(refused(COMMON + "c2 A>B c2", "A", "after"), "barRhythm");
+  assert.equal(refused(COMMON + "^F2 F2 G2", "F2", "before", 1), "barAccidental");
+  assert.equal(refused(COMMON + "A2 B2 c2 d2\nw: one two | three four", "c2", "before"), "noteLyrics");
+  // A tie across the barline there is would be cut by the bar added beside it.
+  assert.equal(refused(COMMON + "A2 B2- | B2 c2", "B2", "after"), "addTie");
+  for (const reason of ["barThere", "barTuplet", "barRhythm", "barAccidental"]) {
+    assert.notEqual(MDM_BARS.reasonText(reason), MDM_BARS.reasonText("unsafe"), reason + " has no words of its own");
+  }
+});
+
+// The owner's ask of 2026-11-08: "si al final de un compás el cabezal está
+// ... C | y se presiona Alt+B, deben aparecer cuantos compases se añadan ...
+// C | | y en cada uno el cabezal debe moverse adentro del compás". Ctrl+B at
+// the head of a bar does it on the other side, by the same token.
+test("where a barline stands already, Alt+B and Ctrl+B add an empty bar beside the cursor's, in its voice alone, and name the barline the cursor goes in after", () => {
+  const edge = (source, needle, side, nth) => {
+    const out = barline(source, needle, side, nth);
+    assert.equal(out.refused, undefined, JSON.stringify(source) + ": " + out.refused);
+    return out;
+  };
+  // At the end of a bar, and at the head of one.
+  const end = edge(COMMON + "A2 B2 | c2", "B2", "after");
+  assert.equal(lastLine(end), "A2 B2 | | c2");
+  assert.equal(opening(end), "| | c2");
+  const head = edge(COMMON + "A2 | B2 c2", "B2", "before");
+  assert.equal(lastLine(head), "A2 | | B2 c2");
+  assert.equal(opening(head), "| | B2 c2");
+  // Before the barline that ends the tune, which goes on ending it.
+  const last = edge(COMMON + "A2 B2 c2 |]", "c2", "after");
+  assert.equal(lastLine(last), "A2 B2 c2 | |]");
+  assert.equal(opening(last), "| |]");
+  // At the head of a line, where the bar above ends: the bar goes in at the
+  // head of the line, and before the first note of a voice as well.
+  assert.equal(edge(COMMON + "A2 B2 |\nc2 d2 |", "c2", "before").source, COMMON + "A2 B2 |\n| | c2 d2 |");
+  assert.equal(lastLine(edge(COMMON + "A2 B2 c2", "A2", "before")), "| | A2 B2 c2");
+  // A barline that is no plain one keeps its sign, and the bar goes beyond it.
+  assert.equal(lastLine(edge(COMMON + "A2 B2 :| c2", "B2", "after")), "A2 B2 :| | c2");
+  // In one voice of two, the other as it was, which a bar of nothing leaves as
+  // long as it was.
+  const duet = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "C D E F | G A B c |", "V:2", "C, D, E, F, | G, A, B, C |"].join("\n");
+  assert.equal(edge(duet, "F |", "after").source, duet.replace("C D E F |", "C D E F | |"));
+  // The barlines of an empty bar are places as well: the bar goes in beside
+  // it, the text the same either way, and the answer says which side the
+  // cursor goes to, after the barline it stood after with Ctrl and after
+  // the new one with Alt.
+  const empty = COMMON + "A2 B2 | | c2";
+  const first = empty.indexOf("|");
+  const right = MDM_BARS.insertBar(ABCJS, empty, first, "after");
+  const left = MDM_BARS.insertBar(ABCJS, empty, first, "before");
+  assert.equal(lastLine(right), "A2 B2 | | | c2");
+  assert.equal(right.source, left.source);
+  assert.equal(opening(left), "| | | c2");
+  assert.equal(opening(right), "| | c2");
+  // The open end past a plain barline: the same.
+  const closed = COMMON + "A2 B2 |";
+  const open = MDM_BARS.insertBar(ABCJS, closed, closed.lastIndexOf("|"), "after");
+  assert.equal(lastLine(open), "A2 B2 | |");
+  assert.equal(opening(open), "|");
+  assert.equal(opening(MDM_BARS.insertBar(ABCJS, closed, closed.lastIndexOf("|"), "before")), "| |");
+});
+
+// The bar the + adds holds no rest since 2026-11-08, so Delete has none to
+// take out with the bar: it takes the bar of nothing out instead, which is
+// one of its two barlines (takeEmptyBar).
+function takeBar(source, needle, nth) {
+  let at = -1;
+  for (let i = 0; i <= (nth || 0); i++) at = source.indexOf(needle, at + 1);
+  assert.ok(at >= 0, "no " + needle + " in the fixture");
+  return MDM_BARS.takeEmptyBar(ABCJS, source, at);
+}
+
+test("a bar with nothing in it is taken out by its plain barline, the second of two plain ones, in that voice alone; two that are no plain ones stay, and so does a place that is no bar of nothing", () => {
+  assert.equal(lastLine(takeBar(COMMON + "A2 B2 | | c2", "|")), "A2 B2 | c2");
+  // The sign written on the first stays: a repeat's, an ending's.
+  assert.equal(lastLine(takeBar(COMMON + "A2 B2 :| | c2", ":|")), "A2 B2 :| c2");
+  assert.equal(lastLine(takeBar(COMMON + "A2 B2 |1 | c2", "|1")), "A2 B2 |1 c2");
+  // Where the second is the one with a sign, the first goes.
+  assert.equal(lastLine(takeBar(COMMON + "A2 B2 | |: c2", "|")), "A2 B2 |: c2");
+  assert.equal(lastLine(takeBar(COMMON + "A2 | |]", "|")), "A2 |]");
+  // At the end of a voice, and with a comment after it.
+  assert.equal(lastLine(takeBar(COMMON + "A2 B2 | |", "|")), "A2 B2 |");
+  assert.equal(lastLine(takeBar(COMMON + "A2 B2 | | c2 % hi", "|")), "A2 B2 | c2 % hi");
+  // One of several in a row goes, and the others stay.
+  assert.equal(lastLine(takeBar(COMMON + "A2 B2 | | | c2", "|", 1)), "A2 B2 | | c2");
+  // Two that each stand for something: nothing is taken out.
+  assert.equal(takeBar(COMMON + "A2 B2 :| |: c2", ":|").refused, "noteUnsafe");
+  // A note is no bar, and two barlines on two lines are no bar of one.
+  assert.equal(takeBar(COMMON + "A2 B2 | | c2", "B2").refused, "notePlace");
+  assert.equal(takeBar(COMMON + "A2 B2 |\n| c2", "|").refused, "notePlace");
+  // In one voice of two, the other as it was.
+  const duet = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "C D E F | | G A B c |]", "V:2", "C, D, E, F, | | G, A, B, C |]"].join("\n");
+  assert.equal(takeBar(duet, "|").source, duet.replace("F | | G A", "F | G A"));
+  assert.equal(takeBar(duet, "|", 3).source, duet.replace("F, | | G,", "F, | G,"));
+  // Every note stays, each as it was, and every line has the bars it had.
+  const source = COMMON + "A2 B2 | | c2 d2 |]";
+  const out = takeBar(source, "|").source;
+  assert.deepEqual(layout(out), layout(source));
+  assert.deepEqual(music(out).hasOwnProperty("0/0") && music(out)["0/0"].filter((x) => !/^bar /.test(x)), music(source)["0/0"].filter((x) => !/^bar /.test(x)));
+});
+
+// The owner's ask of 2026-11-08: "cuando el cursor salga del compás vacío, el
+// espacio entre barras se reduzca como mismo sale cuando se hace C || G que
+// las barras salen pegaditas". abcjs leaves 16 units between two plain
+// barlines and draws a double one 4 across, so the score mode engraves a bar
+// of nothing as the double barline when the cursor is not in it.
+test("a bar with nothing in it is handed to the engraver as a double barline, as long as the text was, but for the bar the cursor is in; three barlines in a row, a heavier one and barlines of two lines are left as they were", () => {
+  const first = (source) => ABCJS.parseOnly(source)[0].lines.filter((l) => l.staff)[0].staff[0].voices[0].filter((e) => e.el_type === "bar")[0];
+  const src = COMMON + "A2 B2 | | c2 d2 |";
+  const out = MDM_BARS.tightBars(ABCJS, src);
+  assert.equal(out.text, COMMON + "A2 B2  || c2 d2 |");
+  assert.equal(out.text.length, src.length);
+  const pair = src.indexOf("| |");
+  assert.deepEqual(out.pairs, [{ from: pair, to: pair + 3, after: out.pairs[0].after, last: out.pairs[0].last }]);
+  // abcjs reads one double barline there, and every note where it was.
+  const bars = (text) => ABCJS.parseOnly(text)[0].lines.filter((l) => l.staff)[0].staff[0].voices[0].filter((e) => e.el_type === "bar").map((e) => e.type);
+  assert.deepEqual(bars(out.text), ["bar_thin_thin", "bar_thin"]);
+  // Every note begins at the character it has in the text as it was written,
+  // which is where the module looks for it (the note before the pair ends
+  // after the spaces that follow it, which are now two), and the pair says
+  // where each of its two barlines began, as abcjs reads the score as
+  // written.
+  const spans = (text) => ABCJS.parseOnly(text)[0].lines.filter((l) => l.staff)[0].staff[0].voices[0].map((e) => [e.el_type, e.startChar, e.endChar]);
+  const was = spans(src);
+  const now = spans(out.text);
+  assert.deepEqual(now.filter((e) => e[0] === "note").map((e) => e[1]), was.filter((e) => e[0] === "note").map((e) => e[1]));
+  assert.deepEqual([out.pairs[0].after, out.pairs[0].last], was.filter((e) => e[0] === "bar").map((e) => e[1]).slice(0, 2));
+  // What lies between the two barlines comes before the double one.
+  assert.equal(MDM_BARS.tightBars(ABCJS, COMMON + "A2 B2 |  | c2").text, COMMON + "A2 B2   || c2");
+  // The bar the cursor is in, named by the barline it opens, as the place
+  // names it.
+  assert.equal(MDM_BARS.tightBars(ABCJS, src, first(src).startChar).text, src);
+  assert.deepEqual(MDM_BARS.tightBars(ABCJS, src, first(src).startChar).pairs, []);
+  // Two of them, one open: the other is tight.
+  const two = COMMON + "A2 | | B2 | | c2";
+  assert.equal(MDM_BARS.tightBars(ABCJS, two, first(two).startChar).text, COMMON + "A2 | | B2  || c2");
+  // Each voice of a line.
+  const duet = ["X:1", "M:4/4", "L:1/4", "K:C", "V:1", "C D | | E F", "V:2", "C, D, | | E, F,"].join("\n");
+  assert.equal(MDM_BARS.tightBars(ABCJS, duet).pairs.length, 2);
+  // Left as they were: three in a row, a heavier barline on either side, a
+  // repeat's, one on each of two lines, and a score with none.
+  for (const line of ["A2 B2 | | | c2", "A2 B2 | |] ", "A2 B2 |] | c2", "A2 B2 :| |: c2", "A2 B2 |\n| c2", "A2 B2 | c2"]) {
+    const same = MDM_BARS.tightBars(ABCJS, COMMON + line);
+    assert.equal(same.text, COMMON + line, JSON.stringify(line));
+    assert.deepEqual(same.pairs, [], JSON.stringify(line));
+  }
+  // A `| |` that is no pair of barlines: in a verse and in an annotation.
+  const words = COMMON + 'A2 B2 | c2 "a | | b"\nw: x y | | z';
+  assert.equal(MDM_BARS.tightBars(ABCJS, words).text, words);
+});
+
+// The owner's report of 2026-11-22, "después de poner el 1 en el indicador
+// de repetición, se pierde la opción de squeeze la doble barra": for a day
+// the score mode left a bar with nothing in it open inside an ending, since
+// abcjs ends an ending at the double barline the pair is drawn as. It is
+// drawn tight there too, and what abcjs reads of it is given back the
+// endings of the text as written (keepEndings), so that the bracket runs
+// on past it as the ending does.
+const TUNE_G = COMMON.replace("K:C", "K:G");
+test("the score mode draws a bar with nothing in it tight inside an ending too, and what abcjs reads of it has the endings of the text as written: each ends where it ends there, and none at the pair (2026-11-22)", () => {
+  const marks = (tune) =>
+    tune.lines
+      .filter((l) => l.staff)[0]
+      .staff[0].voices[0].filter((e) => e.el_type === "bar")
+      .map((e) => e.type + (e.startEnding ? " [" + e.startEnding : "") + (e.endEnding ? " ]" : ""));
+  for (const body of [
+    // In the second ending; in the first, which its repeat ends; and the
+    // owner's, an ending after a repeat that runs to the end of the voice.
+    "|: A2 B2 |1 c4 :|2 d4 | | e4 |]",
+    "|: A2 B2 |1 c4 | | d4 :|2 e4 |]",
+    "A2 B2 :|1 c2 d2 | | e2 f2 | g2 a2",
+  ]) {
+    const src = TUNE_G + body;
+    const out = MDM_BARS.tightBars(ABCJS, src);
+    assert.equal(out.pairs.length, 1, body);
+    assert.ok(/ \|\| /.test(out.text), body + ": " + out.text);
+    // As written, with the pair's two barlines one double barline.
+    const was = marks(ABCJS.parseOnly(src)[0]);
+    const pair = was.findIndex((m, i) => m === "bar_thin" && was[i + 1] === "bar_thin");
+    const want = was.slice(0, pair).concat(["bar_thin_thin"], was.slice(pair + 2));
+    const kept = marks(MDM_BARS.keepEndings(ABCJS.parseOnly(out.text)[0], out.ends));
+    assert.deepEqual(kept, want, body);
+    // Read as it is, the double barline ends the ending.
+    assert.notDeepEqual(marks(ABCJS.parseOnly(out.text)[0]), want, body + ": the ending read as written");
+  }
+  // Out of an ending, as before, with no ending to keep.
+  const outside = MDM_BARS.tightBars(ABCJS, TUNE_G + "A2 B2 | | c4 |]");
+  assert.deepEqual([outside.pairs.length, outside.ends], [1, []]);
+});
+
+// The owner's call of 2026-11-08: a voice a plain barline closes keeps a
+// place past it, which names that barline (endStop in main.js); a note put
+// in there, or music pasted, goes in after it, the first of a bar of its
+// own.
+test("after the plain barline that closes a voice, a note put in and music pasted go in after it, the first of a new bar and beamed to nothing", () => {
+  const closed = COMMON + "C2 D2 |";
+  const bar = closed.lastIndexOf("|");
+  const note = MDM_BARS.insertPlace(ABCJS, closed, bar, { step: 2, duration: QUARTER }, "after");
+  assert.equal(lastLine(note), "C2 D2 | E2");
+  assert.equal(note.source.slice(note.at).trim().slice(0, 2), "E2");
+  assert.equal(lastLine(MDM_BARS.insertPlace(ABCJS, closed, bar, { rest: true, duration: QUARTER }, "after")), "C2 D2 | z2");
+  assert.equal(lastLine(MDM_BARS.insertPlace(ABCJS, COMMON + "CD |", (COMMON + "CD |").lastIndexOf("|"), { step: 2, duration: EIGHTH }, "after")), "CD | E");
+  assert.equal(lastLine(MDM_BARS.pasteMusic(ABCJS, closed, [{ at: bar, text: "E2 F2", where: "after" }])), "C2 D2 | E2 F2");
+  // The barline is no place to put one in before.
+  assert.equal(MDM_BARS.insertPlace(ABCJS, closed, bar, { step: 2, duration: QUARTER }, "before").refused, "notePlace");
 });
 
 test("a note written in one voice leaves every other as it was written", () => {

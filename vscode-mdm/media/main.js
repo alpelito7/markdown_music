@@ -13297,7 +13297,15 @@
   // this script (vendor/abcjs), so the engraving is synchronous; what needs
   // the block to be on screen (fitScores measures it) runs afterwards, from
   // the observer below.
-  function renderScore(code, source) {
+  //
+  // Under the score mode a bar with nothing in it is engraved as one double
+  // barline but for the one `keep` names, the one the cursor is in
+  // (MDM_BARS.tightBars): the visual keeps the pairs it was engraved with
+  // (`mdmTight`), which the places of the cursor are made from (scoreTracks).
+  // What abcjs reads of that text is given back the endings of the text as
+  // written before it is engraved (MDM_BARS.keepEndings): read as it is, a
+  // pair inside an ending ended it, and its bracket stopped there.
+  function renderScore(code, source, keep) {
     try {
       if (!window.ABCJS) return;
       // The old drawing goes, and the engraver that walked it with it: this
@@ -13316,12 +13324,46 @@
       };
       const format = scoreFormat();
       if (format) params.format = format;
-      const visual = ABCJS.renderAbc(code, source, params)[0];
-      if (visual) SCORE_VISUALS.set(code, visual);
+      const tight = scoreMode ? tightScore(source, keep) : null;
+      if (tight && tight.pairs.length) {
+        params.afterParsing = function (tune) {
+          evenScoreBars(tune);
+          try {
+            window.MDM_BARS.keepEndings(tune, tight.ends);
+          } catch (e) {
+            // drawn as abcjs reads the tight text
+          }
+          return tune;
+        };
+      }
+      const visual = ABCJS.renderAbc(code, tight && tight.pairs.length ? tight.text : source, params)[0];
+      if (visual) {
+        visual.mdmTight = tight && tight.pairs.length ? tight.pairs : null;
+        SCORE_VISUALS.set(code, visual);
+      }
       sinkLedgers(code);
     } catch (e) {
       // Score rendering must never break editing.
     }
+  }
+
+  // The score as the mode engraves it (MDM_BARS.tightBars), kept by the text
+  // and the bar left open, since the cursor asks again at every step.
+  const SCORE_TIGHT = new Map();
+  function tightScore(source, keep) {
+    const none = { text: source, pairs: [] };
+    if (!window.MDM_BARS || typeof window.MDM_BARS.tightBars !== "function" || !window.ABCJS) return none;
+    const key = source + "\u0000" + (keep === undefined || keep === null ? "" : keep);
+    if (SCORE_TIGHT.has(key)) return SCORE_TIGHT.get(key);
+    let made = none;
+    try {
+      made = window.MDM_BARS.tightBars(window.ABCJS, source, keep);
+    } catch (e) {
+      made = none;
+    }
+    if (SCORE_TIGHT.size >= 64) SCORE_TIGHT.clear();
+    SCORE_TIGHT.set(key, made);
+    return made;
   }
 
   // Every score on screen, drawn again, which is what a change of face costs.
@@ -15053,6 +15095,11 @@
         // moment for all its voices, so the count starts again with each.
         let at = 0;
         let factor = 1;
+        // The barline just before the child, where nothing stands between it
+        // and the child: two of them make a bar with nothing in it (emptyStop).
+        // And when that bar begins, which is when its place does.
+        let barline = null;
+        let barlineAt = 0;
         voice.children.forEach(function (child) {
           const stop = scoreStop(child, voice.staff, group);
           const elem = child.abcelem;
@@ -15062,14 +15109,39 @@
             span = (elem.duration || 0) * factor;
             if (elem.endTriplet) factor = 1;
           }
+          const drawn = voice.staff && elem && elem.el_type === "bar";
+          if (drawn && barline) track.push(emptyStop(barline, child, voice.staff, group, barlineAt));
+          // A double barline that stands for the two of a bar with nothing
+          // in it, engraved tight (renderScore): the place of that bar, the
+          // same as it is where the two are drawn apart.
+          const pair = drawn && elem.type === "bar_thin_thin" && visual.mdmTight ? tightPair(visual.mdmTight, elem) : null;
+          if (pair) track.push(tightStop(pair, child, voice.staff, group, at));
+          // The rest that gives a bar the time the voice's others have music
+          // for in it (MDM_BARS.evenBars), standing alone between two
+          // barlines: the bar has nothing written in it all the same, and
+          // is the place of one, between the barlines, for a note to be
+          // written there. Read as a rest, it was a bar the cursor could not
+          // be put in, by the arrows, a click or the keys that go up and
+          // down the voices, in any voice but the first to be written
+          // into, and a paste put the others' music at the end of the bar
+          // before (a bar added to an organ score with the + and written
+          // into in the right hand, 2026-11-22).
+          const gap = !!(elem && elem.mdmGap);
+          if (drawn && !pair) barlineAt = at;
+          barline = drawn && !pair ? child : gap && barline ? barline : null;
           if (stop) {
             stop.at = at;
             stop.span = span;
+            if (visual.mdmTight) mendTight(stop, visual.mdmTight);
             track.push(stop);
           }
           at += span;
-          if (elem && elem.el_type === "note" && voice.staff) {
-            open.set(track, { after: elem.startChar, to: elem.endChar, staff: voice.staff, group: group, at: at });
+          // A plain barline leaves the voice open past it, and its open end
+          // is then the first place of a bar of its own, named by the
+          // barline a note written there goes in after (endStop). Any other
+          // (`|]`, `||`, a repeat) ends the voice.
+          if (elem && voice.staff && (elem.el_type === "note" || (elem.el_type === "bar" && (elem.type === "bar_thin" || pair)))) {
+            open.set(track, { after: pair ? pair.last : elem.startChar, to: elem.endChar, staff: voice.staff, group: group, at: at, past: elem.el_type === "bar" });
           } else if (elem && elem.el_type === "bar") {
             open.delete(track);
           }
@@ -15096,9 +15168,14 @@
   // no cierran ... el cuadradito camine y entonces uno pueda moverse arriba
   // o abajo y seleccionar la nota que quiera"). Until then the cursor
   // stopped on the last note, and the tune went on only by Alt with a
-  // figure. Nothing is written there: it has no steps, lasts nothing, and
-  // names the element a place is put in after (`after`, which may be a rest
-  // nobody sees) and where in the text that is.
+  // figure. And past a plain barline that closes the last bar, as the
+  // first place of the bar after it: the owner's call of 2026-11-08, when
+  // Ctrl+B and Alt+B came to put barlines in, so that a bar closed at the
+  // end of a part is followed by the next one written at the same place. A
+  // final barline (`|]`), a double one or a repeat still ends the part.
+  // Nothing is written there: it has no steps, lasts nothing, and names the
+  // element a place is put in after (`after`, which may be a rest nobody
+  // sees, or that barline) and where in the text that is.
   //
   // It stands where the note will: abcjs draws a note added to a line no
   // barline closes with the left of its head on the end the staff had
@@ -15107,9 +15184,15 @@
   // and the cursor does not move across when the note is written. A whole
   // note's head is wider (7.5) and a rest narrower (3.3).
   const END_AFTER = 4.9;
+  // Past a barline that closes the line the head stands further on: abcjs
+  // sets a note written after it with the left of its head 10.0 past the end
+  // the staff had (measured 2026-11-08 on `C2 D2 |` and `C8 |`: a quarter,
+  // an eighth and a sixteenth 10.005 on, a whole note 12.6 and a rest 9.0,
+  // their heads wider and narrower as above).
+  const END_PAST_BAR = 10;
   function endStop(open) {
     return {
-      x: open.group.w + END_AFTER,
+      x: open.group.w + (open.past ? END_PAST_BAR : 0) + END_AFTER,
       at: open.at,
       span: 0,
       staff: open.staff,
@@ -15121,7 +15204,96 @@
       rest: false,
       end: true,
       after: open.after,
+      past: !!open.past,
     };
+  }
+
+  // The bar with nothing in it between two barlines, a place of its own for
+  // the cursor to stand in: the owner's ask of 2026-11-08 ("al dar click en
+  // Add bar el cabezal debe meterse dentro del compás ... pero sin silencio
+  // dentro"), once the bar the + adds holds no rest. Like the open end it
+  // has no steps and lasts nothing, and a note written there goes in after
+  // the barline that opens it (`after`, which names it): it is the open end
+  // of the bars between two barlines. It stands midway between the two,
+  // from the right edge of the first to the left edge of the second, where
+  // abcjs leaves 16 units from the middle of one plain barline to the next
+  // (measured on `C | | G`, 2026-11-08), 14 of which are the cursor's column.
+  function emptyStop(first, second, staff, group, at) {
+    const elem = first.abcelem;
+    return {
+      x: (barEdges(first).right + barEdges(second).left) / 2,
+      at: at,
+      span: 0,
+      staff: staff,
+      group: group,
+      steps: [],
+      from: elem.endChar,
+      to: elem.endChar,
+      duration: 0,
+      rest: false,
+      empty: true,
+      after: elem.startChar,
+    };
+  }
+
+  // The pair of barlines an engraved double barline stands for, of those the
+  // score was engraved with (renderScore), or null: the one that ends where
+  // the double barline does, which begins after the spaces of the pair.
+  function tightPair(pairs, elem) {
+    for (let i = 0; i < pairs.length; i++) {
+      if (pairs[i].to === elem.endChar) return pairs[i];
+    }
+    return null;
+  }
+
+  // A place that ends in the spaces of a pair engraved tight takes the
+  // barline's character into its text, since the spaces stand after the pair
+  // is written as `||` (tightBars): ended where the spaces begin, as it is
+  // in the score as written.
+  function mendTight(stop, pairs) {
+    for (let i = 0; i < pairs.length; i++) {
+      if (stop.from < pairs[i].from && stop.to > pairs[i].from && stop.to <= pairs[i].to) stop.to = pairs[i].from;
+    }
+  }
+
+  // The place of a bar with nothing in it that is drawn tight: the same as
+  // emptyStop makes of the two barlines drawn apart, at the middle of the
+  // double barline. It names the same barline (`after`, the first of the
+  // pair, as the score as written has it), so that the cursor is the same
+  // place whether the bar is drawn tight or open (syncScoreGaps).
+  function tightStop(pair, child, staff, group, at) {
+    return {
+      x: child.x + (child.w || 0) / 2,
+      at: at,
+      span: 0,
+      staff: staff,
+      group: group,
+      steps: [],
+      from: pair.from + 1,
+      to: pair.from + 1,
+      duration: 0,
+      rest: false,
+      empty: true,
+      after: pair.after,
+    };
+  }
+
+  // Where a barline is drawn, from its left edge to its right, in the score's
+  // units: the box abcjs gives it (`x`, `w`) but for the start of a repeat,
+  // whose box begins 4 units before the dots and ends 2.45 before the end of
+  // its glyph (measured on `|:` at six places, 2026-11-08, `:|`, `|]` and
+  // `||` filling their box to the unit).
+  function barEdges(child) {
+    const w = child.w || 0;
+    if (child.abcelem.type === "bar_left_repeat") return { left: child.x + 4, right: child.x + w + 2.45 };
+    return { left: child.x, right: child.x + w };
+  }
+
+  // A place with nothing written on it: the open end of a voice, and a bar
+  // with nothing in it. Nothing is taken from one or chosen on it, and what
+  // is written goes in after the barline it names (`after`).
+  function unwritten(stop) {
+    return !!(stop.end || stop.empty);
   }
 
   // A place is anything that takes time and draws something. Not a spacer
@@ -15294,7 +15466,8 @@
   // implementada", and their pick of how: the first Shift with an arrow
   // chooses the place the cursor stands on, moveScoreCursor). Until then it
   // was a stretch of nothing, but where voices had been picked one by one.
-  // The open end alone is one still: nothing stands there to choose.
+  // The open end and a bar with nothing in it are one still: nothing stands
+  // there to choose.
   //
   // The whole of the score (Ctrl+A, chooseScoreWhole) is from the first
   // place of that voice to its last, to whoever asks for it as two places
@@ -15306,7 +15479,7 @@
     if (place.whole) return { from: 0, to: place.tracks[place.head.track].length - 1 };
     const from = Math.min(place.anchor, place.head.index);
     const to = Math.max(place.anchor, place.head.index);
-    if (from === to && place.tracks[place.head.track][from].end) return null;
+    if (from === to && unwritten(place.tracks[place.head.track][from])) return null;
     return { from: from, to: to };
   }
 
@@ -15357,7 +15530,7 @@
   function selectionParts(place, range) {
     const own = place.tracks[place.head.track];
     let last = range.to;
-    if (own[last].end) last -= 1;
+    while (last > range.from && unwritten(own[last])) last -= 1;
     const chosen = chosenTracks(place);
     // The whole of the score (Ctrl+A): every place of each voice, and none
     // of them in part. Not what sounds while the voice of its head does,
@@ -15368,7 +15541,7 @@
       const all = [];
       chosen.forEach(function (t) {
         const stops = place.tracks[t].filter(function (stop) {
-          return !stop.end;
+          return !unwritten(stop);
         });
         const out = stops.map(function () {
           return { before: 0, after: 0 };
@@ -15386,10 +15559,12 @@
     chosen.forEach(function (t) {
       let stops = [];
       if (t === place.head.track) {
-        stops = own.slice(range.from, last + 1);
+        stops = own.slice(range.from, last + 1).filter(function (stop) {
+          return !unwritten(stop);
+        });
       } else {
         stops = place.tracks[t].filter(function (stop) {
-          if (stop.end) return false;
+          if (unwritten(stop)) return false;
           const g = groups.indexOf(stop.group);
           if (g < first || g > final) return false;
           // Begun before the stretch: out where it has ended by then, and
@@ -15506,6 +15681,11 @@
       if (!wanted(t)) return;
       track.forEach(function (stop, s) {
         if (stop.staff !== staff) return;
+        // The open end past a closing barline is a place of the bar after it:
+        // a click short of the staff's end, inside the bar the barline
+        // closes, is not on it. Under the sixth of eight eighths it took the
+        // end over the bass's whole note at the head of the bar (SM19).
+        if (stop.past && at.x < stop.group.w) return;
         const across = Math.abs(stop.x - at.x);
         const down = Math.min.apply(
           null,
@@ -16010,6 +16190,15 @@
         if (across > 0 || index === 0) return;
         index -= 1;
         takeScoreFigure(own[index]);
+      } else if (place.stop.empty) {
+        // Nothing stands in a bar of nothing to be chosen, and a stretch
+        // anchored there is none (scoreSelection): the first press chooses
+        // the place beside it, on the side the arrow names, or the next
+        // press would find nothing chosen and stay where it is.
+        const beside = index + across;
+        if (beside < 0 || beside >= own.length || own[beside].end) return;
+        index = beside;
+        takeScoreFigure(own[index]);
       }
       scoreCursor = {
         pos: scoreCursor.pos,
@@ -16257,7 +16446,7 @@
     // g2` over `C,4 | G, A, B, C |`, the stretch drawn out in the lower
     // voice to its last C: read off the code by a review, and seen in the
     // test browser). As old as the walk.
-    if (place.stop.end && !scoreSelection(place)) return;
+    if (unwritten(place.stop) && !scoreSelection(place)) return;
     const voices = pickedVoices(place);
     const at = voices.indexOf(place.track);
     if (at >= 0) voices.splice(at, 1);
@@ -16509,7 +16698,7 @@
     }
     const source = scoreSource(place.block);
     const names = place.tracks.map(function (track) {
-      return voiceFieldBefore(source, track[0].end ? track[0].after : track[0].from);
+      return voiceFieldBefore(source, unwritten(track[0]) ? track[0].after : track[0].from);
     });
     const chosen = scoreChosen(place);
     // What the music is put in beside, in a voice no stretch is taken out
@@ -16615,8 +16804,22 @@
   function pasteTarget(place, t, beside) {
     const stop = beside.stop;
     if (t === beside.track) {
-      if (stop.end) return { at: stop.after, where: "after" };
+      if (unwritten(stop)) return { at: stop.after, where: "after" };
       return { at: stop.from, where: beside.after ? "after" : "on" };
+    }
+    // The cursor in a bar with nothing in it, or at an open end: in another
+    // voice, into the place with nothing written on it that begins with it,
+    // a bar with nothing in it or the voice's own open end, as the cursor's
+    // own voice is pasted into its own. Read by what sounds there, as the
+    // rest of this does, the music went in after the last note of the bar
+    // before, a bar early: pasted into a bar the + had added to an organ
+    // score, the right hand went into it and the two other staves into the
+    // end of the bar before (2026-11-22).
+    if (unwritten(stop)) {
+      const kin = place.tracks[t].filter(function (other) {
+        return other.group === stop.group && unwritten(other) && Math.abs(other.at - stop.at) <= SPAN_SLACK;
+      })[0];
+      if (kin) return { at: kin.after, where: "after" };
     }
     const when = beside.after ? stop.at + stop.span : stop.at;
     let first = null;
@@ -16624,7 +16827,7 @@
     const track = place.tracks[t];
     for (let i = 0; i < track.length; i++) {
       const other = track[i];
-      if (other.group !== stop.group || other.end) continue;
+      if (other.group !== stop.group || unwritten(other)) continue;
       if (other.at >= when - SPAN_SLACK) {
         if (!beside.after) return { at: other.from, where: "on" };
         if (!last) first = other;
@@ -16714,7 +16917,7 @@
     const ats = [];
     chosen.forEach(function (part) {
       part.stops.forEach(function (stop, i) {
-        if (!stop.rest && !stop.end && wholeInStretch(part, i)) ats.push(stop.from);
+        if (!stop.rest && !unwritten(stop) && wholeInStretch(part, i)) ats.push(stop.from);
       });
     });
     if (!ats.length) return;
@@ -16788,6 +16991,46 @@
     revealScoreCursor();
   }
 
+  // The bars with nothing in them, drawn as the cursor leaves them (the
+  // owner's ask of 2026-11-08: "cuando el cursor salga del compás vacío, el
+  // espacio entre barras se reduzca como mismo sale cuando se hace C || G
+  // que las barras salen pegaditas"): every score under the mode is
+  // engraved with each bar of nothing as a double barline (renderScore),
+  // but the one the cursor stands in, which keeps the room abcjs gives it.
+  // The places are the same either way (tightStop), so a cursor that goes
+  // in or out keeps its index; only the drawing is made anew. Out of the
+  // mode every score is drawn as written. True when a score was engraved
+  // again, and the cursor drawn with it.
+  function syncScoreGaps() {
+    if (!window.MDM_BARS || typeof window.MDM_BARS.tightBars !== "function") return false;
+    const place = scoreMode ? scoreCursorPlace() : null;
+    let again = false;
+    document.querySelectorAll("#app .mdm-score").forEach(function (block) {
+      const code = block.querySelector("code.language-abc");
+      const visual = code && SCORE_VISUALS.get(code);
+      const source = block.getAttribute("data-mdm-source");
+      if (!visual || typeof source !== "string") return;
+      const keep = place && place.block === block && place.stop.empty ? place.stop.after : null;
+      const have = (visual.mdmTight || []).map(function (p) {
+        return p.from;
+      });
+      const want = scoreMode
+        ? tightScore(source, keep).pairs.map(function (p) {
+            return p.from;
+          })
+        : [];
+      if (have.join() === want.join()) return;
+      renderScore(code, source, keep);
+      again = true;
+    });
+    if (again) {
+      // The staff is another length, and what the chrome stood against with it.
+      afterRender();
+      refreshScoreEdits();
+    }
+    return again;
+  }
+
   // The cursor is three shapes inside the score's own SVG, in its units, so
   // the scale that fits a wide score to the pane moves it with the notes
   // (as the playing cursor, cursorEl): a column over the place, from the
@@ -16815,6 +17058,10 @@
   // took that with the note that it is an asymmetry to come back to.
   let scoreEndedLine = null; // the line the cursor stands at the open end of, as last drawn
   function drawScoreCursor() {
+    // A bar with nothing in it is drawn open for the cursor to stand in and
+    // tight otherwise: where the cursor has come into one or gone out of one
+    // the scores are engraved again, and the cursor is drawn on that.
+    if (syncScoreGaps()) return;
     const place = scoreMode ? scoreCursorPlace() : null;
     const svg = place ? place.block.querySelector("code.language-abc svg") : null;
     document.querySelectorAll("#app .mdm-score-cursor, #app .mdm-score-selection").forEach(function (el) {
@@ -17543,6 +17790,15 @@
     return best ? best.index : line.length ? line[0].index : null;
   }
 
+  // The place of a voice that sounds at or nearest after an index of it, or
+  // before it where nothing sounds after: the open end and a bar with nothing
+  // in it are not heard (unwritten).
+  function soundingIndex(track, index) {
+    for (let i = index; i < track.length; i++) if (!unwritten(track[i])) return i;
+    for (let i = index - 1; i >= 0; i--) if (!unwritten(track[i])) return i;
+    return index;
+  }
+
   function scoreSoundingHere() {
     return !!(player && player.bar && scoreCursor && player.pos === scoreCursor.pos && isSounding(player.bar));
   }
@@ -17617,9 +17873,10 @@
         // From the open end, the last place of the voice: there is nothing
         // after the end to play from, and the cursor comes back to the end.
         const first = range ? range.from : here.stop.end ? here.index - 1 : here.index;
-        // The whole of the score is played from its top, where the voice of
-        // its head may come in later.
-        const t0 = range && here.whole ? 0 : timeOfPlace(line, first);
+        // And from a bar with nothing in it, the next place that sounds. The
+        // whole of the score is played from its top, where the voice of its
+        // head may come in later.
+        const t0 = range && here.whole ? 0 : timeOfPlace(line, soundingIndex(here.tracks[range ? here.head.track : here.track], first));
         if (t0 !== null) {
           // A stretch is played from its head every time, where the music
           // stopped inside it or not (the owner's call of 2026-10-04: "si
@@ -17864,16 +18121,22 @@
   // What the engine says to a change asked of a source: a move of bars
   // (MDM_BARS.moveBars), a bar added (MDM_BARS.addBar), a note written
   // (MDM_BARS.writeNote), a place put in (MDM_BARS.insertPlace) or taken
-  // out (MDM_BARS.takeOut), music pasted or a stretch taken out
+  // out (MDM_BARS.takeOut), a barline put in (MDM_BARS.insertBar), a bar with
+  // nothing in it taken out (MDM_BARS.takeEmptyBar), music pasted or a
+  // stretch taken out
   // (MDM_BARS.pasteMusic), or a stretch made rests (MDM_BARS.restMusic).
   // Asked of every button of the chrome while the page is idle
   // (askScoreEdit), or when the pointer comes onto one first, to grey it
   // out before any click, and asked again by the click, so the answer is
   // kept by the source and the change.
   const SCORE_EDIT_RUNS = new Map();
+  // The voices a bar beside a stretch goes into (`own`) are part of what is
+  // asked: left out, the bar asked for the stretch of one voice was handed
+  // back for the same stretch drawn out over every voice.
   function scoreRunKey(source, action) {
     const more = action.pastes ? JSON.stringify(action.pastes) : action.ats ? action.ats.join() : "";
-    return [source, action.kind, action.at, action.direction || action.where, action.step, action.duration, action.rest, action.own, more].join("\u0000");
+    const own = action.own === undefined ? "" : JSON.stringify(action.own);
+    return [source, action.kind, action.at, action.direction || action.where, action.step, action.duration, action.rest, action.sign, more, own].join("\u0000");
   }
   function scoreEditRun(source, action) {
     const key = scoreRunKey(source, action);
@@ -17888,8 +18151,12 @@
       } else if (action.kind === "insert") {
         const what = action.rest ? { rest: true, duration: action.duration } : { step: action.step, duration: action.duration };
         result = window.MDM_BARS.insertPlace(window.ABCJS, source, action.at, what, action.where);
+      } else if (action.kind === "barline") {
+        result = window.MDM_BARS.insertBar(window.ABCJS, source, action.at, action.where);
+      } else if (action.kind === "gap") {
+        result = window.MDM_BARS.takeEmptyBar(window.ABCJS, source, action.at);
       } else if (action.kind === "add") {
-        result = window.MDM_BARS.addBar(window.ABCJS, source, action.at, action.where, Array.isArray(action.own) ? action.own : !!action.own);
+        result = window.MDM_BARS.addBar(window.ABCJS, source, action.at, action.where, action.own);
       } else if (action.kind === "paste") {
         result = window.MDM_BARS.pasteMusic(window.ABCJS, source, action.pastes);
       } else if (action.kind === "rests") {
@@ -17901,7 +18168,6 @@
       result = null;
     }
     if (!result || (typeof result.source !== "string" && !result.refused)) {
-      result = { refused: /^(?:note|out|insert|paste|rests)$/.test(action.kind) ? "noteUnsafe" : action.kind === "add" ? "addUnsafe" : "unsafe" };
     }
     if (SCORE_EDIT_RUNS.size >= 64) SCORE_EDIT_RUNS.clear();
     SCORE_EDIT_RUNS.set(key, result);
@@ -17940,38 +18206,58 @@
     return true;
   }
 
-  // A bar added, written, and the cursor put on it, on the rest of the
-  // voice the + was asked in (the first voice of the line), or the cursor's
-  // own voice for a key (addScoreBarBeside): where a note of that bar is
-  // written next (writeScoreNote). On the middle line from the +, and from
-  // a key at the `step` the cursor was at, as an arrow keeps it.
-  function commitScoreBar(pos, before, result, step) {
+  // A bar added by the +, written, and the cursor put in it, in the voice the
+  // + was asked in (the first voice of the line) and on the middle line:
+  // where a note of that bar is written next (writeScoreNote). The bar holds
+  // no rest since 2026-11-08: the cursor stands in the bar with nothing in
+  // it, between the two barlines, or at the open end where the bar is the
+  // last of a line no barline closed. Until then Ctrl with an arrow added a
+  // bar too, in the cursor's voice and at the step the cursor was at.
+  function commitScoreBar(pos, before, result) {
     const change = scoreEditChange(pos, before, result.source);
     if (!change) return;
     const entry = recordScoreEdit(pos, scoreCursor, true);
     const now = writeScoreEdit(pos, change);
-    const onBar = cursorAtSource(now, result.rest);
-    if (onBar && typeof step === "number") {
-      const tracks = scoreTracks(blockVisual(scoreBlockAt(now)));
-      onBar.step = clampStep(tracks[onBar.track][onBar.stop], step);
-    }
+    const onBar = cursorInBar(now, result.bar);
     if (onBar) scoreCursor = onBar;
     entry.cursorAfter = onBar ? Object.assign({}, onBar) : null;
     scoreCursorMoved();
     settleScoreEdit();
   }
 
-  // The cursor on the place a character of a score's source was written
-  // at, on the middle line of its staff.
-  function cursorAtSource(pos, char) {
+  // A barline put in that makes a bar of nothing beside the cursor's
+  // (MDM_BARS.insertBar, at the edge of a bar or beside an empty one), and
+  // the cursor put in the bar it says, in its own voice and at the step it
+  // was at: each press of Alt+B a bar further to the right and of Ctrl+B
+  // one at the left, the cursor going in with it (the owner's ask of
+  // 2026-11-08: "en cada uno el cabezal debe moverse adentro del compás").
+  function commitScoreBarline(pos, before, result) {
+    const change = scoreEditChange(pos, before, result.source);
+    if (!change) return;
+    const was = Object.assign({}, scoreCursor);
+    const entry = recordScoreEdit(pos, scoreCursor, false);
+    const now = writeScoreEdit(pos, change);
+    const onBar = cursorInBar(now, result.bar, was.track, was.step);
+    if (onBar) scoreCursor = onBar;
+    entry.cursorAfter = onBar ? Object.assign({}, onBar) : null;
+    scoreCursorMoved();
+    settleScoreEdit();
+  }
+
+  // The cursor in the bar a barline opens, which is the place with nothing
+  // written on it that names that barline (`after`): the bar between it and
+  // the next, or the open end past it. In the voice `track` where there is
+  // one named, and at the step given, or else the middle line of the staff.
+  function cursorInBar(pos, bar, track, step) {
     const visual = blockVisual(scoreBlockAt(pos));
     const tracks = visual ? scoreTracks(visual) : [];
     for (let t = 0; t < tracks.length; t++) {
+      if (typeof track === "number" && t !== track) continue;
       for (let i = 0; i < tracks[t].length; i++) {
         const stop = tracks[t][i];
-        if (stop.from <= char && char < stop.to) {
+        if (unwritten(stop) && stop.after === bar) {
           const lines = lineSteps(stop.staff);
-          return { pos: pos, track: t, stop: i, step: clampStep(stop, (lines.top + lines.bottom) / 2), anchor: null };
+          return { pos: pos, track: t, stop: i, step: clampStep(stop, typeof step === "number" ? step : (lines.top + lines.bottom) / 2), anchor: null };
         }
       }
     }
@@ -18251,10 +18537,12 @@
     const stop = place.stop;
     const rest = kind === "rest";
     // Enter takes its length from the place it is pressed on: the open end
-    // has none to give, and nothing is written there.
-    if (kind === "head" && stop.end) return;
-    // At the open end there is no place to write on: one is put in.
-    if (stop.end) {
+    // and a bar with nothing in it have none to give, and nothing is written
+    // there.
+    if (kind === "head" && unwritten(stop)) return;
+    // There is no place to write on at the open end, nor in a bar with
+    // nothing in it: one is put in.
+    if (unwritten(stop)) {
       insertScorePlace("after", rest);
       return;
     }
@@ -18308,10 +18596,13 @@
       return;
     }
     if (!window.MDM_BARS || !window.ABCJS) return;
-    // Nothing stands at the open end.
+    // Nothing stands at the open end. In a bar with nothing in it the bar
+    // goes, which is one of its barlines (MDM_BARS.takeEmptyBar): the + adds
+    // no rest for Delete to take out with the bar any longer.
     if (place.stop.end) return;
     const source = scoreSource(place.block);
-    const result = scoreEditRun(source, { kind: "out", at: place.stop.from, step: place.step });
+    const gap = !!place.stop.empty;
+    const result = scoreEditRun(source, gap ? { kind: "gap", at: place.stop.after } : { kind: "out", at: place.stop.from, step: place.step });
     if (result.refused) {
       scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
       return;
@@ -18397,8 +18688,9 @@
     if (!window.MDM_BARS || !window.ABCJS) return;
     const source = scoreSource(place.block);
     // The open end has one side to it: after the last of the voice, and the
-    // place put in takes the index the end stood at.
-    const end = !!place.stop.end;
+    // place put in takes the index the end stood at. So does a bar with
+    // nothing in it, whose place goes in after the barline that opens it.
+    const end = unwritten(place.stop);
     const where = end ? "after" : side;
     const result = scoreEditRun(source, {
       kind: "insert",
@@ -18414,74 +18706,6 @@
       return;
     }
     commitScoreNote(scoreCursor.pos, source, result, where === "after" && !end ? 1 : 0);
-  }
-
-  // Ctrl+Right and Ctrl+Left: a bar of rest added after the cursor's bar,
-  // or before it, in the cursor's voice alone, and the cursor on its rest
-  // (MDM_BARS.addBar): the owner's ask of 2026-10-02, the third evening, and
-  // their call of the day after for the one voice.
-  //
-  // With a stretch chosen, beside the stretch: after the bar of its last
-  // place, or before the bar of its first, in the voices it is chosen over.
-  // Every voice of the line where it was drawn out over them all, as the +
-  // adds a bar, and else the ones that wear its ink. The owner's call of
-  // 2026-10-06, "quita el ctrl alt -> y sustituyelo por: una vez estén
-  // marcadas con ctrl shift, se hace ctrl -> y debe añadirse el compás de
-  // silencio al lado". Until then Ctrl+Alt with the arrow added the bar to
-  // every voice, and with a stretch chosen the key did nothing, the cursor
-  // being out of sight then.
-  //
-  // The stretch is let go and the cursor is on the new bar's rest, as the
-  // key leaves it with no stretch and as Ctrl+Alt left it: in the voice the
-  // stretch was drawn out in, or the first of the others where that one was
-  // let go of. Undo gives the stretch back chosen.
-  function addScoreBarBeside(side) {
-    const place = scoreCursorPlace();
-    if (!place) {
-      if (!scoreCursor) startScoreCursor();
-      else bringScoreBack();
-      return;
-    }
-    if (!window.MDM_BARS || !window.ABCJS) return;
-    const source = scoreSource(place.block);
-    let at = place.stop.end ? place.stop.after : place.stop.from;
-    let own = true;
-    let step = place.step;
-    const chosen = scoreChosen(place);
-    if (chosen.length) {
-      const range = scoreSelection(place);
-      const track = place.tracks[place.head.track];
-      let last = range.to;
-      if (track[last].end) last -= 1;
-      const edge = track[side === "after" ? last : range.from];
-      // A place of each voice chosen on the line of that bar, to name the
-      // voice by: any will do, the bar being told by `at` alone.
-      const marks = [];
-      chosen.forEach(function (part) {
-        const there = part.stops.filter(function (stop) {
-          return stop.group === edge.group;
-        });
-        if (there.length) marks.push({ track: part.track, from: there[0].from });
-      });
-      if (!marks.length) return;
-      const home = marks.some(function (mark) {
-        return mark.track === place.head.track;
-      });
-      at = home ? edge.from : marks[0].from;
-      own =
-        place.voices === "all"
-          ? false
-          : marks.map(function (mark) {
-              return mark.from;
-            });
-      step = place.head.step;
-    }
-    const result = scoreEditRun(source, { kind: "add", at: at, where: side, own: own });
-    if (result.refused) {
-      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
-      return;
-    }
-    commitScoreBar(scoreCursor.pos, source, result, step);
   }
 
   // ---- The chrome on a score: bars moved and added with the pointer ----
@@ -19203,9 +19427,10 @@
   //                     line, and past its last the line above or below
   //   Ctrl+Shift+Up,    with no stretch chosen, the line of staves above or
   //     Down            below, in the same voice
-  //   Ctrl+Left, Right  a bar of rest added before or after the cursor's
-  //                     bar, in its voice; with a stretch chosen, beside
-  //                     the stretch, in the voices it is chosen over
+  //   Ctrl+B, Alt+B     a barline put in just before the cursor's place
+  //                     (Ctrl) or just after it (Alt), in its voice; with
+  //                     a stretch chosen, a bar beside it in its voices
+  //                     (addScoreBarBeside). On a Mac the left is Control and
   //   Ctrl+1 to 7       a note of that figure at the cursor's step, put in
   //   Alt+1 to 7        before the cursor's place (Ctrl) or after it (Alt)
   //   Ctrl+0, Alt+0     the same with a rest, as long as the cursor's place
@@ -19232,8 +19457,8 @@
   //                     place on the left of what went
   //
   // Nothing else, on purpose: moving bars is done on the staff (the chrome
-  // on a score), and adding them there and with Ctrl, and Alt+Up and
-  // Alt+Down, which moved bars
+  // on a score), and adding them there (and with Ctrl and an arrow until
+  // 2026-11-08), and Alt+Up and Alt+Down, which moved bars
   // in the third round, went with the owner's call to keep the mode's keys
   // to these until there was more to edit (2026-09-29); the keys that write
   // came with the notes (2026-10-02), and the owner's keys with Ctrl and
@@ -19251,8 +19476,9 @@
   // bar to every voice, the same afternoon: the voices are chosen first,
   // with Ctrl+Shift and an arrow, and Ctrl with Left or Right adds the bar
   // to the ones chosen, so Ctrl+Alt with them is no key of the mode's
-  // either. The rest reach the workbench like any key the mode does not
-  // take.
+  // either. On 2026-11-08 the owner gave Ctrl+B and Alt+B a barline to the
+  // left and to the right of the cursor's place, as Ctrl and Alt put a note
+  // in, and took the bar of rest off the keys: Ctrl with Left and Right is
   const SCORE_KEYS = {
     ArrowLeft: [-1, 0],
     ArrowRight: [1, 0],
@@ -19296,16 +19522,111 @@
     else writeScoreNote(kind);
   }
 
-  // Ctrl with Left or Right: a bar of rest beside the cursor's bar, or
-  // beside the stretch chosen (addScoreBarBeside). While the music sounds on
-  // the cursor's score the key stops it, as the keys that write do.
-  function scoreAddsBar(side) {
+  // Ctrl+B or Alt+B: a barline put in just to the left of the cursor's
+  // place or just to its right, in its voice (MDM_BARS.insertBar). The
+  // cursor stays on its place, which a barline is not, so its index in the
+  // voice is the one it had (commitScoreNote). The open end of a bar no
+  // barline closes has one side, after the last of the voice, and stands on
+  // past the new barline (endStop).
+  //
+  // Where a barline stands on that side already, the cursor is at the edge
+  // of its bar and the key adds a bar with nothing in it beside the cursor's
+  // (the owner's ask of 2026-11-08): the cursor goes into it, so that the
+  // next press adds another one further on, and the open end past a
+  // barline and a bar with nothing in it are at the edge of theirs on
+  // either side (commitScoreBarline).
+  //
+  // While the music sounds on the cursor's score the key stops it, as the
+  // keys that write do; with a stretch chosen it puts nothing in, as Ctrl
+  // and Alt with a figure's key put nothing in then.
+  function scoreAddsBarline(side) {
     if (scoreSoundingHere()) {
       scoreTakeFromPlayer();
       return;
     }
-    addScoreBarBeside(side);
+    const place = scoreCursorPlace();
+    if (!place) {
+      if (!scoreCursor) startScoreCursor();
+      else bringScoreBack();
+      return;
+    }
+    if (!window.MDM_BARS || !window.ABCJS) return;
+    if (scoreChosen(place).length) {
+      addScoreBarBeside(place, side);
+      return;
+    }
+    const source = scoreSource(place.block);
+    const stop = place.stop;
+    const result = scoreEditRun(source, {
+      kind: "barline",
+      at: unwritten(stop) ? stop.after : stop.from,
+      // The open end past a note has the one side, after it.
+      where: stop.end && !stop.past ? "after" : side,
+    });
+    if (result.refused) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    if (typeof result.bar === "number") commitScoreBarline(scoreCursor.pos, source, result);
+    else commitScoreNote(scoreCursor.pos, source, result);
   }
+
+  // Ctrl+B and Alt+B with a stretch chosen: a bar with nothing in it
+  // added beside the stretch, before the bar of its first place or after
+  // the bar of its last, in the voices it is chosen over. In every voice of
+  // the line where it was drawn out over them all, as the + adds a bar, and
+  // else in the ones that wear its ink. The owner's ask of 2026-11-22: "que
+  // uno pueda si tiene marcado las tres voces (con Shift ->) hacer option B
+  // y que se agregue el compás en las voces marcadas". The keys did the
+  // same with Ctrl and an arrow from 2026-10-06 (his "una vez estén
+  // marcadas con ctrl shift, se hace ctrl -> y debe añadirse el compás de
+  // silencio al lado") until the B took their place on 2026-11-08, and from
+  // then on a press with a stretch chosen did nothing.
+  //
+  // The stretch is let go and the cursor stands in the new bar, in the
+  // voice the stretch was drawn out in, or the first of the others where
+  // that one was let go of, on the middle line (commitScoreBar). A second
+  // press of the same key adds one more bar. One step of the history, which
+  // gives the stretch back chosen.
+  function addScoreBarBeside(place, side) {
+    const chosen = scoreChosen(place);
+    const range = scoreSelection(place);
+    if (!range) return;
+    const track = place.tracks[place.head.track];
+    let last = range.to;
+    if (track[last].end) last -= 1;
+    const edge = track[side === "after" ? last : range.from];
+    // A place of each voice chosen on the line of that bar, to name the
+    // voice by: its place at the same edge of the stretch, which is in the
+    // same bar, since `at` tells the bar where the voice the stretch was
+    // drawn out in has been let go of.
+    const marks = [];
+    chosen.forEach(function (part) {
+      const there = part.stops.filter(function (stop) {
+        return stop.group === edge.group && !unwritten(stop);
+      });
+      if (there.length) marks.push({ track: part.track, from: there[side === "after" ? there.length - 1 : 0].from });
+    });
+    if (!marks.length) return;
+    const home = marks.some(function (mark) {
+      return mark.track === place.head.track;
+    });
+    const source = scoreSource(place.block);
+    const at = home && !unwritten(edge) ? edge.from : marks[0].from;
+    const own =
+      place.voices === "all"
+        ? false
+        : marks.map(function (mark) {
+            return mark.from;
+          });
+    const result = scoreEditRun(source, { kind: "add", at: at, where: side, own: own });
+    if (result.refused) {
+      scoreNotice(place.block, window.MDM_BARS.reasonText(result.refused));
+      return;
+    }
+    commitScoreBar(scoreCursor.pos, source, result);
+  }
+
 
   // Ctrl+X. While the music sounds on the cursor's score the key stops it,
   // as the keys that write do, and takes nothing out.
@@ -19395,6 +19716,19 @@
     return typeof e.getModifierState === "function" && e.getModifierState(name);
   }
 
+  // A key told by the letter it writes, which is the letter the reader
+  // looks for on their own keyboard (Dvorak has its B where a US layout has
+  // its N), and by its place where it writes no letter of a to z: Alt on a
+  // Mac writes a sign of its own with the key (the integral sign with the B
+  // of a US layout), and a Russian layout a letter of its own alphabet. The
+  // place is the one the letter has on a US keyboard. Neither seen here,
+  // there being no Mac and no such layout on this machine; the tests send
+  // the keys as those keyboards name them (SM64).
+  function letterKey(e, letter) {
+    const key = e.key || "";
+    return /^[a-z]$/i.test(key) ? key.toLowerCase() === letter : e.code === "Key" + letter.toUpperCase();
+  }
+
   // A digit of the numeric pad pressed with Shift while NumLock is on. The
   // key then comes by its other name, the one it has with NumLock off: 4
   // is ArrowLeft, 2 is ArrowDown, 1 is End. Under X11 Shift is in the event
@@ -19404,8 +19738,9 @@
   // this machine to press it on). Read as it came, Shift with the pad's 4
   // walked the cursor to the left, or chose a place with it, where Shift
   // with the 4 of the top row writes a rest, and on Windows Ctrl+Shift with
-  // it would have added a bar. NumLock on is what tells it from the same
-  // key with NumLock off, which is an arrow in earnest and is left one.
+  // it would have come as Ctrl+Left, which added a bar until 2026-11-08.
+  // NumLock on is what tells it from the same key with NumLock off, which
+  // is an arrow in earnest and is left one.
   function shiftedPad(e) {
     return /^Numpad[0-9]$/.test(e.code || "") && !/^[0-9]$/.test(e.key) && keyState(e, "NumLock");
   }
@@ -19484,27 +19819,44 @@
       if (!e.repeat) scoreChoosesAll();
       return;
     }
-    // Ctrl and Alt with the arrows and with the keys of the figures (the
-    // owner's asks of 2026-10-02, the third evening, and their keys of the
-    // day after). Across, Ctrl adds a bar in the cursor's voice, or in the
-    // voices a stretch is chosen over (addScoreBarBeside); Ctrl+Alt added
-    // it in every voice until the owner took Alt out of that as well
-    // (2026-10-06), and with an arrow across is no key of the mode's since:
-    // it goes on to VS Code as it is, whose own it is (an editor moved into
-    // the next group). Up and down, Ctrl walks the staves one by one, into
-    // the next line past the last of a line, and Ctrl+Shift the lines in
-    // one voice (the owner's change of 2026-10-06: until then Ctrl walked
-    // the lines and Ctrl+Shift the voices of one line); but with a stretch
-    // chosen Ctrl+Shift walks the voices with the stretch kept, which was
-    // Ctrl+Shift+Alt until that day. With Alt, Up and Down are not the
-    // mode's, and go on to VS Code.
-    if (move && ctrl && !e.altKey && !(move[0] && e.shiftKey)) {
+    // Ctrl+B puts a barline in just to the left of the cursor's place, and
+    // Alt+B just to its right (scoreAddsBarline): Ctrl is the key on the
+    // left and Alt the one on the right, as they are for a note put in,
+    // below. The owner's keys of 2026-11-08 ("que sea análogo con el
+    // Ctrl/Alt de las notas y silencios", and "Ctrl+B inserte la barra
+    // justo a la izquierda de donde está el cabezal: A2 | B2 c2"). They
+    // took the place of Ctrl with Right and Left, which added a bar of rest
+    // beside the cursor's bar (the owner's ask of 2026-10-02, the third
+    // evening) and beside a stretch in its voices (2026-10-06): the owner
+    // had that taken off the keys the same day, the + under a barline
+    // adding one still, and Ctrl with an arrow across goes on to VS Code as
+    // it is, as Ctrl+Alt with one has since 2026-10-06. Ctrl+B is VS Code's
+    // for its side bar, kept from it while the mode holds the keyboard as
+    // Ctrl+1 is kept from its first group of editors.
+    //
+    // The key is the B of the reader's layout, read by the letter it
+    // writes as Ctrl+C and the others above are, and by its place where it
+    // writes no letter of a to z (letterKey). Not with Shift (Ctrl+Shift+B
+    // is VS Code's build task), nor with Ctrl and Alt together, which is no
+    // side, nor with AltGr, which makes it another key, as for the figures'
+    // keys.
+    if (letterKey(e, "b") && !e.shiftKey && ctrl !== e.altKey && !keyState(e, "AltGraph")) {
       takeScoreKey(e);
-      if (move[0]) {
-        // A bar put in is one press, as a note written is.
-        if (!e.repeat) scoreAddsBar(move[0] > 0 ? "after" : "before");
-        return;
-      }
+      // A barline put in is one press, as a note written is.
+      if (!e.repeat) scoreAddsBarline(e.altKey ? "after" : "before");
+      return;
+    }
+    // Ctrl with Up and Down (the owner's asks of 2026-10-02, the third
+    // evening, and their keys of the day after) walks the staves one by
+    // one, into the next line past the last of a line, and Ctrl+Shift the
+    // lines in one voice (the owner's change of 2026-10-06: until then Ctrl
+    // walked the lines and Ctrl+Shift the voices of one line); but with a
+    // stretch chosen Ctrl+Shift walks the voices with the stretch kept,
+    // which was Ctrl+Shift+Alt until that day. With Alt, Up and Down are
+    // not the mode's, and go on to VS Code; and Ctrl with Left and Right is
+    // no key of the mode's (the bar, above).
+    if (move && !move[0] && ctrl && !e.altKey) {
+      takeScoreKey(e);
       scoreTakeFromPlayer();
       const place = scoreCursorPlace();
       if (!e.shiftKey) moveScoreStaff(move[1] < 0);
@@ -21756,22 +22108,25 @@
           )
         ),
       ]),
+      // Ctrl+B and Alt+B: a barline to the left and to the right of the
+      // cursor's place, as for a note (scoreKeys). The names are the ones the
+      // owner gave the bar of rest these rows added until 2026-11-08.
       bars: [
         command(
           "score-bar-before",
           "Add bar to the left",
-          "Mod-ArrowLeft",
+          "Mod-b",
           function () {
-            scoreAddsBar("before");
+            scoreAddsBarline("before");
           },
           BAR_BEFORE_ICON
         ),
         command(
           "score-bar-after",
           "Add bar to the right",
-          "Mod-ArrowRight",
+          "Alt-b",
           function () {
-            scoreAddsBar("after");
+            scoreAddsBarline("after");
           },
           BAR_AFTER_ICON
         ),

@@ -13,16 +13,18 @@
 // a score laid out in a way it does not know, comes back as a refusal with a
 // reason, and the score is left as it was.
 //
-// It also adds a bar: an empty one, a rest as long as the bar, in every voice
-// of a line at once (addBar). That one changes the music on purpose, by that
-// bar and by nothing else, and is read back the same way (verifyAdd). And it
-// writes a note, a chord or a rest on a place of a voice (writeNote): that
-// place and nothing else (verifyNote); it puts a note or a rest in beside a
-// place (insertPlace, verifyInsert); it takes a place out, a head of a
-// chord, a note, a rest or the bar it is all of (takeOut, verifyOut); it
-// puts music in at a place, takes a stretch out, or puts music in the place
-// of one (pasteMusic, verifyPaste); and it makes rests of the notes of a
-// stretch (restMusic, verifyRests).
+// It also adds a bar: an empty one, two barlines with nothing between them,
+// in every voice of a line at once (addBar). That one changes the music on
+// purpose, by that bar and by nothing else, and is read back the same way
+// (verifyAdd); so are a barline put in (insertBar, verifyBar) and a bar of
+// nothing taken out (takeEmptyBar, verifyBarOut). And it writes a note, a
+// chord or a rest on a place of a voice (writeNote): that place and nothing
+// else (verifyNote); it puts a note or a rest in beside a place
+// (insertPlace, verifyInsert); it takes a place out, a head of a chord, a
+// note, a rest or the bar it is all of (takeOut, verifyOut); it puts music
+// in at a place, takes a stretch out, or puts music in the place of one
+// (pasteMusic, verifyPaste); and it makes rests of the notes of a stretch
+// (restMusic, verifyRests).
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
@@ -1292,59 +1294,52 @@
 
   // ---------- A bar added ----------
   //
-  // The score mode's + (main.js): an empty bar at a barline, in every voice
-  // of the line at once, or at the head of a line. What is written is the
-  // rest of a bar as long as the bar in each voice: the bar of the meter
-  // that voice is in there, or where there is none (no M:, or M:none) the
-  // bar beside it. Not `Z`, the rest ABC has for a whole bar: abcjs 6.7.0
-  // draws it as a rest of several bars with a 1 over it, with a meter or
-  // without one (checked in 2/4, 3/4, 4/4 and with no meter;
-  // design-score-editing.html). How the rests' lengths are written is
-  // abcjs's to say: the unit length in force there (L:, inline, or a
-  // voice's own) is read off a rest of one unit put there first.
+  // The score mode's + (main.js), and the Ctrl+B and Alt+B of a cursor that
+  // stands at the edge of its bar (insertBar): an empty bar at a barline, in
+  // every voice of the line at once or in one, or at the head of a line. What
+  // is written is the barline that closes it and nothing else, so the bar is
+  // two barlines with nothing between them (`C | | G`), which is how abcjs
+  // draws an empty bar (16 units across, measured 2026-11-08). It lasts
+  // nothing and holds no rest: the owner's call of 2026-11-08, "quiero quitar
+  // los silencios cuando se use Add bar". Until then it was written with the
+  // rest of a bar as long as the bar in each voice (one rest where abcjs
+  // knows how long the bar is, one for each group of a meter written as a
+  // sum, the longest first where there was no meter to go by), and a bar no
+  // meter could measure was refused ("Bar length unknown"). A bar with
+  // nothing in it needs none of that, and the cursor stands in it for a note
+  // to be written there (an empty stop, scoreTracks in main.js).
   //
-  // One rest, where abcjs knows how long the bar is: its engraver draws a
-  // rest the length of its bar as the whole-bar rest, the one engraving
-  // writes for an empty bar in any meter (seen drawn so in 4/4, 3/4, 2/4,
-  // 6/8, 5/8 and 7/8). Where it does not know, the rests a musician would
-  // write, the owner's pick of design-score-editing-2.html (A, 2026-09-29;
-  // barRests): a meter written as a sum, `2+3/8`, whose bar abcjs takes to
-  // be "2+3" over 8 and so no number, has a rest for each group (`z2 z3`),
-  // and a bar with no meter to go by has the longest rests first (seven
-  // quarters `z4 z3`). One rest eight quarters long, what the partials of
-  // example.mdm were given before, abcjs cannot draw at all: it writes
-  // "pitch is undefined" in red where the rest should be.
+  // The barline goes after the barline that closes the bar `at` is in, so
+  // that barline keeps whatever it says (a repeat, an ending) and the new bar
+  // is the one after it. The barline that ends a voice (`|]` or `||`, with
+  // nothing after it in the tune) is the exception, since a bar after the
+  // end of a tune is no bar of it: there the new barline goes in before it,
+  // and it goes on ending the tune. A bar that no barline closes, the last of
+  // a line written open (a tune with no barline in it, `C D E F`, or one that
+  // stops without one) is closed by the new barline, and the bar after it is
+  // the voice's open end, where a note is written next: `C D E F |`. Such a
+  // tune had nowhere to be given a bar but its head (the owner's report,
+  // 2026-09-30). At the head of a line the bar is between two barlines
+  // written there, `| | C D E F |`, or after the one that opens the line
+  // (`|: C` is given `|: | C`).
   //
-  // The rest goes after the barline and is closed by a barline of its own,
-  // so the barline keeps whatever it says (a repeat, an ending) and the new
-  // bar is the one after it. The barline that ends a voice (`|]` or `||`,
-  // with nothing after it in the tune) is the exception, since a bar after
-  // the end of a tune is no bar of it: there the new bar goes in before it,
-  // and it goes on ending the tune. A bar that no barline closes, the last
-  // of a line written open (a tune with no barline in it, `C D E F`, or one
-  // that stops without one) is closed by the barline the new bar opens
-  // with, and the new bar is left open as that one was: `C D E F | z4`. Such
-  // a tune had nowhere to be given a bar but its head (the owner's report,
-  // 2026-09-30).
-  //
-  // `at` is a character of a note of the bar the barline closes, or that
-  // is left open, or, with `where` "head", of the first bar of a line, for a
-  // bar before it. With `where` "before" it is of any bar, for a bar before
-  // it, past the barlines that open it: the + of a barline that closes no
-  // bar, the second of `C | | G`, which is a barline all the same where the
-  // reader sees one (the owner's report, 2026-10-02). With `own`, the bar
-  // goes into the voice `at` is in and into no other, which is then a bar
-  // longer than the rest of its line: the owner's call of 2026-10-03 for
-  // the keys, Ctrl with an arrow for the cursor's voice. `own` may be a
-  // list of characters as well, one of a note of each voice that is to
-  // take the bar on that line beside the one `at` is in: the voices a
-  // stretch is chosen over, which that key adds the bar to since
-  // 2026-10-06 (the owner's "una vez estén marcadas con ctrl shift, se hace
-  // ctrl -> y debe añadirse el compás de silencio al lado"; until then
-  // Ctrl+Alt with the arrow added it to every voice there is, as the + adds
-  // it, and the two were all there was to ask for). Returns
-  // { source, rest }, with where the rest of the voice `at` is in begins in
-  // the new source, or { refused }.
+  // `at` is a character of a note of the bar the barline closes, or that is
+  // left open, or, with `where` "head", of the first bar of a line, for a bar
+  // before it. With `where` "before" it is of any bar, for a bar before it,
+  // past the barlines that open it: the + of a barline that closes no bar,
+  // the second of `C | | G`, which is a barline all the same where the reader
+  // sees one (the owner's report, 2026-10-02). With `own`, the bar goes into
+  // the voice `at` is in and into no other, which no longer makes it longer
+  // than the rest of its line, since it lasts nothing: it is how Ctrl+B and
+  // Alt+B add one beside the cursor's bar. `own` may be a list of characters
+  // as well, one of a note of each voice that is to take the bar on that line
+  // beside the one `at` is in (the stretch chosen over voices, which the
+  // owner's keys added a bar to from 2026-10-06 until they stopped doing so
+  // on 2026-11-08). Returns { source, bar }, with `bar` where, in the new
+  // source, the barline that opens the new bar in the voice `at` is in
+  // begins: the cursor stands in the empty bar that barline opens, or at the
+  // open end past it, and that barline is what names the place (`after` of a
+  // stop in main.js). Or { refused }.
   function addBar(A, src, at, where, own) {
     if (!A || typeof A.parseOnly !== "function") return refuse("engine");
     const tune = parsed(A, src);
@@ -1464,7 +1459,7 @@
       }
       // A tie from the note before into the one after would be cut by it,
       // and so would the voices laid over each other with `&` on this line,
-      // which the rest would go into one of and not the other.
+      // which the barline would go into one of and not the other.
       if (tiedAcross(systems, voice.key, s, plan.last)) {
         failed = "addTie";
         return;
@@ -1473,15 +1468,10 @@
         failed = "addVoices";
         return;
       }
-      const meter = meterAt(systems, voice.key, s, plan.last);
-      const measure = meterLength(meter);
-      plan.length = measure !== null ? measure : barLength(elems, plan.run);
-      if (!(plan.length > 0)) {
-        failed = "addMeter";
-        return;
-      }
-      plan.rests = barRests(plan.length, meter, drawnBar(systems, voice.key, s));
-      // The verses under the line make room for the new rest and barline
+      // Two barlines at the head of a line that none opens, the one between
+      // them being the new bar; one everywhere else.
+      plan.bars = plan.kind === "head" ? 2 : 1;
+      // The verses under the line make room for the new barlines
       // (lyricRoom). A symbol line is read against the notes as a verse is,
       // and is not rewritten here.
       const lineTo = lineEnd(src, elems[music[music.length - 1]].endChar - 1);
@@ -1493,7 +1483,7 @@
       }
       verses.forEach(function (verse) {
         if (failed) return;
-        const room = lyricRoom(readVerse(verse, elems), plan.last, plan.rests.length);
+        const room = lyricRoom(readVerse(verse, elems), plan.last, plan.bars);
         if (room === null) failed = "addLyrics";
         else if (room) lyrics.push({ from: verse.from + room.at, to: verse.from + room.at, insert: room.text });
       });
@@ -1501,38 +1491,24 @@
     });
     if (failed) return refuse(failed);
 
-    // A rest of one unit first, for abcjs to say how long the unit is there.
-    const probe = written(src, plans, lyrics, function () {
-      return "z";
-    });
-    const probed = probe ? parsed(A, probe.source) : null;
-    if (!probed) return refuse("addUnsafe");
-    const texts = {};
-    for (let n = 0; n < plans.length; n++) {
-      const unit = restIn(probed, probe.source, probe.spans[n]);
-      const lengths = plans[n].rests.map(function (length) {
-        return unit ? restLength(length, unit.duration) : null;
-      });
-      if (lengths.indexOf(null) >= 0) return refuse("addMeter");
-      texts[plans[n].key] = lengths
-        .map(function (length) {
-          return "z" + length;
-        })
-        .join(" ");
-    }
-    const out = written(src, plans, lyrics, function (plan) {
-      return texts[plan.key];
-    });
+    const out = written(src, plans, lyrics);
     if (!out) return refuse("addUnsafe");
     const check = verifyAdd(A, src, out.source, s, plans, found.voice.key);
     if (check) return refuse(check);
     const made = parsed(A, out.source);
-    let rest = -1;
+    let opens = -1;
     plans.forEach(function (plan, n) {
-      const el = plan.key === found.voice.key ? restIn(made, out.source, out.spans[n]) : null;
-      if (el) rest = el.startChar;
+      if (plan.key !== found.voice.key) return;
+      const put = barsIn(made, out.source, out.spans[n], plan.key);
+      if (!put) return;
+      // The barline the new bar follows: the one it was put after, or the
+      // first one put in where it goes before another or at a line's head.
+      const first = plan.kind === "after" ? put.at[0] - 1 : put.at[0];
+      const el = put.elems[first];
+      if (el && el.el_type === "bar") opens = el.startChar;
     });
-    return { source: out.source, rest: rest };
+    if (opens < 0) return refuse("addUnsafe");
+    return { source: out.source, bar: opens };
   }
 
   function parsed(A, src) {
@@ -1543,15 +1519,22 @@
     }
   }
 
-  // The system, the voice and the note a character of the source is in.
-  function placeOf(systems, at) {
+  // The system, the voice and the note a character of the source is in;
+  // with `bars`, a barline as well when nothing follows it but a bar of
+  // nothing: the barline that closes a voice, the last of it, which is what
+  // the open end of a voice closed by a plain barline names (endStop in
+  // main.js), and a barline with another straight after it, which is what
+  // the empty bar between the two names (emptyStop there). What is put in
+  // there goes in after it. A barline with music after it is no place still.
+  function placeOf(systems, at, bars) {
     for (let i = 0; i < systems.length; i++) {
       const voices = voicesOf(systems[i]);
       for (let v = 0; v < voices.length; v++) {
         const elems = voices[v].elems;
         for (let e = 0; e < elems.length; e++) {
           const el = elems[e];
-          if (el.el_type === "note" && el.startChar <= at && at < el.endChar) return { system: i, voice: voices[v], index: e };
+          const kind = el.el_type === "note" || (bars && el.el_type === "bar" && (lastOfVoice(systems, voices[v].key, i, e) || emptyBarAfter(elems, e)));
+          if (kind && el.startChar <= at && at < el.endChar) return { system: i, voice: voices[v], index: e };
         }
       }
     }
@@ -1575,6 +1558,14 @@
       }
     }
     return true;
+  }
+
+  // Whether a barline of a voice has another straight after it on its line,
+  // the bar between the two holding nothing. Any two do (`:| |:` written
+  // apart as well, which abcjs draws 16 units apart like any other).
+  function emptyBarAfter(elems, e) {
+    const b = elems[e + 1];
+    return !!b && elems[e].el_type === "bar" && b.el_type === "bar";
   }
 
   // Whether the last note of a voice at or before one of its elements (-1
@@ -1646,106 +1637,6 @@
     return sum;
   }
 
-  // How long a bar lasts by what is written in it, in whole notes: a
-  // tuplet's notes each by the multiplier abcjs puts on the first of them.
-  function barLength(elems, run) {
-    let sum = 0;
-    let factor = 1;
-    run.forEach(function (i) {
-      const el = elems[i];
-      if (el.el_type !== "note") return;
-      if (el.startTriplet && el.tripletMultiplier) factor = el.tripletMultiplier;
-      sum += (el.duration || 0) * factor;
-      if (el.endTriplet) factor = 1;
-    });
-    return sum;
-  }
-
-  // How long abcjs's engraver takes a bar of a voice's staff to be on the
-  // line `s`: the meter the staff was last given at the head of a line, read
-  // as the engraver reads it (the first term's numerator over its
-  // denominator, which makes no number of `2+3/8`), a common or a cut time
-  // as a whole note, and a whole note where the tune names no meter, which
-  // abcjs takes for 4/4. A meter changed inside a line is not read by it
-  // (abcjs 6.7.0, read in its bundle): a rest that bar long is drawn there
-  // as a rest of its length, and not as the bar's.
-  function drawnBar(systems, key, s) {
-    const staff = Number(key.split("/")[0]);
-    let bar = 1;
-    for (let i = 0; i <= s; i++) {
-      const line = systems[i].staff[staff];
-      const meter = line && line.meter;
-      if (!meter) continue;
-      bar = meter.type === "specified" && meter.value && meter.value.length ? Number(meter.value[0].num) / Number(meter.value[0].den) : 1;
-    }
-    return bar;
-  }
-
-  // The rests an empty bar `length` whole notes long is written with, as
-  // their lengths in whole notes, one after the other (A bar added, above):
-  // one for each group of a meter written as a sum, one for the whole bar
-  // where abcjs draws that as the bar's rest, and the longest first where
-  // it does not. One rest the bar long where they cannot be told, as before.
-  function barRests(length, meter, drawn) {
-    const groups = meterGroups(meter);
-    const total = (groups || []).reduce(function (a, b) {
-      return a + b;
-    }, 0);
-    if (groups && Math.abs(total - length) < 1e-9) {
-      let out = [];
-      for (let i = 0; i < groups.length; i++) {
-        const rests = longestRests(groups[i]);
-        if (!rests) return [length];
-        out = out.concat(rests);
-      }
-      return out;
-    }
-    if (Math.abs(length - drawn) < 1e-9) return [length];
-    return longestRests(length) || [length];
-  }
-
-  // The groups of a meter written as a sum, in whole notes (`2+3/8` is a
-  // quarter and a dotted quarter), or null for any other.
-  function meterGroups(meter) {
-    if (!meter || meter.type !== "specified" || !meter.value) return null;
-    if (!meter.value.some(function (term) {
-      return String(term.num).indexOf("+") >= 0;
-    })) return null;
-    const out = [];
-    meter.value.forEach(function (term) {
-      String(term.num)
-        .split("+")
-        .forEach(function (part) {
-          out.push(Number(part) / Number(term.den));
-        });
-    });
-    return out.every(function (g) {
-      return g > 0;
-    })
-      ? out
-      : null;
-  }
-
-  // Rests that make a length, the longest that fits first and again, none
-  // longer than a whole rest and any shorter one with its dot: seven
-  // quarters are a whole and a dotted half, eight two wholes, a group of
-  // three eighths one dotted quarter. Null for a length they do not make
-  // (a third of a beat).
-  const REST_VALUES = [1, 3 / 4, 1 / 2, 3 / 8, 1 / 4, 3 / 16, 1 / 8, 3 / 32, 1 / 16, 3 / 64, 1 / 32, 1 / 64];
-  function longestRests(length) {
-    const out = [];
-    let left = length;
-    while (left > 1e-9 && out.length < 16) {
-      const value = REST_VALUES.filter(function (v) {
-        return v <= left + 1e-9;
-      })[0];
-      if (!value) return null;
-      out.push(value);
-      left -= value;
-    }
-    return left > 1e-9 ? null : out;
-  }
-
   // What follows `z` for a rest `length` whole notes long where the unit is
   // `unit` long: `2`, `3/2`, `/2`, nothing for one unit; null where no power
   // of two up to 64 divides it into whole units.
@@ -1759,37 +1650,34 @@
     return null;
   }
 
-  // What a verse needs written for `rests` rests and a barline put in just
-  // past the element `last` of its line (-1 for the head of the line). The
+  // What a verse needs written for the barlines put in just past the element
+  // `last` of its line (-1 for the head of the line), `bars` of them. The
   // first piece of the verse not taken before that point is offered to the
-  // new rests and the new barline before the notes it went to. A syllable
-  // passes over them all; a `*`, a `_` or a lone `-` would be taken by the
-  // first rest and the pieces like it after it by the rests after that,
-  // and a `|` by the barline, so pieces of their own are written in front
-  // of it for them to take, a `*` for each rest or a `|`. { at, text } for
-  // that, false for nothing to write, and null where it cannot be written:
-  // a `_` sharing its character with the syllable before it (`la_`) can
-  // have nothing put between the two.
-  function lyricRoom(read, last, rests) {
+  // new barlines before the notes it went to. A syllable passes over them,
+  // and so does a `*`, a `_` or a lone `-`, which the next note takes as it
+  // did; a `|` would be taken by the first new barline, so pieces of their
+  // own are written in front of it for the new barlines to take. { at, text }
+  // for that, false for nothing to write, and null where it cannot be
+  // written: a `|` sharing its character with the piece before it can have
+  // nothing put between the two.
+  function lyricRoom(read, last, bars) {
     let k = 0;
     while (k < read.taker.length && read.taker[k] >= 0 && read.taker[k] <= last) k++;
     if (k >= read.tokens.length) return false;
     const token = read.tokens[k];
-    if (!token.skip) return false;
+    if (token.skip !== "bar") return false;
     if (k > 0 && read.tokens[k - 1].to > token.from) return null;
-    return { at: token.from, text: token.skip === "bar" ? "| " : new Array((rests || 1) + 1).join("* ") };
+    return { at: token.from, text: new Array(bars + 1).join("| ") };
   }
 
-  // The source with a rest written for each voice (`text` of its plan) and
-  // the verses' room, as { source, spans }: where the new text of each voice
-  // stands in it. Null when the edits cross.
-  function written(src, plans, lyrics, text) {
+  // The source with the barlines of each plan written, and the verses' room,
+  // as { source, spans }: where the new text of each voice stands in it. Null
+  // when the edits cross.
+  function written(src, plans, lyrics) {
     const inserts = plans.map(function (plan) {
-      const rest = text(plan);
-      if (plan.kind === "end") return "| " + rest + " ";
-      if (plan.kind === "open") return " | " + rest;
-      if (plan.kind === "head") return rest + " | ";
-      return " " + rest + " |";
+      if (plan.kind === "end") return "| ";
+      if (plan.kind === "head") return "| | ";
+      return " |";
     });
     const edits = lyrics.map(function (e) {
       return { from: e.from, to: e.to, insert: e.insert };
@@ -1811,23 +1699,24 @@
     return { source: source, spans: spans };
   }
 
-  // The rest written inside a span of a source, as abcjs read it. abcjs
-  // starts an element at the spaces before it, which for a rest written
-  // after `[V:1] ` or `[M:2/4] ` at the head of a line are outside the span,
-  // and ends one past the space after it when a chord symbol or a
-  // decoration follows, as one left at the end of a line written open does
-  // (`C D E F "Am"`, whose bar was refused for want of a length).
-  function restIn(tune, source, span) {
+  // The barlines written inside a span of a source, as abcjs read them: the
+  // elements of the voice `key` on the first line to have one there, and the
+  // indexes of those barlines among them. abcjs starts an element at the
+  // spaces before it, which for a barline written after `[V:1] ` at the head
+  // of a line are outside the span.
+  function barsIn(tune, source, span, key) {
     let from = span.from;
     while (from > 0 && /[ \t]/.test(source.charAt(from - 1))) from--;
     let found = null;
     (tune ? tune.lines : []).forEach(function (line) {
       if (!line.staff || found) return;
-      voicesOf(line).forEach(function (voice) {
-        voice.elems.forEach(function (el) {
-          if (!found && el.el_type === "note" && el.rest && el.startChar >= from && el.startChar < span.to) found = el;
-        });
+      const voice = voiceIn(line, key);
+      if (!voice) return;
+      const at = [];
+      voice.elems.forEach(function (el, i) {
+        if (el.el_type === "bar" && el.startChar >= from && el.startChar < span.to) at.push(i);
       });
+      if (at.length) found = { elems: voice.elems, at: at };
     });
     return found;
   }
@@ -2123,8 +2012,11 @@
   //
   // `at` is a character of the place, `what` is { step, duration } for a
   // note at a step of the staff or { rest: true, duration } for a rest, and
-  // `side` "after" or "before". Returns { source, at }, with where the new
-  // place begins in the new source, or { refused }.
+  // `side` "after" or "before". After, `at` may be a character of the plain
+  // barline that closes a voice, where the voice's open end stands since
+  // the owner's call of 2026-11-08 (endStop in main.js): the place is the
+  // first of a new bar, and is beamed to nothing. Returns { source, at },
+  // with where the new place begins in the new source, or { refused }.
   function insertPlace(A, src, at, what, side) {
     if (!A || typeof A.parseOnly !== "function") return refuse("engine");
     const tune = parsed(A, src);
@@ -2132,7 +2024,7 @@
     const systems = tune.lines.filter(function (line) {
       return line.staff;
     });
-    const found = placeOf(systems, at);
+    const found = placeOf(systems, at, side !== "before");
     const length = what ? what.duration : 0;
     if (!found || !(length > 0)) return refuse("notePlace");
     const s = found.system;
@@ -2140,6 +2032,7 @@
     const elems = found.voice.elems;
     const first = found.index;
     const el = elems[first];
+    const barline = el.el_type === "bar";
     const music = voiceOn(src, elems);
     let run = null;
     barsOf(elems, music).forEach(function (bar) {
@@ -2166,14 +2059,14 @@
     const beatAt = function (time) {
       return Math.floor(time / beat + 1e-6);
     };
-    const begins = times[first].at + (after ? times[first].length : 0);
+    const begins = barline ? 0 : times[first].at + (after ? times[first].length : 0);
     const beamed = function (i) {
       const other = elems[i];
       return run.indexOf(i) >= 0 && other.el_type === "note" && !other.rest && !!other.pitches && other.duration < 1 / 4 - EPS && !times[i].tuplet;
     };
     let left = null;
     let right = null;
-    if (!rest && length < 1 / 4 - EPS) {
+    if (!barline && !rest && length < 1 / 4 - EPS) {
       const p = after ? first : first - 1;
       if (beamed(p) && beatAt(times[p].at) === beatAt(begins)) {
         const parts = noteParts(src, elems[p]);
@@ -2210,13 +2103,329 @@
     const size = restLength(length, seen.duration);
     if (size === null) return refuse("noteUnsafe");
     const out = draft((rest ? "z" : pitchText(what.step - offset)) + size);
-    const plan = { key: key, s: s, first: first, side: after ? "after" : "before", length: length, step: rest ? null : what.step };
+    const plan = { key: key, s: s, first: first, side: after ? "after" : "before", length: length, step: rest ? null : what.step, opens: barline };
     const check = verifyInsert(A, src, out, plan);
     if (check) return refuse(wordsBelow(src, elems, music) ? "noteLyrics" : check);
     const made = parsed(A, out);
     const put = made ? elementAt(made, s, key, index) : null;
     if (!put) return refuse("noteUnsafe");
     return { source: out, at: put.startChar };
+  }
+
+  // ---------- A barline put in ----------
+  //
+  // The score mode's Ctrl+B and Alt+B (main.js): a plain barline put in just
+  // before the place the cursor stands on (Ctrl) or just after it (Alt), in
+  // that voice alone. The owner's keys of 2026-11-08, "Ctrl/Alt + b
+  // añadirá la barra a la izquierda/derecha de donde el cabezal esté
+  // situado", and the example that set my first reading of them right
+  // (a bar of rest beside the cursor's bar, which those keys put in for an
+  // hour): "Ctrl+B inserte la barra justo a la izquierda de donde está el
+  // cabezal: A2 | B2 c2". Nothing else moves: the bar it cuts leaves two,
+  // each as long as what it holds, for the reader to settle against the
+  // meter, as a place put in leaves its bar longer (insertPlace).
+  //
+  // It goes where a place would go in (insertPlace): before everything
+  // written on the place, or after everything written on it, set apart by
+  // a space on either side, which ends a beam across it as well. Read back,
+  // the voice has every element it had, each as it was, and one plain
+  // barline more just there, and every other voice reads as it did: a
+  // tuplet or a broken rhythm it would cut reads otherwise, and is refused.
+  // And the synth plays the notes it played: a barline between an
+  // accidental and a later note of its bar that it carries to would make
+  // that note another ("barAccidental"; `^F2 F2` would become F sharp and F).
+  //
+  // Where a barline stands there already, with nothing between it and the
+  // place but what is no note, the cursor is at the edge of its bar and the
+  // key adds a bar there: an empty one beside the cursor's, on the side the
+  // key names, which is what the owner asked for on 2026-11-08 ("si al final
+  // de un compás el cabezal está ... C | y se presiona Alt+B, deben aparecer
+  // cuantos compases se añadan ... C | | y en cada uno el cabezal debe
+  // moverse adentro del compás") and which Ctrl+B does at the head of a bar
+  // by the same token (addBar, in the cursor's voice alone). Before the
+  // first note of a voice, where no barline can close a bar, it is the empty
+  // bar at the head of the line. Until then these were "barThere" and
+  // "barHead".
+  //
+  // `at` is a character of the place, or of the barline the cursor stands
+  // after where it has no place: the plain barline that closes the voice
+  // (its open end, endStop in main.js) or a barline with another straight
+  // after it (the empty bar between the two, emptyStop). There the key puts
+  // a plain barline just after that one, which cuts nothing: the bar the
+  // cursor stands in is between the two and the new barline falls inside it,
+  // and the barline named in the answer is the one that opens the bar the
+  // cursor goes to: the one the cursor stood after with Ctrl, the new one
+  // with Alt. `side` is "after" or "before". Returns { source }, or with a
+  // bar added { source, bar } (addBar's), or { refused }.
+  function insertBar(A, src, at, side) {
+    if (!A || typeof A.parseOnly !== "function") return refuse("engine");
+    const tune = parsed(A, src);
+    if (!tune) return refuse("parse");
+    const systems = tune.lines.filter(function (line) {
+      return line.staff;
+    });
+    const found = placeOf(systems, at, true);
+    if (!found) return refuse("notePlace");
+    const s = found.system;
+    const key = found.voice.key;
+    const elems = found.voice.elems;
+    const first = found.index;
+    const el = elems[first];
+    const music = voiceOn(src, elems);
+    if (/&/.test(musicText(src, elems, music))) return refuse("noteUnsafe");
+    const after = side !== "before";
+    if (el.el_type === "bar") {
+      // The barline that ends the tune is no place for a bar after it.
+      if ((el.type === "bar_thin_thick" || el.type === "bar_thin_thin") && lastOfVoice(systems, key, s, first)) return refuse("barThere");
+      const from = trimStart(src, el.startChar, el.endChar);
+      const pos = trimEnd(src, el.endChar, from);
+      const out = src.slice(0, pos) + " |" + src.slice(pos);
+      const check = verifyBar(A, src, out, { key: key, s: s, first: first, side: "after" });
+      if (check) return refuse(check);
+      // The bar the cursor goes to: the one after the barline it stood
+      // after with Ctrl, which is still that barline's, and with Alt the
+      // one the new barline opens.
+      const made = parsed(A, out);
+      const put = made ? elementAt(made, s, key, first + 1) : null;
+      if (after && !put) return refuse("noteUnsafe");
+      return { source: out, bar: after ? put.startChar : el.startChar };
+    }
+    const next = besideIn(systems, key, s, first, after);
+    // At the edge of its bar, or before the first note of the voice: a bar
+    // of nothing is added beside the cursor's, in its voice.
+    if (next === "bar" || (!next && !after)) return addBar(A, src, at, after ? "after" : "before", true);
+    // A tuplet it would cut, and a broken rhythm it would stand inside,
+    // abcjs reads as they were (`(3A | Bc`, `A> | B`, both read back the
+    // same): music no engraver sets, and the export's ABC goes to more
+    // readers than abcjs.
+    if (cutsTuplet(elems, first, after)) return refuse("barTuplet");
+    const from = trimStart(src, el.startChar, el.endChar);
+    const pos = after ? trimEnd(src, el.endChar, from) : from;
+    if (/[<>]$/.test(src.slice(lineStart(src, pos), pos).replace(/\s+$/, ""))) return refuse("barRhythm");
+    const lead = pos > 0 && !/\s/.test(src.charAt(pos - 1)) ? " " : "";
+    const tail = pos < src.length && !/\s/.test(src.charAt(pos)) ? " " : "";
+    const out = src.slice(0, pos) + lead + "|" + tail + src.slice(pos);
+    const check = verifyBar(A, src, out, { key: key, s: s, first: first, side: after ? "after" : "before" });
+    if (check) return refuse(check === "noteUnsafe" && wordsBelow(src, elems, music) ? "noteLyrics" : check);
+    return { source: out };
+  }
+
+  // ---------- A bar with nothing in it, drawn tight ----------
+  //
+  // Two plain barlines with nothing between them (`C | | G`) are drawn by
+  // abcjs 16 units apart, the room an empty bar is given; written as one
+  // double barline (`C || G`) they stand together, 4 across. The owner's ask
+  // of 2026-11-08, "cuando el cursor salga del compás vacío, el espacio entre
+  // barras se reduzca como mismo sale cuando se hace C || G": the score mode
+  // engraves each empty bar as the double barline, except the one the cursor
+  // is in, which keeps its room for it to stand in (renderScore in main.js).
+  //
+  // The text handed to abcjs is the text of the score with each such pair
+  // rewritten at its own place and by as many characters as it had: `|`,
+  // whatever lay between the two (spaces), `|` become the spaces and then
+  // `||`. The double barline ends where the second of the two ended, so
+  // that every element after it is read at the characters it has in the
+  // score as it is written (the note that follows takes the spaces before
+  // it into its range, and those come after the barline in the text as
+  // they were; written the other way round the note began a character
+  // early, which was a place the module could not find). The note before
+  // takes the spaces into its range instead, and the double barline begins
+  // after them, which is not where the first of the two began: each pair
+  // says where its two barlines began (`after` and `last`, as abcjs reads
+  // the score as written), for the places the pair stands for to be named as
+  // they are when the two are drawn apart. Only a pair of plain barlines is, with no
+  // third barline on either side: three or more in a row are bars each, and
+  // draw as they are. `keep` is the barline the cursor's bar opens (`startChar`
+  // of the first of its two, as the place the cursor stands in names it),
+  // which is left as written.
+  //
+  // Inside an ending as well, since the owner's report of 2026-11-22 ("después
+  // de poner el 1 en el indicador de repetición, se pierde la opción de
+  // squeeze la doble barra"). abcjs ends an ending at the first barline
+  // after it that is not a plain one, a double one among them, so the pair
+  // drawn as one ended it there, and the bracket stopped at it while the
+  // ending ran on in the text: the day before, the pairs inside an ending
+  // were left open for that (found by the second reading of the drag of an
+  // ending's end, 2026-11-21). Now `ends` says where the endings end in the
+  // text as written, the startChar of each barline that ends one, which is
+  // the same character in the rewriting, and what abcjs reads of the
+  // rewriting is given them back before it is drawn (keepEndings).
+  //
+  // Returns { text, pairs, ends } with the pairs rewritten as { from, to },
+  // or the text as it was when what was read back from the rewriting is not
+  // the same music.
+  function tightBars(A, src, keep) {
+    const out = { text: src, pairs: [], ends: [] };
+    if (!A || typeof A.parseOnly !== "function" || src.indexOf("|") < 0) return out;
+    const tune = parsed(A, src);
+    if (!tune) return out;
+    const chars = src.split("");
+    const ends = [];
+    tune.lines.forEach(function (line) {
+      if (!line.staff) return;
+      voicesOf(line).forEach(function (voice) {
+        const elems = voice.elems;
+        elems.forEach(function (el) {
+          if (el.el_type === "bar" && el.endEnding) ends.push(el.startChar);
+        });
+        for (let i = 0; i + 1 < elems.length; i++) {
+          const a = elems[i];
+          const b = elems[i + 1];
+          if (a.el_type !== "bar" || b.el_type !== "bar" || a.type !== "bar_thin" || b.type !== "bar_thin") continue;
+          if ((i > 0 && elems[i - 1].el_type === "bar") || (i + 2 < elems.length && elems[i + 2].el_type === "bar")) continue;
+          if (keep !== undefined && keep !== null && a.startChar === keep) continue;
+          const p = trimStart(src, a.startChar, a.endChar);
+          const q = trimStart(src, b.startChar, b.endChar);
+          // `|`, spaces or tabs, `|`, and nothing more on either barline.
+          if (src.charAt(p) !== "|" || src.charAt(q) !== "|" || p + 1 > q || !/^[ \t]*$/.test(src.slice(p + 1, q))) continue;
+          if (trimEnd(src, a.endChar, p) !== p + 1 || trimEnd(src, b.endChar, q) !== q + 1) continue;
+          for (let k = p; k <= q - 2; k++) chars[k] = src.charAt(k + 1);
+          chars[q - 1] = "|";
+          chars[q] = "|";
+          out.pairs.push({ from: p, to: q + 1, after: a.startChar, last: b.startChar });
+        }
+      });
+    });
+    if (!out.pairs.length) return out;
+    const text = chars.join("");
+    // Read back: the same notes in the same order, and one barline fewer
+    // for each pair. Where an ending ends does not reach the sound: abcjs
+    // turns at the numbers of the endings and at the repeats, and never
+    // reads the end (measured on its bundle).
+    const was = reading(A, src);
+    const now = reading(A, text);
+    if (!was || !now || was.notes !== now.notes) return out;
+    return { text: text, pairs: out.pairs, ends: ends };
+  }
+
+  // What abcjs read of a score the mode draws tight (tightBars) given back
+  // the endings of the text as it is written: every barline of it ends an
+  // ending where one at its character does in the text, `ends`, and no
+  // other, the double barline of a pair among them. The bracket an ending is
+  // drawn with runs to the barline that ends it (abcjs's engraver), which is
+  // what the end is read for. Run on the tune abcjs hands its afterParsing,
+  // before it is engraved (renderScore in main.js). Returns the tune.
+  function keepEndings(tune, ends) {
+    if (!tune || !tune.lines) return tune;
+    const at = {};
+    (ends || []).forEach(function (c) {
+      at[c] = true;
+    });
+    tune.lines.forEach(function (line) {
+      voicesOf(line).forEach(function (voice) {
+        voice.elems.forEach(function (el) {
+          if (el.el_type !== "bar") return;
+          if (at[el.startChar]) el.endEnding = true;
+          else delete el.endEnding;
+        });
+      });
+    });
+    return tune;
+  }
+
+  // ---------- A bar with nothing in it taken out ----------
+  //
+  // The score mode's Delete and Backspace with the cursor in a bar of nothing
+  // (main.js): the bar goes, which is one of its two barlines. The bar the +
+  // adds holds no rest since 2026-11-08, and a rest that was a whole bar was
+  // what Delete took out together with the bar (takeBarOut), so these keys
+  // are what takes the bar back, in the cursor's voice alone: Ctrl+Z was the
+  // only way, with the text frozen. The plain barline goes, the second of
+  // two so that the sign written on the first stays (a repeat, an ending);
+  // where the second is the one that is not plain, the first goes; and where
+  // neither is, the two stand for something and nothing is taken out. Read
+  // back, the voice has every element it had but that barline, the synth
+  // plays the same notes, every other voice reads as it did, and every line
+  // has the bars it had.
+  //
+  // `at` is a character of the barline the bar opens (`after` of its place
+  // in main.js). Returns { source }, or { refused }.
+  function takeEmptyBar(A, src, at) {
+    if (!A || typeof A.parseOnly !== "function") return refuse("engine");
+    const tune = parsed(A, src);
+    if (!tune) return refuse("parse");
+    const systems = tune.lines.filter(function (line) {
+      return line.staff;
+    });
+    const found = placeOf(systems, at, true);
+    if (!found || !emptyBarAfter(found.voice.elems, found.index)) return refuse("notePlace");
+    const s = found.system;
+    const key = found.voice.key;
+    const elems = found.voice.elems;
+    const goes = elems[found.index + 1].type === "bar_thin" ? found.index + 1 : elems[found.index].type === "bar_thin" ? found.index : -1;
+    if (goes < 0) return refuse("noteUnsafe");
+    const el = elems[goes];
+    // The barline, and the space that set it apart: the one before it, or
+    // where there is none the one after it.
+    const bar = trimStart(src, el.startChar, el.endChar);
+    let from = bar;
+    let to = trimEnd(src, el.endChar, bar);
+    if (from > 0 && /[ \t]/.test(src.charAt(from - 1))) from--;
+    else if (/[ \t]/.test(src.charAt(to))) to++;
+    const out = src.slice(0, from) + src.slice(to);
+    const check = verifyBarOut(A, src, out, { key: key, s: s, first: goes });
+    if (check) return refuse(check);
+    return { source: out };
+  }
+
+  // Null when a barline went out as it should, or why it did not: the voice
+  // reads as it did without one plain barline, the element `first` of the
+  // system `s`; every other voice reads as it did, the synth plays the notes
+  // it played, and every line has the bars it had (takeEmptyBar).
+  function verifyBarOut(A, before, after, plan) {
+    const was = reading(A, before, true);
+    const now = reading(A, after);
+    if (!was || !now) return "parse";
+    const keys = Object.keys(was.voices).sort();
+    if (keys.join() !== Object.keys(now.voices).sort().join()) return "noteUnsafe";
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i] !== plan.key && was.voices[keys[i]].join("\n") !== now.voices[keys[i]].join("\n")) return "noteUnsafe";
+    }
+    const a = was.voices[plan.key];
+    const b = now.voices[plan.key];
+    const x = placeIndex(was.at[plan.key], plan);
+    if (x < 0 || b.length !== a.length - 1) return "noteUnsafe";
+    for (let j = 0; j < b.length; j++) if (b[j] !== a[j < x ? j : j + 1]) return "noteUnsafe";
+    const gone = JSON.parse(a[x]);
+    if (gone.el_type !== "bar" || gone.type !== "bar_thin") return "noteUnsafe";
+    if (was.notes !== now.notes) return "noteUnsafe";
+    const bars = systemBars(before, A, plan.key);
+    const next = systemBars(after, A, plan.key);
+    if (!bars || !next || bars.join() !== next.join()) return "noteUnsafe";
+    return null;
+  }
+
+  // Whether a barline just after a note of a line, or with `after` false
+  // just before it, would stand inside a tuplet: the note is in one, and is
+  // not its last, or not its first.
+  function cutsTuplet(elems, index, after) {
+    let open = false;
+    for (let i = 0; i < elems.length; i++) {
+      const el = elems[i];
+      if (el.el_type !== "note") continue;
+      if (el.startTriplet) open = true;
+      if (i === index) return open && !(after ? el.endTriplet : el.startTriplet);
+      if (el.endTriplet) open = false;
+    }
+    return false;
+  }
+
+  // What a voice has next to one of its elements on one side, across its
+  // lines: "bar" for a barline, "note" for a note or a rest, or null past
+  // either end of the voice. What is neither (a field written inline) is
+  // passed over.
+  function besideIn(systems, key, s, e, after) {
+    const step = after ? 1 : -1;
+    for (let i = s; i >= 0 && i < systems.length; i += step) {
+      const voice = voiceIn(systems[i], key);
+      if (!voice) continue;
+      const elems = voice.elems;
+      for (let j = i === s ? e + step : after ? 0 : elems.length - 1; j >= 0 && j < elems.length; j += step) {
+        const type = elems[j].el_type;
+        if (type === "note" || type === "bar") return type;
+      }
+    }
+    return null;
   }
 
   // ---------- Music pasted, and a stretch taken out ----------
@@ -2404,7 +2613,7 @@
     const systems = tune.lines.filter(function (line) {
       return line.staff;
     });
-    const found = placeOf(systems, at);
+    const found = placeOf(systems, at, where === "after");
     if (!found) return refuse("notePlace");
     const elems = found.voice.elems;
     const el = elems[found.index];
@@ -3769,14 +3978,14 @@
   }
 
   // Null when a bar went in as it should, or why it did not. Every voice of
-  // the line reads as it did but for the rests of the plan (`rests`, or one
-  // of its `length`) and a plain barline, together, at the one place asked
-  // for: just past the element `last` of the plan, the parts that open a
-  // line left before them when the bar goes at its head, and the rests
-  // after the new barline when the bar goes before the barline that ends
-  // the tune or closes a bar left open. Every other voice reads as it did, the synth plays the same
-  // notes in the same order, and the line has one bar more in the voice
-  // `key`.
+  // the line reads as it did but for the plain barlines of the plan (`bars`
+  // of them, one or two) at the one place asked for: just past the element
+  // `last` of the plan, the parts that open a line left before them when the
+  // bar goes at its head, and before the barline that ends the tune when the
+  // bar goes there. Every other voice reads as it did, the synth plays the
+  // same notes in the same order, and every line has the bars it had in the
+  // voice `key`: a bar with nothing in it is no bar of barsOf, which counts
+  // the ones a note is in.
   function verifyAdd(A, before, after, s, plans, key) {
     const was = reading(A, before, true);
     const now = reading(A, after);
@@ -3803,28 +4012,18 @@
           break;
         }
       }
-      const pieces = plan.rests || [plan.length];
-      const k = pieces.length;
-      if (b.length !== a.length + k + 1) return "addUnsafe";
-      for (let j = 0; j < a.length; j++) if (a[j] !== b[j < x ? j : j + k + 1]) return "addUnsafe";
-      const barFirst = plan.kind === "end" || plan.kind === "open";
-      const first = barFirst ? x + 1 : x;
+      const k = plan.bars;
+      if (b.length !== a.length + k) return "addUnsafe";
+      for (let j = 0; j < a.length; j++) if (a[j] !== b[j < x ? j : j + k]) return "addUnsafe";
       for (let r = 0; r < k; r++) {
-        const rest = JSON.parse(b[first + r]);
-        // A rest abcjs draws, of either name it gives one: "whole" for a rest
-        // a whole note long (measured: z4 in 4/4 with L:1/4), "rest"
-        // otherwise.
-        if (rest.el_type !== "note" || !rest.rest || !/^(?:rest|whole)$/.test(rest.rest.type) || rest.pitches) return "addUnsafe";
-        if (Math.abs(rest.duration - pieces[r]) > 1e-6) return "addUnsafe";
+        const bar = JSON.parse(b[x + r]);
+        if (bar.el_type !== "bar" || bar.type !== "bar_thin") return "addUnsafe";
       }
-      const bar = JSON.parse(barFirst ? b[x] : b[x + k]);
-      if (bar.el_type !== "bar" || bar.type !== "bar_thin") return "addUnsafe";
     }
     if (was.notes !== now.notes) return "addUnsafe";
     const bars = systemBars(before, A, key);
     const next = systemBars(after, A, key);
-    if (!bars || !next || bars.length !== next.length) return "addUnsafe";
-    for (let i = 0; i < bars.length; i++) if (next[i] !== bars[i] + (i === s ? 1 : 0)) return "addUnsafe";
+    if (!bars || !next || bars.join() !== next.join()) return "addUnsafe";
     return null;
   }
 
@@ -3913,7 +4112,38 @@
     }
     const bars = systemBars(before, A, plan.key);
     const next = systemBars(after, A, plan.key);
-    if (!bars || !next || bars.join() !== next.join()) return "noteUnsafe";
+    if (!bars || !next) return "noteUnsafe";
+    // A place put in after the barline that closes a voice opens a bar of
+    // its own on that line (insertPlace).
+    if (plan.opens) bars[plan.s] += 1;
+    if (bars.join() !== next.join()) return "noteUnsafe";
+    return null;
+  }
+
+  // Null when a barline went in as it should, or why it did not: the voice
+  // reads as it did with one plain barline more, just after the element
+  // `first` of the system `s` or, with `side` "before", just before it;
+  // every other voice reads as it did; and the synth plays the notes it
+  // played, which a barline between an accidental and a note it carried to
+  // would change (insertBar).
+  function verifyBar(A, before, after, plan) {
+    const was = reading(A, before, true);
+    const now = reading(A, after);
+    if (!was || !now) return "parse";
+    const keys = Object.keys(was.voices).sort();
+    if (keys.join() !== Object.keys(now.voices).sort().join()) return "noteUnsafe";
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i] !== plan.key && was.voices[keys[i]].join("\n") !== now.voices[keys[i]].join("\n")) return "noteUnsafe";
+    }
+    const a = was.voices[plan.key];
+    const b = now.voices[plan.key];
+    const x = placeIndex(was.at[plan.key], plan);
+    if (x < 0 || b.length !== a.length + 1) return "noteUnsafe";
+    const y = plan.side === "before" ? x : x + 1;
+    for (let j = 0; j < a.length; j++) if (a[j] !== b[j < y ? j : j + 1]) return "noteUnsafe";
+    const put = JSON.parse(b[y]);
+    if (put.el_type !== "bar" || put.type !== "bar_thin") return "noteUnsafe";
+    if (was.notes !== now.notes) return "barAccidental";
     return null;
   }
 
@@ -4266,7 +4496,6 @@
     addPlace: "No bar here",
     addVoices: "Voices don't match",
     addLyrics: "Lyrics can't make room",
-    addMeter: "Bar length unknown",
     addTie: "A tie crosses here",
     addUnsafe: "Can't keep the music as written",
     // A note written (writeNote), in the words the bars' refusals already
@@ -4293,6 +4522,14 @@
     pasteNothing: "Nothing to paste",
     pasteVoice: "No voice of that name here",
     pasteUnit: "Copied under another L:",
+    // A barline put in (insertBar), my wording of 2026-11-08 until the
+    // owner chooses: the one that ends the tune there already, an
+    // accidental the barline would stop from carrying to a note after it,
+    // and a tuplet or a broken rhythm it would stand inside.
+    barThere: "A barline is already there",
+    barAccidental: "An accidental would stop carrying",
+    barTuplet: "A tuplet would be cut",
+    barRhythm: "A broken rhythm would be cut",
   };
 
   function reasonText(reason) {
@@ -4342,7 +4579,11 @@
   // on the clock. It is given the place of the barline it stands before and
   // no length in the text, so nothing that reads the source by an element's
   // characters (the ink of the playhead, a click, the mode's places) finds
-  // it there.
+  // it there. It is marked `mdmGap` as well, for the one reader that has to
+  // see through it: a bar with nothing written in it, in a voice whose
+  // others have music in that bar, is filled whole by one, and the mode
+  // still has to find a bar with nothing in it there for the cursor to
+  // stand in (scoreTracks in main.js).
   function evenBars(tune) {
     if (!tune || !tune.lines) return tune;
     const meters = {};
@@ -4387,6 +4628,7 @@
             duration: missing,
             startChar: barline.startChar,
             endChar: barline.startChar,
+            mdmGap: true,
           });
         });
       }
@@ -4431,6 +4673,10 @@
     addBar: addBar,
     writeNote: writeNote,
     insertPlace: insertPlace,
+    insertBar: insertBar,
+    takeEmptyBar: takeEmptyBar,
+    tightBars: tightBars,
+    keepEndings: keepEndings,
     pasteMusic: pasteMusic,
     cutTakes: cutTakes,
     clipParts: clipParts,
@@ -4444,6 +4690,7 @@
     verifyAdd: verifyAdd,
     verifyNote: verifyNote,
     verifyInsert: verifyInsert,
+    verifyBar: verifyBar,
     verifyPaste: verifyPaste,
     verifyOut: verifyOut,
     verifyRests: verifyRests,

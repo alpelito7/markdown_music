@@ -38,7 +38,7 @@ The text is the file, and the editor reads it as the export does: Pandoc's Markd
 | `Ctrl+Shift+↑` `↓` `Space` | With a selection: walk the parts, and leave one out or take it back. |
 | `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z` | Select all, copy, cut, paste, undo. |
 | `Space` | Play from the cursor, or the selection alone. |
-| `Ctrl+←` `→` | Add a bar beside the cursor's, or beside a selection in its parts. |
+| `Ctrl+B` `Alt+B` | Put a barline in before the cursor's note, or after it. With a selection, a bar before it or after it, in its parts. |
 
 With the pointer on a score, two arrows at the end of each line send its last bar down or bring the next one up, or drag to any barline, and a `+` under a barline adds a bar.
 
