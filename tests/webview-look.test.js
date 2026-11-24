@@ -4909,6 +4909,132 @@ test("an open table stands on a card, coloured as code is, with its copy in the 
   await h.close();
 });
 
+// The caption written beside a table is a line of the table's card while
+// its source is open, on its side of the rows, and the blank line between
+// the two with it (the owner, 2026-11-20: "I want the caption to come into
+// the code block, whether it is over the table or under it"); until then
+// it stood as a line of prose beside the card. The card's rail stands on
+// its first line, the caption's where it is written over the table, and
+// the copy copies the card, caption and all, as written.
+const TABLE_CAPTION_DOC = [
+  "A block of code, the measure of a card.",
+  "",
+  "```python",
+  "x = 1",
+  "```",
+  "",
+  "| a | b |",
+  "|---|---|",
+  "| 1 | 2 |",
+  "",
+  ": Under the rows, in words enough to run past the column of the card and to be scrolled with its rows {#tbl-under}",
+  "",
+  "Between.",
+  "",
+  ": Over the rows {#tbl-over}",
+  "| c | d |",
+  "|---|---|",
+  "| 3 | 4 |",
+  "",
+  "After.",
+].join("\n");
+
+test("a table's caption is a line of its card, over the rows or under them as it is written, the rail on the card's first line and the copy with the caption in it", { skip }, async () => {
+  const h = await open({ text: TABLE_CAPTION_DOC, scores: 0, withFrontMatter: false });
+  const card = async function (needle) {
+    await setSelection(h.page, await posOf(h.page, needle));
+    await sleep(300);
+    return h.page.evaluate(() => {
+      const look = (el) => {
+        const cs = getComputedStyle(el);
+        return JSON.stringify({ ground: cs.backgroundColor, face: cs.fontFamily, size: cs.fontSize, side: cs.paddingLeft });
+      };
+      const lines = Array.from(document.querySelectorAll("#app .cm-line.mdm-table-line"));
+      const table = document.querySelector("#app .mdm-table:has(> .mdm-chrome.mdm-chrome--open)");
+      const rail = table.querySelector(":scope > .mdm-chrome");
+      return {
+        lines: lines.map((l) => l.textContent),
+        looks: Array.from(new Set(lines.map(look))),
+        code: look(document.querySelector("#app .cm-line.mdm-code-line")),
+        // One width of scroll for the whole card, the longest line's, which
+        // is the caption's under the rows.
+        widths: Array.from(new Set(lines.map((l) => l.scrollWidth))).length,
+        first: lines[0].classList.contains("mdm-table-first"),
+        last: lines[lines.length - 1].classList.contains("mdm-table-last"),
+        // The drawing straight under the card, nothing between.
+        under: lines[lines.length - 1].nextElementSibling === table,
+        level: Math.round((rail.getBoundingClientRect().top - lines[0].getBoundingClientRect().top) * 100) / 100,
+        // Marked while the main caret is anywhere on the card, the
+        // caption's line included.
+        active: rail.classList.contains("mdm-chrome--active"),
+        copy: table.getAttribute("data-mdm-source"),
+        differ: window.__mdm.checkDecorations(),
+      };
+    });
+  };
+  try {
+    const under = await card("Under the");
+    const long = ": Under the rows, in words enough to run past the column of the card and to be scrolled with its rows {#tbl-under}";
+    assert.deepEqual(under.lines, ["| a | b |", "|---|---|", "| 1 | 2 |", "", long]);
+    assert.deepEqual(under.looks, [under.code], "a line of the card is not on the card a block of code is on");
+    assert.deepEqual([under.widths, under.first, under.last, under.under, under.level, under.active, under.differ], [1, true, true, true, 0, true, null]);
+    assert.equal(under.copy, "| a | b |\n|---|---|\n| 1 | 2 |\n\n" + long);
+    // From a cell, the same card.
+    assert.deepEqual((await card("| 1 |")).lines, under.lines);
+    const over = await card("Over the");
+    assert.equal(over.active, true, "the rail is not marked with the caret in the caption over the rows");
+    assert.deepEqual((await card("| 3 |")).lines, over.lines);
+    assert.deepEqual(over.lines, [": Over the rows {#tbl-over}", "| c | d |", "|---|---|", "| 3 | 4 |"]);
+    assert.deepEqual(over.looks, [over.code]);
+    assert.deepEqual([over.widths, over.first, over.last, over.under, over.level, over.active, over.differ], [1, true, true, true, 0, true, null]);
+    assert.equal(over.copy, ": Over the rows {#tbl-over}\n| c | d |\n|---|---|\n| 3 | 4 |");
+    assert.equal(await docText(h.page), TABLE_CAPTION_DOC, "the document was changed by looking at it");
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  // In a quote, a caption of two lines: the > of its second line is put
+  // away on the card, as a row's is. And a caption that opens an item of a
+  // list: the item's marker is drawn once, by the drawing while the
+  // caption's line is put away and by that line while it is on the card.
+  const nested = [
+    "Before.",
+    "",
+    "> | e | f |",
+    "> |---|---|",
+    "> | 5 | 6 |",
+    ">",
+    "> : In a quote,",
+    "> on two lines {#tbl-q}",
+    "",
+    "- : Opening an item {#tbl-item}",
+    "",
+    "  | g | h |",
+    "  |---|---|",
+    "  | 7 | 8 |",
+    "",
+    "After.",
+  ].join("\n");
+  const g = await open({ text: nested, scores: 0, withFrontMatter: false });
+  const markers = () => g.page.evaluate(() => Array.from(document.querySelectorAll("#app .mdm-li-marker")).filter((m) => m.getBoundingClientRect().width > 0).length);
+  try {
+    await setSelection(g.page, await posOf(g.page, "| 5 |"));
+    await sleep(300);
+    const quoted = await g.page.evaluate(() => Array.from(document.querySelectorAll("#app .cm-line.mdm-table-line")).map((l) => l.textContent));
+    assert.deepEqual(quoted.slice(3), ["", ": In a quote,", "on two lines {#tbl-q}"]);
+    await setSelection(g.page, await posOf(g.page, "After."));
+    await sleep(300);
+    assert.equal(await markers(), 1, "the marker of the item is not drawn once with the caption put away");
+    await setSelection(g.page, await posOf(g.page, "| 7 |"));
+    await sleep(300);
+    assert.equal(await markers(), 1, "the marker of the item is not drawn once with the caption on the card");
+    assert.equal(await g.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(g.errors, []);
+  } finally {
+    await g.close();
+  }
+});
+
 // The copy button of a table copies the table as Markdown, its rows as they
 // were typed and nothing of the quote or the list it stands in, the way the
 // copy of a card of code leaves those out. The rail comes up on a shut table

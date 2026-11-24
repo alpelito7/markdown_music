@@ -247,6 +247,31 @@ test("the header says what a figure is called in its caption and in a reference,
   assert.equal(X.figureLook("crossref:\n  title-delim: \"\"\n").delim, "");
 });
 
+test("a figure stands where its own fig-align asks, else where the header's does, else in the middle", () => {
+  // The header's word, under `format: html:` before the top level, as the
+  // page reads it; one of Quarto's three or none.
+  assert.equal(X.figureAlign(""), null);
+  assert.equal(X.figureAlign("fig-align: right\n"), "right");
+  assert.equal(X.figureAlign("fig-align: \"center\"\n"), "center");
+  assert.equal(X.figureAlign("fig-align: default\n"), null);
+  assert.equal(X.figureAlign("fig-align: middle\n"), null);
+  assert.equal(X.figureAlign("fig-align: left\nformat:\n  html:\n    fig-align: right\n"), "right");
+  assert.equal(X.figureAlign("fig-align: left\nformat:\n  pdf:\n    fig-align: right\n"), "left");
+  assert.equal(X.figureAlign("format:\n  html:\n    toc: true\n"), null);
+  // A figure's own word first, then the header's, then the middle, as
+  // Quarto has it (the owner, 2026-11-21: until then the left, where MDM
+  // had always stood a figure); `default` is none of its own, and a word
+  // Quarto does not know is the middle, whatever the header says, as
+  // Quarto takes it (validatedAlign).
+  assert.equal(X.figureAlignOf("center", "right"), "center");
+  assert.equal(X.figureAlignOf(null, "right"), "right");
+  assert.equal(X.figureAlignOf("default", "right"), "right");
+  assert.equal(X.figureAlignOf("middle", "right"), "center");
+  assert.equal(X.figureAlignOf(null, null), "center");
+  assert.equal(X.figureAlignOf("default", null), "center");
+  assert.equal(X.figureAlignOf("Right", null), "center");
+});
+
 test("a figure's caption opens as Quarto printed it, and a figure inside a figure with its letter", () => {
   const opens = (header, n, captioned) => {
     const look = X.figureLook(header);
@@ -478,6 +503,187 @@ test("a reference to a table prints what Quarto printed for it, beside a figure 
   // or beside a figure.
   assert.equal(X.reference("@tbl-one", equations, X.look(""), float(figures, "Figure")), null);
   assert.equal(X.reference("[@fig-a; @tbl-one]", equations, X.look(""), float(figures, "Figure")), null);
+});
+
+// ---------- Where a figure's caption stands ----------
+
+test("the header puts every figure's caption over it or under it by Quarto's fig-cap-location, the page's word over the document's", () => {
+  assert.equal(X.figureCapLocation(""), null);
+  assert.equal(X.figureCapLocation("fig-cap-location: top\n"), "top");
+  assert.equal(X.figureCapLocation("fig-cap-location: \"bottom\"\n"), "bottom");
+  assert.equal(X.figureCapLocation("fig-cap-location: margin\n"), null);
+  assert.equal(X.figureCapLocation("fig-cap-location: top\nformat:\n  html:\n    fig-cap-location: bottom\n"), "bottom");
+  assert.equal(X.figureCapLocation("fig-cap-location: top\nformat:\n  pdf:\n    fig-cap-location: bottom\n"), "top");
+  // A table's word is not a figure's.
+  assert.equal(X.figureCapLocation("tbl-cap-location: top\n"), null);
+  assert.equal(X.capWord(" top "), "top");
+  assert.equal(X.capWord("Top"), null);
+});
+
+// ---------- Where a table stands ----------
+
+test("a table stands where the header's tbl-align asks, read as fig-align is, MDM's word where Quarto has none", () => {
+  assert.equal(X.tableAlign(""), null);
+  assert.equal(X.tableAlign("tbl-align: left\n"), "left");
+  assert.equal(X.tableAlign("tbl-align: \"right\"\n"), "right");
+  assert.equal(X.tableAlign("tbl-align: default\n"), null);
+  assert.equal(X.tableAlign("tbl-align: middle\n"), null);
+  assert.equal(X.tableAlign("tbl-align: left\nformat:\n  html:\n    tbl-align: right\n"), "right");
+  assert.equal(X.tableAlign("tbl-align: left\nformat:\n  pdf:\n    tbl-align: right\n"), "left");
+  // A figure's word is not a table's, nor a table's a figure's.
+  assert.equal(X.tableAlign("fig-align: left\n"), null);
+  assert.equal(X.figureAlign("tbl-align: left\n"), null);
+});
+
+// ---------- Options at the head of a block, and listings ----------
+//
+// A score and a piece of code take a label, a caption and a place in lines
+// at their head, the language's comment mark and a `|`, as a cell of
+// Quarto's does (the owner, 2026-11-21). The page reads them in mdm.lua and
+// is held against the editor in html.test.js; the editor draws them as
+// webview-markdown.test.js holds.
+
+// bin/quarto.js of the Quarto on the PATH, or null.
+function quartoScript() {
+  const dir = quartoLanguages();
+  if (!dir) return null;
+  const file = path.join(dir, "..", "..", "bin", "quarto.js");
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+}
+
+test("every language takes the comment mark Quarto reads a cell's options by", (t) => {
+  const script = quartoScript();
+  if (!script) {
+    t.skip("no Quarto on the PATH");
+    return;
+  }
+  // The table partitionCellOptions reads (kLangCommentChars, the first one
+  // in the script), each entry `name: "mark"` or `name: ["open", "close"]`.
+  const body = /var kLangCommentChars = \{([\s\S]*?)\n\};/.exec(script);
+  assert.ok(body, "Quarto's table of comment marks was not found");
+  const entries = Array.from(body[1].matchAll(/^\s*(\w+): (\[[^\]]*\]|"(?:[^"\\]|\\.)*")/gm));
+  assert.ok(entries.length > 40, "the table read short: " + entries.length);
+  for (const e of entries) {
+    const quarto = JSON.parse(e[2]);
+    assert.deepEqual(X.commentMark(e[1]), Array.isArray(quarto) ? quarto : [quarto], e[1]);
+  }
+  // A language it does not name takes `#`, as Quarto's does; a score `%`.
+  assert.deepEqual(X.commentMark("text"), ["#"]);
+  assert.deepEqual(X.commentMark("abc"), ["%"]);
+  assert.deepEqual(X.commentMark("JavaScript"), ["//"]);
+});
+
+test("the options at the head of a block are read as Quarto reads a cell's, and no further", () => {
+  const read = (lang, text) => X.blockOptions(lang, text.split("\n"));
+  // The mark, any spaces, a bar and one space at most; YAML after it.
+  assert.deepEqual(read("abc", "%| label: fig-scale\n%| fig-cap: \"The *natural* minor.\"\n%|fig-align: left\nX:1"), {
+    count: 3,
+    options: { label: "fig-scale", "fig-cap": "The *natural* minor.", "fig-align": "left" },
+  });
+  assert.deepEqual(read("python", "# | label: lst-x\n#| lst-cap: Step by step\nprint(1)"), {
+    count: 2,
+    options: { label: "lst-x", "lst-cap": "Step by step" },
+  });
+  // Up to the first line that is none: one written after the code is code.
+  assert.deepEqual(read("python", "#| label: lst-x\nprint(1)\n#| lst-cap: late"), { count: 1, options: { label: "lst-x" } });
+  assert.deepEqual(read("python", "print(1)\n#| label: lst-x"), { count: 0, options: {} });
+  // A mark of two parts closes on its line, or the line is code.
+  assert.deepEqual(read("c", "/*| label: lst-c */\n/*| lst-cap: x */\nint x;"), { count: 2, options: { label: "lst-c", "lst-cap": "x" } });
+  assert.deepEqual(read("c", "/*| label: lst-c\nint x;"), { count: 0, options: {} });
+  // Each language its own mark: a `#|` is code to JavaScript.
+  assert.deepEqual(read("js", "#| label: lst-x\nlet x;"), { count: 0, options: {} });
+  assert.deepEqual(read("js", "//| label: lst-x\nlet x;"), { count: 1, options: { label: "lst-x" } });
+  // A caption written over several lines, as YAML lets it.
+  assert.equal(read("abc", "%| fig-cap: |\n%|   Two\n%|   lines.\nX:1").options["fig-cap"].trim(), "Two\nlines.");
+  // A block that names no language has no options.
+  assert.deepEqual(read("", "#| label: lst-x\nx"), { count: 0, options: {} });
+});
+
+test("a block's language is the first word of its fence, or the first class of its braces", () => {
+  assert.equal(X.infoLanguage("python"), "python");
+  assert.equal(X.infoLanguage("Python {.numberLines}"), "python");
+  assert.equal(X.infoLanguage("{#lst-x .python lst-cap=\"a b\"}"), "python");
+  assert.equal(X.infoLanguage("{.abc .play}"), "abc");
+  assert.equal(X.infoLanguage("{#lst-x}"), "");
+  assert.equal(X.infoLanguage(""), "");
+});
+
+test("a score's options make a figure of it and a code block's a listing, as Quarto makes them of a picture and of braces", () => {
+  const float = (lang, options) => X.blockFloat(lang, options);
+  // A score: numbered with a `fig-` label, captioned with no number with a
+  // caption alone, placed by its own word, and nothing at all with none.
+  assert.deepEqual(float("abc", { label: "fig-a", "fig-cap": "A.", "fig-align": "left" }), { kind: "fig", label: "fig-a", caption: "A.", align: "left", cap: null });
+  assert.deepEqual(float("abc", { label: "fig-a" }), { kind: "fig", label: "fig-a", caption: "", align: null, cap: null });
+  assert.deepEqual(float("abc", { "fig-cap": "B." }), { kind: "fig", label: null, caption: "B.", align: null, cap: null });
+  assert.deepEqual(float("abc", { "fig-align": "right" }), { kind: null, label: null, caption: "", align: "right", cap: null });
+  assert.deepEqual(float("abc", { "fig-align": "default" }), null);
+  assert.deepEqual(float("abc", { "fig-align": "middle" }), { kind: null, label: null, caption: "", align: "center", cap: null });
+  assert.deepEqual(float("abc", { label: "tune", "fig-cap": "C." }), { kind: "fig", label: null, caption: "C.", align: null, cap: null });
+  // Its caption over it or under it by its own `fig-cap-location`, Quarto's
+  // two words; `margin` and any other is none of its own.
+  assert.equal(float("abc", { label: "fig-a", "fig-cap-location": "bottom" }).cap, "bottom");
+  assert.equal(float("abc", { "fig-cap": "D.", "fig-cap-location": "top" }).cap, "top");
+  assert.equal(float("abc", { label: "fig-a", "fig-cap-location": "margin" }).cap, null);
+  assert.equal(float("abc", {}), null);
+  // A caption over two lines is one line of words.
+  assert.equal(float("abc", { "fig-cap": "Two\nlines.\n" }).caption, "Two lines.");
+  // Code: a listing with both an `lst-` label and a caption, and with
+  // either alone nothing, as Quarto has it (`{#lst-a .python}` is no
+  // listing, and `{.python lst-cap="x"}` prints no caption, 1.11.9).
+  assert.deepEqual(float("python", { label: "lst-a", "lst-cap": "Steps." }), { kind: "lst", label: "lst-a", caption: "Steps.", align: null, cap: null });
+  assert.equal(float("python", { label: "lst-a" }), null);
+  assert.equal(float("python", { "lst-cap": "Steps." }), null);
+  assert.equal(float("python", { label: "fig-a", "fig-cap": "A." }), null);
+  assert.equal(float("abc", { label: "lst-a", "lst-cap": "x" }), null);
+});
+
+test("every language names a listing as Quarto's own language file does", (t) => {
+  const dir = quartoLanguages();
+  if (!dir) {
+    t.skip("no Quarto on the PATH");
+    return;
+  }
+  const files = fs.readdirSync(dir).filter((f) => /^_language(?:-.+)?\.yml$/.test(f));
+  assert.ok(files.length > 30, "Quarto's language files were not found in " + dir);
+  const seen = new Set();
+  for (const file of files) {
+    const tag = file.replace(/^_language-?/, "").replace(/\.yml$/, "");
+    seen.add(tag);
+    const lines = fs.readFileSync(path.join(dir, file), "utf8").split(/\r?\n/);
+    assert.ok(!lines.some((l) => /^crossref-lst-prefix:/.test(l)), file + " has a crossref-lst-prefix");
+    const line = lines.find((l) => /^crossref-lst-title:/.test(l));
+    if (!line) {
+      assert.ok(!Object.prototype.hasOwnProperty.call(X.LISTING_TITLES, tag), tag + " has no title in Quarto");
+      continue;
+    }
+    const value = /^crossref-lst-title:\s*"([^"]*)"/.exec(line) || /^crossref-lst-title:\s*(\S+)/.exec(line);
+    assert.equal(X.LISTING_TITLES[tag], value[1], "the title of " + (tag || "English"));
+  }
+  for (const tag of Object.keys(X.LISTING_TITLES)) assert.ok(seen.has(tag), tag + " is not one of Quarto's languages");
+});
+
+test("the header says what a listing is called, by a figure's keys with `lst` for `fig`, and a reference to one prints what Quarto printed", () => {
+  assert.deepEqual(X.listingLook(""), { title: "Listing", prefix: "Listing", labels: "arabic", delim: ":" });
+  assert.deepEqual(X.listingLook("lang: es\n"), { title: "Listado", prefix: "Listado", labels: "arabic", delim: ":" });
+  assert.equal(X.listingLook("crossref:\n  fig-title: Lámina\n").title, "Listing");
+  assert.deepEqual(X.listingLook("crossref:\n  lst-title: Código\n  lst-prefix: código\n"), { title: "Código", prefix: "código", labels: "arabic", delim: ":" });
+  const look = X.listingLook("lang: es\n");
+  assert.equal(X.caption(X.number(1, look.labels), look, true), "Listado\u00a01: ");
+  // "Listing 1" for `@lst-scale`, beside a figure, and "?@lst-zz" for a
+  // label nothing carries (measured on 1.11.9, 2026-11-21).
+  const listings = { numbers: new Map([["lst-scale", "1"]]), prefix: "Listing" };
+  const figures = { numbers: new Map([["fig-a", "2"]]), prefix: "Figure" };
+  assert.deepEqual(X.reference("@lst-scale", new Map(), X.look(""), null, null, listings), [
+    { kind: "link", text: "Listing\u00a01", label: "lst-scale", ref: "lst" },
+  ]);
+  assert.deepEqual(X.reference("[@fig-a; @lst-scale]", new Map(), X.look(""), figures, null, listings).map((p) => p.text), [
+    "Figure\u00a02",
+    ", ",
+    "Listing\u00a01",
+  ]);
+  assert.deepEqual(X.reference("@lst-zz", new Map(), X.look(""), null, null, listings), [{ kind: "missing", text: "?@lst-zz", label: "lst-zz" }]);
+  // Without the listings counted, a citation of one is left as written.
+  assert.equal(X.reference("@lst-scale", new Map(), X.look("")), null);
 });
 
 // ---------- Sections by number ----------

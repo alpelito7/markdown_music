@@ -65,6 +65,18 @@
   --mdm-score-pad-inline: 0;
   --mdm-score-radius: 0;
   --mdm-score-margin: auto;
+  /* And on its right, which only a score whose own `fig-align` says
+     `right` takes from the right edge (`.mdm-score-right`, below). */
+  --mdm-score-margin-end: auto;
+  /* Where a score's caption stands: under it, as the score does (look_css
+     in mdm.lua sets the left with the scores). */
+  --mdm-score-caption-align: center;
+  /* Where a table stands, and its caption with it: in the middle, unless
+     the header's `tbl-align` says otherwise (look_css) or the table's own
+     word does (`.mdm-table-left`, below). */
+  --mdm-table-left: auto;
+  --mdm-table-right: auto;
+  --mdm-table-caption-align: center;
   /* The page at the editor's 100 (PAGE_AT in vscode-mdm/media/main.js and
      --mdm-zoom in its style.css): 0.9 of the lengths this sheet names, the
      owner's ask of 2026-11-16, so that the editor at 100 is still the page
@@ -335,27 +347,62 @@ body p {
    holding theirs as paragraphs. Headings and table cells are neither, and
    stay ragged on both surfaces. Chromium chooses where a line breaks before
    it justifies it, so the words each line ends on are the editor's either way
-   (html.test.js, line by line). It outranks Quarto's centring of a figure's
+   (html.test.js, line by line). It outranks Quarto's placing of a figure's
    paragraph (`.quarto-figure-center > figure > p`, a class and two elements
-   against a class and three), so a picture stands flush left under the text,
-   where the editor draws it; mdm.lua stands it there on paper too (measured
-   2026-09-27, a comment here had said the centring won). */
+   against a class and three), which the rule below gives back. */
 body main.content p,
 body main.content li {
   text-align: var(--mdm-text-align);
 }
-/* A figure with a label (`![...](a.png){#fig-a}`) is a float to Quarto, its
-   picture in a div of its own where the unlabelled one's is in a paragraph,
-   so the rule above does not reach it and Quarto's centring did
-   (`.quarto-figure-center > figure > div`): a 256px picture stood 282px in
-   from the left of the 820px column, over a caption set flush left, where
-   the editor draws every figure flush left and the page the one without a
-   label (measured 2026-10-12, when the editor began to number them). Named
-   from `body main.content` it outranks Quarto's class and two elements,
-   whichever way the figure asks to be aligned, as the paragraph rule does
-   for a figure with no label. */
-body main.content .quarto-figure > figure.quarto-float > div[aria-describedby] {
-  text-align: left;
+/* A figure stands across the column where Quarto stands it, by the class it
+   writes on the figure from the picture's `fig-align` or the header's, in
+   the middle where neither asks: the editor answers the same way
+   (figureAlignOf in vscode-mdm/media/mdm-crossref.js; the owner, 2026-11-20
+   and 2026-11-21). The picture is in a paragraph of the figure where the
+   figure has no label and in a div of its own where it has one (a float),
+   and the paragraph rule above would set the first by the prose's
+   alignment, which is the left for a picture alone in its row and is what
+   `quarto-figure-left` asks. Until 2026-11-21 every figure stood at the
+   left here, as the editor drew it. The caption stands the same way under
+   it, centred under a figure in the middle and at the right under one at
+   the right (the owner, 2026-11-21: every caption centred where what it
+   captions is centred), where Quarto's page left it at the left; the
+   editor draws it so (`.mdm-figure--center .mdm-figcaption`). A score's
+   figure is captioned as the scores stand, which mdm.scoreAlign says and
+   Quarto's class does not. */
+body main.content .quarto-figure-center > figure > :is(p, div[aria-describedby]) {
+  text-align: center;
+}
+body main.content .quarto-figure-right > figure > :is(p, div[aria-describedby]) {
+  text-align: right;
+}
+body main.content .quarto-figure-center > figure > figcaption {
+  text-align: center;
+}
+body main.content .quarto-figure-right > figure > figcaption {
+  text-align: right;
+}
+body main.content .quarto-figure > figure:has(figure.mdm-block) > figcaption {
+  text-align: var(--mdm-score-caption-align);
+}
+/* A labelled figure that names its own `fig-align` has Quarto write the
+   figure's classes on its picture as well (`<img class="quarto-figure
+   quarto-figure-right figure-img">`, 1.11.9), and with them the 1em under
+   a figure: 14.4px between such a picture and its caption where every
+   other figure has the picture's 0.5rem, 7.65px, and the editor its 7.6
+   (measured 2026-11-21). */
+body main.content img.quarto-figure.figure-img {
+  margin-bottom: 0.5rem;
+}
+/* A caption over its picture (`fig-cap-location: top`, the figure's own or
+   the header's) stands as far from it as one under it, and the picture
+   keeps nothing under it: Quarto leaves the 0.5rem under the picture, which
+   set the caption on the picture and the air under the figure 7px deeper
+   than the editor's (`.mdm-figure--cap-top` in media/style.css; measured
+   2026-11-21). */
+body main.content figure:has(> figcaption:first-child) img.figure-img {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
 }
 /* A caption, under a figure or at a table, in the ink of the prose, as the
    editor draws it (`#app .mdm-figcaption`) and the PDF sets it (look_tex in
@@ -429,7 +476,7 @@ body main.content table {
      and no wider than the column, where it scrolls them. */
   width: fit-content;
   max-width: 100%;
-  margin: 0 auto 1em;
+  margin: 0 var(--mdm-table-right) 1em var(--mdm-table-left);
   padding: 0.3em 0;
   border: none;
   overflow-x: auto;
@@ -477,8 +524,46 @@ body main.content figure.quarto-subfloat-tbl > figcaption,
 body main.content .mdm-table-caption {
   margin: 0;
   padding: 0;
-  text-align: center;
+  text-align: var(--mdm-table-caption-align);
   line-height: 1.5;
+}
+/* A table that names its own place (`tbl-align`, table_place in mdm.lua),
+   on its caption's braces or on a div around it: the class is on the table
+   and on the caption mdm-after.lua takes out of it, on Quarto's float for a
+   labelled one, or on the div, and what is inside takes the place from it.
+   The editor stands it so (`.mdm-table--left` in media/style.css). */
+body main.content .mdm-table-left {
+  --mdm-table-left: 0;
+  --mdm-table-right: auto;
+  --mdm-table-caption-align: left;
+}
+body main.content .mdm-table-center {
+  --mdm-table-left: auto;
+  --mdm-table-right: auto;
+  --mdm-table-caption-align: center;
+}
+body main.content .mdm-table-right {
+  --mdm-table-left: auto;
+  --mdm-table-right: 0;
+  --mdm-table-caption-align: right;
+}
+/* A caption written under its table stands under it on the page too (the
+   owner, 2026-11-20): Quarto's for a labelled table, which mdm.lua tells
+   `tbl-cap-location: bottom`, and the block mdm-after.lua sets after a
+   table with no label. The em the table keeps under it for the prose after
+   it goes under the caption instead, so the caption sits on the table at
+   the distance the editor draws it (TableWidget), the 0.3em of the table's
+   own box. The table's margin and the caption's collapse through the div
+   Quarto holds the table in, and -1em takes it back there. */
+body main.content figure.quarto-float-tbl > figcaption.quarto-float-caption-bottom {
+  margin-top: -1em;
+  margin-bottom: 1em;
+}
+body main.content table.mdm-caption-below {
+  margin-bottom: 0;
+}
+body main.content table.mdm-caption-below + .mdm-table-caption {
+  margin-bottom: 1em;
 }
 /* The caption left inside a table, should one get there: over the column
    and not over the table's own width. */
@@ -1355,7 +1440,53 @@ body .code-copy-button:hover {
    the text. */
 .mdm-fit {
   margin-left: var(--mdm-score-margin);
-  margin-right: auto;
+  margin-right: var(--mdm-score-margin-end);
+}
+/* A score whose block names its own place (`%| fig-align: left`,
+   block_options in mdm.lua) stands there whatever the scores do, and its
+   player and its caption with it, as the editor stands it
+   (`.mdm-score--left` and the rest in media/style.css). The caption is
+   the figure's, beside the block and not inside it, hence the `:has`. */
+body .mdm-score-left {
+  --mdm-score-margin: 0;
+  --mdm-score-margin-end: auto;
+}
+body .mdm-score-center {
+  --mdm-score-margin: auto;
+  --mdm-score-margin-end: auto;
+}
+body .mdm-score-right {
+  --mdm-score-margin: auto;
+  --mdm-score-margin-end: 0;
+}
+body main.content .quarto-figure > figure:has(figure.mdm-score-left) > figcaption {
+  text-align: left;
+}
+body main.content .quarto-figure > figure:has(figure.mdm-score-center) > figcaption {
+  text-align: center;
+}
+body main.content .quarto-figure > figure:has(figure.mdm-score-right) > figcaption {
+  text-align: right;
+}
+/* And its caption stands as far from the engraving as a picture's from the
+   picture, 0.5rem, the editor's 0.53em (`.mdm-score--captioned` and
+   `--cap-top` in media/style.css), over it or under it: the score's own
+   blank line was 14.4px of air between the two (measured 2026-11-21). Only
+   the figure the options make (`mdm-score-figure`, block_options in
+   mdm.lua); the div of a score with its caption written as a paragraph
+   (`::: {#fig-x}`) keeps the blank. */
+body main.content .mdm-score-figure > figure:has(> figcaption:last-child) figure.mdm-block {
+  margin-bottom: 0.5rem;
+}
+body main.content .mdm-score-figure > figure:has(> figcaption:first-child) figure.mdm-block {
+  margin-top: 0.5rem;
+}
+/* A listing's caption stands over its code as far as a picture's caption
+   under the picture, where Quarto's block of code kept its 1em over it:
+   23.4px from the caption to the first row of code against the editor's
+   9 (measured 2026-11-21; `.mdm-listing-caption` in media/style.css). */
+body main.content figure.quarto-float-lst div.sourceCode {
+  margin-top: 0.5rem;
 }
 
 /* ---------- The player bar ----------
@@ -1396,6 +1527,7 @@ body .mdm-audio {
   cursor: default;
   margin: 8px auto 0;
   margin-left: var(--mdm-score-margin);
+  margin-right: var(--mdm-score-margin-end);
   color: var(--mdm-syn-comment);
 }
 body .mdm-audio:focus {
@@ -2051,8 +2183,24 @@ body .mdm-audio .abcjs-loading-svg circle {
      and Chrome sets its head again at the top of the next sheet, and a
      display equation goes to the next sheet whole: both measured the same
      day, neither needing a rule. */
-  body main.content figure:not(.mdm-block) {
+  body main.content figure:not(.mdm-block):not(:has(figure.mdm-block)):not(.quarto-float-lst) {
     break-inside: avoid;
+  }
+  /* A figure that holds a score, or a listing, is not held whole: the rule
+     above held the float round a score's engraving, which breaks between
+     its systems, and round a listing, whose card of code runs on over the
+     sheet as any card does, and each went to the next sheet whole, leaving
+     a third of the one before it blank (a score of twelve systems and a
+     listing of sixty rows after a page of prose, printed by the export on
+     2026-11-21; the `::: {#fig-x}` form of a score did the same since it was
+     made). They break where the drawing breaks, and the caption is held to
+     the piece next to it: over the first, or under the last. */
+  body main.content figure:has(figure.mdm-block) > figcaption:first-child,
+  body main.content figure.quarto-float-lst > figcaption:first-child {
+    break-after: avoid;
+  }
+  body main.content figure:has(figure.mdm-block) > figcaption:last-child {
+    break-before: avoid;
   }
   /* The contents on paper (resources/mdm-toc.js puts a copy of the page's
      own into the flow), set as the typeset PDF sets its own, which is the one

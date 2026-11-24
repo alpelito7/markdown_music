@@ -125,16 +125,26 @@ end
 -- tables of 2026-10-12): a caption in there is as wide as the table and no
 -- wider, a word to a line over a table of two short columns, or it widens
 -- the box and leaves the rows at its left. So the caption comes out of the
--- table here and stands before it as a block of its own, which the
--- stylesheet sets as it sets the other, and the editor draws the two alike
--- (TableWidget in vscode-mdm/media/main.js). Only on a page: LaTeX sets its
--- own captions. It runs after Quarto has read the braces a caption may end
--- on (`{.striped}`), which is why it is here and not in mdm.lua.
+-- table here and stands before it as a block of its own, or after it where
+-- the caption is written under the table (the class `mdm-caption-below`,
+-- which mdm.lua gives the table off the source; the owner, 2026-11-20),
+-- which the stylesheet sets as it sets the other, and the editor draws the
+-- two alike (TableWidget in vscode-mdm/media/main.js). Only on a page:
+-- LaTeX sets its own captions. It runs after Quarto has read the braces a
+-- caption may end on (`{.striped}`), which is why it is here and not in
+-- mdm.lua. The caption stands where its table does (`mdm-table-left`, which
+-- mdm.lua gives a table whose braces ask for a side), so it carries the
+-- table's class for it.
 local function table_caption(el)
   if not FORMAT:match("html") then return nil end
   if #el.caption.long == 0 then return nil end
-  local caption = pandoc.Div(el.caption.long, pandoc.Attr("", { "mdm-table-caption" }))
+  local classes = { "mdm-table-caption" }
+  for _, c in ipairs(el.classes) do
+    if c:match("^mdm%-table%-") then classes[#classes + 1] = c end
+  end
+  local caption = pandoc.Div(el.caption.long, pandoc.Attr("", classes))
   el.caption.long = pandoc.Blocks({})
+  if el.classes:includes("mdm-caption-below") then return { el, caption } end
   return { caption, el }
 end
 

@@ -216,6 +216,17 @@ local function read_look(meta)
     -- its own, which the scale below leaves alone.
     mathfont = meta_string(meta, "mathfont") ~= nil,
     mainfont = meta_string(meta, "mainfont") ~= nil,
+    -- Not one either: where the header stands every table (`tbl-align`,
+    -- MDM's own word; table_place has the rules). Quarto keeps a key it
+    -- does not know in the metadata, from the top level or from under
+    -- `format: html:`, where it is taken over the top level's (measured on
+    -- 1.11.9, 2026-11-21).
+    table_align = meta_word(meta, "tbl-align", { left = true, center = true, right = true, default = true }, "center"),
+    -- Nor this: where the header puts every figure's caption, Quarto's
+    -- `fig-cap-location` (`format: html:` over the top level, as Quarto
+    -- hands it to a filter, measured on 1.11.9), or nil for none; a score
+    -- takes it where its own options name none (score_cap).
+    figure_cap = meta_word(meta, "fig-cap-location", { top = true, bottom = true }, nil),
     colors = {},
   }
   for _, slot in ipairs(SYNTAX_SLOTS) do
@@ -279,9 +290,24 @@ local function look_css(l)
     put("score-pad-inline", "0.8em")
     put("score-radius", "4px")
   end
+  -- Every table stands where the header's `tbl-align` says, unless it says
+  -- otherwise itself (table_place): the middle, which the stylesheet holds,
+  -- or a side.
+  if l.table_align == "left" then
+    put("table-left", "0")
+    put("table-right", "auto")
+    put("table-caption-align", "left")
+  elseif l.table_align == "right" then
+    put("table-left", "auto")
+    put("table-right", "0")
+    put("table-caption-align", "right")
+  end
   -- A score sits centred like a display equation, unless the editor was set
   -- to line them up with the text.
-  if l.score_align == "left" then put("score-margin", "0") end
+  if l.score_align == "left" then
+    put("score-margin", "0")
+    put("score-caption-align", "left")
+  end
   -- The roman, when the editor was in it. The faces themselves ride with the
   -- page as their own dependency (ensure_look), and this is the line that
   -- spends them: mdm-look.css sets --mdm-text to the sans and reads it on the
@@ -1434,16 +1460,21 @@ local function ensure_katex_dep()
   })
 end
 
-local function render_html(el)
+-- `place` is where the block's own `fig-align` stands it (block_options),
+-- or nil for where every score stands: a class of its own, which
+-- mdm-look.css reads into the margins of the drawing and of its player and
+-- into the side of a caption over it.
+local function render_html(el, place)
   ensure_html_deps()
   local playable = el.classes:includes("play")
   local html = string.format(
-    '<figure class="mdm-block%s">' ..
+    '<figure class="mdm-block%s%s">' ..
     '<pre class="mdm-src" style="display:none">%s</pre>' ..
     '<div class="mdm-paper"></div>' ..
     '<div class="mdm-audio"></div>' ..
     '</figure>',
     playable and " mdm-play" or "",
+    place and (" mdm-score-" .. place) or "",
     html_escape(el.text))
   return pandoc.RawBlock("html", html)
 end
@@ -2589,15 +2620,34 @@ end
 -- the rest of the page blank, and a score longer than a page has nowhere
 -- to go at all. Music is written to be read across a page turn, so the
 -- break belongs where the engraving already leaves a gap.
+-- Where the score being engraved stands, when its block says so itself
+-- (`%| fig-align: left`, block_options): `left`, `center` or `right`, or nil
+-- for where every score stands (mdm.scoreAlign, look.score_align). Set by
+-- CodeBlock around the one block it draws.
+local score_place_now = nil
+
+-- What sets a narrow score in its place on paper: \noindent at the left,
+-- \centering in the middle, and \raggedleft at the right, which is
+-- \centering with the left glue alone, the indent zeroed as both zero it
+-- (LaTeX2e's definitions). The right is unmeasured: no TeX on the machine it
+-- was written on (2026-11-21, tests/README.md).
+local function score_set(place)
+  if place == "left" then return "\\noindent" end
+  if place == "right" then return "\\raggedleft" end
+  return "\\centering"
+end
+
 -- An abcjs engraving on paper, at the size the editor draws it: one CSS
 -- pixel of it, which Chrome printed at 0.75 bp, to a sixteenth of the body's
 -- em, clamped to the box a score may take (\mdmscoreat, in the preamble).
 -- Every such score is narrower than the measure, as it is narrower than the
 -- editor's column, so every one is placed the way the editor places a score
--- that does not fill the line: centred, or lined up left.
-local function abcjs_score_tex(pdf, width_pt, left, height, cuts)
+-- that does not fill the line: centred, lined up left, or right where its
+-- own `fig-align` says (score_set).
+local function abcjs_score_tex(pdf, width_pt, place, height, cuts)
+  local left = place == "left"
   local at = string.format("\\mdmscoreat{%.4f}", width_pt / PX_TO_PT / 16)
-  local align = left and "\\noindent" or "\\centering"
+  local align = score_set(place)
   if not height then
     return string.format(
       "\\mdmscoreband{%s%s\\mdmscore{\\includegraphics[width=\\mdmscorew]{%s}}}",
@@ -2606,7 +2656,7 @@ local function abcjs_score_tex(pdf, width_pt, left, height, cuts)
   local pad = "\\dimexpr\\mdmscorew+1.4em\\relax"
   local indent = left and "\\noindent" or ""
   local out = { "\\mdmscoreband{\\mdmslicestack{%", at }
-  if not left then out[#out + 1] = "\\centering" end
+  if not left then out[#out + 1] = align end
   out[#out + 1] = "\\mdmslicepad{" .. pad .. "}"
   for i = 1, #cuts + 1 do
     out[#out + 1] = string.format(
@@ -2623,6 +2673,7 @@ end
 -- An abcm2ps engraving has no pixels, and keeps the older rule below: a
 -- narrow one at its natural size, anything else at the text width.
 local function insert_score(digest, px)
+  local place = score_place_now or (look and look.score_align) or "center"
   local pdf = CACHE_DIR .. "/" .. digest .. ".pdf"
   local width_pt = nil
   local wf = io.open(CACHE_DIR .. "/" .. digest .. ".w", "r")
@@ -2630,33 +2681,32 @@ local function insert_score(digest, px)
     width_pt = tonumber(wf:read("*a"))
     wf:close()
   end
-  local left = look and look.score_align == "left"
+  local left = place == "left"
   local narrow = width_pt and width_pt < 330
   local height, cuts = read_cuts(digest)
   if px and width_pt then
-    return pandoc.RawBlock("latex", abcjs_score_tex(pdf, width_pt, left, height, cuts))
+    return pandoc.RawBlock("latex", abcjs_score_tex(pdf, width_pt, place, height, cuts))
   end
   if not height then
     if narrow then
       return pandoc.RawBlock("latex", string.format(
-        left and "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics{%s}}}"
-          or "\\mdmscoreband{\\centering\\mdmscore{\\includegraphics{%s}}}",
-        pdf))
+        "\\mdmscoreband{%s\\mdmscore{\\includegraphics{%s}}}", score_set(place), pdf))
     end
     return pandoc.RawBlock("latex", string.format(
       "\\mdmscoreband{\\noindent\\mdmscore{\\includegraphics[width=\\mdmscorewidth]{%s}}}", pdf))
   end
-  -- Centred, the paragraphs need no \noindent: \centering zeroes the
-  -- indent itself. The fill under the slices is padded out to the same
-  -- width the one-piece box has, the drawing plus its 0.7em on either
-  -- side, which is the measure when the score is set at the text width.
+  -- Centred, or at the right, the paragraphs need no \noindent: \centering
+  -- and \raggedleft zero the indent themselves. The fill under the slices
+  -- is padded out to the same width the one-piece box has, the drawing plus
+  -- its 0.7em on either side, which is the measure when the score is set at
+  -- the text width.
   local centred = narrow and not left
   local indent = centred and "" or "\\noindent"
   local pad = narrow
     and string.format("\\dimexpr %.3fbp+1.4em\\relax", width_pt)
     or "\\linewidth"
   local out = { "\\mdmscoreband{\\mdmslicestack{%" }
-  if centred then out[#out + 1] = "\\centering" end
+  if centred then out[#out + 1] = score_set(place) end
   out[#out + 1] = "\\mdmslicepad{" .. pad .. "}"
   for i = 1, #cuts + 1 do
     local trim = string.format("trim=0bp %.3fbp 0bp %.3fbp,clip",
@@ -3386,14 +3436,228 @@ function Math(m)
   )
 end
 
-function CodeBlock(el)
-  if not is_abc_block(el) then return nil end
-  if quarto.doc.is_format("html") then
-    return render_html(el)
-  elseif quarto.doc.is_format("latex") then
-    return render_latex(el)
+-- ---------- Options at the head of a block ----------
+--
+-- A score and a piece of code take a label, a caption and a place the one
+-- way, in lines at the head of the block that open with the language's
+-- comment mark and a `|`, as a cell of Quarto's does (the owner,
+-- 2026-11-21: "both are called with ```"; blockOptions and blockFloat in
+-- vscode-mdm/media/mdm-crossref.js, which the editor reads them by, say the
+-- rules at length):
+--
+--     ```abc                          ```python
+--     %| label: fig-scale             #| label: lst-scale
+--     %| fig-cap: "The scale."        #| lst-cap: "The scale, step by step."
+--     %| fig-align: left              print(1)
+--
+-- A score with a `fig-` label is a figure, numbered with the pictures, and
+-- one with a caption and no label a figure with no number; a code block
+-- with an `lst-` label and an `lst-cap` is a listing, as Quarto makes one of
+-- `{#lst-x .python lst-cap="..."}`, and with only one of the two it is code,
+-- as Quarto has it. Quarto reads such lines only in a cell it runs, and
+-- turns a div into a figure before any filter of the document's but a
+-- `pre-ast` one sees it; what it numbers, though, is its own float
+-- (FloatRefTarget), and one built here at `pre-quarto` is numbered among the
+-- pictures, cited and captioned as Quarto's own (measured on 1.11.9,
+-- 2026-11-21: "Figure 2" after a picture, "Listing 1", `@lst-x` resolved).
+-- The lines are no part of what is drawn, here or in the editor.
+
+-- The comment mark of each language (COMMENT_MARKS in mdm-crossref.js,
+-- where it says whose table it is); a language it does not name takes `#`.
+local COMMENT_MARKS = {
+  abc = "%", apl = "\u{235d}", asy = "//", awk = "#", bash = "#", c = { "/*", "*/" }, cc = "//",
+  coffee = "#", cpp = "//", csharp = "//", css = { "/*", "*/" }, d3 = "//", dockerfile = "#",
+  dot = "//", elm = "#", fortran = "!", fortran95 = "!", fsharp = "//", gap = "#", gawk = "#",
+  go = "//", groovy = "//", haskell = "--", html = { "<!--", "-->" }, java = "//",
+  javascript = "//", js = "//", json = "//", julia = "#", kotlin = "//", latex = "%", lua = "--",
+  markdown = { "<!--", "-->" }, matlab = "%", mermaid = "%%", mysql = "--", node = "//",
+  ocaml = { "(*", "*)" }, octave = "#", ojs = "//", perl = "#", powershell = "#", prql = "#",
+  psql = "--", python = "#", q = "/", r = "#", ruby = "#", rust = "//", sas = { "*", ";" },
+  sass = "//", scala = "//", scss = "//", sed = "#", sql = "--", stan = "#", stata = "*",
+  swift = "//", tikz = "%", typescript = "//", typst = "//", vhdl = "--", yaml = "#",
+}
+
+-- The options at the head of a block, read as YAML, with their lines taken
+-- out of the block's text; nil for a block with none, or that names no
+-- language. A score is the language of `abc` wherever the class stands
+-- (is_abc_block). Lines that are not YAML are left in the block, and said.
+local function block_options(el)
+  local lang = is_abc_block(el) and "abc" or (el.classes[1] and el.classes[1]:lower())
+  if not lang then return nil end
+  local mark = COMMENT_MARKS[lang] or "#"
+  local open, close = mark, nil
+  if type(mark) == "table" then open, close = mark[1], mark[2] end
+  local lines = {}
+  for line in (el.text .. "\n"):gmatch("([^\n]*)\n") do lines[#lines + 1] = line end
+  local yaml, count = {}, 0
+  for i, line in ipairs(lines) do
+    local after = line:match("^" .. open:gsub("%p", "%%%0") .. "%s*|(.*)$")
+    if not after then break end
+    after = after:gsub("^ ", "", 1)
+    if close then
+      local trimmed = after:gsub("%s+$", "")
+      if trimmed:sub(-#close) ~= close then break end
+      after = trimmed:sub(1, #trimmed - #close):gsub("%s+$", "")
+    end
+    yaml[#yaml + 1] = after
+    count = i
   end
-  return nil -- any other format: leave the block alone
+  if count == 0 then return nil end
+  local ok, read = pcall(pandoc.read, "---\n" .. table.concat(yaml, "\n") .. "\n---\n", "markdown")
+  if not ok then
+    quarto.log.warning("mdm: the options at the head of a " .. lang ..
+      " block are not YAML, and are left in it: " .. tostring(read))
+    return nil
+  end
+  local body = {}
+  for i = count + 1, #lines do body[#body + 1] = lines[i] end
+  el.text = table.concat(body, "\n")
+  return read.meta
+end
+
+-- An option as one line of text, or "".
+local function option_word(meta, key)
+  local value = meta[key]
+  if value == nil then return "" end
+  return pandoc.utils.stringify(value)
+end
+
+-- An option as the inlines of a caption, Markdown read as Markdown, or nil
+-- for none.
+local function option_inlines(meta, key)
+  local value = meta[key]
+  if value == nil then return nil end
+  local kind = pandoc.utils.type(value)
+  local inlines
+  if kind == "Inlines" then
+    inlines = value
+  elseif kind == "Blocks" then
+    inlines = pandoc.utils.blocks_to_inlines(value)
+  elseif kind == "string" then
+    inlines = pandoc.Inlines({ pandoc.Str(value) })
+  else
+    return nil
+  end
+  if pandoc.utils.stringify(inlines):match("^%s*$") then return nil end
+  return inlines
+end
+
+-- Where a score's caption stands: its own `fig-cap-location`, else the
+-- header's, else over it (the owner, 2026-11-21: a score is, as a table
+-- is, often long in the vertical), where Quarto's figures have theirs
+-- under them. The editor reads it the same way (blockFloat and the score's
+-- branch in main.js).
+local function score_cap(meta)
+  local word = option_word(meta, "fig-cap-location")
+  if word == "top" or word == "bottom" then return word end
+  return (look and look.figure_cap) or "top"
+end
+
+-- Where a score's own `fig-align` stands it, by Quarto's words (a word it
+-- does not know is the middle), or nil for where the scores stand.
+local function score_place(meta)
+  local word = option_word(meta, "fig-align")
+  if word == "" or word == "default" then return nil end
+  if word == "left" or word == "center" or word == "right" then return word end
+  return "center"
+end
+
+-- The score as a figure, when its options make one of it: Quarto's float
+-- for a `fig-` label, which Quarto numbers, and Pandoc's figure for a
+-- caption with no label, held in the frame Quarto gives a picture's
+-- (`quarto-figure`) on a page, and both carry `mdm-score-figure`, which
+-- mdm-look.css sets the caption's distance by. On paper Quarto is told to leave the place
+-- alone (`fig-align: left` on the float, which writes no \centering around
+-- it): the engraving sets its own (score_set). A figure with no label is
+-- written out here on paper, as figure_on_paper has Quarto write a
+-- picture's, held in place and captioned with no number: Quarto's renderer
+-- takes a figure only with a picture in it and leaves any other to Pandoc,
+-- whose \caption LaTeX numbers, and every labelled figure after it came out
+-- one on (measured in the .tex of 1.11.9, 2026-11-21).
+local function score_figure(drawn, meta, place)
+  local blocks = pandoc.utils.type(drawn) == "Blocks" and drawn or pandoc.Blocks({ drawn })
+  local label = option_word(meta, "label")
+  local caption = option_inlines(meta, "fig-cap")
+  local side = score_cap(meta)
+  if label:match("^fig%-") then
+    local attributes = { ["fig-cap-location"] = side }
+    if quarto.doc.is_format("latex") then attributes["fig-align"] = "left" end
+    return quarto.FloatRefTarget({
+      identifier = label,
+      type = "Figure",
+      classes = { "mdm-score-figure" },
+      content = blocks,
+      caption_long = pandoc.Plain(caption or {}),
+      attributes = attributes,
+    })
+  end
+  if not caption then return drawn end
+  if quarto.doc.is_format("latex") then
+    local out = pandoc.Blocks({ pandoc.RawBlock("latex", "\\begin{figure}[H]") })
+    local words = pandoc.Inlines({ pandoc.RawInline("latex", "\\caption*{") })
+    words:extend(caption)
+    words:insert(pandoc.RawInline("latex", "}"))
+    if side == "top" then out:insert(pandoc.Plain(words)) end
+    out:extend(blocks)
+    if side ~= "top" then out:insert(pandoc.Plain(words)) end
+    out:insert(pandoc.RawBlock("latex", "\\end{figure}"))
+    out:insert(pandoc.RawBlock("latex", "\\vspace{-\\intextsep}"))
+    return out
+  end
+  -- On a page the figure is written out too, as Quarto writes a picture's
+  -- with no label, since neither its own `fig-cap-location` nor the
+  -- header's moves the caption of a figure Quarto did not make (measured
+  -- on 1.11.9, 2026-11-21: a Pandoc figure built here keeps its caption
+  -- under it whatever either says).
+  local frame = pandoc.Blocks({ pandoc.RawBlock("html", '<figure class="figure">') })
+  local words = pandoc.Blocks({
+    pandoc.RawBlock("html", "<figcaption>"),
+    pandoc.Plain(caption),
+    pandoc.RawBlock("html", "</figcaption>"),
+  })
+  if side == "top" then
+    frame:extend(words)
+    frame:extend(blocks)
+  else
+    frame:extend(blocks)
+    frame:extend(words)
+  end
+  frame:insert(pandoc.RawBlock("html", "</figure>"))
+  return pandoc.Div(frame, pandoc.Attr("", { "mdm-score-figure", "quarto-figure", "quarto-figure-" .. (place or "center") }))
+end
+
+-- A code block as Quarto's listing, when it carries both an `lst-` label
+-- and an `lst-cap`; as the code it is otherwise.
+local function listing(el, meta)
+  local label = option_word(meta, "label")
+  local caption = option_inlines(meta, "lst-cap")
+  if not label:match("^lst%-") or not caption then return el end
+  return quarto.FloatRefTarget({
+    identifier = label,
+    type = "Listing",
+    content = pandoc.Blocks({ el }),
+    caption_long = pandoc.Plain(caption),
+  })
+end
+
+function CodeBlock(el)
+  local meta = block_options(el)
+  if not is_abc_block(el) then
+    return meta and listing(el, meta) or nil
+  end
+  local place = meta and score_place(meta) or nil
+  local drawn = nil
+  score_place_now = place
+  if quarto.doc.is_format("html") then
+    drawn = render_html(el, place)
+  elseif quarto.doc.is_format("latex") then
+    drawn = render_latex(el)
+  end
+  score_place_now = nil
+  -- Any other format leaves the block alone, as it always did, but for
+  -- its options.
+  if not meta then return drawn end
+  return score_figure(drawn or el, meta, place)
 end
 
 -- The maths pass, over the whole document at once so the batch is one
@@ -3474,14 +3738,16 @@ end
 -- (measured, Quarto 1.9.37). `quarto-caption-env` is the attribute Quarto's
 -- renderer reads for the command it writes a caption with, and \caption* is
 -- the caption package's caption with no number, no step of the counter and
--- no line in a list of figures. The picture stands where it is written and
--- flush left, as in the editor and on the page (whose paragraph rule
--- outranks Quarto's `.quarto-figure-center`), unless the figure or its
--- picture asks for a place or an alignment of its own. Quarto holds only
--- the figure with no label at all in place, so one with a plain anchor
--- (`{#name}`) floated off to the top of a page. A `fig-align` for the whole
--- document never reaches a filter: Quarto keeps it out of the metadata
--- (measured), and neither the editor nor the page follows it.
+-- no line in a list of figures. The picture stands where it is written,
+-- unless the figure or its picture asks for a place of its own, and across
+-- the column where Quarto stands it, by its own `fig-align`, the
+-- document's or the middle, as the editor and the page stand it since
+-- 2026-11-21 (the owner's "centre by default"; until then this held every
+-- figure flush left, the place the editor and the page had then). A
+-- `fig-align` for the whole document never reaches a filter, since Quarto
+-- keeps it out of the metadata (measured), but its renderer reads it.
+-- Quarto holds only the figure with no label at all in place, so one with
+-- a plain anchor (`{#name}`) floated off to the top of a page.
 --
 -- A figure held in place leaves \intextsep under it as well as over it, and
 -- the paragraph after it adds its \parskip to that: 3.972 ems of the text
@@ -3504,7 +3770,6 @@ local function figure_on_paper(el)
       for key in pairs(img.attributes) do own[key] = true end
     end,
   })
-  if not own["fig-align"] then el.attributes["fig-align"] = "left" end
   if not own["fig-pos"] then el.attributes["fig-pos"] = "H" end
   -- Where it ends up: the figure's own word, or its picture's, except that
   -- Quarto holds a figure with no label in place whatever its picture asks.
@@ -3634,6 +3899,383 @@ local function table_lists(el)
   return el
 end
 
+-- ---------- The side a table's caption is written on ----------
+--
+-- The editor draws a table's caption where it is written, under the table
+-- when it comes after it and over it when it comes before (the owner,
+-- 2026-11-20; tableTops in vscode-mdm/media/main.js), and the page sets it
+-- there too. Pandoc keeps no trace of the side, the caption being the
+-- table's whichever paragraph it came from, so it is read here off the
+-- source, as header_meta reads the header, by the rules the editor reads it
+-- by: a table's caption is the paragraph before it that opens with `:` (no
+-- punctuation after it) or `Table:`, else such a paragraph after it, with a
+-- blank line between or none, and a paragraph the table before took is no
+-- caption of the next. A div that is a table (`::: {#tbl-x}`) holding one
+-- table and nothing else but a caption is captioned by that table's own
+-- caption, on its side, or by the div's last paragraph, under it; one that
+-- holds more is captioned by its last paragraph, under its tables, which
+-- the editor draws where it is written; one with no caption has its number
+-- over the table. A labelled table is a float to Quarto and is told its
+-- side by `tbl-cap-location` on the float, which Quarto reads before the
+-- header's (cap_location); one with no label carries the class
+-- `mdm-caption-below` when its caption goes under it, which mdm-after.lua
+-- reads as it takes the caption out of the table (both measured on 1.11.9,
+-- 2026-11-21). A table this reading does not find keeps Quarto's place,
+-- over it; a header's `tbl-cap-location` no longer moves the ones it finds,
+-- as the editor follows none. On paper a table with no label keeps its
+-- caption over it, where Pandoc's longtable sets it.
+
+-- A line with the marks of the quotes and the indent of the lists it stands
+-- in taken off, and the marker of an item it opens.
+local function line_body(line)
+  local s = line
+  while true do
+    local t = s:gsub("^[ \t]*>[ \t]?", "", 1)
+    if t == s then break end
+    s = t
+  end
+  s = s:gsub("^[ \t]+", "")
+  s = s:gsub("^[-*+][ \t]+", "", 1)
+  s = s:gsub("^%d+[.)][ \t]+", "", 1)
+  return s
+end
+
+-- The row under a pipe table's head: cells of dashes with a colon at
+-- either end, between pipes.
+local function is_rule(s)
+  local t = s:gsub("%s", "")
+  if not t:find("-", 1, true) then return false end
+  t = t:gsub("^|", "")
+  t = t:gsub("|$", "")
+  for cell in (t .. "|"):gmatch("([^|]*)|") do
+    if not cell:match("^:?%-+:?$") then return false end
+  end
+  return true
+end
+
+-- What a caption says after its mark, or nil for a line that is none:
+-- Pandoc's tableCaption, `:` with no punctuation after it, or `Table:`.
+local function caption_words(s)
+  local rest = s:match("^[Tt]able:(.*)$")
+  if rest then return rest end
+  if s:sub(1, 1) == ":" then
+    local after = s:sub(2, 2)
+    if after == "" or not after:match("%p") then return s:sub(2) end
+  end
+  return nil
+end
+
+-- The label of the braces a caption ends on, where they open with an
+-- identifier, the last of them, and it is a table's.
+local function caption_label(words)
+  local braces = words:match("(%b{})%s*$")
+  if not braces or not braces:match("^{%s*#") then return nil end
+  local id = nil
+  for x in braces:gmatch("#([^%s}#.]+)") do id = x end
+  return id and id:match("^tbl%-") and id or nil
+end
+
+-- A caption as plain words, the braces it ends on left off, to know a
+-- table with no label by.
+local function plain_words(text)
+  text = text:gsub("%s*%b{}%s*$", "")
+  text = text:gsub("%s+", " ")
+  text = text:gsub("^ ", "")
+  text = text:gsub(" $", "")
+  return text
+end
+local function markdown_words(md)
+  local ok, doc = pcall(pandoc.read, md, "markdown")
+  return plain_words(ok and pandoc.utils.stringify(doc.blocks) or md)
+end
+
+local SIDES = nil
+local function caption_sides()
+  if SIDES then return SIDES end
+  SIDES = { labels = {}, plain = {}, figures = {} }
+  local file = quarto.doc.input_file
+  local f = file and io.open(file, "r")
+  if not f then return SIDES end
+  local text = (f:read("a") or ""):gsub("\r\n", "\n")
+  f:close()
+  local lines = {}
+  for l in (text .. "\n"):gmatch("([^\n]*)\n") do lines[#lines + 1] = l end
+  local n = #lines
+  local first = 1
+  if lines[1] and lines[1]:match("^%-%-%-%s*$") then
+    for k = 2, n do
+      if lines[k]:match("^%-%-%-%s*$") or lines[k]:match("^%.%.%.%s*$") then
+        first = k + 1
+        break
+      end
+    end
+  end
+  -- What each line is: blank, code (a fenced block with its fences), a
+  -- fence of a div, a row of a table, or text.
+  local body, kind = {}, {}
+  local fence = nil
+  for k = first, n do
+    local b = line_body(lines[k])
+    body[k] = b
+    if fence then
+      kind[k] = "code"
+      local close = b:match("^([`~]+)%s*$")
+      if close and close:sub(1, 1) == fence:sub(1, 1) and #close >= #fence then fence = nil end
+    elseif b:match("^```") or b:match("^~~~") then
+      fence = b:match("^([`~]+)")
+      kind[k] = "code"
+    elseif b:match("^%s*$") then
+      kind[k] = "blank"
+    elseif b:match("^:::") then
+      kind[k] = "div"
+    else
+      kind[k] = "text"
+    end
+  end
+  local tables = {}
+  local k = first
+  while k <= n do
+    if kind[k] == "text" and body[k]:find("|", 1, true) and k < n and kind[k + 1] == "text" and is_rule(body[k + 1]) then
+      local j = k + 2
+      while j <= n and kind[j] == "text" and body[j]:find("|", 1, true) do j = j + 1 end
+      for r = k, j - 1 do kind[r] = "row" end
+      tables[#tables + 1] = { from = k, to = j - 1 }
+      k = j
+    else
+      k = k + 1
+    end
+  end
+  local function para_from(j)
+    while j - 1 >= first and kind[j - 1] == "text" do j = j - 1 end
+    return j
+  end
+  local function para_to(j)
+    while j + 1 <= n and kind[j + 1] == "text" do j = j + 1 end
+    return j
+  end
+  local function words_of(from, to)
+    local parts = {}
+    for j = from, to do parts[#parts + 1] = body[j] end
+    return caption_words(table.concat(parts, "\n"))
+  end
+  local taken = {}
+  for _, t in ipairs(tables) do
+    local j = t.from - 1
+    while j >= first and kind[j] == "blank" do j = j - 1 end
+    if j >= first and kind[j] == "text" then
+      local from = para_from(j)
+      if not taken[from] and caption_words(body[from]) then
+        t.caption = { from = from, to = j, side = "top" }
+      end
+    end
+    if not t.caption then
+      j = t.to + 1
+      while j <= n and kind[j] == "blank" do j = j + 1 end
+      if j <= n and kind[j] == "text" and caption_words(body[j]) then
+        t.caption = { from = j, to = para_to(j), side = "bottom" }
+      end
+    end
+    if t.caption then
+      taken[t.caption.from] = true
+      local words = words_of(t.caption.from, t.caption.to)
+      local label = caption_label(words)
+      t.caption.label = label
+      if label then
+        SIDES.labels[label] = t.caption.side
+      else
+        SIDES.plain[#SIDES.plain + 1] = { words = markdown_words(words), side = t.caption.side }
+      end
+    end
+  end
+  -- The divs that are figures (`::: {#fig-x}`): captioned by their last
+  -- paragraph, which the editor draws where it is written, under what the
+  -- div holds; told so, a header's `fig-cap-location: top` does not lift
+  -- it on the page alone (table_side_float).
+  for k = first, n do
+    local label = kind[k] == "div" and body[k]:match("^:::+%s*{%s*#(fig%-[^%s}#.]+)")
+    if label then SIDES.figures[label] = "bottom" end
+  end
+  -- The divs that are tables: the side of what captions each.
+  for open = first, n do
+    local label = kind[open] == "div" and body[open]:match("^:::+%s*{%s*#(tbl%-[^%s}#.]+)")
+    if label then
+      local depth, close = 0, nil
+      for j = open, n do
+        if kind[j] == "div" then
+          if body[j]:match("^:::+%s*$") then
+            depth = depth - 1
+            if depth == 0 then
+              close = j
+              break
+            end
+          else
+            depth = depth + 1
+          end
+        end
+      end
+      if close then
+        local inside = {}
+        for _, t in ipairs(tables) do
+          if t.from > open and t.to < close then inside[#inside + 1] = t end
+        end
+        local last = close - 1
+        while last > open and kind[last] == "blank" do last = last - 1 end
+        local para = nil
+        if kind[last] == "text" then
+          local from = para_from(last)
+          if from > open + 1 or #inside > 0 then
+            if not caption_words(body[from]) then para = from end
+          end
+        end
+        local own = #inside == 1 and inside[1].caption or nil
+        local side = "top"
+        if para then
+          side = "bottom"
+        elseif #inside == 1 and own and not own.label then
+          side = own.side
+        end
+        SIDES.labels[label] = side
+      end
+    end
+  end
+  return SIDES
+end
+
+-- ---------- Where a table stands ----------
+--
+-- Across the column, by MDM's `tbl-align`, which Quarto has no word for
+-- (1.11.9 aligns no table, measured 2026-11-21) and which reads as Quarto
+-- reads `fig-align`: a table's own, in the braces its caption ends on,
+-- labelled (`{#tbl-x tbl-align="left"}`) or not (`{tbl-align="left"}`), or
+-- on a div around it (`::: {#tbl-x tbl-align=left}`, `::: {tbl-align=left}`
+-- for a table with no caption), else the header's (look.table_align), else
+-- the middle; `default` is no word of its own, and a word Quarto would not
+-- know for a figure is the middle (tableAlign in mdm-crossref.js, which the
+-- editor reads it by). The caption stands as its table does. A word of the
+-- table's or its div's is a class (`mdm-table-left`), which mdm-look.css
+-- reads into the margins of what is inside and the side of the caption; the
+-- header's is the same three properties on the root (look_css).
+--
+-- Quarto takes the word of a labelled table onto its float with the rest of
+-- the braces, and the word of a div onto the div; the braces of a caption
+-- with no label it reads for their classes alone and prints the rest
+-- (`Plain {tbl-align='left'}`, measured on 1.11.9), so the word is taken
+-- out of them here, before Quarto reads them. On paper nothing moves yet: a
+-- longtable takes its place in an argument of its own that the writer
+-- leaves empty (tests/README.md, Pending).
+local function table_place(word)
+  if word == nil then return nil end
+  word = pandoc.utils.stringify(word)
+  if word == "" or word == "default" then return nil end
+  if word == "left" or word == "center" or word == "right" then return word end
+  return "center"
+end
+
+-- An inline as the text it was written as, straight quotes and all.
+local function written_text(inline)
+  if inline.t == "Str" then return inline.text end
+  if inline.t == "Space" or inline.t == "SoftBreak" then return " " end
+  if inline.t == "Quoted" then
+    local q = inline.quotetype == "SingleQuote" and "'" or '"'
+    local inner = {}
+    for _, i in ipairs(inline.content) do inner[#inner + 1] = written_text(i) end
+    return q .. table.concat(inner) .. q
+  end
+  return pandoc.utils.stringify(inline)
+end
+
+-- The word in the braces a caption with no label ends on, taken out of
+-- them, and the braces with it when nothing else is left in them.
+local function caption_place(el)
+  if not el.caption or #el.caption.long == 0 then return nil end
+  local block = el.caption.long[#el.caption.long]
+  if block.t ~= "Plain" and block.t ~= "Para" then return nil end
+  local inlines = block.content
+  local text, from = "", nil
+  for i = #inlines, 1, -1 do
+    text = written_text(inlines[i]) .. text
+    if inlines[i].t == "Str" and inlines[i].text:find("{", 1, true) then
+      from = i
+      break
+    end
+  end
+  if not from then return nil end
+  local head, inside = text:match("^([^{]*){(.*)}%s*$")
+  if not inside then return nil end
+  local key = "tbl%-align%s*=%s*[\"']?([%w]*)[\"']?"
+  local word = inside:match(key)
+  if not word then return nil end
+  local rest = inside:gsub(key, ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local out = pandoc.List()
+  for i = 1, from - 1 do out:insert(inlines[i]) end
+  if head ~= "" then out:insert(pandoc.Str(head)) end
+  if rest ~= "" then
+    out:insert(pandoc.Str("{" .. rest .. "}"))
+  else
+    while #out > 0 and (out[#out].t == "Space" or out[#out].t == "SoftBreak") do out:remove() end
+  end
+  block.content = out
+  return table_place(word) or "default"
+end
+
+-- A labelled table, Quarto's float: its caption on the side it is written,
+-- and the table where its braces or its div stand it. And a div that is a
+-- figure: its caption under it, where it is written.
+local function table_side_float(float)
+  if float.type == "Figure" and float.identifier and caption_sides().figures[float.identifier] then
+    float.attributes["fig-cap-location"] = "bottom"
+    return float
+  end
+  if float.type ~= "Table" then return nil end
+  local changed = false
+  local side = float.identifier and caption_sides().labels[float.identifier]
+  if side then
+    float.attributes["tbl-cap-location"] = side
+    changed = true
+  end
+  local place = table_place(float.attributes["tbl-align"])
+  if place then
+    if not float.classes then float.classes = pandoc.List() end
+    table.insert(float.classes, "mdm-table-" .. place)
+    changed = true
+  end
+  return changed and float or nil
+end
+
+-- A div that stands the tables in it (`::: {tbl-align=left}`).
+local function table_place_div(div)
+  local place = table_place(div.attributes["tbl-align"])
+  if not place then return nil end
+  div.classes:insert("mdm-table-" .. place)
+  return div
+end
+
+-- A table with no label whose caption is written under it, known by its
+-- words, each caption of the source taken once and in its order.
+local function table_side(el)
+  if not el.caption or #el.caption.long == 0 then return false end
+  local words = plain_words(pandoc.utils.stringify(el.caption.long))
+  for _, entry in ipairs(caption_sides().plain) do
+    if not entry.used and entry.words == words then
+      entry.used = true
+      if entry.side == "bottom" then
+        el.classes:insert("mdm-caption-below")
+        return true
+      end
+      return false
+    end
+  end
+  return false
+end
+
+-- A table: the lists in its cells, and the side of a caption with no label
+-- and the place its braces ask.
+local function table_element(el)
+  local sided = table_side(el)
+  local place = caption_place(el)
+  if place and place ~= "default" then el.classes:insert("mdm-table-" .. place) end
+  return table_lists(el) or ((sided or place) and el) or nil
+end
 -- Meta has to run before the CodeBlocks, since it settles the abcm2ps path,
 -- and before the headings, since it settles which command each level of them
 -- is written as (look.heads), which title_sections reads too. The equations
@@ -3645,5 +4287,6 @@ return {
   { Pandoc = equations },
   { Pandoc = title_sections },
   { CodeBlock = CodeBlock, Header = sixth_heading, HorizontalRule = horizontal_rule,
-    Figure = figure_on_paper, Image = Image, Math = Math, Table = table_lists, Pandoc = document },
+    Figure = figure_on_paper, Image = Image, Math = Math, Table = table_element,
+    FloatRefTarget = table_side_float, Div = table_place_div, Pandoc = document },
 }

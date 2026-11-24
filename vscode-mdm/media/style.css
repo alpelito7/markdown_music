@@ -2287,6 +2287,54 @@ body {
   display: block;
   margin: 0 0 0.53em;
 }
+/* A caption over its picture (`fig-cap-location: top`, the figure's own or
+   the header's), as far from it as one under it. */
+#app .mdm-figure--cap-top .mdm-image {
+  margin-top: 0.53em;
+  margin-bottom: 0;
+}
+/* A figure stands where Quarto's `fig-align` asks, `{fig-align="left"}` on
+   its picture or `fig-align:` in the header for all of them, and in the
+   middle of the column where nothing asks (the owner, 2026-11-21), and the
+   page stands it there by Quarto's own classes (mdm-look.css). Its caption
+   stands under it the same way: every caption centred under what it
+   captions where that is centred (the owner's word of that day), where
+   Quarto's page leaves it at the left. A picture alone in its paragraph
+   with neither caption nor label is no figure and stands at the left. */
+#app .mdm-figure--center .mdm-image {
+  margin-left: auto;
+  margin-right: auto;
+}
+#app .mdm-figure--right .mdm-image {
+  margin-left: auto;
+  margin-right: 0;
+}
+#app .mdm-figure--center .mdm-figcaption {
+  text-align: center;
+}
+#app .mdm-figure--right .mdm-figcaption {
+  text-align: right;
+}
+/* The paragraph a div that is a figure or a table is captioned by, after its
+   number (`.mdm-figure-lead`, `.mdm-table-lead`): across the column as what
+   it captions, the middle or the right where the figure stands there, and
+   under a score as the scores stand, in the middle unless they are set at
+   the left (mdm.scoreAlign, `.mdm-score--left` on the root). Named from
+   `.cm-content >` so they outrank the justified prose. */
+#app .cm-content > .cm-line.mdm-caption-line {
+  font-size: 0.956em;
+  color: var(--mdm-ink);
+}
+#app .cm-content > .cm-line.mdm-caption--center,
+#app .cm-content > .cm-line.mdm-caption--score {
+  text-align: center;
+}
+#app .cm-content > .cm-line.mdm-caption--right {
+  text-align: right;
+}
+#app.mdm-score--left .cm-content > .cm-line.mdm-caption--score {
+  text-align: left;
+}
 #app .mdm-figcaption {
   font-size: 0.956em;
   color: var(--mdm-ink);
@@ -2611,11 +2659,27 @@ body {
   border-spacing: 0;
   margin: 0 auto;
 }
-/* The caption of a table, over it and centred on the column, in the size
-   and the ink of a figure's (.mdm-figcaption): `: The shapes {#tbl-shapes}`
-   written beside the table, drawn here by the table's widget with its
-   number before it where it carries a label ("Table 1: The shapes"). It is
-   outside the scroller, so it stays put over a table pushed sideways. */
+/* A table that stands at a side (`tbl-align`, tableAlignOf in main.js), its
+   caption with it, as the page stands it (`.mdm-table-left` in
+   mdm-look.css). */
+#app .mdm-table--left table {
+  margin: 0 auto 0 0;
+}
+#app .mdm-table--right table {
+  margin: 0 0 0 auto;
+}
+#app .mdm-table--left .mdm-table-caption {
+  text-align: left;
+}
+#app .mdm-table--right .mdm-table-caption {
+  text-align: right;
+}
+/* The caption of a table, over it or under it as it is written (the owner,
+   2026-11-20) and centred on the column, in the size and the ink of a
+   figure's (.mdm-figcaption): `: The shapes {#tbl-shapes}` written beside
+   the table, drawn here by the table's widget with its number before it
+   where it carries a label ("Table 1: The shapes"). It is outside the
+   scroller, so it stays put by a table pushed sideways. */
 #app .mdm-table-caption {
   text-align: center;
   font-size: 0.956em;
@@ -3681,6 +3745,71 @@ body {
    than the pane moves; a full-width one fills the line either way. */
 #app.mdm-score--left code.language-abc svg {
   margin: 0;
+}
+/* A score whose block names its own place (`%| fig-align: left`, the
+   options at its head, blockOptionsOf in main.js) stands there whatever the
+   scores do, as the page stands it (`.mdm-score-left` in mdm-look.css).
+   After the rule above, which they outrank by order. */
+#app .mdm-score--at-left code.language-abc svg {
+  margin: 0;
+}
+#app .mdm-score--at-center code.language-abc svg {
+  margin: 0 auto;
+}
+#app .mdm-score--at-right code.language-abc svg {
+  margin: 0 0 0 auto;
+}
+/* The caption of a score that is a figure (`%| fig-cap:`), under it and
+   standing as it does: in the middle, at the left with the scores
+   (mdm.scoreAlign), or where the block's own `fig-align` says; in the size
+   and the ink of every caption (.mdm-figcaption), as the page sets
+   Quarto's figcaption under the score. */
+#app .mdm-score-caption {
+  font-size: 0.956em;
+  line-height: 1.5;
+  color: var(--mdm-ink);
+  text-align: center;
+}
+/* As far under the engraving as a picture's caption under the picture
+   (`.mdm-figure .mdm-image`), and the page sets it there
+   (`.mdm-score-figure` in mdm-look.css). */
+#app .mdm-score--captioned code.language-abc {
+  margin-bottom: 0.53em;
+}
+/* Over it, which a score's caption is unless its `fig-cap-location` or the
+   header's says under (the owner, 2026-11-21), at the same distance. */
+#app .mdm-score--cap-top code.language-abc {
+  margin-top: 0.53em;
+}
+#app.mdm-score--left .mdm-score-caption {
+  text-align: left;
+}
+#app .mdm-score--at-left .mdm-score-caption {
+  text-align: left;
+}
+#app .mdm-score--at-center .mdm-score-caption {
+  text-align: center;
+}
+#app .mdm-score--at-right .mdm-score-caption {
+  text-align: right;
+}
+/* The caption of a listing (`#| lst-cap:` with an `lst-` label), over its
+   card and at the left, as the page sets Quarto's over the code. */
+#app .mdm-listing-caption {
+  font-size: 0.956em;
+  line-height: 1.5;
+  color: var(--mdm-ink);
+  text-align: left;
+  /* As far over the card as a picture's caption stands under the picture,
+     0.53em of the text in the caption's own ems; padding, since CodeMirror
+     measures a block widget by its box and a margin is outside it. */
+  padding-bottom: calc(0.53em / 0.956);
+}
+/* The options at the head of an open block, in the ink of a comment,
+   which is what they are to the language and what they read as outside
+   MDM. */
+#app .mdm-block-option {
+  color: var(--mdm-syn-comment);
 }
 /* Guitar-Pro-style gray staff lines (mdm.staffLines = "gray"): add_classes in
    renderScore tags the staff .abcjs-staff; only those lines are recoloured,

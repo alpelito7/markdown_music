@@ -1998,6 +1998,148 @@ test("on paper the ground reaches the four edges of every sheet", {
   }
 });
 
+// The text of each sheet of a PDF: poppler's where it is installed, and on a
+// Mac without it PDFKit's, through Swift, which a Mac has, so that what is
+// read off paper is read on the owner's computer as well.
+const SHEET_TEXTS =
+  spawnSync("pdftotext", ["-v"]).status === 0 ||
+  (process.platform === "darwin" && spawnSync("swift", ["--version"]).status === 0);
+function sheetTexts(pdf) {
+  if (spawnSync("pdftotext", ["-v"]).status === 0) {
+    return spawnSync("pdftotext", [pdf, "-"], { encoding: "utf8" }).stdout.split("\f").slice(0, -1);
+  }
+  const script = path.join(DIR, "sheet-texts.swift");
+  fs.writeFileSync(
+    script,
+    'import PDFKit\nlet d = PDFDocument(url: URL(fileURLWithPath: CommandLine.arguments[1]))!\n' +
+      'for i in 0..<d.pageCount { print((d.page(at: i)!.string ?? "") + "\\u{0C}", terminator: "") }\n'
+  );
+  const r = spawnSync("swift", [script, pdf], { encoding: "utf8", timeout: 180000 });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.split("\f").slice(0, -1);
+}
+
+// A score made a figure by its options, and a listing, break on paper where
+// what they hold breaks, a score between two of its systems and a card of
+// code between two rows, with the caption held to the piece next to it. The
+// rule that holds a picture and its caption on one sheet held the figure
+// round them whole, and printed by the export after a sheet of prose each
+// went to the next sheet, leaving a third of the one before it blank (here
+// a score of 24 systems and a listing of 120 rows, each longer than a sheet)
+// (2026-11-21, when a score's caption went over it by default and the owner
+// said scores are often long in the vertical).
+test("on paper a score made a figure and a listing break where they break alone, the caption with the piece next to it", {
+  skip: skip || (!SHEET_TEXTS && "needs pdftotext, or Swift on a Mac"),
+}, () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  const prose = Array.from({ length: 9 }, () => "A paragraph of prose to fill most of a sheet before what follows it, with words enough to take several lines of the column and leave a little room at the foot.").join("\n\n");
+  const systems = ["alfa", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliett", "kilo", "lima"]
+    .flatMap((w) => [w, w + "two"]);
+  const doc = [
+    "---",
+    'title: "Long figures"',
+    "format:",
+    "  html:",
+    "    embed-resources: true",
+    "filters:",
+    "  - mdm",
+    "---",
+    "",
+    prose,
+    "",
+    "The last words before the score, BEFORESCORE.",
+    "",
+    "```abc",
+    "%| label: fig-long",
+    '%| fig-cap: "A long score, SCORECAP."',
+    "X:1",
+    "L:1/4",
+    "K:C",
+    ...systems.map((w) => "CDEF|GABc|cBAG|FEDC|\nw: " + w + " b c d e f g h i j k l m n o p"),
+    "```",
+    "",
+    "The first words after the score, AFTERSCORE.",
+    "",
+    prose,
+    "",
+    "The last words before the listing, BEFORECODE.",
+    "",
+    "```python",
+    "#| label: lst-long",
+    '#| lst-cap: "A long block of code, CODECAP."',
+    ...Array.from({ length: 120 }, (_, i) => "print(" + i + ")  # row" + i),
+    "```",
+    "",
+    "The end.",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(DIR, "long-figures.mdm"), doc);
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-look:light"];
+  const r = spawnSync(MDM, ["render", "long-figures.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const sheets = sheetTexts(printPdf("long-figures"));
+  const sheetOf = (word) => sheets.findIndex((t) => t.indexOf(word) !== -1) + 1;
+  // Each starts on the sheet the prose before it ends on, its caption on it.
+  assert.deepEqual(
+    [sheetOf("SCORECAP"), sheetOf("alfa b c")],
+    [sheetOf("BEFORESCORE"), sheetOf("BEFORESCORE")],
+    "the score's figure went to a sheet of its own"
+  );
+  // (Read by the prose after it: the words under the systems after the
+  // first are not in the text PDFKit reads off the sheet.)
+  assert.ok(sheetOf("AFTERSCORE") > sheetOf("alfa b c"), "the score did not run over two sheets, which this test needs");
+  assert.deepEqual(
+    [sheetOf("CODECAP"), sheetOf("row0")],
+    [sheetOf("BEFORECODE"), sheetOf("BEFORECODE")],
+    "the listing went to a sheet of its own"
+  );
+  assert.ok(sheetOf("row119") > sheetOf("row0"), "the listing did not run over two sheets, which this test needs");
+});
+
+// And a caption is never left at the foot of a sheet with its score on the
+// next, over it or under it: forty short figures in a row, each a line of
+// prose and a score of one system, step down the sheets a line at a time,
+// so that some caption falls at a sheet's foot whatever the sheet; each
+// caption is read on the sheet its score's first words are on.
+test("on paper a score's caption keeps to its score across the foot of a sheet, over it or under it", {
+  skip: skip || (!SHEET_TEXTS && "needs pdftotext, or Swift on a Mac"),
+}, () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  const n = (i) => String(i).padStart(2, "0");
+  const figures = Array.from({ length: 40 }, (_, i) => [
+    "A line of prose, number " + n(i) + ".",
+    "",
+    "```abc",
+    '%| fig-cap: "CAPTION' + n(i) + ', a short score."',
+    i % 2 ? "%| fig-cap-location: bottom" : "%| fig-cap-location: top",
+    "X:1",
+    "L:1/4",
+    "K:C",
+    "CDEF|GABc|",
+    "w: words" + n(i) + " b c d e f g",
+    "```",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(
+    path.join(DIR, "caption-feet.mdm"),
+    "---\ntitle: \"Captions at a sheet's foot\"\nformat:\n  html:\n    embed-resources: true\nfilters:\n  - mdm\n---\n\n" + figures.join("\n")
+  );
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-look:light"];
+  const r = spawnSync(MDM, ["render", "caption-feet.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const sheets = sheetTexts(printPdf("caption-feet"));
+  const sheetOf = (word) => sheets.findIndex((t) => t.indexOf(word) !== -1) + 1;
+  assert.ok(sheets.length > 4, "the figures took " + sheets.length + " sheets");
+  const apart = [];
+  for (let i = 0; i < 40; i++) {
+    const caption = sheetOf("CAPTION" + n(i));
+    const score = sheetOf("words" + n(i));
+    if (!caption || !score) apart.push(n(i) + " not read");
+    else if (caption !== score) apart.push(n(i) + " (" + (i % 2 ? "under" : "over") + "): caption on sheet " + caption + ", score on " + score);
+  }
+  assert.deepEqual(apart, []);
+});
+
 // ---------- The sheet, its number and the bookmarks (2026-10-02) ----------
 //
 // The extension's PDF is this page printed (printHtmlToPdf in
@@ -2803,6 +2945,7 @@ test("on paper the roman's faces are embedded as fonts, from the outlines kept f
     "the screen's faces no longer go into a PDF as Type 3: " + JSON.stringify(screen)
   );
 });
+
 
 // The headings are the PDF's bookmarks, each once. A heading that opened a
 // sheet came out of Chrome with its words twice in its bookmark ("Heading
@@ -3730,6 +3873,7 @@ test("every heading is drawn on the page at the size the editor draws it, in eit
     );
   }
 });
+
 
 // The air around a heading, gap by gap against the editor: from the bottom of
 // each block's line box to the top of the next, and from the top of the
@@ -6079,14 +6223,16 @@ test("a numbered equation is set as the editor draws it, and a reference to it p
 // a numbered caption breaks, where the picture and its caption stand, and
 // the paragraph that refers to them, word for word and row for row.
 //
-// The picture of a labelled figure stood centred on the page, 282px in from
-// the left of the 820px column for the 256px icon, over a caption set flush
-// left, where the editor draws every figure flush left and the page the one
-// with no label: Quarto makes a float of it, its picture in a div where the
-// other's is in a paragraph, and its centring reached the div (measured
-// that day; the rule beside the paragraphs' in mdm-look.css). The figure in
-// the list is there for the count: it is the third on both, and the editor
-// draws it as a picture in its line, with no caption.
+// A figure stands where Quarto stands it, in the middle of the column
+// unless its `fig-align` asks otherwise, over its caption set flush left,
+// on both (the owner, 2026-11-20 and 2026-11-21; until then the editor drew
+// every figure flush left and mdm-look.css held the page's there). Quarto
+// makes a float of one with a label, its picture in a div where the other's
+// is in a paragraph, and the page places both by the class Quarto writes.
+// The figure in the list is there for the count: it is the third on both,
+// and the editor draws it as a picture in its line, with no caption. The
+// two after the references ask for a side of their own, one with a label
+// and one without.
 const FIGURES_DOC = `Before the figure, a line of prose to measure from.
 
 ![A plain caption under the picture.](icon.png)
@@ -6110,6 +6256,14 @@ The caption of the div.
 :::
 
 The relation between the pictures: @fig-icon is the first of them and -@fig-bare the second, [Fig. @fig-list] stands in a list and @Fig-div is a div, which [@fig-icon; @fig-bare] and [@fig-icon; @fig-zz] name again beside [see @fig-div, p. 3], long enough a paragraph to break more than twice in the column of the page, since a row that ends on another word on one of the two surfaces is how a reference drawn wider or narrower than the page prints it shows up.
+
+![At the left of the column.](icon.png){fig-align="left"}
+
+Between the two that ask for a side, a line of prose to measure from.
+
+![At the right of the column, numbered.](icon.png){#fig-right fig-align="right"}
+
+After the two, a line of prose to measure from.
 `;
 
 // Every figure of a surface that is a picture over a caption: what the
@@ -6132,10 +6286,17 @@ const FIGURE_BOXES = function (arg) {
       const above = blocks.filter((b) => b.getBoundingClientRect().bottom <= img.top + 1).pop();
       const below = blocks.find((b) => b.getBoundingClientRect().top >= box.bottom - 1);
       const read = Object.values(eval("(" + arg.ends + ")")([caption]))[0];
+      const words = document.createRange();
+      words.selectNodeContents(caption);
+      const ink = words.getBoundingClientRect();
       return {
         caption: read.text,
         ends: read.ends,
         left: round(img.left - column.left),
+        right: round(column.right - img.right),
+        captionLeft: round(ink.left - column.left),
+        captionRight: round(column.right - ink.right),
+        align: getComputedStyle(caption).textAlign.replace(/^start$/, "left"),
         width: round(img.width),
         above: above ? round(img.top - above.getBoundingClientRect().bottom) : null,
         gap: round(box.top - img.bottom),
@@ -6170,6 +6331,12 @@ test("a numbered figure opens its caption on the page as the editor opens it and
         }),
         // What every float is captioned by, a div's among them.
         numbered: Array.from(document.querySelectorAll("main.content figcaption.quarto-float-caption")).map(flat),
+        divCaption: (() => {
+          const cap = document.querySelector("#fig-div figcaption");
+          const r = document.createRange();
+          r.selectNodeContents(cap);
+          return { align: getComputedStyle(cap).textAlign, left: Math.round((r.getBoundingClientRect().left - document.querySelector("main.content").getBoundingClientRect().left) * 10) / 10 };
+        })(),
         refs: Array.from(document.querySelectorAll("main.content a.quarto-xref")).map((a) => a.textContent + " " + a.getAttribute("href")),
         missing: Array.from(document.querySelectorAll("main.content p strong")).map((x) => x.textContent),
         labels: /\{#fig-/.test(document.querySelector("main.content").textContent),
@@ -6183,6 +6350,7 @@ test("a numbered figure opens its caption on the page as the editor opens it and
     "Figure 2",
     "Figure 3: In a list",
     "Figure 4: The caption of the div.",
+    "Figure 5: At the right of the column, numbered.",
   ]);
   assert.deepEqual(page.refs, [
     "Figure 1 #fig-icon",
@@ -6199,15 +6367,15 @@ test("a numbered figure opens its caption on the page as the editor opens it and
 
   const { open: openEditor } = require("./webview/helpers.js");
   const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" };
-  const h = await openEditor({ text: FIGURES_DOC, seed: { settings, docBase: "file://" + DIR + "/" }, scores: 0, height: 1200 });
+  const h = await openEditor({ text: FIGURES_DOC, seed: { settings, docBase: "file://" + DIR + "/" }, scores: 0, height: 2400 });
   let editor;
   try {
-    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 2400 });
     await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
     await h.page.mouse.click(2, 2);
     await h.page.waitForFunction(() => {
       const imgs = Array.from(document.querySelectorAll("#app .mdm-figure img"));
-      return imgs.length >= 3 && imgs.every((img) => img.complete && img.naturalWidth > 0);
+      return imgs.length >= 5 && imgs.every((img) => img.complete && img.naturalWidth > 0);
     });
     await h.page.evaluate(() => document.fonts.ready);
     await new Promise((res) => setTimeout(res, 500));
@@ -6218,6 +6386,12 @@ test("a numbered figure opens its caption on the page as the editor opens it and
           sel: { figure: "#app .mdm-figure", caption: ".mdm-figcaption", block: "#app .cm-line", column: "#app .cm-content" },
         }),
         leads: Array.from(document.querySelectorAll("#app .mdm-figure-lead")).map((e) => e.closest(".cm-line").textContent.replace(/[ \t\r\n]+/g, " ").trim()),
+        divCaption: (() => {
+          const line = document.querySelector("#app .mdm-figure-lead").closest(".cm-line");
+          const r = document.createRange();
+          r.selectNodeContents(line);
+          return { align: getComputedStyle(line).textAlign, left: Math.round((r.getBoundingClientRect().left - document.querySelector("#app .cm-content").getBoundingClientRect().left) * 10) / 10 };
+        })(),
         refs: Array.from(document.querySelectorAll("#app .mdm-eqref")).map((e) => e.textContent),
         lines: eval("(" + arg.ends + ")")(Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => l.textContent.startsWith("The relation"))),
       }),
@@ -6227,20 +6401,35 @@ test("a numbered figure opens its caption on the page as the editor opens it and
   } finally {
     await h.close();
   }
-  // The same three pictures over a caption on both: the one with no label,
-  // the numbered one and the one with a number and no caption. Each opens
-  // with the same words and breaks on the same ones, and stands flush left
-  // with the same air around it.
+  // The same five pictures over a caption on both: the one with no label,
+  // the numbered one and the one with a number and no caption, in the
+  // middle of the column, and the two that ask for the left and the right.
+  // Each opens with the same words and breaks on the same ones, and stands
+  // where the other surface stands it with the same air around it.
   assert.deepEqual(editor.boxes.map((b) => b.caption), page.boxes.map((b) => b.caption));
   // (LINE_ENDS reads a caption with its spaces made one kind.)
-  assert.deepEqual(editor.boxes.map((b) => b.caption.slice(0, 20)), ["A plain caption unde", "Figure 1: A numbered", "Figure 2"]);
+  assert.deepEqual(editor.boxes.map((b) => b.caption.slice(0, 20)), [
+    "A plain caption unde", "Figure 1: A numbered", "Figure 2", "At the left of the c", "Figure 5: At the rig",
+  ]);
+  const sides = ["center", "center", "center", "left", "right"];
   assert.ok(page.boxes[1].ends.length >= 1, "the numbered caption does not run over a row on the page: " + JSON.stringify(page.boxes[1]));
   for (let i = 0; i < page.boxes.length; i++) {
     const [own, printed] = [editor.boxes[i], page.boxes[i]];
     assert.deepEqual(own.ends, printed.ends, "the caption of figure " + i + " breaks elsewhere in the editor");
-    assert.equal(printed.left, 0, "the picture of figure " + i + " stands " + printed.left + " px in from the left of the page's column");
-    assert.equal(own.left, 0, "the picture of figure " + i + " stands " + own.left + " px in from the left of the editor's column");
-    for (const key of ["width", "above", "gap", "below"]) {
+    for (const [name, box] of [["the page", printed], ["the editor", own]]) {
+      const at = Math.abs(box.left - box.right) <= 1 ? "center" : box.left === 0 ? "left" : box.right === 0 ? "right" : "astray";
+      assert.equal(at, sides[i], "the picture of figure " + i + " stands " + box.left + " px from the left and " + box.right + " from the right on " + name);
+      // Its caption under it the same way, centred under a centred picture
+      // (the owner, 2026-11-21), and a caption of one row stands so. (A row
+      // that wraps is centred without the space it breaks at, which its box
+      // keeps: its sides are read off its alignment alone.)
+      assert.equal(box.align, sides[i], "the caption of figure " + i + " is set " + box.align + " on " + name);
+      if (!box.ends.length) {
+        const under = Math.abs(box.captionLeft - box.captionRight) <= 1 ? "center" : box.captionLeft <= 1 ? "left" : box.captionRight <= 1 ? "right" : "astray";
+        assert.equal(under, sides[i], "the caption of figure " + i + " stands " + box.captionLeft + " px from the left and " + box.captionRight + " from the right on " + name);
+      }
+    }
+    for (const key of ["left", "captionLeft", "width", "above", "gap", "below"]) {
       assert.ok(Math.abs(own[key] - printed[key]) <= 1, key + " of figure " + i + " is " + printed[key] + " on the page and " + own[key] + " in the editor");
     }
     assert.equal(own.size, printed.size, "the size of the caption of figure " + i);
@@ -6252,8 +6441,11 @@ test("a numbered figure opens its caption on the page as the editor opens it and
       assert.ok(Math.abs(boxes[1][key] - boxes[0][key]) <= 0.5, key + " is " + boxes[0][key] + " without a label and " + boxes[1][key] + " with one on " + name);
     }
   }
-  // The div's caption opens with its number where the page's does.
+  // The div's caption opens with its number where the page's does, and
+  // stands in the middle of the column as the div's figure does, on both.
   assert.deepEqual(editor.leads, [page.numbered[3]]);
+  assert.deepEqual([page.divCaption.align, editor.divCaption.align], ["center", "center"]);
+  assert.ok(Math.abs(page.divCaption.left - editor.divCaption.left) <= 1, "the div's caption starts " + page.divCaption.left + " px in on the page and " + editor.divCaption.left + " in the editor");
   // And the references: the same words, on the same rows.
   assert.deepEqual(editor.refs, [
     "Figure 1", "2", "Fig. 3", "Figure 4", "Figure 1, Figure 2", "Figure 1?@fig-zz", "see 4",
@@ -6266,6 +6458,427 @@ test("a numbered figure opens its caption on the page as the editor opens it and
   assert.deepEqual(editorText.ends, pageText.ends);
 });
 
+// The header's `fig-align` moves every figure that names no side of its
+// own, on the page by Quarto's reading of it and in the editor by the same
+// reading written again (figureAlignOf in media/mdm-crossref.js): `default`
+// on a figure is the header's, and a word Quarto does not know is the
+// middle, whatever the header says (the owner, 2026-11-20 and 2026-11-21).
+const SIDES_HEADER = "---\ntitle: Sides\nfig-align: right\nfilters:\n  - mdm\n---\n";
+const SIDES_DOC = `Before the figures, a line of prose to measure from.
+
+![Plain, on the header's side.](icon.png)
+
+Between, a line of prose to measure from.
+
+![On its own left.](icon.png){fig-align="left"}
+
+Between, a line of prose to measure from.
+
+![Its default, the header's.](icon.png){#fig-default fig-align="default"}
+
+Between, a line of prose to measure from.
+
+![A word Quarto does not know.](icon.png){fig-align="middle"}
+
+After the figures, a line of prose to measure from.
+`;
+
+test("a figure stands where the header's fig-align asks on the page as in the editor, unless it names its own side", { skip }, async () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "vscode-mdm", "media", "icon.png"), path.join(DIR, "icon.png"));
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
+  fs.writeFileSync(path.join(DIR, "sides.mdm"), SIDES_HEADER + "\n" + SIDES_DOC);
+  const r = spawnSync(MDM, ["render", "sides.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const sel = { figure: "main.content figure", caption: ":scope > figcaption", block: "main.content p", column: "main.content" };
+  const page = await readCiting(
+    "file://" + path.join(DIR, "sides.html"),
+    (arg) => eval("(" + arg.boxes + ")")({ ends: arg.ends, sel: arg.sel }),
+    { boxes: FIGURE_BOXES, ends: LINE_ENDS, sel }
+  );
+  const { open: openEditor } = require("./webview/helpers.js");
+  const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" };
+  const h = await openEditor({
+    text: SIDES_HEADER + "\n" + SIDES_DOC,
+    withFrontMatter: false,
+    frontMatter: SIDES_HEADER,
+    seed: { settings, docBase: "file://" + DIR + "/" },
+    scores: 0,
+    height: 2400,
+  });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 2400 });
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await h.page.mouse.click(2, 2);
+    await h.page.waitForFunction(() => {
+      const imgs = Array.from(document.querySelectorAll("#app .mdm-figure img"));
+      return imgs.length >= 4 && imgs.every((img) => img.complete && img.naturalWidth > 0);
+    });
+    await h.page.evaluate(() => document.fonts.ready);
+    await new Promise((res) => setTimeout(res, 500));
+    editor = await h.page.evaluate(
+      (arg) => eval("(" + arg.boxes + ")")({ ends: arg.ends, sel: arg.sel }),
+      { boxes: FIGURE_BOXES, ends: LINE_ENDS, sel: { figure: "#app .mdm-figure", caption: ".mdm-figcaption", block: "#app .cm-line", column: "#app .cm-content" } }
+    );
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  const side = (b) => (Math.abs(b.left - b.right) <= 1 ? "center" : b.left === 0 ? "left" : b.right === 0 ? "right" : "astray " + b.left + "/" + b.right);
+  assert.deepEqual(page.map(side), ["right", "left", "right", "center"], "on the page");
+  assert.deepEqual(editor.map(side), ["right", "left", "right", "center"], "in the editor");
+  for (let i = 0; i < page.length; i++) {
+    for (const key of ["left", "width", "above", "gap", "below"]) {
+      assert.ok(Math.abs(editor[i][key] - page[i][key]) <= 1, key + " of figure " + i + " is " + page[i][key] + " on the page and " + editor[i][key] + " in the editor");
+    }
+  }
+});
+
+// A score made a figure (`::: {#fig-tune}`, the score, its caption) is
+// captioned under it as it stands: in the middle, and at the left where the
+// scores are set there (mdm.scoreAlign), on the page as in the editor (the
+// owner, 2026-11-21: every caption centred where what it captions is
+// centred). Quarto's class on the figure says the middle whatever the score
+// does, and mdm-look.css reads the scores' place instead.
+const SCORE_FIGURE_DOC = `Before the score, a line of prose to measure from.
+
+::: {#fig-tune}
+\`\`\`abc
+X:1
+L:1/4
+K:C
+CDEF|GABc|
+\`\`\`
+
+A short tune.
+:::
+
+After the score, a line of prose to measure from.
+`;
+
+test("a score made a figure has its caption under it as the scores stand, in the middle or at the left, on the page as in the editor", { skip }, async () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  const { open: openEditor } = require("./webview/helpers.js");
+  for (const align of ["center", "left"]) {
+    const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light", "-M", "mdm-score-align:" + align];
+    // The header asks every caption over its figure, which a div's caption,
+    // a paragraph written under the score, does not follow on the page any
+    // more than in the editor (mdm.lua, SIDES.figures).
+    fs.writeFileSync(path.join(DIR, "score-figure.mdm"), "---\ntitle: Score\nfig-cap-location: top\nfilters:\n  - mdm\n---\n\n" + SCORE_FIGURE_DOC);
+    const r = spawnSync(MDM, ["render", "score-figure.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const page = await readCiting(
+      "file://" + path.join(DIR, "score-figure.html"),
+      () => {
+        const cap = document.querySelector("#fig-tune figcaption");
+        const col = document.querySelector("main.content").getBoundingClientRect();
+        const words = document.createRange();
+        words.selectNodeContents(cap);
+        const ink = words.getBoundingClientRect();
+        const svg = document.querySelector("#fig-tune .mdm-paper svg");
+        return {
+          text: cap.textContent.replace(/\s+/g, " ").trim(),
+          align: getComputedStyle(cap).textAlign,
+          left: Math.round(ink.left - col.left),
+          right: Math.round(col.right - ink.right),
+          under: cap.getBoundingClientRect().top >= svg.getBoundingClientRect().bottom - 1,
+        };
+      },
+      {}
+    );
+    assert.equal(page.under, true, "the div's caption went over the score on the page");
+    const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light", scoreAlign: align };
+    const h = await openEditor({ text: SCORE_FIGURE_DOC, seed: { settings }, scores: 1, height: 1200 });
+    let editor;
+    try {
+      await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 1200 });
+      await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+      await h.page.mouse.click(2, 2);
+      await new Promise((res) => setTimeout(res, 500));
+      editor = await h.page.evaluate(() => {
+        const line = document.querySelector("#app .mdm-figure-lead").closest(".cm-line");
+        const col = document.querySelector("#app .cm-content").getBoundingClientRect();
+        const words = document.createRange();
+        words.selectNodeContents(line);
+        const ink = words.getBoundingClientRect();
+        return { text: line.textContent.replace(/\s+/g, " ").trim(), align: getComputedStyle(line).textAlign, left: Math.round(ink.left - col.left), right: Math.round(col.right - ink.right) };
+      });
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+    assert.equal(editor.text, page.text);
+    assert.deepEqual([page.align, editor.align], [align, align], "the caption of a score set " + align);
+    assert.ok(Math.abs(page.left - editor.left) <= 1, "the caption starts " + page.left + " px in on the page and " + editor.left + " in the editor, scores " + align);
+  }
+});
+
+// A score and a piece of code take a label, a caption and a place from
+// lines at their head, the language's comment mark and a `|`, as a cell of
+// Quarto's does (the owner, 2026-11-21: "both are called with ```", so both
+// are captioned and aligned alike; blockOptions in media/mdm-crossref.js,
+// block_options in mdm.lua). The page is Quarto's own float, built by the
+// filter, and the editor draws what it prints: a score numbered after the
+// picture before it, its caption under it as it stands, at its own
+// `fig-align` where it names one (a side the scores' setting does not
+// move), one with a caption and no label captioned with no number, and a
+// listing numbered among the listings with its caption over the code at the
+// left. A score's caption stands over it unless its `fig-cap-location` or
+// the header's says under (the owner, 2026-11-21: a score is, as a table
+// is, often long in the vertical), and a picture's under it unless its own
+// or the header's says over, as Quarto has it. The lines of options are no
+// part of either drawing.
+const BLOCK_OPTIONS_DOC = `Before the picture, a line of prose to measure from.
+
+![A picture, the first figure.](icon.png){#fig-pic fig-cap-location="top"}
+
+Between the pictures, a line of prose to measure from.
+
+![A picture with no label, its own word read by nobody.](icon.png){fig-cap-location="top"}
+
+Before the first score, a line of prose to measure from.
+
+\`\`\`abc
+%| label: fig-tune
+%| fig-cap: "A *short* tune, the second figure."
+X:1
+L:1/4
+K:C
+CDEF|GABc|
+\`\`\`
+
+Before the second score, a line of prose to measure from.
+
+\`\`\`abc
+%| fig-cap: "A tune with no label, at the left."
+%| fig-align: left
+X:1
+L:1/4
+K:C
+cBAG|FEDC|
+\`\`\`
+
+Before the third score, a line of prose to measure from.
+
+\`\`\`abc
+%| label: fig-right
+%| fig-cap: "At the right, the third figure, its caption under it."
+%| fig-align: right
+%| fig-cap-location: bottom
+X:1
+L:1/4
+K:C
+EDCD|EEE2|
+\`\`\`
+
+Before the code, a line of prose to measure from.
+
+\`\`\`python
+#| label: lst-alone
+print("A label and no caption is code.")
+\`\`\`
+
+\`\`\`python
+#| lst-cap: "A caption and no label is code."
+print("code")
+\`\`\`
+
+Before the listing, a line of prose to measure from.
+
+\`\`\`python
+#| label: lst-scale
+#| lst-cap: "The scale, *step* by step."
+for step in [2, 1, 2, 2, 1, 2, 2]:
+    print(step)
+\`\`\`
+
+After the listing, a line of prose to measure from: @fig-tune, @fig-right and @lst-scale.
+`;
+
+// Every caption of a surface beside what it captions: its words, how they
+// are set, over what it captions or under it, where its ink starts and ends
+// across the column, and the air over the two, between them and under
+// them. `sel` names the captions of the pictures, of the scores and of the
+// listings, the blocks of prose and the column; a picture's drawing is its
+// <img>, a score's its engraving (and not the icons of its rail), a
+// listing's the ink of its first and last words of code (`code` gives the
+// elements its lines are in).
+const OPTION_BOXES = function (sel) {
+  const round = (x) => Math.round(x * 10) / 10;
+  const column = document.querySelector(sel.column).getBoundingClientRect();
+  const prose = Array.from(document.querySelectorAll(sel.prose)).filter((b) => /a line of prose/.test(b.textContent));
+  const words = (roots, word, last) => {
+    let found = null;
+    for (const root of roots) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        const at = t.data.indexOf(word);
+        if (at === -1) continue;
+        const r = document.createRange();
+        r.setStart(t, at);
+        r.setEnd(t, at + word.length);
+        found = r.getBoundingClientRect();
+        if (!last) return found;
+      }
+    }
+    return found;
+  };
+  const read = (caption, top, bottom, over) => {
+    // Its box without its padding, which on one surface holds the air to
+    // what it captions and on the other does not.
+    const r = document.createRange();
+    r.selectNodeContents(caption);
+    const ink = r.getBoundingClientRect();
+    const style = getComputedStyle(caption);
+    const outer = caption.getBoundingClientRect();
+    const box = { top: outer.top + parseFloat(style.paddingTop), bottom: outer.bottom - parseFloat(style.paddingBottom) };
+    if (over === null) over = box.bottom <= top + 1;
+    const first = over ? box.top : top;
+    const end = over ? bottom : box.bottom;
+    const above = prose.filter((b) => b.getBoundingClientRect().bottom <= first + 1).pop();
+    const below = prose.find((b) => b.getBoundingClientRect().top >= end - 1);
+    return {
+      text: caption.textContent.replace(/\s+/g, " ").trim(),
+      side: over ? "over" : "under",
+      align: getComputedStyle(caption).textAlign.replace(/^start$/, "left"),
+      left: round(ink.left - column.left),
+      right: round(column.right - ink.right),
+      above: above ? round(first - above.getBoundingClientRect().bottom) : null,
+      gap: round(over ? top - box.bottom : box.top - bottom),
+      below: below ? round(below.getBoundingClientRect().top - end) : null,
+    };
+  };
+  const drawn = (selector, drawing) =>
+    Array.from(document.querySelectorAll(selector)).map((caption) => {
+      const box = eval("(" + drawing + ")")(caption).getBoundingClientRect();
+      return Object.assign(read(caption, box.top, box.bottom, null), {
+        drawingLeft: round(box.left - column.left),
+        drawingRight: round(column.right - box.right),
+      });
+    });
+  const pictures = drawn(sel.picture, sel.image);
+  const scores = drawn(sel.score, sel.drawing);
+  const listings = Array.from(document.querySelectorAll(sel.listing)).map((caption) => {
+    const code = eval("(" + sel.code + ")")(caption);
+    return read(caption, words(code, "for").top, words(code, "print", true).bottom, true);
+  });
+  const shown = document.querySelector(sel.column).textContent;
+  return { pictures: pictures, scores: scores, listings: listings, options: /[%#]\| /.test(shown) };
+}.toString();
+
+test("a score and a piece of code take a label, a caption and a place from the lines at their head, numbered, captioned and standing alike on the page and in the editor", { skip }, async () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "vscode-mdm", "media", "icon.png"), path.join(DIR, "icon.png"));
+  const { open: openEditor } = require("./webview/helpers.js");
+  // The scores in the middle and no word in the header, then at the left
+  // with the header putting every caption under what it captions.
+  for (const [align, words] of [["center", ""], ["left", "fig-cap-location: bottom\n"]]) {
+    const header = "---\ntitle: Options\n" + words + "filters:\n  - mdm\n---\n";
+    const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light", "-M", "mdm-score-align:" + align];
+    fs.writeFileSync(path.join(DIR, "block-options.mdm"), header + "\n" + BLOCK_OPTIONS_DOC);
+    const r = spawnSync(MDM, ["render", "block-options.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const html = fs.readFileSync(path.join(DIR, "block-options.html"), "utf8");
+    const sel = {
+      column: "main.content",
+      prose: "main.content p",
+      picture: "main.content figure:has(img) > figcaption",
+      image: "(c) => c.parentElement.querySelector('img')",
+      score: "main.content figure:has(figure.mdm-block) > figcaption",
+      drawing: "(c) => c.parentElement.querySelector('figure.mdm-block .mdm-paper svg')",
+      listing: "main.content figure.quarto-float-lst > figcaption",
+      code: "(c) => [c.parentElement.querySelector('pre')]",
+    };
+    const page = await readCiting(
+      "file://" + path.join(DIR, "block-options.html"),
+      (arg) => {
+        return new Promise((done) => {
+          const ready = () => document.querySelectorAll("figure.mdm-block svg").length >= 3;
+          const wait = () => (ready() ? done(eval("(" + arg.boxes + ")")(arg.sel)) : setTimeout(wait, 100));
+          wait();
+        });
+      },
+      { boxes: OPTION_BOXES, sel: sel }
+    );
+    const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light", scoreAlign: align };
+    const h = await openEditor({
+      text: header + "\n" + BLOCK_OPTIONS_DOC,
+      withFrontMatter: false,
+      frontMatter: header,
+      seed: { settings, docBase: "file://" + DIR + "/" },
+      scores: 3,
+      height: 2400,
+    });
+    let editor;
+    try {
+      await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 2400 });
+      await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+      await h.page.mouse.click(2, 2);
+      await h.page.waitForFunction(() => {
+        const img = document.querySelector("#app .mdm-figure img");
+        return img && img.complete && img.naturalWidth > 0;
+      });
+      await h.page.evaluate(() => document.fonts.ready);
+      await new Promise((res) => setTimeout(res, 500));
+      editor = await h.page.evaluate((arg) => eval("(" + arg.boxes + ")")(arg.sel), {
+        boxes: OPTION_BOXES,
+        sel: {
+          column: "#app .cm-content",
+          prose: "#app .cm-line",
+          picture: "#app .mdm-figcaption",
+          image: "(c) => c.closest('.mdm-figure').querySelector('img')",
+          score: "#app .mdm-score-caption",
+          drawing: "(c) => c.closest('.mdm-score').querySelector('code.language-abc svg')",
+          listing: "#app .mdm-listing-caption",
+          code: "(c) => { const out = []; for (let e = c.nextElementSibling; e && e.classList.contains('mdm-code-line'); e = e.nextElementSibling) out.push(e); return out; }",
+        },
+      });
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+    // The options are read and put away on both, the page's text and the
+    // editor's lines alike.
+    assert.equal(page.options, false, "the page prints an option line");
+    assert.equal(editor.options, false, "the editor shows an option line while the blocks are shut");
+    assert.ok(!/%\| |#\| /.test(html.replace(/<pre class="mdm-src"[\s\S]*?<\/pre>/g, "")), "the page carries an option line");
+    assert.deepEqual(page.scores.map((c) => c.text), [
+      "Figure 2: A short tune, the second figure.",
+      "A tune with no label, at the left.",
+      "Figure 3: At the right, the third figure, its caption under it.",
+    ]);
+    // A label alone, or a caption alone, makes no listing.
+    assert.deepEqual(page.listings.map((c) => c.text), ["Listing 1: The scale, step by step."]);
+    assert.deepEqual(editor.scores.map((c) => c.text), page.scores.map((c) => c.text));
+    assert.deepEqual(editor.listings.map((c) => c.text), page.listings.map((c) => c.text));
+    // A score stands where its own `fig-align` says, and the others where
+    // the scores do; a listing's caption at the left.
+    assert.deepEqual(page.scores.map((c) => c.align), [align, "left", "right"], "on the page, scores " + align);
+    assert.deepEqual(editor.scores.map((c) => c.align), [align, "left", "right"], "in the editor, scores " + align);
+    assert.deepEqual([page.listings[0].align, editor.listings[0].align], ["left", "left"]);
+    // Over or under: a score's own word, else the header's, else over; a
+    // picture's own word, else the header's, else under.
+    const sides = words ? ["over", "under", "under", "under", "under"] : ["over", "under", "over", "over", "under"];
+    assert.deepEqual(page.pictures.concat(page.scores).map((c) => c.side), sides, "on the page, " + (words || "no header"));
+    assert.deepEqual(editor.pictures.concat(editor.scores).map((c) => c.side), sides, "in the editor, " + (words || "no header"));
+    const all = (read) => read.pictures.concat(read.scores, read.listings);
+    const both = all(page).map((c, i) => [c, all(editor)[i]]);
+    const apart = [];
+    both.forEach(function (pair, i) {
+      for (const key of ["left", "right", "above", "gap", "below", "drawingLeft", "drawingRight"]) {
+        if (pair[0][key] === undefined && pair[1][key] === undefined) continue;
+        if (!(Math.abs(pair[0][key] - pair[1][key]) <= 1)) {
+          apart.push(key + " of caption " + i + " (" + pair[0].text + ") is " + pair[0][key] + " on the page and " + pair[1][key] + " in the editor");
+        }
+      }
+    });
+    assert.deepEqual(apart, [], "scores " + align + ", " + (words || "no header"));
+    // And the references print the numbers the captions carry.
+    assert.match(html, /Figure&nbsp;2<\/a>, <a href="#fig-right" class="quarto-xref">Figure&nbsp;3<\/a> and <a href="#lst-scale" class="quarto-xref">Listing&nbsp;1<\/a>/);
+  }
+});
+
 // ---------- Tables by number, page against editor ----------
 
 // A table is captioned by the paragraph beside it that opens with a colon
@@ -6273,12 +6886,14 @@ test("a numbered figure opens its caption on the page as the editor opens it and
 // editor by the same rules (Tables by number in webview-markdown.test.js),
 // and the owner's pick of 2026-10-12, B on design/design-table-caption.html,
 // is the same on both: every table in the middle of the column, its caption
-// over it and centred on the column, in a figure's size and ink. The page
-// had the caption over the table already and the table at the left; and a
-// caption with no label stood inside the table, where it can be no wider
-// than the rows (mdm-after.lua takes it out, and the stylesheet sets the two
-// kinds alike). The third table here is that case: a caption wider than its
-// two short columns.
+// centred on the column, in a figure's size and ink. The caption stands on
+// the side of the table it is written on (the owner, 2026-11-20: until
+// then B stood it over the table wherever it was written), which the page
+// is told off the source (mdm.lua, the side a table's caption is written
+// on). A caption with no label stood inside the table, where it can be no
+// wider than the rows (mdm-after.lua takes it out, and the stylesheet sets
+// the two kinds alike). The third table here is that case: a caption wider
+// than its two short columns, under it.
 const TABLES_DOC = `Before the tables, a line of prose to measure from.
 
 | Note | Name | Duration |
@@ -6286,7 +6901,7 @@ const TABLES_DOC = `Before the tables, a line of prose to measure from.
 | a | whole note | 4 beats |
 | b | half note | 2 beats |
 
-: A numbered caption over the table, long enough to run over to a second row of the column of the page, so that the word it breaks on can be read on both surfaces alike and held there. {#tbl-shapes}
+: A numbered caption under the table, long enough to run over to a second row of the column of the page, so that the word it breaks on can be read on both surfaces alike and held there. {#tbl-shapes}
 
 Between the first two, a line of prose to measure from.
 
@@ -6314,12 +6929,12 @@ The relation between the tables: @tbl-shapes is the first of them and -@tbl-shap
 `;
 
 // Every table of a surface: what its caption says and the words its rows
-// end on, how far the middle of the table stands from the middle of the
-// column and how wide it is, where the caption's box stands and how its
-// text is set in it, the air over the table (over its caption where it has
-// one), between the caption and the table and under the table, and the
-// caption's size and ink. `sel` names the table, the blocks of prose and
-// what is no prose, and how to find a table's rows and its caption.
+// end on, the side of the table it stands on, how far the middle of the
+// table stands from the middle of the column and how wide it is, where the
+// caption's box stands and how its text is set in it, the air over the
+// table and its caption, between the two and under both, and the caption's
+// size and ink. `sel` names the table, the blocks of prose and what is no
+// prose, and how to find a table's rows and its caption.
 const TABLE_BOXES = function (arg) {
   const sel = arg.sel;
   const round = (x) => Math.round(x * 10) / 10;
@@ -6330,28 +6945,31 @@ const TABLE_BOXES = function (arg) {
     const rows = eval("(" + sel.rows + ")")(table);
     const caption = eval("(" + sel.caption + ")")(table);
     const box = caption ? caption.getBoundingClientRect() : null;
-    const top = box ? box.top : rows.top;
+    const under = !!box && box.top >= rows.bottom - 1;
+    const top = box && !under ? box.top : rows.top;
+    const bottom = box && under ? box.bottom : rows.bottom;
     const above = blocks.filter((b) => b.getBoundingClientRect().bottom <= top + 1).pop();
-    const below = blocks.find((b) => b.getBoundingClientRect().top >= rows.bottom - 1);
+    const below = blocks.find((b) => b.getBoundingClientRect().top >= bottom - 1);
     const read = caption ? Object.values(eval("(" + arg.ends + ")")([caption]))[0] : null;
     return {
       caption: read ? read.text : null,
       ends: read ? read.ends : null,
+      side: !box ? null : under ? "under" : box.bottom <= rows.top + 1 ? "over" : "across",
       off: round(rows.left + rows.width / 2 - middle),
       width: round(rows.width),
       captionOff: box ? round(box.left + box.width / 2 - middle) : null,
       captionWidth: box ? round(box.width) : null,
       align: caption ? getComputedStyle(caption).textAlign : null,
       above: above ? round(top - above.getBoundingClientRect().bottom) : null,
-      gap: box ? round(rows.top - box.bottom) : null,
-      below: below ? round(below.getBoundingClientRect().top - rows.bottom) : null,
+      gap: box ? round(under ? box.top - rows.bottom : rows.top - box.bottom) : null,
+      below: below ? round(below.getBoundingClientRect().top - bottom) : null,
       size: caption ? getComputedStyle(caption).fontSize : null,
       ink: caption ? getComputedStyle(caption).color : null,
     };
   });
 }.toString();
 
-test("a table stands in the middle of the column with its caption over it on the page as in the editor, numbered alike, and a reference to it prints what the editor prints and breaks its paragraph on the same words", { skip }, async () => {
+test("a table stands in the middle of the column with its caption on the side it is written on, on the page as in the editor, numbered alike, and a reference to it prints what the editor prints and breaks its paragraph on the same words", { skip }, async () => {
   fs.mkdirSync(DIR, { recursive: true });
   const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
   fs.writeFileSync(path.join(DIR, "tables.mdm"), "---\ntitle: Tables\nfilters:\n  - mdm\n---\n\n" + TABLES_DOC);
@@ -6379,7 +6997,9 @@ test("a table stands in the middle of the column with its caption over it on the
               const float = t.closest("figure");
               if (float && float.querySelector(":scope > figcaption")) return float.querySelector(":scope > figcaption");
               const before = t.previousElementSibling;
-              return before && before.classList.contains("mdm-table-caption") ? before : null;
+              const after = t.nextElementSibling;
+              if (before && before.classList.contains("mdm-table-caption")) return before;
+              return after && after.classList.contains("mdm-table-caption") ? after : null;
             }).toString(),
           },
         }),
@@ -6445,6 +7065,9 @@ test("a table stands in the middle of the column with its caption over it on the
   assert.deepEqual(editor.boxes.map((b) => b.caption && b.caption.slice(0, 26)), [
     "Table 1: A numbered captio", "Table 2: Written before it", "A caption with no label, w", null,
   ]);
+  // Each caption on the side of its table it is written on, on both.
+  assert.deepEqual(page.boxes.map((b) => b.side), ["under", "over", "under", null]);
+  assert.deepEqual(editor.boxes.map((b) => b.side), ["under", "over", "under", null]);
   assert.ok(page.boxes[0].ends.length >= 1, "the numbered caption does not run over a row on the page: " + JSON.stringify(page.boxes[0]));
   assert.ok(page.boxes[2].captionWidth > 3 * page.boxes[2].width, "the third caption is no wider than its table: " + JSON.stringify(page.boxes[2]));
   for (let i = 0; i < page.boxes.length; i++) {
@@ -6455,7 +7078,7 @@ test("a table stands in the middle of the column with its caption over it on the
       if (box.caption === null) continue;
       assert.ok(Math.abs(box.captionOff) <= 0.5, "the caption of table " + i + " stands " + box.captionOff + " px off the middle on " + name);
       assert.equal(box.align, "center", "the caption of table " + i + " on " + name);
-      assert.ok(box.gap >= 0, "the caption of table " + i + " is not over it on " + name + ": " + box.gap);
+      assert.ok(box.gap >= 0, "the caption of table " + i + " runs into it on " + name + ": " + box.gap);
     }
     assert.deepEqual(own.ends, printed.ends, "the caption of table " + i + " breaks elsewhere in the editor");
     for (const key of ["width", "captionWidth", "above", "gap", "below"]) {
@@ -6465,11 +7088,11 @@ test("a table stands in the middle of the column with its caption over it on the
     assert.equal(own.size, printed.size, "the size of the caption of table " + i);
     assert.equal(own.ink, printed.ink, "the ink of the caption of table " + i);
   }
-  // A caption is as wide as the column, whatever the table under it, and a
-  // table with one keeps under it the air of a table with none.
+  // A caption is as wide as the column, whatever the table by it, and a
+  // table with one over it keeps under it the air of a table with none.
   for (const [name, boxes] of [["the page", page.boxes], ["the editor", editor.boxes]]) {
     assert.ok(Math.abs(boxes[2].captionWidth - boxes[0].captionWidth) <= 0.5, "the captions are not one width on " + name);
-    assert.ok(Math.abs(boxes[0].below - boxes[3].below) <= 0.5, "below is " + boxes[3].below + " without a caption and " + boxes[0].below + " with one on " + name);
+    assert.ok(Math.abs(boxes[1].below - boxes[3].below) <= 0.5, "below is " + boxes[3].below + " without a caption and " + boxes[1].below + " with one over the table on " + name);
   }
   // And the references: the same words, on the same rows.
   assert.deepEqual(editor.refs, ["Table 1", "1", "Tab. 2", "Table 1, Table 2", "Table 1?@tbl-zz"]);
@@ -6479,6 +7102,382 @@ test("a table stands in the middle of the column with its caption over it on the
   assert.equal(editorText.text, pageText.text, "the editor prints other words than the page");
   assert.ok(editorText.ends.length >= 2, "the paragraph is not long enough to test: " + JSON.stringify(editorText.ends));
   assert.deepEqual(editorText.ends, pageText.ends);
+});
+
+// The side a caption is written on, read off the source by the filter
+// (mdm.lua, the side a table's caption is written on) since Pandoc keeps no
+// trace of it, against the editor, which reads it off its own tree
+// (tableTops): every way a caption can stand by its table, the rules of
+// which is the table's, a quote, the divs that are tables, a panel of two,
+// and a table in a block of code, which is no table and must not take the
+// label of the one before it. A grid table is a table to Pandoc and text to
+// the editor, which reads GFM's pipe tables alone: its caption is none of
+// the source's, and the next table's is known by its words and not by its
+// place in the count.
+const SIDES_TABLES = `Opening.
+
+| A1 | x |
+|---|---|
+| r | y |
+
+: After its table {#tbl-after}
+
+Between.
+
+: Before its table {#tbl-before}
+
+| A2 | x |
+|---|---|
+| r | y |
+
+| A3 | x |
+|---|---|
+| r | y |
+: No blank line under {#tbl-row}
+
+: Straight over, no blank line {#tbl-over}
+| A4 | x |
+|---|---|
+| r | y |
+
+| A5 | x |
+|---|---|
+| r | y |
+
+: Between two {#tbl-between}
+
+| A6 | x |
+|---|---|
+| r | y |
+
+Prose.
+
++----+---+
+| G1 | x |
++====+===+
+| r  | y |
++----+---+
+
+: Grid, plain under
+
+Prose.
+
+| A7 | x |
+|---|---|
+| r | y |
+
+: Plain under
+
+: Plain over
+
+| A8 | x |
+|---|---|
+| r | y |
+
+> : In a quote, over its table {#tbl-quote}
+>
+> | A9 | x |
+> |---|---|
+> | r | y |
+
+::: {#tbl-div}
+| A10 | x |
+|---|---|
+| r | y |
+
+The div's paragraph.
+:::
+
+::: {#tbl-own}
+: The table's own, over it
+
+| A11 | x |
+|---|---|
+| r | y |
+:::
+
+::: {#tbl-panel}
+| A12 | x |
+|---|---|
+| r | y |
+
+: Sub one {#tbl-suba}
+
+| A13 | x |
+|---|---|
+| r | y |
+
+: Sub two {#tbl-subb}
+
+Panel caption.
+:::
+
+| A14 | x |
+|---|---|
+| r | y |
+
+: After the code's table {#tbl-code}
+
+: Over, which is the table's {#tbl-each}
+
+| A15 | x |
+|---|---|
+| r | y |
+
+: Under, which is prose
+
+::: {#tbl-own-under}
+| A16 | x |
+|---|---|
+| r | y |
+
+: The table's own, under it
+:::
+
+- : Opening an item {#tbl-item}
+
+  | A17 | x |
+  |---|---|
+  | r | y |
+
+\`\`\`markdown
+
+: Over a table that is code {#tbl-code}
+
+| fake | x |
+|---|---|
+| r | y |
+\`\`\`
+
+Refs: @tbl-after @tbl-before @tbl-row @tbl-over @tbl-between @tbl-quote @tbl-div @tbl-own @tbl-panel @tbl-suba @tbl-code @tbl-each @tbl-own-under @tbl-item.
+`;
+
+test("a table's caption stands on the side it is written on, on the page as in the editor, however it is written beside its table", { skip }, async () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
+  // The header asks every caption under its table, which the side read off
+  // the source outranks, so a side the filter did not set shows.
+  fs.writeFileSync(path.join(DIR, "table-sides.mdm"), "---\ntitle: Sides\ntbl-cap-location: bottom\nfilters:\n  - mdm\n---\n\n" + SIDES_TABLES);
+  const r = spawnSync(MDM, ["render", "table-sides.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const warned = (r.stderr + r.stdout).replace(/\x1b\[[0-9;]*m/g, "").match(/Unable to resolve crossref @\S+/g) || [];
+  assert.deepEqual(warned, []);
+  // Each table by the first cell of its head, the side its caption stands
+  // on, and the panel's caption against its last table.
+  const page = await readCiting(
+    "file://" + path.join(DIR, "table-sides.html"),
+    () => {
+      const side = (cap, t) => {
+        if (!cap) return "none";
+        const c = cap.getBoundingClientRect();
+        const b = t.getBoundingClientRect();
+        return c.bottom <= b.top + 1 ? "over" : c.top >= b.bottom - 1 ? "under" : "across";
+      };
+      const tables = Array.from(document.querySelectorAll("main.content table")).filter((t) => /^A/.test(t.querySelector("th").textContent.trim()));
+      const rows = tables.map((t) => {
+        const fig = t.closest("figure");
+        let cap = fig ? fig.querySelector(":scope > figcaption") : null;
+        const prev = t.previousElementSibling;
+        const next = t.nextElementSibling;
+        if (!cap && prev && prev.classList.contains("mdm-table-caption")) cap = prev;
+        if (!cap && next && next.classList.contains("mdm-table-caption")) cap = next;
+        return t.querySelector("th").textContent.trim() + " " + side(cap, t);
+      });
+      const panel = document.querySelector("#tbl-panel > figure > figcaption");
+      const last = tables.find((t) => t.querySelector("th").textContent.trim() === "A13");
+      return { rows, panel: panel ? side(panel, last) : "none", panelAlign: panel ? getComputedStyle(panel).textAlign : null, fake: !!document.querySelector("main.content pre code") };
+    },
+    {}
+  );
+  const { open: openEditor } = require("./webview/helpers.js");
+  const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" };
+  const h = await openEditor({ text: SIDES_TABLES, seed: { settings }, scores: 0, height: 4000 });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 4000 });
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await h.page.mouse.click(2, 2);
+    await new Promise((res) => setTimeout(res, 500));
+    editor = await h.page.evaluate(() => {
+      const side = (cap, t) => {
+        if (!cap) return "none";
+        const c = cap.getBoundingClientRect();
+        const b = t.getBoundingClientRect();
+        return c.bottom <= b.top + 1 ? "over" : c.top >= b.bottom - 1 ? "under" : "across";
+      };
+      const widgets = Array.from(document.querySelectorAll("#app .mdm-table"));
+      const rows = widgets.map((w) => w.querySelector("th").textContent.trim() + " " + side(w.querySelector(".mdm-table-caption"), w.querySelector("table")));
+      const lead = document.querySelector("#app .mdm-table-lead");
+      const last = widgets.find((w) => w.querySelector("th").textContent.trim() === "A13");
+      return { rows, panel: lead ? side(lead.closest(".cm-line"), last.querySelector("table")) : "none", panelAlign: lead ? getComputedStyle(lead.closest(".cm-line")).textAlign : null };
+    });
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  const sides = [
+    "A1 under", "A2 over", "A3 under", "A4 over", "A5 under", "A6 none", "A7 under", "A8 over",
+    "A9 over", "A10 under", "A11 over", "A12 under", "A13 under", "A14 under", "A15 over", "A16 under", "A17 over",
+  ];
+  assert.deepEqual(editor.rows, sides, "in the editor");
+  assert.deepEqual(page.rows, sides, "on the page");
+  assert.deepEqual([editor.panel, page.panel], ["under", "under"], "the panel's caption");
+  // Centred under the tables it captions, which stand in the middle (the
+  // owner, 2026-11-21).
+  assert.deepEqual([editor.panelAlign, page.panelAlign], ["center", "center"], "the panel's caption");
+  assert.equal(page.fake, true, "the block of code is not on the page");
+});
+
+// A table stands where MDM's `tbl-align` says, which Quarto has no word for
+// (1.11.9, measured 2026-11-21), read as `fig-align` is (the owner,
+// 2026-11-21: "a way, perhaps provisional, as homogeneous as possible with
+// everything we want to align"): its own in the braces its caption ends on,
+// labelled or not, else a div's around it, else the header's, else the
+// middle, and its caption stands with it. On the page the word of a caption
+// with no label is taken out of its braces, which Quarto would print.
+const TBL_ALIGN_HEADER = "---\ntitle: Places\ntbl-align: right\nfilters:\n  - mdm\n---\n";
+const TBL_ALIGN_DOC = `Before the tables, a line of prose to measure from.
+
+| B1 | own left |
+|---|---|
+| x | y |
+
+: Its own left {#tbl-left tbl-align="left"}
+
+Between, a line of prose to measure from.
+
+: Its own middle, with no label {tbl-align="center" .striped}
+
+| B2 | own middle |
+|---|---|
+| x | y |
+
+Between, a line of prose to measure from.
+
+::: {tbl-align="left"}
+| B3 | the div's left |
+|---|---|
+| x | y |
+:::
+
+Between, a line of prose to measure from.
+
+| B4 | the right of the header |
+|---|---|
+| x | y |
+
+: The side of the header {#tbl-header}
+
+Between, a line of prose to measure from.
+
+::: {#tbl-div tbl-align="left"}
+| B5 | a div that is the table |
+|---|---|
+| x | y |
+
+: Its own caption in the div
+:::
+
+Between, a line of prose to measure from.
+
+| B6 | its default |
+|---|---|
+| x | y |
+
+: Its default, the side of the header {tbl-align="default"}
+
+After the tables: @tbl-left, @tbl-header and @tbl-div.
+`;
+
+// Each table of a surface by the first cell of its head: the side it
+// stands on, its caption's words and how they are set, and where their ink
+// stands across the column.
+const PLACE_BOXES = function (sel) {
+  const column = document.querySelector(sel.column).getBoundingClientRect();
+  const side = (b) => {
+    const left = Math.round(b.left - column.left);
+    const right = Math.round(column.right - b.right);
+    return Math.abs(left - right) <= 1 ? "center" : left === 0 ? "left" : right === 0 ? "right" : "astray " + left + "/" + right;
+  };
+  return Array.from(document.querySelectorAll(sel.table))
+    .filter((t) => /^B\d/.test(t.querySelector("th").textContent.trim()))
+    .map((t) => {
+      const cap = eval("(" + sel.caption + ")")(t);
+      const r = document.createRange();
+      if (cap) r.selectNodeContents(cap);
+      return {
+        table: t.querySelector("th").textContent.trim() + " " + side(t.getBoundingClientRect()),
+        caption: cap ? cap.textContent.replace(/\s+/g, " ").trim() : null,
+        align: cap ? getComputedStyle(cap).textAlign : null,
+        ink: cap ? side(r.getBoundingClientRect()) : null,
+      };
+    });
+}.toString();
+
+test("a table stands where tbl-align says, its own, a div's, the header's or the middle, with its caption, on the page as in the editor", { skip }, async () => {
+  fs.mkdirSync(DIR, { recursive: true });
+  const look = ["-M", "mdm-text-font:roman", "-M", "mdm-text-align:justify", "-M", "mdm-hyphenation:none", "-M", "mdm-front-matter:hidden", "-M", "mdm-look:light"];
+  fs.writeFileSync(path.join(DIR, "table-places.mdm"), TBL_ALIGN_HEADER + "\n" + TBL_ALIGN_DOC);
+  const r = spawnSync(MDM, ["render", "table-places.mdm", "--to", "html"].concat(look), { cwd: DIR, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const page = await readCiting(
+    "file://" + path.join(DIR, "table-places.html"),
+    (arg) => eval("(" + arg.boxes + ")")(arg.sel),
+    {
+      boxes: PLACE_BOXES,
+      sel: {
+        column: "main.content",
+        table: "main.content table",
+        caption: "(t) => { const fig = t.closest('figure'); const own = fig && fig.querySelector(':scope > figcaption'); if (own) return own; const near = [t.previousElementSibling, t.nextElementSibling].find((e) => e && e.classList.contains('mdm-table-caption')); return near || null; }",
+      },
+    }
+  );
+  const { open: openEditor } = require("./webview/helpers.js");
+  const settings = { frontMatter: "hidden", textFont: "roman", textAlign: "justify", hyphenation: "none", theme: "light" };
+  const h = await openEditor({
+    text: TBL_ALIGN_HEADER + "\n" + TBL_ALIGN_DOC,
+    withFrontMatter: false,
+    frontMatter: TBL_ALIGN_HEADER,
+    seed: { settings },
+    scores: 0,
+    height: 2400,
+  });
+  let editor;
+  try {
+    await h.page.setViewport({ width: SIDE_BY_SIDE_WIDTH, height: 2400 });
+    await h.page.evaluate(() => document.activeElement && document.activeElement.blur());
+    await h.page.mouse.click(2, 2);
+    await new Promise((res) => setTimeout(res, 500));
+    editor = await h.page.evaluate((arg) => eval("(" + arg.boxes + ")")(arg.sel), {
+      boxes: PLACE_BOXES,
+      sel: { column: "#app .cm-content", table: "#app .mdm-table table", caption: "(t) => t.closest('.mdm-table').querySelector('.mdm-table-caption')" },
+    });
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  const places = ["B1 left", "B2 center", "B3 left", "B4 right", "B5 left", "B6 right"];
+  assert.deepEqual(page.map((t) => t.table), places, "on the page");
+  assert.deepEqual(editor.map((t) => t.table), places, "in the editor");
+  // The caption stands with its table, and the word is no part of it.
+  const captions = [
+    ["Table 1: Its own left", "left"],
+    ["Its own middle, with no label", "center"],
+    null,
+    ["Table 2: The side of the header", "right"],
+    ["Table 3: Its own caption in the div", "left"],
+    ["Its default, the side of the header", "right"],
+  ];
+  for (const [surface, read] of [["page", page], ["editor", editor]]) {
+    assert.deepEqual(
+      read.map((t) => (t.caption === null ? null : [t.caption, t.align])),
+      captions,
+      "the captions " + (surface === "page" ? "on the page" : "in the editor")
+    );
+    read.forEach(function (t, i) {
+      if (captions[i]) assert.equal(t.ink, captions[i][1], "the ink of " + t.table + "'s caption, " + surface);
+    });
+  }
 });
 
 // ---------- Sections by number, page against editor ----------

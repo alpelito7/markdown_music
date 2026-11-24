@@ -190,6 +190,63 @@ test("the .tex sets an address in the code face and a link written in words in t
   assert.deepEqual(own.match(/\\urlstyle\{[^}]*\}/g), ["\\urlstyle{same}"]);
 });
 
+// A score and a block of code take a label, a caption and a place in lines
+// at their head (the owner, 2026-11-21; block_options in mdm.lua). On paper
+// the score with a `fig-` label is Quarto's figure, numbered and cited, and
+// Quarto is told to leave its place to the engraving (no \centering of its
+// own around it); one with a caption and no label is a figure held in place
+// with its caption unnumbered, written out by the filter, since Quarto's
+// renderer takes a figure only with a picture in it and Pandoc's \caption
+// numbered it and every labelled figure after it; and the code is Quarto's
+// listing. A score's caption is over it unless its options say under, as
+// on the page (the owner, 2026-11-21). None of the lines of options reaches
+// the paper. Written to .tex alone, with no TeX run; the paper typeset with
+// LaTeX is not looked at otherwise (the owner, 2026-11-21: it may leave the
+// editor).
+test("the .tex has a score's options made a figure, a caption with no label unnumbered, and a code block's a listing, and none of their lines", () => {
+  const dir = freshDir("block-options-tex");
+  const body = [
+    "```abc",
+    "%| label: fig-tune",
+    '%| fig-cap: "A *short* tune."',
+    "%| fig-align: left",
+    "X:1",
+    "K:C",
+    "CDEF|",
+    "```",
+    "",
+    "```abc",
+    '%| fig-cap: "No label."',
+    "%| fig-cap-location: bottom",
+    "X:1",
+    "K:C",
+    "GABc|",
+    "```",
+    "",
+    "```python",
+    "#| label: lst-scale",
+    '#| lst-cap: "Step by *step*."',
+    "print(1)",
+    "```",
+    "",
+    "See @fig-tune and @lst-scale.",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "doc.mdm"), "---\nfilters:\n  - mdm\n---\n\n" + body);
+  const r = runMdm(["render", "doc.mdm", "--to", "latex"], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const tex = fs.readFileSync(path.join(dir, "doc.tex"), "utf8");
+  const numbered = /\\begin\{figure\}\s*\\caption\{\\label\{fig-tune\}A \\emph\{short\} tune\.\}([\s\S]*?)\\end\{figure\}/.exec(tex);
+  assert.ok(numbered, "no numbered figure of the score in:\n" + tex);
+  assert.doesNotMatch(numbered[1], /\\centering\{/, "Quarto centred the score's figure");
+  assert.doesNotMatch(numbered[1], /\\begin\{figure\}/, "the figure took in more than the score");
+  assert.match(tex, /\\begin\{figure\}\[H\][\s\S]*?\\caption\*\{No label\.\}\s*\\end\{figure\}\s*\\vspace\{-\\intextsep\}/);
+  assert.equal((tex.match(/\\caption\{/g) || []).length, 2, "a caption numbered that has no label");
+  assert.match(tex, /\\begin\{codelisting\}\s*\\caption\{\\label\{lst-scale\}Step by \\emph\{step\}\.\}/);
+  assert.match(tex, /Figure~\\ref\{fig-tune\} and Listing~\\ref\{lst-scale\}/);
+  assert.doesNotMatch(tex, /label: |fig-cap|lst-cap|fig-align/);
+});
+
 // The smallest style that asks for no space between entries, as IEEE does.
 const TIGHT_CSL = `<?xml version="1.0" encoding="utf-8"?>
 <style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">

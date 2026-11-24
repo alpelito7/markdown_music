@@ -3538,11 +3538,14 @@ test("a click on the label of an open figure, equation or table puts the caret i
   }
 });
 
-test("a click on the caption over a table puts the caret in the caption's words, written after the table or before it, and a click on a cell in the cell", { skip }, async () => {
-  // The caption is drawn by the table's widget and written beside the
-  // table, outside it: the click finds its words by how far they are from
-  // the head of the table, on either side (TableWidget, revealBlock). With
-  // the source open, a second click on the drawing puts both away.
+test("a click on the caption of a table puts the caret in the caption's words, written after the table or before it, and a click on a cell in the cell", { skip }, async () => {
+  // The caption is drawn by the table's widget, under the table or over it
+  // as it is written beside the table, outside it: the click finds its
+  // words by how far they are from the head of the table, on either side
+  // (TableWidget, revealBlock). Open, the caption's line and the blank one
+  // between are lines of the table's card, three rows and two more (the
+  // owner, 2026-11-20). With the source open, a second click on the
+  // drawing puts both away.
   const table = (name) => "| " + name + " | x |\n|---|---|\n| r" + name + " | y |\n";
   const text = "Intro.\n\n" + table("A") + "\n: After caption {#tbl-a}\n\nProse.\n\n: Before caption {#tbl-b}\n\n" + table("B") + "\nEnd.\n";
   const h = await open({ text, scores: 0, height: 900 });
@@ -3570,14 +3573,14 @@ test("a click on the caption over a table puts the caret in the caption's words,
     await h.page.mouse.click(at.x, at.y);
     await sleep(250);
     assert.deepEqual(await selectionRanges(h.page), [[text.indexOf("After caption"), text.indexOf("After caption")]]);
-    assert.deepEqual(await open2(), { card: 3, captions: [": After caption {#tbl-a}"] });
+    assert.deepEqual(await open2(), { card: 5, captions: [": After caption {#tbl-a}"] });
     // The one written before its table: the first is put away as the caret
     // leaves it.
     at = await centre(".mdm-table-caption", 1);
     await h.page.mouse.click(at.x, at.y);
     await sleep(250);
     assert.deepEqual(await selectionRanges(h.page), [[text.indexOf("Before caption"), text.indexOf("Before caption")]]);
-    assert.deepEqual(await open2(), { card: 3, captions: [": Before caption {#tbl-b}"] });
+    assert.deepEqual(await open2(), { card: 5, captions: [": Before caption {#tbl-b}"] });
     // A second click on the drawing puts its source away, caption and all.
     at = await centre(".mdm-table-caption", 1);
     await h.page.mouse.click(at.x, at.y);
@@ -3588,7 +3591,7 @@ test("a click on the caption over a table puts the caret in the caption's words,
     await h.page.mouse.click(at.x, at.y);
     await sleep(250);
     assert.deepEqual(await selectionRanges(h.page), [[text.indexOf("rA"), text.indexOf("rA")]]);
-    assert.deepEqual(await open2(), { card: 3, captions: [": After caption {#tbl-a}"] });
+    assert.deepEqual(await open2(), { card: 5, captions: [": After caption {#tbl-a}"] });
     assert.deepEqual(h.errors, []);
   } finally {
     await h.close();

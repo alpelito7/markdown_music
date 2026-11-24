@@ -555,13 +555,14 @@ const CASES = [
     // Named by what it cites and not by its brackets: the bare `@knuth1984`
     // was called a "Reference" and `[@fig-x]` a "Citation" (isCrossref in
     // main.js, the kinds Quarto numbers; 2026-09-29). The cross-reference is
-    // a listing's, a kind the editor does not number: a figure's and a
+    // a section's, a kind the editor does not number: a figure's and a
     // table's are drawn as the page prints them since 2026-10-12 (Figures
-    // by number and Tables by number, below).
+    // by number and Tables by number, below), and a listing's since
+    // 2026-11-21 (Options at the head of a block), where this was one.
     name: "a citation and a cross-reference are drawn as written, in the link colour, with what they are in the tooltip (PX04)",
-    text: "As shown by [@knuth1984, p. 33], by @knuth1984 and in @lst-brass, mail me@example.org.\n",
+    text: "As shown by [@knuth1984, p. 33], by @knuth1984 and in @sec-brass, mail me@example.org.\n",
     rows: [
-      [1, "", "As shown by [@knuth1984, p. 33], by @knuth1984 and in @lst-brass, mail me@example.org."],
+      [1, "", "As shown by [@knuth1984, p. 33], by @knuth1984 and in @sec-brass, mail me@example.org."],
       [2, "mdm-blank", ""],
     ],
     dom: (page) =>
@@ -573,7 +574,7 @@ const CASES = [
     domExpected: [
       "[@knuth1984, p. 33]|Citation [@knuth1984, p. 33]",
       "@knuth1984|Citation @knuth1984",
-      "@lst-brass|Cross-reference @lst-brass",
+      "@sec-brass|Cross-reference @sec-brass",
     ],
   },
   {
@@ -2788,6 +2789,130 @@ test("a header shown in the text names the figures as it is typed", { skip }, as
   }
 });
 
+// A picture that loads, 100 by 70 and empty: PNG above does not decode
+// (its chunks fail their checks), so it is drawn as a broken image across
+// the column, which no place across it can be read off.
+const BOX = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22100%22%20height%3D%2270%22%2F%3E";
+
+// Where each drawn picture stands across the column, by its caption: the
+// room it leaves at its left and at its right, and where its caption's
+// words start.
+async function figuresAcross(page) {
+  await page.waitForFunction(() => Array.from(document.querySelectorAll("#app .mdm-figure img")).every((i) => i.complete && i.naturalWidth > 0), { timeout: 5000 });
+  return page.evaluate(() => {
+    const col = document.querySelector("#app .cm-content .cm-line").getBoundingClientRect();
+    return Array.from(document.querySelectorAll("#app .mdm-figure")).map((f) => {
+      const img = f.querySelector("img").getBoundingClientRect();
+      const words = document.createRange();
+      words.selectNodeContents(f.querySelector(".mdm-figcaption"));
+      return {
+        caption: f.querySelector(".mdm-figcaption").textContent,
+        left: Math.round(img.left - col.left),
+        right: Math.round(col.right - img.right),
+        captionLeft: Math.round(words.getBoundingClientRect().left - col.left),
+        captionRight: Math.round(col.right - words.getBoundingClientRect().right),
+      };
+    });
+  });
+}
+
+test("a figure stands across the column where its fig-align or the header's asks, in the middle where neither does, its caption at the left under it", { skip }, async () => {
+  // Quarto's `fig-align` (the owner, 2026-11-20: "make the editor respect
+  // the fig-align of the figures"): on a figure's own braces, or in the
+  // header for every figure, under `format: html:` before the top level as
+  // the page reads it. `default` and nothing at all stand the figure where
+  // the header says, and in the middle where it says nothing, and a word
+  // Quarto does not know in the middle, as Quarto does (the owner,
+  // 2026-11-21: "centre by default"; until then MDM stood it at the left).
+  // Only a figure is placed so, a picture with a caption or a label: one
+  // with neither is a picture in its paragraph on the page, at the left.
+  // The caption stands under the picture the same way, in the middle under
+  // one in the middle and at the right under one at the right (the owner,
+  // 2026-11-21: "every caption centred where what it captions is
+  // centred"; Quarto's page leaves it at the left).
+  const body =
+    "![Plain](" + BOX + ")\n\n" +
+    "![Left](" + BOX + "){fig-align=\"left\"}\n\n" +
+    "![Center](" + BOX + "){fig-align=\"center\"}\n\n" +
+    "![Right](" + BOX + "){fig-align=right}\n\n" +
+    "![Default](" + BOX + "){fig-align=\"default\"}\n\n" +
+    "![Unknown](" + BOX + "){fig-align=\"middle\"}\n\n" +
+    "![Labelled](" + BOX + "){#fig-l fig-align=\"right\"}\n\n" +
+    "![](" + BOX + "){#fig-bare fig-align=\"center\"}\n\n" +
+    "![](" + BOX + "){fig-align=\"center\"}\n\n" +
+    "After.\n";
+  const h = await open({ text: body, scores: 0, height: 2600 });
+  // Each figure by its caption, and where it and its caption stand: left,
+  // center or right, the caption's said only where it is not the picture's.
+  const where = async function () {
+    await new Promise((r) => setTimeout(r, 200));
+    const side = (left, right) => (left === 0 ? "left" : right === 0 ? "right" : Math.abs(left - right) <= 1 ? "center" : "astray");
+    return (await figuresAcross(h.page)).map((f) => {
+      const picture = side(f.left, f.right);
+      const caption = f.caption ? side(f.captionLeft, f.captionRight) : picture;
+      return (f.caption || "(none)") + " " + picture + (caption !== picture ? ", its caption " + caption : "");
+    });
+  };
+  try {
+    await reading(h.page);
+    assert.deepEqual(await where(), [
+      "Plain center",
+      "Left left",
+      "Center center",
+      "Right right",
+      "Default center",
+      "Unknown center",
+      "Figure\u00a01: Labelled right",
+      "Figure\u00a02 center",
+      "(none) left",
+    ]);
+    // The header's, which every figure takes that names none of its own.
+    const header = "---\nfig-align: right\n---\n";
+    await update(h.page, header + "\n" + body, false, 0, header);
+    assert.deepEqual(await where(), [
+      "Plain right",
+      "Left left",
+      "Center center",
+      "Right right",
+      "Default right",
+      "Unknown center",
+      "Figure\u00a01: Labelled right",
+      "Figure\u00a02 center",
+      "(none) left",
+    ]);
+    // What the header says for the page is taken over what it says for the
+    // document.
+    const page = "---\nfig-align: right\nformat:\n  html:\n    fig-align: center\n---\n";
+    await update(h.page, page + "\n" + body, false, 0, page);
+    assert.deepEqual((await where()).slice(0, 2), ["Plain center", "Left left"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  // A header typed in the text moves the figures as it is typed, though
+  // nothing near them changes: a word changed in place, so that the
+  // document keeps its count of lines, which redraws it whole on its own.
+  const shown = "---\ntitle: T\nfig-align: left\n---\n\n![A caption](" + BOX + ")\n\nAfter.\n";
+  const g = await open({ text: shown, scores: 0, height: 900, withFrontMatter: true });
+  try {
+    await reading(g.page);
+    assert.deepEqual((await figuresAcross(g.page)).map((f) => f.left), [0]);
+    await g.page.evaluate(() => {
+      const text = window.__mdm.view.state.doc.toString();
+      const at = text.indexOf("fig-align: left") + "fig-align: ".length;
+      window.__mdm.view.dispatch({ changes: { from: at, to: at + "left".length, insert: "center" } });
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const [f] = await figuresAcross(g.page);
+    assert.ok(f.left > 100 && Math.abs(f.left - f.right) <= 1, JSON.stringify(f));
+    assert.equal(await g.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(g.errors, []);
+  } finally {
+    await g.close();
+  }
+});
+
 test("an open picture shows its attributes wherever the caret stands in it, a figure's label among them", { skip }, async () => {
   // The label is the figure's number on the page and none of its text, and
   // the width is the picture's size, so shut neither is drawn; open, the
@@ -2912,10 +3037,13 @@ test("the label of a figure, of an equation and of a table is drawn alike while 
     ["#fig-brass", text.indexOf("Brass") + 2, false],
     ["#eq-block", text.indexOf("a = b") + 1, true],
     ["#eq-inline", text.indexOf("c = d") + 1, false],
-    ["#tbl-beside", text.indexOf("| T1 |") + 3, false],
-    ["#tbl-beside", text.indexOf("Beside") + 2, false],
+    // A caption written beside its table is a line of the table's card
+    // while the two are open, as the one written straight under the last
+    // row is (the owner, 2026-11-20: until then it stood as prose).
+    ["#tbl-beside", text.indexOf("| T1 |") + 3, true],
+    ["#tbl-beside", text.indexOf("Beside") + 2, true],
     ["#tbl-under", text.indexOf("| T2 |") + 3, true],
-    [".striped", text.indexOf("Classes") + 2, false],
+    [".striped", text.indexOf("Classes") + 2, true],
   ];
   for (const face of ["roman", "sans"]) {
     const h = await open({ text, scores: 0, height: 1600, seed: FIGURES_SEED });
@@ -2934,7 +3062,7 @@ test("the label of a figure, of an equation and of a table is drawn alike while 
         const seen = await braces(h.page, name, at);
         assert.ok(seen, face + " " + name + ": not on screen with its source open");
         // The braces and nothing beside them: the words of a caption are
-        // prose still.
+        // the caption's, set as the rest of its line.
         assert.deepEqual(
           { label: seen.label, text: seen.text, px: seen.px, face: seen.face, ink: seen.ink, card: seen.card, differ: seen.differ },
           { label: true, text: "{" + name + "}", px: figure.px, face: figure.face, ink: figure.ink, card: card, differ: null },
@@ -2942,9 +3070,13 @@ test("the label of a figure, of an equation and of a table is drawn alike while 
         );
       }
       // Braces a caption ends on that name another kind of thing are words
-      // of the caption, printed with it, and are drawn as its words.
+      // of the caption, printed with it, and are set as its words, on the
+      // card in the card's size.
       const other = await braces(h.page, "#other", text.indexOf("Another kind") + 2);
-      assert.deepEqual([other.label, other.px], [false, prose], face);
+      const cardPx = await h.page.evaluate(() =>
+        Math.round(parseFloat(getComputedStyle(document.querySelector("#app .cm-line.mdm-table-line")).fontSize) * 100) / 100
+      );
+      assert.deepEqual([other.label, other.card, other.px], [false, true, cardPx], face);
       assert.deepEqual(h.errors, []);
     } finally {
       await h.close();
@@ -2996,9 +3128,9 @@ const TABLES =
   "Nothing carries: @tbl-lost; @tbl-upper; @tbl-five; @tbl-late.\n";
 
 // Every drawn table by the first cell of its head, with the caption drawn
-// over it (null for a table with none), how many rows its body has, and
-// how far its middle and its caption's stand from the middle of the block
-// they are drawn in.
+// by it (null for a table with none) and the side of the table it is drawn
+// on, how many rows its body has, and how far its middle and its caption's
+// stand from the middle of the block they are drawn in.
 function tablesNow(page) {
   return page.evaluate(() =>
     Array.from(document.querySelectorAll("#app .mdm-table")).map((w) => {
@@ -3015,7 +3147,7 @@ function tablesNow(page) {
         rows: w.querySelectorAll("tbody tr").length,
         off: Math.round((table.left + table.width / 2 - middle) * 10) / 10,
         captionOff: ink ? Math.round((ink.left + ink.width / 2 - middle) * 10) / 10 : null,
-        over: cap ? cap.getBoundingClientRect().bottom <= table.top + 0.5 : null,
+        side: !cap ? null : cap.getBoundingClientRect().bottom <= table.top + 0.5 ? "over" : cap.getBoundingClientRect().top >= table.bottom - 0.5 ? "under" : "across",
       };
     })
   );
@@ -3041,7 +3173,416 @@ function sourceLines(page) {
   );
 }
 
-test("a table is captioned by the paragraph beside it and numbered where that carries a label, the caption over it and every table in the middle of the column", { skip }, async () => {
+// ---------- Options at the head of a block ----------
+//
+// A score and a piece of code take a label, a caption and a place the one
+// way, in lines at their head that open with the language's comment mark
+// and a `|`, as a cell of Quarto's does (the owner, 2026-11-21: "both are
+// called with ```"; blockOptionsOf in main.js, blockOptions in
+// mdm-crossref.js). A score with a `fig-` label is a figure, numbered with
+// the pictures, its caption under it; a code block with an `lst-` label and
+// an `lst-cap` a listing, numbered apart, its caption over its card, and so
+// is one in Quarto's own braces on the fence, and in braces only. The
+// lines are put away while the block is shut and are on its card, in the
+// ink of a comment, while it is open. html.test.js holds the page to it.
+const SCORE_OPTIONS = [
+  "![A picture first.](" + BOX + "){#fig-pic}",
+  "",
+  "```abc",
+  "%| label: fig-tune",
+  '%| fig-cap: "A *short* tune."',
+  "X:1",
+  "K:C",
+  "CDEF|",
+  "```",
+  "",
+  "```abc",
+  '%| fig-cap: "No label."',
+  "%| fig-align: left",
+  "%| fig-cap-location: bottom",
+  "X:1",
+  "K:C",
+  "GABc|",
+  "```",
+  "",
+  "```abc",
+  "%| fig-align: right",
+  "X:1",
+  "K:C",
+  "cBAG|",
+  "```",
+  "",
+  "```abc",
+  "%| label: fig-bare",
+  "X:1",
+  "K:C",
+  "C4|",
+  "```",
+  "",
+  "See @fig-tune, @fig-bare and @fig-pic.",
+  "",
+].join("\n");
+
+// Each score's widget: its classes, its caption's words and how they are
+// set, and whether a line of options is on screen.
+function scoresNow(page) {
+  return page.evaluate(() => ({
+    scores: Array.from(document.querySelectorAll("#app .mdm-score")).map((b) => {
+      const cap = b.querySelector(".mdm-score-caption");
+      const svg = b.querySelector("code.language-abc svg");
+      const side = !cap || !svg ? null : cap.getBoundingClientRect().bottom <= svg.getBoundingClientRect().top + 1 ? "over" : "under";
+      return { cls: b.className, caption: cap ? cap.textContent : null, align: cap ? getComputedStyle(cap).textAlign : null, side: side };
+    }),
+    options: Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => /^[%#/]+\| /.test(l.textContent)).map((l) => l.textContent),
+    marked: Array.from(document.querySelectorAll("#app .mdm-block-option")).map((m) => m.textContent),
+  }));
+}
+
+test("a score whose options give it a label is a figure numbered among the pictures, captioned under it as it stands, and its options are put away while it is shut", { skip }, async () => {
+  const h = await open({ text: SCORE_OPTIONS, scores: 4, height: 2400 });
+  try {
+    await reading(h.page);
+    await h.page.waitForFunction(() => document.querySelectorAll("#app code.language-abc svg").length >= 4);
+    const shut = await scoresNow(h.page);
+    // The picture is Figure 1 and the scores count on from it; the one with
+    // a caption and no label has its caption and no number, the one with a
+    // label and no caption its number alone, and the one with a place and
+    // nothing else no caption.
+    assert.deepEqual(shut.scores.map((s) => s.caption), ["Figure\u00a02: A short tune.", "No label.", null, "Figure\u00a03"]);
+    assert.equal(await h.page.evaluate(() => document.querySelector("#app .mdm-score-caption").innerHTML), "Figure&nbsp;2: A <em>short</em> tune.");
+    assert.deepEqual(shut.scores.map((s) => s.cls), [
+      "mdm-score mdm-score--cap-top",
+      "mdm-score mdm-score--at-left mdm-score--captioned",
+      "mdm-score mdm-score--at-right",
+      "mdm-score mdm-score--cap-top",
+    ]);
+    // A score's caption over it, unless its own `fig-cap-location` says
+    // under (the owner, 2026-11-21: a score is, as a table is, often long
+    // in the vertical), and the header's word for those that say none.
+    assert.deepEqual(shut.scores.map((s) => s.side), ["over", "under", null, "over"]);
+    const text = await h.page.evaluate(() => window.__mdm.view.state.doc.toString());
+    const under = "---\nfig-cap-location: bottom\n---\n";
+    await update(h.page, under + "\n" + text, false, 0, under);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual((await scoresNow(h.page)).scores.map((s) => s.side), ["under", "under", null, "under"]);
+    const over = "---\nfig-cap-location: bottom\nformat:\n  html:\n    fig-cap-location: top\n---\n";
+    await update(h.page, over + "\n" + text, false, 0, over);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual((await scoresNow(h.page)).scores.map((s) => s.side), ["over", "under", null, "over"]);
+    // The header moves the picture's caption too, which stands under it
+    // where nothing says otherwise, as Quarto has it.
+    const picture = () =>
+      h.page.evaluate(() => {
+        const f = document.querySelector("#app .mdm-figure");
+        return f.querySelector(".mdm-figcaption").getBoundingClientRect().bottom <= f.querySelector("img").getBoundingClientRect().top + 1 ? "over" : "under";
+      });
+    assert.equal(await picture(), "over");
+    await update(h.page, text, false, 0, "");
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(await picture(), "under");
+    assert.deepEqual((await scoresNow(h.page)).scores.map((s) => s.side), ["over", "under", null, "over"]);
+
+    // Where the scores stand, in the middle here, or where its own word says.
+    assert.deepEqual(shut.scores.map((s) => s.align), ["center", "left", null, "center"]);
+    const across = await h.page.evaluate(() => {
+      const col = document.querySelector("#app .cm-content").getBoundingClientRect();
+      return Array.from(document.querySelectorAll("#app code.language-abc svg")).map((svg) => {
+        const b = svg.getBoundingClientRect();
+        return [Math.round(b.left - col.left), Math.round(col.right - b.right)];
+      });
+    });
+    assert.equal(across[1][0], 0, "the score at its own left");
+    assert.equal(across[2][1], 0, "the score at its own right");
+    assert.ok(Math.abs(across[0][0] - across[0][1]) <= 1, "the score in the middle: " + across[0]);
+    // Set at the left, the scores and the captions that follow them move;
+    // the ones that name a place stay.
+    await postSettings(h.page, { scoreAlign: "left" });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual((await scoresNow(h.page)).scores.map((s) => s.align), ["left", "left", null, "left"]);
+    await postSettings(h.page, { scoreAlign: "center" });
+    await new Promise((r) => setTimeout(r, 200));
+    // The references read the numbers the captions carry.
+    assert.deepEqual((await figRefs(h.page)).map((r) => [r.text, r.figures]), [
+      ["Figure\u00a02", ["fig-tune"]],
+      ["Figure\u00a03", ["fig-bare"]],
+      ["Figure\u00a01", ["fig-pic"]],
+    ]);
+    // Shut, no line of options is on screen.
+    assert.deepEqual(shut.options, []);
+    // Open, the first score's options are on its card in a comment's ink,
+    // and its caption still stands under the drawing.
+    await setSelection(h.page, SCORE_OPTIONS.indexOf("CDEF"));
+    await new Promise((r) => setTimeout(r, 200));
+    const open = await scoresNow(h.page);
+    assert.deepEqual(open.options, ["%| label: fig-tune", '%| fig-cap: "A *short* tune."']);
+    assert.deepEqual(open.marked.join("\n"), '%| label: fig-tune\n%| fig-cap: "A *short* tune."');
+    assert.equal(open.scores[0].caption, "Figure\u00a02: A short tune.");
+    // The caption typed changes under the drawing as it is typed.
+    await h.page.evaluate((at) => window.__mdm.view.dispatch({ changes: { from: at, to: at + 5, insert: "long" } }), SCORE_OPTIONS.indexOf("short"));
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await scoresNow(h.page)).scores[0].caption, "Figure\u00a02: A long tune.");
+    // A label taken out of the options leaves the score a picture's
+    // number short, and the references after it with it.
+    await h.page.evaluate(() => {
+      const text = window.__mdm.view.state.doc.toString();
+      const at = text.indexOf("%| label: fig-tune\n");
+      window.__mdm.view.dispatch({ changes: { from: at, to: at + "%| label: fig-tune\n".length } });
+    });
+    await reading(h.page);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual((await scoresNow(h.page)).scores.map((s) => s.caption), ["A long tune.", "No label.", null, "Figure\u00a02"]);
+    assert.deepEqual((await figRefs(h.page)).map((r) => r.text), ["?@fig-tune", "Figure\u00a02", "Figure\u00a01"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  // A header shown in the text, its word changed in place: nothing else of
+  // the document changes, and the captions move all the same.
+  const shown = "---\ntitle: T\nfig-cap-location: top\n---\n\n";
+  const h2 = await open({ text: shown + SCORE_OPTIONS, scores: 4, height: 2400, withFrontMatter: true });
+  try {
+    await reading(h2.page);
+    await h2.page.waitForFunction(() => document.querySelectorAll("#app code.language-abc svg").length >= 4);
+    assert.deepEqual((await scoresNow(h2.page)).scores.map((s) => s.side), ["over", "under", null, "over"]);
+    await h2.page.evaluate(() => {
+      const at = window.__mdm.view.state.doc.toString().indexOf("fig-cap-location: top") + "fig-cap-location: ".length;
+      window.__mdm.view.dispatch({ changes: { from: at, to: at + 3, insert: "bottom" } });
+    });
+    await reading(h2.page);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual((await scoresNow(h2.page)).scores.map((s) => s.side), ["under", "under", null, "under"]);
+    assert.equal(await h2.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h2.errors, []);
+  } finally {
+    await h2.close();
+  }
+});
+
+const CODE_OPTIONS = [
+  "```python",
+  "#| label: lst-scale",
+  '#| lst-cap: "The scale, *step* by step."',
+  "for step in [2, 1, 2]:",
+  "    print(step)",
+  "```",
+  "",
+  "```python",
+  '#| lst-cap: "A caption with no label."',
+  "print(2)",
+  "```",
+  "",
+  "```python",
+  "#| label: lst-nocap",
+  "print(3)",
+  "```",
+  "",
+  '```{#lst-native .python lst-cap="In the braces."}',
+  "print(4)",
+  "```",
+  "",
+  "```js",
+  "//| label: lst-js",
+  '//| lst-cap: "Another language, another mark."',
+  "let x = 1;",
+  "```",
+  "",
+  "```",
+  "#| label: lst-plain",
+  '#| lst-cap: "No language, no options."',
+  "plain",
+  "```",
+  "",
+  '```python #lst-bare lst-cap="Not in braces."',
+  "print(5)",
+  "```",
+  "",
+  "See @lst-scale, @lst-native, @lst-js, [@lst-scale; @lst-zz], @lst-nocap and @lst-bare.",
+  "",
+].join("\n");
+
+function listingsNow(page) {
+  return page.evaluate(() => ({
+    captions: Array.from(document.querySelectorAll("#app .mdm-listing-caption")).map((c) => c.textContent),
+    first: Array.from(document.querySelectorAll("#app .cm-line.mdm-code-first")).map((l) => l.textContent),
+    options: Array.from(document.querySelectorAll("#app .cm-line")).filter((l) => /^[%#/]+\| /.test(l.textContent)).map((l) => l.textContent),
+    marked: Array.from(document.querySelectorAll("#app .mdm-block-option")).map((m) => m.textContent),
+  }));
+}
+
+test("a code block whose options give it an lst- label and a caption is a listing, numbered apart with its caption over its card, and its options are put away while it is shut", { skip }, async () => {
+  const h = await open({ text: CODE_OPTIONS, scores: 0, height: 2400, clipboard: true });
+  try {
+    await reading(h.page);
+    const shut = await listingsNow(h.page);
+    // A listing with both, in the options or in Quarto's own braces, and in
+    // either language's mark; a caption with no label, or a label with no
+    // caption, makes none, as on Quarto's page.
+    assert.deepEqual(shut.captions, [
+      "Listing\u00a01: The scale, step by step.",
+      "Listing\u00a02: In the braces.",
+      "Listing\u00a03: Another language, another mark.",
+    ]);
+    assert.equal(await h.page.evaluate(() => document.querySelector("#app .mdm-listing-caption").innerHTML), "Listing&nbsp;1: The scale, <em>step</em> by step.");
+    // Every card opens on its code; a block that names no language has no
+    // options, and its lines are code.
+    assert.deepEqual(shut.first, ["for step in [2, 1, 2]:", "print(2)", "print(3)", "print(4)", "let x = 1;", "#| label: lst-plain", "print(5)"]);
+    assert.deepEqual(shut.options, ["#| label: lst-plain", '#| lst-cap: "No language, no options."']);
+    // The caption stands over the card, at the left of the column.
+    const placed = await h.page.evaluate(() => {
+      const cap = document.querySelector("#app .mdm-listing-caption");
+      const first = document.querySelector("#app .cm-line.mdm-code-first");
+      return { over: cap.getBoundingClientRect().bottom <= first.getBoundingClientRect().top + 1, align: getComputedStyle(cap).textAlign };
+    });
+    assert.deepEqual(placed, { over: true, align: "left" });
+    // The references read "Listing 1", and a label nothing carries, or one
+    // on no listing, is what the page prints for it.
+    const refs = await h.page.evaluate(() =>
+      Array.from(document.querySelectorAll("#app .mdm-eqref")).map((e) => [
+        e.textContent,
+        Array.from(e.querySelectorAll(".mdm-eqref-link[data-mdm-lst]")).map((l) => l.getAttribute("data-mdm-lst")),
+      ])
+    );
+    assert.deepEqual(refs, [
+      ["Listing\u00a01", ["lst-scale"]],
+      ["Listing\u00a02", ["lst-native"]],
+      ["Listing\u00a03", ["lst-js"]],
+      ["Listing\u00a01?@lst-zz", ["lst-scale"]],
+      ["?@lst-nocap", []],
+      // A label written on the fence out of braces is no attribute to
+      // Pandoc, which reads no listing there (the page prints "?@lst-bare").
+      ["?@lst-bare", []],
+    ]);
+    // Copied shut, a card gives the code it shows, without its options.
+    const line = await h.page.evaluate(() => {
+      const b = document.querySelector("#app .cm-line.mdm-code-first").getBoundingClientRect();
+      return [b.left + 40, b.top + b.height / 2];
+    });
+    await h.page.mouse.move(line[0], line[1]);
+    await new Promise((r) => setTimeout(r, 400));
+    const button = await h.page.evaluate(() => {
+      const b = document.querySelector("#app .mdm-chrome--code .mdm-copy").getBoundingClientRect();
+      return [b.left + b.width / 2, b.top + b.height / 2];
+    });
+    await h.page.mouse.click(button[0], button[1]);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(await h.page.evaluate(() => window.__copied.slice()), ["for step in [2, 1, 2]:\n    print(step)"]);
+    // Open, the options are on the card in a comment's ink, the fence over
+    // them, and the caption still over the card.
+    await setSelection(h.page, CODE_OPTIONS.indexOf("print(step)"));
+    await new Promise((r) => setTimeout(r, 200));
+    const open = await listingsNow(h.page);
+    assert.deepEqual(open.options, ["#| label: lst-scale", '#| lst-cap: "The scale, *step* by step."', "#| label: lst-plain", '#| lst-cap: "No language, no options."']);
+    assert.equal(open.marked.join("\n"), '#| label: lst-scale\n#| lst-cap: "The scale, *step* by step."');
+    assert.equal(open.first[0], "```python");
+    assert.equal(open.captions.length, 3);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // The header names them as it names the figures.
+    const text = await h.page.evaluate(() => window.__mdm.view.state.doc.toString());
+    const header = "---\nlang: es\n---\n";
+    await update(h.page, header + "\n" + text, false, 0, header);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await listingsNow(h.page)).captions[0], "Listado\u00a01: The scale, step by step.");
+    assert.equal(await h.page.evaluate(() => document.querySelector("#app .mdm-eqref").textContent), "Listado\u00a01");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+});
+
+// Where a table stands, MDM's `tbl-align` read as Quarto reads `fig-align`
+// (tableAlignOf in main.js): the braces of its caption, then the divs
+// around it, then the header, then the middle. html.test.js holds the page
+// to the editor; here, what moves them as the document is written.
+const TABLE_PLACES = [
+  "| P1 | own |",
+  "|---|---|",
+  "| x | y |",
+  "",
+  ': Its own {tbl-align="left"}',
+  "",
+  "| P2 | none |",
+  "|---|---|",
+  "| x | y |",
+  "",
+  "::: {#tbl-pair tbl-align=right}",
+  "| P3 | in a pair |",
+  "|---|---|",
+  "| x | y |",
+  "",
+  "| P4 | in a pair |",
+  "|---|---|",
+  "| x | y |",
+  "",
+  "The pair, captioned by the div.",
+  ":::",
+  "",
+].join("\n");
+
+function placesNow(page) {
+  return page.evaluate(() => ({
+    tables: Array.from(document.querySelectorAll("#app .mdm-table")).map((w) => w.querySelector("th").textContent + " " + (/mdm-table--(\w+)/.exec(w.className) || [, "center"])[1]),
+    divCaption: getComputedStyle(document.querySelector("#app .mdm-table-lead").closest(".cm-line")).textAlign,
+    shown: Array.from(document.querySelectorAll("#app .mdm-table-caption")).map((c) => c.textContent),
+  }));
+}
+
+test("a table stands where its caption's braces, a div around it or the header ask, and moves as they are written", { skip }, async () => {
+  const h = await open({ text: TABLE_PLACES, scores: 0, height: 1800 });
+  try {
+    await reading(h.page);
+    const first = await placesNow(h.page);
+    assert.deepEqual(first.tables, ["P1 left", "P2 center", "P3 right", "P4 right"]);
+    // The div's own caption stands with its tables.
+    assert.equal(first.divCaption, "right");
+    // The word is no part of a caption drawn: braces with no label are put
+    // away as a class is.
+    assert.deepEqual(first.shown, ["Its own"]);
+    // A header that names a side moves the tables with no word of their
+    // own and leaves the others where they stand.
+    const header = "---\ntbl-align: left\n---\n";
+    await update(h.page, header + "\n" + TABLE_PLACES, false, 0, header);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual((await placesNow(h.page)).tables, ["P1 left", "P2 left", "P3 right", "P4 right"]);
+    const html = "---\ntbl-align: left\nformat:\n  html:\n    tbl-align: right\n---\n";
+    await update(h.page, html + "\n" + TABLE_PLACES, false, 0, html);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual((await placesNow(h.page)).tables, ["P1 left", "P2 right", "P3 right", "P4 right"]);
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    // A word typed into a table's braces moves that table alone.
+    await update(h.page, TABLE_PLACES.replace("tbl-align=right", "tbl-align=default"), false, 0, "");
+    await new Promise((r) => setTimeout(r, 200));
+    const plain = await placesNow(h.page);
+    assert.deepEqual(plain.tables, ["P1 left", "P2 center", "P3 center", "P4 center"]);
+    assert.equal(plain.divCaption, "center");
+    assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
+  // A header shown in the text, its word changed in place: nothing else of
+  // the document changes, and the tables move all the same.
+  const shown = "---\ntitle: T\ntbl-align: left\n---\n\n";
+  const h2 = await open({ text: shown + TABLE_PLACES, scores: 0, height: 1800, withFrontMatter: true });
+  try {
+    await reading(h2.page);
+    assert.deepEqual((await placesNow(h2.page)).tables, ["P1 left", "P2 left", "P3 right", "P4 right"]);
+    await h2.page.evaluate(() => {
+      const at = window.__mdm.view.state.doc.toString().indexOf("tbl-align: left") + "tbl-align: ".length;
+      window.__mdm.view.dispatch({ changes: { from: at, to: at + 4, insert: "right" } });
+    });
+    await reading(h2.page);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual((await placesNow(h2.page)).tables, ["P1 left", "P2 right", "P3 right", "P4 right"]);
+    assert.equal(await h2.page.evaluate(() => window.__mdm.checkDecorations()), null);
+    assert.deepEqual(h2.errors, []);
+  } finally {
+    await h2.close();
+  }
+});
+
+test("a table is captioned by the paragraph beside it and numbered where that carries a label, the caption over it or under it as it is written and every table in the middle of the column", { skip }, async () => {
   const h = await open({ text: TABLES, scores: 0, height: 5200 });
   try {
     await reading(h.page);
@@ -3082,12 +3623,22 @@ test("a table is captioned by the paragraph beside it and numbered where that ca
     ]);
     // The caption written under a table with no blank line is no row of it.
     assert.deepEqual(drawn.map((t) => t.rows), new Array(20).fill(1));
-    // Over its table, and both in the middle of the block they are drawn
-    // in, which is the column or what a quote leaves of it.
+    // On the side of its table it is written on (the owner, 2026-11-20:
+    // until then every caption stood over its table, as B of 2026-10-12
+    // had it): under it after it, as the line straight under the last row
+    // (T6) and as the last paragraph of a div (T13, T15 to T17), and over
+    // it before it (T2, T3, T19). A div that is a table with no caption
+    // (T14) has its number alone over the table, where Quarto puts a
+    // table's caption.
+    assert.deepEqual(drawn.map((t) => t.head + " " + t.side), [
+      "T1 under", "T2 over", "T3 over", "T4 under", "T5 null", "T6 under", "T7 under", "T8 under", "T9 under", "T10 under",
+      "T11 null", "T12 under", "T13 under", "T14 over", "T15 under", "T16 under", "T17 under", "T18 null", "T19 over", "T20 under",
+    ]);
+    // Both in the middle of the block they are drawn in, which is the
+    // column or what a quote leaves of it.
     for (const t of drawn) {
       assert.ok(Math.abs(t.off) <= 0.5, t.head + " stands " + t.off + "px off the middle");
       if (t.caption === null) continue;
-      assert.equal(t.over, true, t.head + ": the caption is not over the table");
       assert.ok(Math.abs(t.captionOff) <= 0.5, t.head + ": the caption stands " + t.captionOff + "px off the middle");
     }
     // The emphasis of a caption is still read after its number.
@@ -3248,9 +3799,9 @@ test("a reference to a table reads in a cell and in a caption as it does in the 
       "Table\u00a01: The first, which cites Table\u00a02 and Equation\u00a01",
       "Table\u00a02: The second",
     ]);
-    // Each a link to the table it names, the caption's before the cells'
-    // since the caption is drawn over the table.
-    assert.deepEqual(seen.links, ["tbl-two", "eq-x", "tbl-two", "tbl-two", "tbl-one"]);
+    // Each a link to the table it names, the caption's after the cells'
+    // since the caption is written under the table and drawn there.
+    assert.deepEqual(seen.links, ["tbl-two", "tbl-two", "tbl-two", "eq-x", "tbl-one"]);
     assert.deepEqual(seen.missing, ["?@tbl-zz"]);
     assert.equal(seen.titles[0], "Table\u00a02: The second\nCtrl+click to open");
     assert.equal(await h.page.evaluate(() => window.__mdm.checkDecorations()), null);
@@ -3279,30 +3830,30 @@ test("a table and its caption open together and are put away together, the label
     await reading(h.page);
     const shut = await sourceLines(h.page);
     // The caret in the words of a caption written after its table: the
-    // caption stands as the line it is, label and all, the table's source is
-    // open over it, and the drawing keeps its caption. (The stars of its
-    // emphasis are the caret's to open, as in any line of prose.)
-    const after = ": The first, after its table {#tbl-one}";
+    // caption is a line of the table's card, label and all, under the rows
+    // and the blank line between, and the drawing keeps its caption (the
+    // owner, 2026-11-20: until then the caption stood as a line of prose
+    // beside the card). On the card it is the source it is, its stars and
+    // all, as a row's cells are.
+    const after = ": The first, *after* its table {#tbl-one}";
+    const first = ["| T1 | x |", "|---|---|", "| r | y |", "", after];
     let seen = await at(TABLES.indexOf("The first") + 3);
-    assert.deepEqual(seen.card, ["| T1 | x |", "|---|---|", "| r | y |"]);
-    assert.ok(seen.lines.includes(after), "the caption's line is not on screen");
+    assert.deepEqual(seen.card, first);
     assert.equal(seen.drawn[0], "Table\u00a01: The first, after its table");
     assert.equal(seen.differ, null);
     // And in a cell of the table: the caption's line with it, so the label
     // is in view whenever the table's source is.
     seen = await at(TABLES.indexOf("| T1 |") + 3);
-    assert.deepEqual(seen.card, ["| T1 | x |", "|---|---|", "| r | y |"]);
-    assert.ok(seen.lines.includes(after), "the caption's line is not on screen with the table open");
+    assert.deepEqual(seen.card, first);
     assert.equal(seen.differ, null);
     // In the blank line between the two, the same.
     seen = await at(TABLES.indexOf("\n\n: The first") + 1);
-    assert.equal(seen.card.length, 3);
-    assert.ok(seen.lines.includes(after));
+    assert.deepEqual(seen.card, first);
     assert.equal(seen.differ, null);
-    // A caption written before its table, from the table.
+    // A caption written before its table, from the table: over the rows on
+    // the card.
     seen = await at(TABLES.indexOf("| T2 |") + 3);
-    assert.deepEqual(seen.card, ["| T2 | x |", "|---|---|", "| r | y |"]);
-    assert.ok(seen.lines.includes(": The second, before {#tbl-two}"));
+    assert.deepEqual(seen.card, [": The second, before {#tbl-two}", "", "| T2 | x |", "|---|---|", "| r | y |"]);
     assert.ok(!seen.lines.includes(after), "the first table's caption stayed open");
     assert.equal(seen.drawn[1], "Table\u00a02: The second, before");
     assert.equal(seen.differ, null);
@@ -3312,11 +3863,13 @@ test("a table and its caption open together and are put away together, the label
     assert.equal(seen.drawn[5], "Table\u00a05: No blank line");
     assert.equal(seen.differ, null);
     // The paragraph a div is captioned by, from the div's one table, and
-    // the table from the paragraph.
+    // the table from the paragraph: the paragraph on the card under the
+    // rows, the fences of the div outside it.
+    const div = ["| T13 | x |", "|---|---|", "| r | y |", "", "The div's paragraph."];
     seen = await at(TABLES.indexOf("| T13 |") + 3);
-    assert.ok(seen.lines.includes("The div\u2019s paragraph."), "the div's paragraph is not on screen with its table open");
+    assert.deepEqual(seen.card, div);
     seen = await at(TABLES.indexOf("The div's paragraph.") + 3);
-    assert.deepEqual(seen.card, ["| T13 | x |", "|---|---|", "| r | y |"]);
+    assert.deepEqual(seen.card, div);
     assert.equal(seen.drawn[12], "Table\u00a08: The div\u2019s paragraph.");
     assert.equal(seen.differ, null);
     // A paragraph that is no caption opens no table.

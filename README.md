@@ -182,40 +182,89 @@ stands in the braces after the image, shows while the image is open and
 only then, as an equation's does, and the image stays open while the caret
 is in them. Here it is Quarto that numbers
 on the page and on paper, and the editor follows its count: an image alone
-in its paragraph, wherever the paragraph stands, and a fenced div that
-carries the label, which is how a score is made a figure, captioned by its
-last paragraph (`::: {#fig-tune}`, the score, its caption, `:::`). A figure
+in its paragraph, wherever the paragraph stands, a score whose options give
+it a label (below), and a fenced div that carries the label, captioned by
+its last paragraph (`::: {#fig-tune}`, the score, its caption, `:::`). A figure
 inside such a div is lettered, "(a)", and read as "Figure 2 (a)". The words
 are the language's ("Figura" under `lang: es`) or the header's, where
 `crossref: fig-title` renames the captions and `fig-prefix` the references,
-as Quarto has it. The picture of a numbered figure stands flush left on the
-page as every figure does in the editor; Quarto centred it. Still drawn
+as Quarto has it. A figure stands across the column where Quarto's
+`fig-align` asks, on its own braces (`{fig-align="left"}`, `"right"`) or
+in the header for every figure, its own word over the header's, and in the
+middle where neither asks, as Quarto has it, in the editor, on the page
+and on paper alike. Its caption stands under it the same way, centred under
+a figure in the middle and at the right under one at the right, where
+Quarto's page leaves every caption at the left; a score made a figure is
+captioned as the scores stand. The caption is under the picture unless
+Quarto's `fig-cap-location: top` says over it, the figure's own word where
+it carries a label or the header's for every figure (a figure with no label
+takes the header's alone, as on Quarto's page). Still drawn
 otherwise in the editor: a figure in a list, in a quote or in a link is a
 picture in its line with no caption, and a div with no paragraph to caption
-it shows no number. References to listings and sections (`@lst-x`,
-`@sec-x`) are drawn as written.
+it shows no number. References to sections (`@sec-x`) are drawn as
+written.
+
+A score and a block of code take a label, a caption and a place the one
+way, in lines at the head of the block that open with the language's
+comment mark and a `|`, as the options of a Quarto cell do: `%|` in a score,
+which is ABC's comment, `#|` in Python, `//|` in JavaScript.
+
+    ```abc                          ```python
+    %| label: fig-scale             #| label: lst-scale
+    %| fig-cap: "The scale."        #| lst-cap: "The scale, step by step."
+    %| fig-align: left              print(1)
+    X:1                             ```
+
+A score with a `fig-` label is a figure, numbered with the pictures, its
+caption over it, centred as the score stands; one with a caption and no
+label is captioned with no number; its `fig-align` stands it at the left,
+in the middle or at the right whatever the other scores do; and its
+`fig-cap-location: bottom`, or the header's, puts the caption under it. A
+score's caption is over it by default, where a picture's is under, since a
+score, as a table, is often long in the vertical. On paper a score made a
+figure breaks between its systems as any score does, and a listing between
+its rows, the caption held to the piece next to it. A block of code with an `lst-`
+label and an `lst-cap` is a listing, "Listing 1: The scale, step by step."
+over the code and "Listing 1" for `@lst-scale` ("Listado" under `lang:
+es`), as Quarto makes one of a block whose braces carry both (`{#lst-scale
+.python lst-cap="..."}`, which the editor reads too); with only one of the
+two it is code, as in Quarto. The lines are no part of what is drawn: the
+editor puts them away while the block is shut and shows them as comments
+while it is open, and the page leaves them out. Quarto reads such lines only
+in a cell it runs, so MDM reads them itself, in the editor and in the
+filter; outside MDM they are comments of the language.
 
 A table is captioned by the paragraph written beside it that opens with a
 colon, under the table or over it (`: The shapes of a note`, or `Table: The
-shapes of a note`), and the caption is drawn over the table, centred on the
-column, in the editor, on the page and on paper alike. Where the caption
+shapes of a note`), and the caption is drawn where it is written, under the
+table or over it, centred on the column, in the editor and on the page (the
+filter reads the side off the source, since Pandoc keeps no trace of it);
+a PDF typeset with LaTeX keeps a caption with no label over its table.
+Where the caption
 ends on a label (`: The shapes of a note {#tbl-shapes}`) the table is
 numbered, "Table 1: The shapes of a note", and `@tbl-shapes` reads
 "Table 1", with every form a figure's reference has and beside a figure or
 an equation (`[@tbl-shapes; @fig-circle]`). The caption's own line is put
-away with the table's source and comes back with it: a caret in either
-shows both, so the label is in view whenever the table is open, small and
+away with the table's source and comes back with it, on the table's card
+over the rows or under them, and the card's copy button copies it with
+them: a caret in either shows both, so the label is in view whenever the
+table is open, small and
 faint as a figure's and an equation's are, and a click on the drawn caption
-goes to its words. Every table stands in the middle of
-the column, with a caption or without. As with the figures it is Quarto
+goes to its words. A table stands in the middle of the column unless MDM's
+`tbl-align` says otherwise, `left` or `right`, read as `fig-align` is: in
+the braces its caption ends on (`{#tbl-shapes tbl-align="left"}`, labelled
+or not), on a div around it (`::: {tbl-align="left"}`, which is how a table
+with no caption is placed), or in the header for every table, its own word
+over the div's and the div's over the header's. Quarto has no word for it
+(1.11.9); should it take one up, MDM means to follow Quarto's. The caption
+stands as its table does. As with the figures it is Quarto
 that numbers on the page and the editor follows its count: a fenced div
 with the label is a table too (`::: {#tbl-pair}`), the tables inside one
 are lettered, "(a)", and read "Table 2 (a)", and the words are the
 language's ("Tabla" under `lang: es`) or the header's (`crossref:
-tbl-title`, `tbl-prefix`, `tbl-labels`). Not followed in the editor:
-`tbl-cap-location`, which the page obeys, and the caption of a div that
-holds several tables, which the page sets over them and the editor leaves
-where it is written.
+tbl-title`, `tbl-prefix`, `tbl-labels`). `tbl-cap-location` is followed
+nowhere: a caption stands where it is written, the caption of a div that
+holds several tables under them.
 
 The sections of a document whose header says `number-sections: true` are
 numbered, 1, 1.1, 1.2, before the text of each heading and in its ink, in
@@ -254,8 +303,9 @@ editors these cells read as they are written.
 Differences that are left standing, each on the record in `tests/README.md`:
 the page's callouts have the editor's colours and Quarto's build, a row with
 an icon and the name of the kind where the editor keeps the fences in view; a
-table's caption stands over the table on the page, where the editor draws
-the line it is written on; a numbered list
+table's caption with no label written under the table stands over it in a
+PDF typeset with LaTeX, and a table stands in the middle there whatever its
+`tbl-align` says; a numbered list
 written `3)` keeps its delimiter in the editor where Pandoc prints a point; a
 setext heading written over several lines is a heading in the editor and a
 paragraph to Pandoc; Pandoc reads the inside of a `<div>` as Markdown and the

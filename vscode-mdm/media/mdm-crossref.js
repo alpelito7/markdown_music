@@ -95,6 +95,19 @@
     sv: "Tabell", tr: "Tablo", ua: "Таблиця", zh: "表", "zh-TW": "表",
   };
 
+  // And what a listing is called, `crossref-lst-title` in the same files:
+  // "Listing 1: ..." over a code block that is one and "Listing 1" for
+  // `@lst-x`, "Listado 1" under `lang: es` (measured on 1.11.9,
+  // 2026-11-21). A code block is a listing when it carries an `lst-` label
+  // and an `lst-cap` (blockFloat).
+  const LISTING_TITLES = {
+    "": "Listing", bg: "Изброяване", ca: "Llistat", cs: "Výpis", da: "Liste", de: "Listing", "de-CH": "Listing",
+    el: "Κατάλογος", es: "Listado", eu: "Zerrendatua", fi: "Listaus", fr: "Listing", he: "רישום", id: "Daftar",
+    is: "Listun", it: "Lista", ja: "コード", ko: "목록", lt: "Sąrašas", nb: "Liste", nl: "Listing", nn: "Liste",
+    pl: "Wykaz", pt: "Listagem", "pt-BR": "Listagem", ru: "Список", sk: "Výpis", sl: "Seznam", "sr-Latn": "Lista",
+    sv: "Lista", tr: "Listeleme", ua: "Список", zh: "列表", "zh-TW": "列表",
+  };
+
   // The prefix of a language tag as Quarto finds it: the file of the tag
   // itself, then the one of its first part, then English. The tag is matched
   // as written, so `ES` is English and `es-MX` Spanish, and Ukrainian is
@@ -305,6 +318,200 @@
   function tableLook(header) {
     return floatLook(header, "tbl", TABLE_TITLES);
   }
+  function listingLook(header) {
+    return floatLook(header, "lst", LISTING_TITLES);
+  }
+
+  // Where a figure stands across the column: `left`, `center` or `right`
+  // for one word of Quarto's `fig-align`, or null for none of them. Every
+  // figure takes the one the header names (`fig-align: right`, or under
+  // `format: html:`, which is taken over it, as the page takes it) unless
+  // its own braces name one (`{fig-align="center"}`) or say `default`, and
+  // nothing at all stands the figure in the middle of the column; a word
+  // Quarto does not know stands it there too, on the figure or in the
+  // header. That is Quarto's own answer word for word (figAlignAttribute and
+  // validatedAlign among its filters, read on 1.10 and 1.11), so the page
+  // stands every figure where the editor does by Quarto's classes alone (the
+  // owner, 2026-11-21: "centre by default"; until then MDM stood every
+  // figure at the left, on the page by a rule of mdm-look.css).
+  function alignWord(v) {
+    const word = typeof v === "string" ? v.trim().replace(/^["']|["']$/g, "") : "";
+    return /^(?:left|center|right)$/.test(word) ? word : null;
+  }
+  function figureAlign(header) {
+    const keys = headerKeys(header);
+    const format = isMap(keys.format) ? keys.format : {};
+    const html = isMap(format.html) ? format.html : {};
+    return alignWord(html["fig-align"]) || alignWord(keys["fig-align"]);
+  }
+  function figureAlignOf(own, header) {
+    const word = typeof own === "string" ? own.trim().replace(/^["']|["']$/g, "") : "";
+    if (!word || word === "default") return header || "center";
+    return alignWord(word) || "center";
+  }
+
+  // Where a figure's caption stands, over it or under it: Quarto's
+  // `fig-cap-location`, `top` or `bottom`, the header's (under `format: html:`
+  // over the top level, as the page takes it) or a figure's own. Quarto's
+  // `margin` is no place here: neither surface has a margin column, and it
+  // reads as no word. Which default a figure takes is the caller's: a
+  // picture's caption stands under it, as Quarto has it, and a score's over
+  // it (the owner, 2026-11-21: "by default top, because like the tables the
+  // scores can be, and commonly are, long in the vertical").
+  function capWord(v) {
+    const word = typeof v === "string" ? v.trim().replace(/^["']|["']$/g, "") : "";
+    return /^(?:top|bottom)$/.test(word) ? word : null;
+  }
+  function figureCapLocation(header) {
+    const keys = headerKeys(header);
+    const format = isMap(keys.format) ? keys.format : {};
+    const html = isMap(format.html) ? format.html : {};
+    return capWord(html["fig-cap-location"]) || capWord(keys["fig-cap-location"]);
+  }
+
+  // Where a table stands across the column, by MDM's `tbl-align`, which
+  // Quarto has no word for (1.11.9 aligns no table, measured 2026-11-21) and
+  // which is read as `fig-align` is, word for word: the table's own, in the
+  // braces its caption ends on (`{#tbl-x tbl-align="left"}`, labelled or
+  // not) or on a div around it, else the header's (`tbl-align: left`, or
+  // under `format: html:`, taken over it), else the middle (the owner,
+  // 2026-11-21: "a way, perhaps provisional, as homogeneous as possible with
+  // everything we want to align"; should Quarto take up a word for it, the
+  // owner means to follow Quarto's). The caption stands as its table does.
+  function tableAlign(header) {
+    const keys = headerKeys(header);
+    const format = isMap(keys.format) ? keys.format : {};
+    const html = isMap(format.html) ? format.html : {};
+    return alignWord(html["tbl-align"]) || alignWord(keys["tbl-align"]);
+  }
+
+  // ---------- Options at the head of a block ----------
+  //
+  // A score and a piece of code are given a label, a caption and a place
+  // the one way, as Quarto gives them to a cell: lines at the head of the
+  // block that open with the language's comment mark and a `|` (the owner,
+  // 2026-11-21: "both are called with ```", so both are captioned and
+  // aligned alike):
+  //
+  //     ```abc                          ```python
+  //     %| label: fig-scale             #| label: lst-scale
+  //     %| fig-cap: "The scale."        #| lst-cap: "The scale, step by step."
+  //     %| fig-align: left              print(1)
+  //     X:1                             ```
+  //
+  // Quarto reads these only in a cell it runs; MDM reads them in every
+  // fenced block that names a language, in the editor and in the export's
+  // filter (block_options in mdm.lua), and outside MDM they are comments of
+  // the language (agreed with the owner, 2026-11-21). The lines are no part
+  // of what is drawn: the page leaves them out as Quarto leaves out a cell's,
+  // and the editor puts them away while the block is shut.
+
+  // The comment mark of each language, as Quarto reads a cell's options
+  // (kLangCommentChars in bin/quarto.js of 1.11.9), with the marks its
+  // filters know for the languages that table leaves out (constants.lua:
+  // javascript, typescript, html, mermaid and the rest), and ABC's `%` for a
+  // score. A language neither names takes `#`, as Quarto's does. A mark of
+  // two parts closes on its line (`/*| label: lst-x */`).
+  const COMMENT_MARKS = {
+    abc: "%", apl: "⍝", asy: "//", awk: "#", bash: "#", c: ["/*", "*/"], cc: "//", coffee: "#",
+    cpp: "//", csharp: "//", css: ["/*", "*/"], d3: "//", dockerfile: "#", dot: "//", elm: "#",
+    fortran: "!", fortran95: "!", fsharp: "//", gap: "#", gawk: "#", go: "//", groovy: "//",
+    haskell: "--", html: ["<!--", "-->"], java: "//", javascript: "//", js: "//", json: "//",
+    julia: "#", kotlin: "//", latex: "%", lua: "--", markdown: ["<!--", "-->"], matlab: "%",
+    mermaid: "%%", mysql: "--", node: "//", ocaml: ["(*", "*)"], octave: "#", ojs: "//", perl: "#",
+    powershell: "#", prql: "#", psql: "--", python: "#", q: "/", r: "#", ruby: "#", rust: "//",
+    sas: ["*", ";"], sass: "//", scala: "//", scss: "//", sed: "#", sql: "--", stan: "#", stata: "*",
+    swift: "//", tikz: "%", typescript: "//", typst: "//", vhdl: "--", yaml: "#",
+  };
+  function commentMark(lang) {
+    const key = String(lang || "").toLowerCase();
+    const mark = Object.prototype.hasOwnProperty.call(COMMENT_MARKS, key) ? COMMENT_MARKS[key] : "#";
+    return Array.isArray(mark) ? mark : [mark];
+  }
+
+  // The language a fence names, lower-cased: the first word of its info
+  // string, or the first class in its braces (`{#lst-x .python}`), as Pandoc
+  // reads it; "" for none.
+  function infoLanguage(info) {
+    const s = String(info || "").trim();
+    if (s.charAt(0) === "{") {
+      const m = /(?:^\{|\s)\.([^\s.#}=]+)/.exec(s);
+      return m ? m[1].toLowerCase() : "";
+    }
+    const word = /^[^\s{]+/.exec(s);
+    return word ? word[0].toLowerCase() : "";
+  }
+
+  // The options at the head of a block whose body is `lines`, as Quarto
+  // reads a cell's (partitionCellOptions): the lines from the first on that
+  // open with the mark, any spaces, a `|` and one space at most (`#| x`,
+  // `# | x`), up to the first that does not, read together as YAML
+  // (readHeader). `count` is how many lines they are, and a block that names
+  // no language has none.
+  function blockOptions(lang, lines) {
+    if (!lang) return { count: 0, options: {} };
+    const mark = commentMark(lang);
+    const open = new RegExp("^" + mark[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\| ?");
+    const close = mark[1] || "";
+    const yaml = [];
+    let count = 0;
+    for (; count < lines.length; count++) {
+      const m = open.exec(lines[count]);
+      if (!m) break;
+      let rest = lines[count].slice(m[0].length);
+      if (close) {
+        const trimmed = rest.replace(/\s+$/, "");
+        if (trimmed.slice(-close.length) !== close) break;
+        rest = trimmed.slice(0, trimmed.length - close.length).replace(/\s+$/, "");
+      }
+      yaml.push(rest);
+    }
+    let options = {};
+    if (count) {
+      try {
+        options = readHeader(yaml.join("\n"));
+      } catch (e) {
+        options = {};
+      }
+    }
+    return { count: count, options: isMap(options) ? options : {} };
+  }
+
+  // What a block's options make of it, or null for nothing:
+  //
+  // - A score with an `fig-` label is a figure, numbered among the
+  //   pictures; with a `fig-cap` and no label, a figure with no number, as
+  //   a picture with a caption and no label is (`kind: "fig"`). Its
+  //   `fig-align` stands the score where it says, figure or not, else the
+  //   score stands where the scores do (mdm.scoreAlign); `align` is null
+  //   then. Its `fig-cap-location` puts its caption over it or under it
+  //   (`cap`), or null for the header's word, and over it where the header
+  //   has none (figureCapLocation).
+  // - Any other block with an `lst-` label and an `lst-cap` is a listing,
+  //   numbered among the listings with its caption over it (`kind: "lst"`),
+  //   as Quarto makes one of a code block whose braces carry both. With one
+  //   of the two and not the other it is code and nothing more, as Quarto
+  //   has it (measured on 1.11.9: `{#lst-a .python}` is no listing and
+  //   `@lst-a` reads "?@lst-a"; `{.python lst-cap="x"}` prints no caption).
+  //
+  // `caption` is the caption's text as written, Markdown and all, on one
+  // line; "" for none.
+  function blockFloat(lang, options) {
+    const o = isMap(options) ? options : {};
+    const label = lineOf(o.label);
+    if (lang === "abc") {
+      const caption = lineOf(o["fig-cap"]);
+      const own = lineOf(o["fig-align"]);
+      const align = own && own !== "default" ? alignWord(own) || "center" : null;
+      const cap = capWord(lineOf(o["fig-cap-location"]));
+      if (/^fig-/.test(label)) return { kind: "fig", label: label, caption: caption, align: align, cap: cap };
+      if (caption) return { kind: "fig", label: null, caption: caption, align: align, cap: cap };
+      return align ? { kind: null, label: null, caption: "", align: align, cap: null } : null;
+    }
+    const caption = lineOf(o["lst-cap"]);
+    if (/^lst-/.test(label) && caption) return { kind: "lst", label: label, caption: caption, align: null, cap: null };
+    return null;
+  }
 
   // What a figure's caption opens with, as titlePrefix writes it: the title,
   // a no-break space, the number, and then the delimiter and a space where
@@ -422,11 +629,11 @@
     return out;
   }
 
-  // What the page prints for a citation that names an equation, a figure or
-  // a table, as resolveRefs does it, or null when the citation is not the
-  // editor's to print: none of its keys is one of those, or it also names a
-  // listing, a section or another kind the editor does not number.
-  // `equations` maps a label to its number, and `figures` and `tables`,
+  // What the page prints for a citation that names an equation, a figure, a
+  // table or a listing, as resolveRefs does it, or null when the citation is
+  // not the editor's to print: none of its keys is one of those, or it also
+  // names a section or another kind the editor does not number. `equations`
+  // maps a label to its number, and `figures`, `tables` and `listings`,
   // where the caller numbers them, hold the same map for each kind
   // (`numbers`, a figure inside a figure under what the page prints for it,
   // "6 (a)", and one the editor cannot number under null, which leaves the
@@ -437,14 +644,14 @@
   // upper-cased when the key is, then a no-break space and the number, and
   // it is the number alone for `-@eq-x`. A label nothing carries is
   // "?@eq-x", in bold on the page, with no comma before it. A piece that
-  // names a figure or a table says so (`ref: "fig"`, `ref: "tbl"`), for the
+  // names a float says which kind (`ref: "fig"`, `"tbl"`, `"lst"`), for the
   // click that goes to it.
-  function reference(raw, equations, lookOf, figures, tables) {
+  function reference(raw, equations, lookOf, figures, tables, listings) {
     const list = citations(raw);
     const kinds = list.map(function (c) {
       return kindOf(c.key);
     });
-    const floats = { fig: figures || null, tbl: tables || null };
+    const floats = { fig: figures || null, tbl: tables || null, lst: listings || null };
     const numbered = function (k) {
       return k === "eq" || !!floats[k];
     };
@@ -1407,11 +1614,23 @@
     PREFIXES: PREFIXES,
     FIGURE_TITLES: FIGURE_TITLES,
     TABLE_TITLES: TABLE_TITLES,
+    LISTING_TITLES: LISTING_TITLES,
+    COMMENT_MARKS: COMMENT_MARKS,
     languagePrefix: languagePrefix,
     headerKeys: headerKeys,
     look: look,
     figureLook: figureLook,
     tableLook: tableLook,
+    listingLook: listingLook,
+    figureAlign: figureAlign,
+    figureAlignOf: figureAlignOf,
+    capWord: capWord,
+    figureCapLocation: figureCapLocation,
+    tableAlign: tableAlign,
+    commentMark: commentMark,
+    infoLanguage: infoLanguage,
+    blockOptions: blockOptions,
+    blockFloat: blockFloat,
     caption: caption,
     subcaption: subcaption,
     sectionLook: sectionLook,
