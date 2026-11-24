@@ -3878,8 +3878,13 @@ body {
    is the hover wash, 22% the held disc), and the loudest, since a copy is an
    event and not a state: 28%, the weight the old slate tint carried, in the
    brass of the icon so a copy speaks the same colour as the button that
-   asked for it. The three keyframes differ only in the ground they settle
-   onto, which is why they cannot be one.
+   asked for it. The keyframes of a drawing differ only in the ground they
+   settle onto, which is why they cannot be one.
+
+   What takes the wash is what was copied, the source (copyBlock in main.js):
+   the card of a block of code or of the header, and the card of a score, an
+   equation or a table whose source is open, rather than the drawing under
+   it. A drawing takes it only while its source is put away.
 
    A cleared score card has no ground of its own, so its wash fades out. */
 @keyframes mdm-copy-pulse {
@@ -3899,13 +3904,33 @@ body {
     background-color: var(--mdm-score-fill);
   }
 }
-/* A block of code already sits on a card, so it settles back onto that. */
+/* The lines of a card take the wash as a layer over their ground and under
+   their text, an inset shadow as big as the line, and not as their ground:
+   the ground of a card in a quote is a layer of background-image beside the
+   quote's bars (.mdm-framed above), which a background-color is painted
+   under, so a block of code in a quote pulsed where nobody could see it. An
+   inset shadow stays inside the padding box, which is where a card's ground
+   is, so the bars of the quote keep their colour; and 28% of the brass laid
+   over the card is the colour the 28% mixed into the card was. A broken
+   equation keeps its red bar through it. */
 @keyframes mdm-copy-pulse-code {
   0% {
-    background-color: color-mix(in srgb, var(--mdm-play-accent) 28%, var(--mdm-syn-card));
+    box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--mdm-play-accent) 28%, transparent);
   }
   100% {
-    background-color: var(--mdm-syn-card);
+    box-shadow: inset 0 0 0 100vmax transparent;
+  }
+}
+@keyframes mdm-copy-pulse-broken {
+  0% {
+    box-shadow:
+      inset 3px 0 0 #c94f4f,
+      inset 0 0 0 100vmax color-mix(in srgb, var(--mdm-play-accent) 28%, transparent);
+  }
+  100% {
+    box-shadow:
+      inset 3px 0 0 #c94f4f,
+      inset 0 0 0 100vmax transparent;
   }
 }
 #app code.language-abc.mdm-copy-pulse {
@@ -3915,8 +3940,13 @@ body {
   animation-name: mdm-copy-pulse-filled;
 }
 #app .cm-line.mdm-code-line.mdm-copy-pulse,
+#app .cm-line.mdm-math-line.mdm-copy-pulse,
+#app .cm-line.mdm-table-line.mdm-copy-pulse,
 #app .cm-line.mdm-fm-line.mdm-copy-pulse {
   animation: mdm-copy-pulse-code 0.5s ease-out;
+}
+#app .cm-line.mdm-math--broken.mdm-copy-pulse {
+  animation-name: mdm-copy-pulse-broken;
 }
 #app .mdm-math--block.mdm-copy-pulse,
 #app .mdm-table.mdm-copy-pulse,

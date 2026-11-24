@@ -1878,8 +1878,8 @@
   // The copy button of a code block, a display equation, a table or a score,
   // in the rail beside the block (widget chrome, see handleChromeClick and
   // `#app .mdm-chrome` in style.css): the source goes to the clipboard
-  // through the clipboard API, nothing is selected, and the block that was
-  // copied gives a brief pulse of its own background as the feedback.
+  // through the clipboard API, nothing is selected, and what was copied
+  // gives a brief pulse as the feedback (copyBlock says what that is).
   //
   // A score also loses its layout directives (%%staffwidth and friends) on
   // the way out: they size the block for this document and mean nothing
@@ -1891,8 +1891,8 @@
     return source.replace(LAYOUT_DIRECTIVE, "");
   }
 
-  // The element carrying the background of the block: the score itself, or
-  // the first line of the rendered code.
+  // The element carrying the ground of what pulses: a line of a card, or a
+  // drawing, which for a score is the card the engraving stands on.
   function pulseBlock(el) {
     const code = el && el.querySelector ? el.querySelector("code.language-abc") || el : el;
     if (!code) return;
@@ -15626,32 +15626,58 @@
     let node = tree.resolveInner(pos, 1);
     while (node && node.name !== "FencedCode" && node.name !== "FrontMatter") node = node.parent;
     if (!node) return null;
+    const doc = view.state.doc;
+    // The DOM lines of the card from one position to another, for the pulse.
+    const cardLines = function (from, to) {
+      const out = [];
+      for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) {
+        const dom = view.domAtPos(doc.line(n).from).node;
+        const line = dom && (dom.nodeType === 1 ? dom : dom.parentElement);
+        const el = line && line.closest ? line.closest(".cm-line") : null;
+        if (el) out.push(el);
+      }
+      return out;
+    };
+    const last = Math.max(node.from, node.to - 1);
     if (node.name === "FrontMatter") {
-      // The header's card: the header as written, its fences with it, and
-      // its lines for the pulse.
-      const doc = view.state.doc;
-      const card = [];
-      for (let n = doc.lineAt(node.from).number; n <= doc.lineAt(Math.max(node.from, node.to - 1)).number; n++) {
-        const dom = view.domAtPos(doc.line(n).from).node;
-        const line = dom && (dom.nodeType === 1 ? dom : dom.parentElement);
-        const el = line && line.closest ? line.closest(".cm-line") : null;
-        if (el) card.push(el);
-      }
-      return { source: doc.sliceString(node.from, node.to).replace(/\n+$/, ""), lines: card };
+      // The header's card: the header as written, its fences with it.
+      return { source: doc.sliceString(node.from, node.to).replace(/\n+$/, ""), lines: cardLines(node.from, last) };
     }
+    // The whole card pulses, the fences with the body while they show (the
+    // chrome of an open block rides its fence), since the card is the strip
+    // the copy stands for; the body alone while the fences are put away, and
+    // the code alone, without the lines of its options, which are put away
+    // with them (blockOptionsOf): what is copied is what the card shows.
     const body = fenceBody(node);
-    // The DOM lines of the block, for the pulse.
+    const open = chrome.classList.contains("mdm-chrome--open");
+    const options = blockOptionsOf(view.state, node);
+    const code = !body ? null : options.count ? codeStart(doc, node, options) : body.from;
+    const lines = open ? cardLines(node.from, last) : code !== null ? cardLines(code, body.to) : [];
+    const source = fenceSource(doc, node);
+    return { source: open || !options.count ? source : source.split("\n").slice(options.count).join("\n"), lines: lines };
+  }
+
+  // The lines of the source open above a drawn block (a score, a display
+  // equation, a table), top to bottom: the run of its card's lines standing
+  // straight above it, or above its wrapper in a quote. None while the source
+  // is put away, the lines being under a cover then, and none for any other
+  // block.
+  function sourceLinesAbove(block) {
+    const lineClass = block.classList.contains("mdm-score")
+      ? "mdm-abc-line"
+      : block.classList.contains("mdm-table")
+        ? "mdm-table-line"
+        : block.classList.contains("mdm-math--block")
+          ? "mdm-math-line"
+          : null;
+    if (!lineClass) return [];
+    const parent = block.parentElement;
+    const outer = parent && parent.classList.contains("mdm-block-framed") ? parent : block;
     const lines = [];
-    if (body) {
-      const doc = view.state.doc;
-      for (let n = doc.lineAt(body.from).number; n <= doc.lineAt(body.to).number; n++) {
-        const dom = view.domAtPos(doc.line(n).from).node;
-        const line = dom && (dom.nodeType === 1 ? dom : dom.parentElement);
-        const el = line && line.closest ? line.closest(".cm-line") : null;
-        if (el) lines.push(el);
-      }
+    for (let el = outer.previousElementSibling; el && el.classList.contains(lineClass); el = el.previousElementSibling) {
+      lines.unshift(el);
     }
-    return { source: fenceSource(view.state.doc, node), lines: lines };
+    return lines;
   }
 
   // ---- The rail under the pointer ----
@@ -15762,18 +15788,7 @@
         blocks.forEach(function (block) {
           const rail = block.querySelector(":scope > .mdm-chrome");
           if (!rail) return;
-          const lineClass = block.classList.contains("mdm-score")
-            ? "mdm-abc-line"
-            : block.classList.contains("mdm-table")
-              ? "mdm-table-line"
-              : "mdm-math-line";
-          // The block's place among the lines is its wrapper's when it has
-          // one (a block in a quote).
-          const outer = block.parentElement.classList.contains("mdm-block-framed") ? block.parentElement : block;
-          let first = null;
-          for (let el = outer.previousElementSibling; el && el.classList.contains(lineClass); el = el.previousElementSibling) {
-            first = el;
-          }
+          const first = sourceLinesAbove(block)[0];
           const lift = first
             ? (block.getBoundingClientRect().top - first.getBoundingClientRect().top) / (view.scaleY || 1)
             : 0;
@@ -15805,7 +15820,7 @@
   // the layer: a clip path over everything, less the box of each open
   // drawing, read after every redraw as the rails are placed.
   const OPEN_DRAWINGS =
-    ".mdm-math--preview, .mdm-title-block--open, " +
+    ".mdm-math--preview, .mdm-image--preview, .mdm-figure--open, .mdm-title-block--open, " +
     ".mdm-score:has(> .mdm-chrome--open), .mdm-math--block:has(> .mdm-chrome--open), .mdm-table:has(> .mdm-chrome--open)";
   let drawingsCleared = "";
   function clearOpenDrawings() {
@@ -15861,17 +15876,16 @@
       hideTipUntilLeave(button);
       button.setAttribute("aria-label", "Copy");
     }, COPIED_MS);
-    if (found.score) {
-      pulseBlock(found.score);
-    } else if (found.math) {
-      pulseBlock(found.math);
-    } else if (found.table) {
-      pulseBlock(found.table);
-    } else if (found.title) {
-      pulseBlock(found.title);
-    } else if (found.lines) {
-      found.lines.forEach(pulseBlock);
-    }
+    // What pulses is what was copied, the source: the card of a block of
+    // code or of the header, and the card of a score, an equation or a
+    // table whose source is open, every line of it, rather than the drawing
+    // under it (the owner, 2026-11-20: the strip blinks, because that is
+    // what is copied and not the rendering). A drawing whose source is put
+    // away is the one thing on screen that stands for it, and pulses itself.
+    const drawing = found.score || found.math || found.table || found.title;
+    const lines = found.lines || sourceLinesAbove(drawing);
+    if (lines.length) lines.forEach(pulseBlock);
+    else if (drawing) pulseBlock(drawing);
   }
 
   // ---------- The score mode ----------

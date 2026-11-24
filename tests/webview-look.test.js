@@ -736,50 +736,251 @@ test(
       const out = await h.page.evaluate((sel, kind) => {
         const names = (els) =>
           Array.from(new Set(Array.from(els).map((el) => getComputedStyle(el).animationName)));
-        // The pulse runs on every line of the code block (the lines carry its
-        // card; the python block is the only code block of the example, its
-        // fences carry no pulse, and the source lines of an opened score are
-        // code lines too), and on the score that was copied, not its
-        // neighbours, and on the box of the equation that was copied.
+        // The caret is in the block, so its source is open, and the pulse
+        // runs on every line of its card, fences and all, and not on the
+        // drawing under it (the owner, 2026-11-20: what is copied is the
+        // source). The python block is the only code block of the example,
+        // and the caret in it leaves every score shut, so the code lines
+        // that are not a score's source are its card; the caret in a score
+        // or an equation opens that one alone.
         const animations =
           kind === "code"
-            ? names(
-                document.querySelectorAll(
-                  "#app .cm-line.mdm-code-line:not(.mdm-fence-line):not(.mdm-src-line)"
-                )
-              )
+            ? names(document.querySelectorAll("#app .cm-line.mdm-code-line:not(.mdm-src-line)"))
+            : kind === "equation"
+            ? names(document.querySelectorAll("#app .cm-line.mdm-math-line"))
+            : names(document.querySelectorAll("#app .cm-line.mdm-abc-line"));
+        const drawing =
+          kind === "code"
+            ? ["none"]
             : kind === "equation"
             ? names([document.querySelector(sel).closest(".mdm-math--block")])
-            : names(
-                document.querySelector(sel).closest(".mdm-score").querySelectorAll("code.language-abc")
-              );
+            : names(document.querySelector(sel).closest(".mdm-score").querySelectorAll("code.language-abc"));
         return {
           copied: window.__copied[window.__copied.length - 1] || "",
           animations: animations,
+          drawing: drawing,
           selection: String(getSelection()).length,
           label: document.querySelector(sel).getAttribute("aria-label"),
         };
       }, buttonSel, kind);
       assert.equal(out.selection, 0, kind + ": the page was selected");
       assert.equal(out.label, "Copied");
-      assert.ok(!out.animations.includes("none"), kind + ": the block did not pulse");
+      assert.deepEqual(out.animations, ["mdm-copy-pulse-code"], kind + ": the card of the source did not pulse, every line of it");
+      assert.deepEqual(out.drawing, ["none"], kind + ": the drawing under the open source pulsed");
       if (kind === "code") {
         assert.equal(out.copied, PYTHON_SOURCE);
-        assert.deepEqual(out.animations, ["mdm-copy-pulse-code"]);
       } else if (kind === "equation") {
         assert.ok(/\\sum/.test(EQUATION_SOURCE), "the fixture's first equation moved");
         assert.equal(out.copied, EQUATION_SOURCE);
-        assert.deepEqual(out.animations, ["mdm-copy-pulse"]);
       } else {
         // A score drops the directives that size it for this document.
         assert.ok(!/%%staffwidth/.test(out.copied));
-        assert.deepEqual(out.animations, ["mdm-copy-pulse"]);
       }
       await sleep(700);
     }
     await h.close();
   }
 );
+
+// What a copy pulses is what it copied, which is the source (the owner,
+// 2026-11-20: the coloured strip blinks, because that is what is copied and
+// not the rendering): with the source of a block open, the card it stands
+// on, every line of it with its fences, and not the drawing under it; with
+// the source put away, the drawing, which is then the one thing on screen
+// standing for it, or the body of a block of code, whose fences are what is
+// put away. Every kind of block with a copy button is named, so that the
+// next one cannot be left out without this saying so.
+const PULSE_FIXTURE = [
+  "---",
+  "title: A pulse",
+  "---",
+  "",
+  "Some words.",
+  "",
+  "```python",
+  "x = 1",
+  "y = 2",
+  "```",
+  "",
+  "```abc",
+  "X:1",
+  "L:1/4",
+  "K:C",
+  "CDEF|",
+  "```",
+  "",
+  "$$",
+  "a^2 + b^2 = c^2",
+  "$$",
+  "",
+  "| a | b |",
+  "| --- | --- |",
+  "| 1 | 2 |",
+  "",
+  "> ```python",
+  "> z = 3",
+  "> ```",
+  "",
+  "> ```abc",
+  "> X:1",
+  "> K:C",
+  "> GABc|",
+  "> ```",
+  "",
+  "The end.",
+  "",
+].join("\n");
+
+// Presses the nth copy button a selector finds (a synthetic click, which is
+// what handleChromeClick answers) and reads, in the same task, what took the
+// pulse: a line of a card by its text, a drawing by its kind, each with the
+// animation it runs. `hold` stops every pulse at its first frame, so that a
+// picture taken after shows it at its loudest.
+function pressCopy(page, selector, index, hold) {
+  return page.evaluate(
+    (sel, i, hold) => {
+      const btn = document.querySelectorAll(sel)[i];
+      if (!btn) return null;
+      btn.click();
+      if (hold) {
+        document.getAnimations().forEach((a) => {
+          if (/^mdm-copy-pulse/.test(a.animationName)) {
+            a.pause();
+            a.currentTime = 0;
+          }
+        });
+      }
+      return Array.from(document.querySelectorAll("#app .mdm-copy-pulse")).map((el) => {
+        const what = el.classList.contains("cm-line")
+          ? el.textContent
+          : el.matches("code.language-abc")
+            ? "score"
+            : el.classList.contains("mdm-math--block")
+              ? "equation"
+              : el.classList.contains("mdm-table")
+                ? "table"
+                : el.classList.contains("mdm-title-block")
+                  ? "title"
+                  : el.className;
+        return what + " ~ " + getComputedStyle(el).animationName;
+      });
+    },
+    selector,
+    index,
+    !!hold
+  );
+}
+
+test("a copy pulses the source it copied: the card of an open block, every line of it, and the drawing only while the source is put away", { skip }, async () => {
+  // The header put away, which is how the host hands a document over; its
+  // source is opened by the host as well, with the text it sends (a click
+  // on the title asks for it), and so the header is the last one opened.
+  const header = frontMatter(PULSE_FIXTURE);
+  const h = await open({ text: PULSE_FIXTURE, scores: 2, clipboard: true, withFrontMatter: false, frontMatter: header });
+  const card = (lines) => lines.map((line) => line + " ~ mdm-copy-pulse-code");
+  const BLOCKS = [
+    {
+      kind: "header",
+      openUp: () => update(h.page, PULSE_FIXTURE, true, 2, header),
+      shut: "#app .mdm-title-block .mdm-copy",
+      opened: "#app .cm-line.mdm-fm-line .mdm-copy",
+      copied: "---\ntitle: A pulse\n---",
+      whenShut: ["title ~ mdm-copy-pulse"],
+      whenOpen: card(["---", "title: A pulse", "---"]),
+    },
+    {
+      kind: "code",
+      drawing: "#app .cm-line.mdm-code-line",
+      shut: "#app .mdm-chrome--code .mdm-copy",
+      opened: "#app .mdm-chrome--code .mdm-copy",
+      copied: "x = 1\ny = 2",
+      whenShut: card(["x = 1", "y = 2"]),
+      whenOpen: card(["```python", "x = 1", "y = 2", "```"]),
+    },
+    {
+      kind: "score",
+      drawing: "#app .mdm-score",
+      shut: "#app .mdm-score .mdm-copy",
+      opened: "#app .mdm-score .mdm-copy",
+      copied: "X:1\nL:1/4\nK:C\nCDEF|",
+      whenShut: ["score ~ mdm-copy-pulse"],
+      whenOpen: card(["```abc", "X:1", "L:1/4", "K:C", "CDEF|", "```"]),
+    },
+    {
+      kind: "equation",
+      drawing: "#app .mdm-math--block",
+      shut: "#app .mdm-math--block .mdm-copy",
+      opened: "#app .mdm-math--block .mdm-copy",
+      copied: "a^2 + b^2 = c^2",
+      whenShut: ["equation ~ mdm-copy-pulse"],
+      whenOpen: card(["$$", "a^2 + b^2 = c^2", "$$"]),
+    },
+    {
+      kind: "table",
+      drawing: "#app .mdm-table",
+      shut: "#app .mdm-table .mdm-copy",
+      opened: "#app .mdm-table .mdm-copy",
+      copied: "| a | b |\n| --- | --- |\n| 1 | 2 |",
+      whenShut: ["table ~ mdm-copy-pulse"],
+      whenOpen: card(["| a | b |", "| --- | --- |", "| 1 | 2 |"]),
+    },
+  ];
+  for (const b of BLOCKS.slice(1).concat(BLOCKS.slice(0, 1))) {
+    await setSelection(h.page, await h.page.evaluate(() => window.__mdm.view.state.doc.length));
+    await sleep(250);
+    assert.deepEqual(await pressCopy(h.page, b.shut, 0), b.whenShut, b.kind + ", shut: not the pulse of what stands for its source");
+    assert.equal(await h.page.evaluate(() => window.__copied[window.__copied.length - 1]), b.copied, b.kind + ", shut: not its source copied");
+    await sleep(700);
+    if (b.openUp) await b.openUp();
+    else await caretInBlock(h.page, b.drawing, 0);
+    await sleep(250);
+    assert.deepEqual(await pressCopy(h.page, b.opened, 0), b.whenOpen, b.kind + ", open: not the card of its source that pulsed");
+    assert.equal(await h.page.evaluate(() => window.__copied[window.__copied.length - 1]), b.copied, b.kind + ", open: not its source copied");
+    await sleep(700);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+// The pulse of a card is seen where the card is drawn, in a quote as well:
+// the ground of a card in a quote is a layer of background-image beside the
+// bars (.mdm-framed in style.css), and the pulse used to be a background
+// colour, painted under that layer, so a block of code in a quote gave no
+// sign of being copied. Read in the picture, at the loudest frame of the
+// pulse, against the ground the same point had before the press.
+test("a copy's pulse shows on a card in a quote as it does on one outside it", { skip }, async () => {
+  const h = await open({ text: PULSE_FIXTURE, scores: 2, clipboard: true, withFrontMatter: false, frontMatter: frontMatter(PULSE_FIXTURE) });
+  const end = await h.page.evaluate(() => window.__mdm.view.state.doc.length);
+  const CASES = [
+    { name: "the code, shut", caret: null, button: "#app .mdm-chrome--code .mdm-copy", index: 0, line: "x = 1" },
+    { name: "the quoted code, shut", caret: null, button: "#app .mdm-chrome--code .mdm-copy", index: 1, line: "z = 3" },
+    { name: "the quoted code, open", caret: "> z = 3", button: "#app .mdm-chrome--code.mdm-chrome--open .mdm-copy", index: 0, line: "z = 3" },
+    { name: "the quoted score, open", caret: "> GABc|", button: "#app .mdm-score .mdm-chrome--open .mdm-copy", index: 0, line: "GABc|" },
+  ];
+  for (const c of CASES) {
+    await setSelection(h.page, c.caret ? await posOf(h.page, c.caret, 2) : end);
+    await sleep(300);
+    // A point of the line's card clear of its text and of the rail: the
+    // right end of the line, inside its padding. The line is found by the
+    // end of its text, since an open one in a quote shows its `> `.
+    const at = await h.page.evaluate((text) => {
+      const line = Array.from(document.querySelectorAll("#app .cm-line")).find((el) => el.textContent.endsWith(text));
+      const r = line.getBoundingClientRect();
+      return { x: Math.round(r.right - 6), y: Math.round(r.top + r.height / 2) };
+    }, c.line);
+    const clip = { x: at.x - 2, y: at.y - 2, width: 5, height: 5 };
+    const [ground] = await paintedAt(h.page, clip, [at]);
+    const pulsed = await pressCopy(h.page, c.button, c.index, true);
+    assert.ok(pulsed && pulsed.some((p) => p.includes(c.line + " ~ ")), c.name + ": the line was not among what pulsed (" + JSON.stringify(pulsed) + ")");
+    const [loud] = await paintedAt(h.page, clip, [at]);
+    const far = Math.max(...loud.map((v, i) => Math.abs(v - ground[i])));
+    assert.ok(far >= 12, c.name + ": the pulse is not seen on the card (" + loud + " against " + ground + ")");
+    await h.page.evaluate(() => document.getAnimations().forEach((a) => /^mdm-copy-pulse/.test(a.animationName) && a.finish()));
+    await sleep(700);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
 
 // The copy button answers in its own tooltip, "Copied" where "Copy" was. A
 // tooltip is drawn on :hover, so with the pointer resting on the button after
