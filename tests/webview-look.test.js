@@ -1825,11 +1825,17 @@ test("every button and every row draws a glyph of its own, and the row of the sc
     els.map((svg) => ({ name: svg.closest("[data-type]").getAttribute("data-type"), svg: svg.outerHTML.replace(/\s+/g, " ") }))
   );
   const seen = new Map();
+  // A control in two places draws one glyph in both: a button of the row of
+  // favorites and the row of a menu it is, under the same name, and the
+  // levels' button with the first of the levels; the outline's button and
+  // its row of Page below. The row is read put away, as the harness opens.
+  const twin = { headings: "heading-1" };
   for (const g of glyphs) {
     if (g.name === "page-outline") {
       assert.equal(seen.get(g.svg), "outline", "the outline's row does not draw the outline's glyph");
       continue;
     }
+    if (seen.has(g.svg) && (seen.get(g.svg) === g.name || seen.get(g.svg) === twin[g.name])) continue;
     assert.ok(!seen.has(g.svg), g.name + " draws the glyph of " + seen.get(g.svg));
     seen.set(g.svg, g.name);
   }
@@ -2010,7 +2016,10 @@ async function faceOf(page) {
     run.style.fontSizeAdjust = "none";
     const without = run.getBoundingClientRect().width;
     run.remove();
-    const btn = app.querySelector('button[data-type="mdm-text-font"]');
+    // The face is a list now (Page -> Font, and the A of the row of
+    // favorites): the row of each face is ticked while the text is set in it.
+    const font = app.querySelector('button[data-type="mdm-text-font"]');
+    const tick = (id) => !!app.querySelector('button[data-type="font-' + id + '"] .mdm-swatch__tick');
     return {
       roman: app.classList.contains("mdm-text--roman"),
       text: getComputedStyle(document.querySelector(".cm-scroller")).fontFamily,
@@ -2031,8 +2040,9 @@ async function faceOf(page) {
       adjust: getComputedStyle(content).fontSizeAdjust,
       factor: +(withAdjust / without).toFixed(3),
       katex,
-      ticked: !!btn.querySelector(".mdm-swatch__tick"),
-      name: Array.from(btn.childNodes)
+      ticked: tick("roman"),
+      sansTicked: tick("sans"),
+      name: Array.from(font.childNodes)
         .filter((n) => n.nodeType === 3)
         .map((n) => n.textContent)
         .join(""),
@@ -2040,7 +2050,7 @@ async function faceOf(page) {
   });
 }
 
-test("the text is set in the roman, and the LaTeX font row hands it back to the sans", { skip }, async () => {
+test("the text is set in the roman, and the Font list hands it back to the sans", { skip }, async () => {
   const h = await open({ text: EXAMPLE });
 
   const first = await faceOf(h.page);
@@ -2085,16 +2095,17 @@ test("the text is set in the roman, and the LaTeX font row hands it back to the 
   // Computer Modern needs beside a sans, and with the words now drawn at the
   // sans's x-height that is the measurement it was made against. The vendored
   // sheet's `font` shorthand keeps the adjust off the maths by itself.
-  // The row is named for the roman, the way a reader would name it rather
-  // than by the name of the file, and ticked while the text is set in it:
-  // from the first opening, since the roman is what the editor opens in. Its
-  // button was the other way round, a lamp lit on the sans, because a lamp
-  // on from the start says nothing; a tick beside a name says the name.
-  assert.equal(first.name, "LaTeX font");
-  assert.ok(first.ticked, "the row is not ticked on the face the editor opens in");
   assert.equal(first.katex, "17.424px", "the maths was resized under the roman");
+  // The face is chosen from a list, Font in the Page menu (and the A of the
+  // row of favorites, which opens the same rows), each face by the name a
+  // reader would call it, the one the text is set in ticked: from the first
+  // opening the roman, since it is what the editor opens in. It was a
+  // switch, "LaTeX font", until the row gave it a button (2026-11-16).
+  assert.equal(first.name, "Font");
+  assert.ok(first.ticked, "the roman is not ticked on the face the editor opens in");
+  assert.ok(!first.sansTicked, "the sans is ticked with the text in the roman");
 
-  await pressBar(h.page, "mdm-text-font");
+  await pressBar(h.page, "font-sans");
   await sleep(200);
   assert.deepEqual(await setSettingPosts(h.page), [
     { type: "setSetting", key: "textFont", value: "sans" },
@@ -2113,9 +2124,10 @@ test("the text is set in the roman, and the LaTeX font row hands it back to the 
   // maths is the 1.21 it always was on both sides of the switch.
   assert.equal(second.adjust, "none", "the sans came out adjusted");
   assert.equal(second.factor, 1, "something is scaling the sans");
-  assert.ok(!second.ticked, "the row is still ticked with the text in the sans");
-  assert.equal(second.name, "LaTeX font");
   assert.equal(second.katex, "17.424px", "the maths did not stay at 1.21");
+  assert.ok(!second.ticked, "the roman is still ticked with the text in the sans");
+  assert.ok(second.sansTicked, "the sans is not ticked with the text in it");
+  assert.equal(second.name, "Font");
 
   assert.deepEqual(h.errors, []);
   await h.close();
@@ -2130,10 +2142,11 @@ test("an editor left in the sans comes back in the sans", { skip }, async () => 
   assert.ok(!face.roman, "the seeded sans did not survive the opening");
   assert.match(face.text, /-apple-system/);
   assert.equal(face.adjust, "none");
-  assert.ok(!face.ticked, "the row came up ticked over a text in the sans");
-  assert.equal(face.name, "LaTeX font");
-  await pressBar(h.page, "mdm-text-font");
   assert.equal(face.katex, "17.424px");
+  assert.ok(!face.ticked, "the roman came up ticked over a text in the sans");
+  assert.ok(face.sansTicked, "the sans did not come up ticked");
+  assert.equal(face.name, "Font");
+  await pressBar(h.page, "font-roman");
   await sleep(200);
   assert.deepEqual(await setSettingPosts(h.page), [
     { type: "setSetting", key: "textFont", value: "roman" },
@@ -2542,8 +2555,11 @@ test("the small caps glyph sets two shapes at one height, where the heading glyp
   // so a `transform` on the glyph or on a group inside it moves the drawing
   // and not the numbers, and the placement below would pass on an icon that
   // had visibly floated off the row (seen, mutating this on 2026-09-19).
+  // The rows under the words: the row of favorites carries the levels'
+  // glyph again (its Heading button's rows, and the »'s), drawn only while
+  // their panels are open.
   const read = (name) =>
-    h.page.$$eval('#app button[data-type="' + name + '"] svg path', (ps) =>
+    h.page.$$eval('#app .mdm-word + .mdm-menu button[data-type="' + name + '"] svg path', (ps) =>
       ps.map((el) => {
         const b = el.getBBox();
         const m = el.ownerSVGElement.getScreenCTM().inverse().multiply(el.getScreenCTM());
@@ -7377,6 +7393,10 @@ test("the words beside a closed dash are divided as the page divides them, and r
 // with. So two of them come up ticked on a fresh editor, the roman and the
 // justified text, where their buttons came up dark: a lamp lit from the
 // first opening says nothing, and a tick beside a name says the name. The
+// roman has left them: the face is a list now, Page's Font, each face ticked
+// while the text is set in it, and a press on a face asks for that face
+// (the face's own tests, above). The Favorites row has joined them, ticked
+// while the row of favorites stands under the words, as on a fresh editor. The
 // tick follows the setting the host sends back, with the menu shut, and is
 // the same mark the theme in use and the level of the caret's line wear.
 // Each is one of several: no row of a menu that is a switch wears a lit
@@ -7390,7 +7410,7 @@ test("the words beside a closed dash are divided as the page divides them, and r
 // mode (its own tests, further down, and SM113 in webview-score-mode.test.js).
 const SWITCHES = [
   { name: "mdm-match-substring", says: "Match inside words", key: "multicursorMatch", on: "substring", off: "word", fresh: false },
-  { name: "mdm-text-font", says: "LaTeX font", key: "textFont", on: "roman", off: "sans", fresh: true },
+  { name: "page-favorites", says: "Favorites", key: "favorites", on: "shown", off: "hidden", fresh: true },
   { name: "mdm-text-align", says: "Justified text", key: "textAlign", on: "justify", off: "left", fresh: true },
   { name: "page-outline", says: "Outline", key: "outline", on: "shown", off: "hidden", fresh: false },
   { name: "mdm-score-panel", says: "Side panel", key: "scorePanel", on: "shown", off: "hidden", fresh: true },
@@ -7405,9 +7425,10 @@ const SWITCHES = [
 
 test("a switch in a menu is ticked while what it names is on, from the opening and as the setting comes back", { skip }, async () => {
   // The settings the extension ships: the document comes without its
-  // header, and Score navigation with its panel (the harness opens without
-  // it, for the tests of the mode to measure the editor as they did).
-  const fresh = await open({ seed: { settings: { frontMatter: "hidden", scorePanel: "shown" } }, withFrontMatter: false });
+  // header, Score navigation with its panel and the bar with its row of
+  // favorites (the harness opens without the two, for the other tests to
+  // measure the editor as they did).
+  const fresh = await open({ seed: { settings: { frontMatter: "hidden", scorePanel: "shown", favorites: "shown" } }, withFrontMatter: false });
   for (const s of SWITCHES) {
     const row = await barState(fresh.page, s.name);
     assert.deepEqual([row.kind, row.name, row.on], ["row", s.says, s.fresh], s.name + " on a fresh editor");
@@ -7740,6 +7761,9 @@ test("the names of a menu stand in one column and its keys at one edge, the glyp
     ["menu-format", 9, 4, 9],
     ["menu-paragraph", 14, 11, 6],
     ["menu-insert", 7, 0, 7],
+    // Page: the outline, the row of favorites (no glyph yet), the zoom, and
+    // the five of the look.
+    ["menu-page", 8, 0, 7],
     // Score: its ten rows, the one that names a key (the play), and the
     // seven that wear a glyph (the mode, the side panel, the play, the
     // playhead and the three of the look).
@@ -7797,8 +7821,9 @@ test("a row is as tall ticked as it is not", { skip }, async () => {
   for (const [press, ticked] of [
     [["menu-edit"], []],
     [["menu-paragraph"], ["heading-2"]],
-    [["mdm-theme"], ["mdm-text-font", "mdm-text-align", "mdm-front-matter", "mdm-theme-1"]],
-    [["mdm-hyphenation"], ["mdm-text-font", "mdm-text-align", "mdm-front-matter", "mdm-hyphenation-es"]],
+    [["mdm-theme"], ["mdm-text-align", "mdm-front-matter", "mdm-theme-1"]],
+    [["mdm-text-font"], ["mdm-text-align", "mdm-front-matter", "font-roman"]],
+    [["mdm-hyphenation"], ["mdm-text-align", "mdm-front-matter", "mdm-hyphenation-es"]],
   ]) {
     await h.page.keyboard.press("Escape");
     for (const name of press) await pressBar(h.page, name);
@@ -7917,7 +7942,9 @@ test("the rows and the legends of a submenu of the Score menu stand in one colum
     await pressBar(h.page, "mdm-score-navigation");
     await sleep(200);
     for (const [sub, lines, legends, drawn] of [
-      ["score-notes", 12, 2, 11],
+      // The figures, the rest and its legend, the sides, the chord and what
+      // takes out, and since 2026-11-16 the dot and the three signs.
+      ["score-notes", 16, 2, 15],
       ["score-bars", 2, 0, 2],
       ["score-moves", 11, 6, 0],
     ]) {
@@ -8836,7 +8863,8 @@ test("a submenu of a known length keeps no gutter and is as tall as the pane let
   await sleep(250);
   const notes = await opened("score-notes");
   assert.deepEqual([notes.shown, notes.scrolls, notes.gutter], [true, false, 0], "the notes keep room for a scroll bar they do not have");
-  assert.equal(notes.rules.length, 2);
+  // The third over the dot and the signs (2026-11-16).
+  assert.equal(notes.rules.length, 3);
   // A rule runs from one border to the other: 1px in from each edge.
   for (const rule of notes.rules) assert.deepEqual(rule, [1, 1], "a rule of the notes does not run from border to border");
   const moves = await opened("score-moves");

@@ -123,6 +123,7 @@ test("hostile setting values never reach the webview HTML", () => {
     // Not its fallback with junk after it, which would come to the
     // fallback whether the allowlist read the value whole or by its head.
     "mdm.scorePanel": "hidden</script>",
+    "mdm.favorites": "hidden</script>",
     "mdm.scorePanelFace": "keys; drop",
     "mdm.multicursorMatch": ["substring"],
     "mdm.followPlayhead": 0,
@@ -140,6 +141,7 @@ test("hostile setting values never reach the webview HTML", () => {
     scoreAlign: "center",
     frontMatter: "hidden",
     outline: "hidden",
+    favorites: "shown",
     scorePanel: "shown",
     scorePanelFace: "buttons",
     multicursorMatch: "word",
@@ -164,6 +166,7 @@ test("valid setting values pass through to the webview HTML", () => {
     "mdm.outlineWidth": 480,
     "mdm.zoom": 125,
     "mdm.scorePanel": "shown",
+    "mdm.favorites": "hidden",
     "mdm.scorePanelFace": "keys",
     "mdm.multicursorMatch": "substring",
     "mdm.followPlayhead": "still",
@@ -179,6 +182,7 @@ test("valid setting values pass through to the webview HTML", () => {
     scoreAlign: "left",
     frontMatter: "shown",
     outline: "shown",
+    favorites: "hidden",
     scorePanel: "shown",
     scorePanelFace: "keys",
     multicursorMatch: "substring",
@@ -196,8 +200,10 @@ test("valid setting values pass through to the webview HTML", () => {
 // Code and the allowlist's first word here (readSettings), and the two are one:
 // else a settings.json that carries junk (above) would bring up another editor
 // than one that carries nothing. Score navigation comes with its side panel
-// unless the Side panel row has turned it off (the owner's ask of 2026-10-14).
-test("a setting left unset comes to the default the manifest declares, and the score panel's is shown", () => {
+// unless the Side panel row has turned it off (the owner's ask of 2026-10-14),
+// and the bar with its row of favorites unless the Favorites row has put it
+// away (his picks of 2026-11-16).
+test("a setting left unset comes to the default the manifest declares, and the score panel's and the row of favorites' are shown", () => {
   const props = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "vscode-mdm", "package.json"), "utf8")).contributes.configuration.properties;
   const unset = settingsOf(boot("Body\n", {}));
   let read = 0;
@@ -210,6 +216,8 @@ test("a setting left unset comes to the default the manifest declares, and the s
   assert.equal(read, Object.keys(unset).length - 1, "a setting the page is given is not in the manifest");
   assert.equal(props["mdm.scorePanel"].default, "shown");
   assert.equal(unset.scorePanel, "shown");
+  assert.equal(props["mdm.favorites"].default, "shown");
+  assert.equal(unset.favorites, "shown");
 });
 
 // The width of the outline panel is the one setting that is a number, so it is
@@ -278,8 +286,10 @@ test("setSetting stores a zoom, clamped, and refuses what is not a number", asyn
   );
 });
 
-test("setSetting writes the outline, the score panel, its face and the Ctrl+D toggle, and no other word", async () => {
+test("setSetting writes the outline, the row of favorites, the score panel, its face and the Ctrl+D toggle, and no other word", async () => {
   const h = boot("Body\n", {});
+  await h.receive({ type: "setSetting", key: "favorites", value: "hidden" });
+  await h.receive({ type: "setSetting", key: "favorites", value: "pinned" });
   await h.receive({ type: "setSetting", key: "outline", value: "shown" });
   await h.receive({ type: "setSetting", key: "multicursorMatch", value: "substring" });
   await h.receive({ type: "setSetting", key: "scorePanel", value: "shown" });
@@ -291,6 +301,7 @@ test("setSetting writes the outline, the score panel, its face and the Ctrl+D to
   assert.deepEqual(
     vscode._state.updates.map((u) => [u.key, u.value]),
     [
+      ["mdm.favorites", "hidden"],
       ["mdm.outline", "shown"],
       ["mdm.multicursorMatch", "substring"],
       ["mdm.scorePanel", "shown"],

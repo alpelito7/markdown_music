@@ -1034,7 +1034,10 @@ test("with no score to write, the audio rows grey out and the document's do not"
     const mode = document.querySelector('#app .mdm-toolbar button[data-type="mdm-score-navigation"]');
     return {
       row: getComputedStyle(row).opacity,
-      button: getComputedStyle(button).opacity,
+      // The button's glyph: a greyed button keeps the pointer for its tip
+      // and greys what it shows (style.css, 2026-11-20).
+      button: getComputedStyle(button.querySelector(":scope > svg")).opacity,
+      buttonPointer: getComputedStyle(button).pointerEvents,
       greyed: button.classList.contains("mdm-btn--off"),
       pointer: getComputedStyle(row).pointerEvents,
       mode: getComputedStyle(mode).opacity + "/" + getComputedStyle(mode).pointerEvents,
@@ -1043,6 +1046,7 @@ test("with no score to write, the audio rows grey out and the document's do not"
   assert.equal(weights.row, "0.35");
   assert.equal(weights.greyed, true, "the key of the pad is not greyed, so the weights compare nothing");
   assert.equal(weights.button, weights.row, "the row and a greyed button differ");
+  assert.equal(weights.buttonPointer, "auto", "a greyed button lost the pointer, and with it its tip");
   assert.equal(weights.mode, "0.35/none", "the switch of the score mode is not greyed in a document with no score");
   assert.equal(weights.pointer, "none");
   // And it takes no press: nothing is asked of the host at all.

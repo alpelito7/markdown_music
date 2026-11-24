@@ -59,6 +59,10 @@ window.MDM_SETTINGS = Object.assign(
     staffLines: "gray",
     scoreAlign: "center",
     outline: "hidden",
+    // The extension's default is the row shown; the harness opens on the bar
+    // of words, as it opens without the score panel, and the row's own tests
+    // ask for it (webview-favorites.test.js).
+    favorites: "hidden",
     outlineWidth: 250,
     scorePanel: "hidden",
     scorePanelFace: "buttons",

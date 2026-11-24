@@ -45,6 +45,7 @@ const B = ["---", "title: B", "lang: en", "---", "", PROSE, "", "```abc", "X:1",
 // All of it is read with every menu shut.
 const LAMPS = [
   "outline",
+  "page-favorites",
   "mdm-match-substring",
   "mdm-text-font",
   "mdm-text-align",
@@ -60,7 +61,8 @@ const ASKED = (names) => {
   const ticked = (n) => !!el(n).querySelector(".mdm-swatch__tick");
   const says = {
     "mdm-match-substring": () => ticked("mdm-match-substring"),
-    "mdm-text-font": () => !ticked("mdm-text-font"),
+    "page-favorites": () => !ticked("page-favorites"),
+    "mdm-text-font": () => !ticked("font-roman"),
     "mdm-text-align": () => !ticked("mdm-text-align"),
     "mdm-hyphenation": () =>
       Array.from(document.querySelectorAll('#app button[data-type^="mdm-hyphenation-"]')).some(

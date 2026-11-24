@@ -108,6 +108,10 @@ const SETTINGS = {
   // in the provider).
   frontMatter: ["hidden", "shown"],
   outline: ["hidden", "shown"],
+  // Shown first, the fallback as well as the default: the row of favorite
+  // buttons stands under the words until the Favorites row of the Page menu
+  // puts it away (the owner's picks of 2026-11-16).
+  favorites: ["shown", "hidden"],
   // Shown first, the fallback as well as the default: Score navigation
   // comes with its panel until the Side panel row says otherwise (the
   // owner's ask of 2026-10-14).

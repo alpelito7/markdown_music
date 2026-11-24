@@ -463,6 +463,30 @@
   // watches: without the call the caret and the selection are drawn for a
   // page ago.
   //
+  // The faces as rows of a menu, by what a reader would call each one, the one
+  // in force ticked: under Page -> Font and under the A of the row of
+  // favorites, one control in two places. The names are those
+  // design-text-faces.html proposes (its question 1, still open with the
+  // owner on 2026-11-16); the setting keeps the words it had, roman and sans.
+  const FACES = [
+    { id: "roman", name: "Latin Modern Roman" },
+    { id: "sans", name: "System sans" },
+  ];
+  function faceMenuItems() {
+    return FACES.map(function (face) {
+      return {
+        name: "font-" + face.id,
+        tip: face.name,
+        on: function () {
+          return textFont === face.id;
+        },
+        click: function () {
+          askSetting("textFont", face.id);
+        },
+      };
+    });
+  }
+
   // The second re-measure is for the file arriving. The faces are asked for by
   // name here rather than left to be fetched when layout first wants one,
   // which is what closes the window in which CodeMirror can measure a
@@ -477,7 +501,9 @@
     const wasFace = scoreFace + "/" + scoreFaceWide;
     scoreFace = readScoreFace("--mdm-score-face");
     scoreFaceWide = readScoreFace("--mdm-score-face-wide");
-    syncRow("mdm-text-font");
+    FACES.forEach(function (face) {
+      syncRow("font-" + face.id);
+    });
     remeasureText();
     // Only when the face really moved, and only when it can be used. This
     // function runs on every settings message the host sends, which is every
@@ -923,8 +949,10 @@
     );
   }
 
+  // Every row of the zoom put right, the reading at the end of the bar, and
+  // the one beside the glass on the row of favorites (mdm-zoom).
   function updateZoomRows() {
-    ["zoom-in", "zoom-out", "zoom-actual"]
+    ["zoom-in", "zoom-out", "zoom-actual", "mdm-zoom"]
       .concat(
         ZOOM_STEPS.map(function (step) {
           return "zoom-" + step;
@@ -11631,7 +11659,9 @@
         cell.addEventListener("click", function (e) {
           e.stopPropagation();
           closeMenus();
-          if (!view) return;
+          // Nothing written into the text the score mode freezes, for a
+          // press of the keyboard either (fillMenu's rows).
+          if (!view || scoreMode) return;
           insertText(symbol[1])(view);
           view.focus();
         });
@@ -21710,13 +21740,19 @@
     { to: "both", label: "HTML + PDF" },
   ];
 
-  // Undo and redo as rotating arrows, a thick open ring with a fat
-  // tangential head. Same 16-unit grid and fill-only rules as every other
-  // icon here; redo mirrors undo.
+  // Undo and redo as a U-turn: a head at the top pointing the way back, the
+  // stroke along the top to the turn on the far side, and the tail coming
+  // back under it, open between the two. The owner's pick of 2026-11-20,
+  // variant B of design/design-row-icons.html, in place of a thick open ring
+  // with a fat tangential head, which read as reload and rotate and was
+  // heavier than the row's other glyphs (2.25 units where they are about
+  // 1.6). Same 16-unit grid and fill-only rules as every other icon here;
+  // redo mirrors undo. One drawing in its three places: the row of
+  // favorites, the Edit menu and the score panel's keys.
   const UNDO_ICON =
-    '<svg viewBox="0 0 16 16"><path d="M3.32 12.22A6.3 6.3 0 1 0 3.32 3.78L4.99 5.29A4.05 4.05 0 1 1 4.99 10.71Z"/><path d="M6.14 6.33L2.17 2.75L1.28 7.73Z"/></svg>';
+    '<svg viewBox="0 0 16 16"><path d="M5 4.15H10.25A4.6 4.6 0 0 1 14.85 8.75A4.6 4.6 0 0 1 10.25 13.35H6.35A.85 .85 0 0 1 6.35 11.65H10.25A2.9 2.9 0 0 0 13.15 8.75A2.9 2.9 0 0 0 10.25 5.85H5Z"/><path d="M1 5L5.3 1.6L5.3 8.4Z"/></svg>';
   const REDO_ICON =
-    '<svg viewBox="0 0 16 16"><path d="M12.68 12.22A6.3 6.3 0 1 1 12.68 3.78L11.01 5.29A4.05 4.05 0 1 0 11.01 10.71Z"/><path d="M9.86 6.33L13.83 2.75L14.72 7.73Z"/></svg>';
+    '<svg viewBox="0 0 16 16"><path d="M11 4.15H5.75A4.6 4.6 0 0 0 1.15 8.75A4.6 4.6 0 0 0 5.75 13.35H9.65A.85 .85 0 0 0 9.65 11.65H5.75A2.9 2.9 0 0 1 2.85 8.75A2.9 2.9 0 0 1 5.75 5.85H11Z"/><path d="M15 5L10.7 1.6L10.7 8.4Z"/></svg>';
 
   // Formatting glyphs, fill only: a bold B, a slanted I, a code chevron pair,
   // a chain link, two H of different sizes, and the three list glyphs, which
@@ -21871,10 +21907,15 @@
   // strokes.
   const FIND_ICON =
     '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M6.8 1.4a5.4 5.4 0 0 1 4.3 8.7l3.5 3.5-1 1-3.5-3.5A5.4 5.4 0 1 1 6.8 1.4Zm0 1.4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg>';
-  // A stack of headings, longest at the top: the document's own table of
-  // contents, the glyph an outline has always carried.
+  // The outline as the panel it opens: a window with a column of lines down
+  // its left, which is where the outline stands beside the page. The
+  // owner's pick of 2026-11-20, variant B of design/design-row-icons.html,
+  // in place of a stack of headings with dots, which is a list, and the
+  // bulleted list further along the row of favorites wore nearly the same
+  // drawing. The twin of the score's side panel (PANEL_ICON), a window with
+  // its right part filled: the editor's two panels, each on its own side.
   const OUTLINE_ICON =
-    '<svg viewBox="0 0 16 16"><rect x="1" y="2.4" width="10" height="1.6" rx=".8"/><rect x="3.5" y="6.2" width="9.5" height="1.6" rx=".8"/><rect x="3.5" y="10" width="6.5" height="1.6" rx=".8"/><circle cx="1.6" cy="7" r="1"/><circle cx="1.6" cy="10.8" r="1"/></svg>';
+    '<svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M2.8 2.4H13.2A1.8 1.8 0 0 1 15 4.2V11.8A1.8 1.8 0 0 1 13.2 13.6H2.8A1.8 1.8 0 0 1 1 11.8V4.2A1.8 1.8 0 0 1 2.8 2.4ZM3 3.9A.5 .5 0 0 0 2.5 4.4V11.6A.5 .5 0 0 0 3 12.1H13A.5 .5 0 0 0 13.5 11.6V4.4A.5 .5 0 0 0 13 3.9Z"/><path d="M6.4 3.9H7.7V12.1H6.4Z"/><path d="M3.9 5.3H5.1A0.6 0.6 0 0 1 5.7 5.9V5.9A0.6 0.6 0 0 1 5.1 6.5H3.9A0.6 0.6 0 0 1 3.3 5.9V5.9A0.6 0.6 0 0 1 3.9 5.3Z"/><path d="M3.9 7.5H5.1A0.6 0.6 0 0 1 5.7 8.1V8.1A0.6 0.6 0 0 1 5.1 8.7H3.9A0.6 0.6 0 0 1 3.3 8.1V8.1A0.6 0.6 0 0 1 3.9 7.5Z"/><path d="M3.9 9.7H5.1A0.6 0.6 0 0 1 5.7 10.3V10.3A0.6 0.6 0 0 1 5.1 10.9H3.9A0.6 0.6 0 0 1 3.3 10.3V10.3A0.6 0.6 0 0 1 3.9 9.7Z"/></svg>';
   // Score navigation: the whole note abcjs draws, alone inside the box of
   // the cursor. The owner's call on 2026-09-29, the third round: the wide
   // box of E in design/design-score-mode.html (the box of C, the owner's
@@ -22524,8 +22565,9 @@
     const pane = document.getElementById("app").getBoundingClientRect();
     // As tall as the pane lets it be, as the menu under a word is as tall as
     // the room under the bar (fitUnderBar): held to the 60% of the
-    // stylesheet, the notes of the Score menu, 353px of them, would scroll
-    // in a pane under 588px tall with the room to show them whole. Not a
+    // stylesheet, the notes of the Score menu, 437px of them since the dot
+    // and the signs (353 until 2026-11-16), would scroll in a pane under
+    // 728px tall with the room to show them whole. Not a
     // list that may be any length (`mdm-menu--long`: the themes), which is
     // what that 60% is for.
     if (!sub.classList.contains("mdm-menu--long")) {
@@ -22671,6 +22713,12 @@
         row.addEventListener("click", function (e) {
           e.stopPropagation();
           closeMenus();
+          // As a button (toolbarButton): a row greyed under the score mode
+          // does nothing for the keyboard either, as it does nothing for the
+          // pointer, which the stylesheet keeps off it. Enter on such a row
+          // of an open menu wrote into the frozen text before the row of
+          // favorites came, and the row put such buttons a key away.
+          if (scoreMode && (entry.caret || entry.edit)) return;
           entry.click();
         });
         // The pointer has come to a row that leads nowhere: a submenu left
@@ -23509,7 +23557,11 @@
       btn.textContent = spec.word;
     } else {
       btn.className = "mdm-btn mdm-tip mdm-tip--s";
-      btn.setAttribute("aria-label", spec.tip);
+      // A button that is a row of a menu names the row's key in its tip, as
+      // the buttons of the bar did before they became rows: Bold (Ctrl+B).
+      const bind = rowBinding(spec);
+      btn.setAttribute("aria-label", bind ? spec.tip + " (" + keyLabel(bind) + ")" : spec.tip);
+      if (bind) btn.setAttribute("aria-keyshortcuts", keyAria(bind));
       btn.innerHTML = spec.icon;
     }
     // A word over rows that work on the selection, or that read where the
@@ -23521,9 +23573,13 @@
     // out while the score mode freezes it.
     if (spec.edit) btn.classList.add("mdm-btn--edit");
     item.appendChild(btn);
-    if (spec.menu) {
+    if (spec.menu || spec.draw || spec.fill) {
       const panel = document.createElement("div");
-      panel.className = "mdm-menu";
+      panel.className = "mdm-menu" + (spec.panel ? " " + spec.panel : "");
+      // A panel laid out by its own hand whose every cell works on the
+      // selection (the music symbols) is exempt from dismissFromOutside, as
+      // it is under its row of the Insert menu (fillMenu).
+      if (spec.draw && spec.readsCaret) panel.classList.add("mdm-btn--caret");
       item.appendChild(panel);
       // What each row can do is read again every time the panel opens, not
       // once when it is filled: the Audio rows of the export panel grey out
@@ -23536,8 +23592,11 @@
         });
       };
       // The list is filled once, and what its rows say is read again each
-      // time the panel opens.
-      fillMenu(panel, spec.menu, rows);
+      // time the panel opens; rows laid out by their owner (`fill`, the » of
+      // the row of favorites) are handed the same map to be read again too.
+      if (spec.fill) spec.fill(panel, rows);
+      else if (spec.draw) spec.draw(panel);
+      else fillMenu(panel, spec.menu, rows);
       refresh();
       const show = function () {
         closeMenus();
@@ -23550,6 +23609,9 @@
       let byPointer = false;
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
+        // Greyed under the score mode, its panel stays shut: the button takes
+        // the pointer, for its tip (style.css), and not the press.
+        if (spec.edit && scoreMode) return;
         // A press shuts the panel a press opened. One the pointer opened on
         // its way along the words is left open by the press that comes
         // after: a hand that presses a word means to see its menu, and with
@@ -23568,16 +23630,27 @@
       // The manners of a menu bar: with the menu of one word open, the
       // pointer coming to another word opens that one in its place, and no
       // press is needed to look along the row. Only once a press has opened
-      // the first.
-      btn.addEventListener("mouseenter", function () {
-        const open = document.querySelector("#app .mdm-toolbar__item--open > .mdm-word");
-        if (!open || open === btn) return;
-        show();
-        byPointer = true;
-      });
+      // the first, and only among the words: a button of the row of
+      // favorites under them is no word of a menu bar, and the pointer
+      // crossing one on its way down to a menu must not swap that menu for
+      // the button's.
+      if (spec.word) {
+        btn.addEventListener("mouseenter", function () {
+          const open = document.querySelector("#app .mdm-toolbar__item--open > .mdm-word");
+          if (!open || open === btn) return;
+          show();
+          byPointer = true;
+        });
+      }
     } else {
       btn.addEventListener("click", function () {
         closeMenus();
+        // Greyed under the score mode does nothing, for the pointer that it
+        // takes for its tip (style.css) and for the keyboard: Enter on a
+        // focused button wrote into the frozen text (Tab to Table, then
+        // Enter, found by the second reading of the row of favorites,
+        // 2026-11-16).
+        if (spec.edit && scoreMode) return;
         spec.click();
         if (view) view.focus();
       });
@@ -23626,6 +23699,255 @@
     const el = document.createElement("span");
     el.className = "mdm-toolbar__sep";
     return el;
+  }
+
+  // ---------- The row of favorites ----------
+  //
+  // A row of buttons under the words for what is reached for on every page
+  // (design-favorites.html, the owner's picks of 2026-11-16): the outline at
+  // its head, then what a writer uses most, every one of them a button of the
+  // bar before 0.8.0 with the glyph it had, and the face and the zoom as two
+  // glyphs more. Nothing is set apart at the right end, for the time being,
+  // by the owner's word. The face stands left of the heading's levels and
+  // the zoom shows its reading beside its glass, his asks of 2026-11-20; and
+  // the zoom is a group of its own after Undo and Redo, his pick of the same
+  // day (variant B of design/design-row-icons.html, where it was the run's
+  // last): it is a control of how the page is seen and of nothing that is
+  // written, and a narrow pane, which gathers the row from its right end,
+  // keeps it among the last where at the end it went first. The code block
+  // stands right of the task list and the music symbols are Insert's alone,
+  // his asks of the same evening.
+  //
+  // Each button is a row of one of the menus found by its name: the same
+  // glyph, the same name and key (in its tip), greyed and lit when the row
+  // is. So the row is a list of names, and what a reader may one day choose
+  // for it (a Settings button, which the owner has put off) is a list of
+  // names and nothing more. "|" is a rule between two groups. The outline's
+  // button is no name of the list: it is the head of the words, which the
+  // row takes while it is shown (applyFavorites).
+  const FAVORITES = [
+    "undo", "redo", "|",
+    "mdm-zoom", "|",
+    "mdm-text-font", "headings", "bold", "italic", "link", "|",
+    "unordered-list", "ordered-list", "task-list", "code-block", "|",
+    "insert-equation", "insert-table", "insert-picture",
+  ];
+
+  // Shown unless the Favorites row of the Page menu has put it away
+  // (mdm.favorites, shown by default). The row, and the outline's button
+  // with the rule after it, which go back to the head of the words while the
+  // row is away, so that the bar is then the bar of words it was.
+  let favoritesShown = SETTINGS.favorites !== "hidden";
+  let favoritesBar = null;
+  let outlineHead = null;
+
+  // The chevron of inline code (CODE_ICON), twice: what did not fit.
+  const OVERFLOW_ICON =
+    '<svg viewBox="0 0 16 16"><path d="M3.3 3.6 7.6 8l-4.3 4.4-1.2-1.2L5.2 8 2.1 4.8Z"/><path d="M9.8 3.6 14.1 8l-4.3 4.4-1.2-1.2L11.7 8 8.6 4.8Z"/></svg>';
+
+  // Every row of the menus by its name, the rows of a submenu with them, so
+  // that a button of the row is the entry of its row and not a copy of it.
+  function rowsByName(specs) {
+    const map = {};
+    const walk = function (list) {
+      (list || []).forEach(function (entry) {
+        if (!entry || entry === "|" || entry.head) return;
+        if (entry.name && !map[entry.name]) map[entry.name] = entry;
+        if (Array.isArray(entry.menu)) walk(entry.menu);
+      });
+    };
+    walk(specs);
+    return map;
+  }
+
+  // A row of a menu as a button of the row: its glyph, its name and key in
+  // the tip (toolbarButton), the panel it leads to if it leads to one, and
+  // its state, kept under the row's name (keepRow) so that the two say the
+  // same thing whichever is pressed. A row that works on the selection is
+  // exempt from dismissFromOutside and one that writes into the text greys
+  // out under the score mode, as the row does (menuRow).
+  function favoriteButton(entry) {
+    const item = toolbarButton({
+      name: entry.name,
+      icon: entry.icon,
+      tip: entry.tip,
+      bind: entry.bind,
+      key: entry.key,
+      also: entry.also,
+      click: entry.click,
+      menu: entry.menu,
+      draw: entry.draw,
+      panel: entry.panel,
+      readsCaret: !!(entry.caret || entry.readsCaret),
+      edit: !!(entry.caret || entry.edit),
+    });
+    const btn = item.querySelector(":scope > button");
+    // A reading beside the glyph, in the words' type, for a row that has one
+    // to give: the zoom's "100%" (the owner's ask of 2026-11-20). Read again
+    // with the row's state, so it follows the zoom.
+    let reading = null;
+    if (entry.reading) {
+      btn.classList.add("mdm-btn--reading");
+      reading = document.createElement("span");
+      reading.className = "mdm-btn__reading";
+      btn.appendChild(reading);
+    }
+    const mark = function () {
+      const off = !!(entry.off && entry.off());
+      btn.classList.toggle("mdm-btn--off", off);
+      btn.disabled = off;
+      if (entry.on) btn.classList.toggle("mdm-btn--on", !!entry.on());
+      if (reading) reading.textContent = entry.reading();
+    };
+    keepRow(entry.name, mark);
+    mark();
+    return item;
+  }
+
+  // The row, a line of its own under the words: its groups in order, each
+  // after a rule but the first, which stands after the outline's own, and
+  // last the » that gathers what the pane has no room for (fitFavorites).
+  function favoritesRow(byName) {
+    const row = document.createElement("div");
+    row.className = "mdm-favorites";
+    const groups = [[]];
+    FAVORITES.forEach(function (name) {
+      if (name === "|") groups.push([]);
+      else if (byName[name]) groups[groups.length - 1].push(byName[name]);
+    });
+    const runs = groups.filter(function (entries) {
+      return entries.length > 0;
+    });
+    const fit = { groups: [], menu: [], more: null };
+    runs.forEach(function (entries, i) {
+      const els = i ? [separator()] : [];
+      entries.forEach(function (entry) {
+        els.push(favoriteButton(entry));
+      });
+      els.forEach(function (el) {
+        row.appendChild(el);
+      });
+      fit.groups.push(els);
+    });
+    // The », filled once with every group's rows, of which it shows the
+    // groups the row has no room for. Each run keeps the column of glyphs,
+    // so the names of all of them stand in one column.
+    // Exempt from dismissFromOutside as a word over such rows is: its press
+    // comes before the press on Bold or Equation, and the block being edited
+    // has to be open still for the second (found by the second reading of
+    // the row: a word selected in a table's cell lost its selection to the
+    // press on the », and Equation wrote under the table).
+    fit.more = toolbarButton({
+      name: "favorites-more",
+      icon: OVERFLOW_ICON,
+      tip: "More",
+      readsCaret: true,
+      fill: function (panel, rows) {
+        runs.forEach(function (entries, i) {
+          let rule = null;
+          if (i) {
+            rule = document.createElement("div");
+            rule.className = "mdm-menu__rule";
+            panel.appendChild(rule);
+          }
+          const before = panel.children.length;
+          fillMenu(panel, entries, rows, true);
+          fit.menu.push({ rule: rule, rows: Array.prototype.slice.call(panel.children, before) });
+        });
+      },
+    });
+    row.appendChild(fit.more);
+    new ResizeObserver(function () {
+      fitFavorites(row, fit);
+    }).observe(row);
+    return row;
+  }
+
+  // What the pane has no room for goes into the », a whole group at a time
+  // from the right end, never half of one (the three lists are one family);
+  // the outline stays at the head and the bar keeps its height. The » holds
+  // those groups as their rows, each with its glyph, name and key.
+  function fitFavorites(row, fit) {
+    // Nothing to fit while the row is put away: it has no width to fit in,
+    // and the groups are fitted again as it comes back (the observer).
+    if (!row.getClientRects().length) return;
+    const show = function (el, on) {
+      el.style.display = on ? "" : "none";
+    };
+    fit.groups.forEach(function (els) {
+      els.forEach(function (el) {
+        show(el, true);
+      });
+    });
+    show(fit.more, false);
+    let cut = fit.groups.length;
+    if (!fitsRow(row)) {
+      show(fit.more, true);
+      while (cut > 0 && !fitsRow(row)) {
+        cut--;
+        fit.groups[cut].forEach(function (el) {
+          show(el, false);
+        });
+      }
+    }
+    fit.menu.forEach(function (part, i) {
+      part.rows.forEach(function (el) {
+        show(el, i >= cut);
+      });
+      if (part.rule) show(part.rule, i > cut);
+    });
+    // A panel open under a button the row has just put away goes with it:
+    // left open out of sight, it held down every tip of the bar (style.css)
+    // and came back open by itself when the pane widened.
+    const open = row.querySelector(":scope > .mdm-toolbar__item--open");
+    if (open && open.style.display === "none") closeMenus();
+    markZoomInRow();
+  }
+
+  // Whether the row shows the glass with its reading, which is what puts
+  // away the reading at the end of the words (#app.mdm-favorites--zoom in
+  // style.css): the same figure twice in the bar says nothing more. Read
+  // off what is in sight, so that the words' reading comes back when the
+  // row is put away and when the pane gathers the glass into the ».
+  function markZoomInRow() {
+    const root = app();
+    if (!root || !favoritesBar) return;
+    const glass = favoritesBar.querySelector(':scope > .mdm-toolbar__item > button[data-type="mdm-zoom"]');
+    const seen = favoritesShown && !!glass && glass.parentNode.style.display !== "none";
+    root.classList.toggle("mdm-favorites--zoom", seen);
+  }
+
+  // Whether the last thing in sight on the row ends inside it.
+  function fitsRow(row) {
+    const end = row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight);
+    for (let el = row.lastElementChild; el; el = el.previousElementSibling) {
+      if (el.style.display === "none") continue;
+      return el.getBoundingClientRect().right <= end + 0.5;
+    }
+    return true;
+  }
+
+  // The row drawn from the setting in force, and the outline's button with
+  // the rule after it where they belong: at the head of the row while it is
+  // shown, at the head of the words while it is away.
+  function applyFavorites() {
+    const root = app();
+    if (!root || !favoritesBar || !outlineHead) return;
+    root.classList.toggle("mdm-favorites--shown", favoritesShown);
+    // And one open on the row when the row is put away (fitFavorites).
+    if (!favoritesShown && favoritesBar.querySelector(".mdm-toolbar__item--open")) closeMenus();
+    const home = favoritesShown ? favoritesBar : favoritesBar.parentNode;
+    if (outlineHead[0].parentNode !== home) {
+      const first = home.firstElementChild;
+      home.insertBefore(outlineHead[0], first);
+      home.insertBefore(outlineHead[1], first);
+    }
+    syncRow("page-favorites");
+    markZoomInRow();
+  }
+
+  function toggleFavorites() {
+    askSetting("favorites", favoritesShown ? "hidden" : "shown");
   }
 
   function buildToolbar() {
@@ -23897,6 +24219,31 @@
           },
           click: toggleOutline,
         },
+        // The row of favorites, shown or put away (mdm.favorites): beside the
+        // outline, the other thing the editor shows around the page and no
+        // part of the document. No glyph yet: the row's is still to be
+        // chosen with the owner.
+        {
+          name: "page-favorites",
+          tip: "Favorites",
+          on: function () {
+            return favoritesShown;
+          },
+          click: toggleFavorites,
+        },
+        // The zoom after them: the three of the menu that change how the
+        // page is seen and nothing of what an export makes of it.
+        // `reading`: what its button on the row of favorites says beside the
+        // glass (favoriteButton); the row of the menu says its name.
+        {
+          name: "mdm-zoom",
+          icon: ZOOM_ICON,
+          tip: "Zoom",
+          menu: zoomMenuItems(),
+          reading: function () {
+            return zoom + "%";
+          },
+        },
         "|",
         // The theme leads the rest, because the fill colours of the score
         // are defined per theme and the wider switch should read before the
@@ -23905,20 +24252,13 @@
         // keeps the room of a scroll bar and the height of a list that may
         // be any length (placeSub).
         { name: "mdm-theme", icon: THEME_ICON, tip: "Theme", menu: themeMenuItems(), panel: "mdm-menu--long" },
-        // Named by what a reader would call the face rather than by the name
-        // of its file: the roman is the face of a LaTeX document. Off, the
-        // text is in the sans Markdown is usually written in.
-        {
-          name: "mdm-text-font",
-          icon: TEXT_FONT_ICON,
-          tip: "LaTeX font",
-          on: function () {
-            return textFont === "roman";
-          },
-          click: function () {
-            askSetting("textFont", textFont === "roman" ? "sans" : "roman");
-          },
-        },
+        // The face of the prose, a list of the faces the editor carries with
+        // the one in force ticked (faceMenuItems). It was a switch, "LaTeX
+        // font", while it had no button; the row of favorites gave it one,
+        // the A, which opens the same list, so the two are one control (the
+        // owner's pick of 2026-11-16), and a third face is a row more where a
+        // switch could not hold it.
+        { name: "mdm-text-font", icon: TEXT_FONT_ICON, tip: "Font", menu: faceMenuItems() },
         // Beside the hyphenation menu, since the two decide together how a
         // line of prose meets the right edge.
         {
@@ -24059,6 +24399,18 @@
     specs.forEach(function (spec) {
       bar.appendChild(spec === "|" ? separator() : toolbarButton(spec));
     });
+    // The head of the words, the outline's button and the rule after it,
+    // which the row of favorites takes while it is shown (applyFavorites);
+    // and the row, a line of its own under the words. The levels of a
+    // heading are one button there over their rows, the button the bar had
+    // before it was words: in the Paragraph menu they are rows of their own
+    // and no row leads to them.
+    const outlineItem = bar.querySelector(':scope > .mdm-toolbar__item > button[data-type="outline"]').parentNode;
+    outlineHead = [outlineItem, outlineItem.nextElementSibling];
+    const byName = rowsByName(specs);
+    byName.headings = { name: "headings", icon: HEADING_ICON, tip: "Heading", menu: headingMenuItems(), caret: true };
+    favoritesBar = favoritesRow(byName);
+    bar.appendChild(favoritesBar);
     // A press on the chrome must not take the focus off the text. The
     // document draws itself with nobody in it while it is unfocused, so the
     // source of the caret's line went away for as long as a button was held
@@ -24167,6 +24519,7 @@
     // outline included: the document reopens as it was closed. Of the score
     // panel what comes up is the tick of its row: the panel waits for the
     // mode, and a document opens out of it.
+    applyFavorites();
     applyScorePanel();
     applyOutlineWidth();
     applyOutline();
@@ -24237,6 +24590,7 @@
       outlineWidth = next.outlineWidth || 250;
       scorePanelOpen = next.scorePanel !== "hidden";
       scorePanelFace = next.scorePanelFace === "keys" ? "keys" : "buttons";
+      favoritesShown = next.favorites !== "hidden";
       matchSubstring = next.multicursorMatch === "substring";
       following = next.followPlayhead !== "still";
       textFont = next.textFont || "roman";
@@ -24255,7 +24609,9 @@
       // The score panel, which fits the outline to the room it leaves as
       // it comes or goes; then the outline's width, and the outline shown by
       // the call after it: setting its width before that keeps it from
-      // opening at one width and jumping to another.
+      // opening at one width and jumping to another. The row of favorites
+      // before them, which carries the outline's button while it is shown.
+      applyFavorites();
       applyScorePanel();
       applyScorePanelFace();
       applyOutlineWidth();

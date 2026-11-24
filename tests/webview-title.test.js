@@ -809,11 +809,18 @@ test("the YAML header row shows the source in place of the drawing, and what it 
   assert.deepEqual(seen.numbers, ["1", "2", "3"]);
   assert.deepEqual(await fmButton(h.page), ["YAML header", true, false]);
   // The caret was at the head of the body, where a document nobody has
-  // clicked in has it, and it is there still: the press gives the text the
-  // focus, and a caret left at the head of the text would be in the header
-  // and have its title drawn.
-  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, "the press did not hand the text the focus, so nothing was under test");
+  // clicked in has it, and it is there still. The press leaves the document
+  // nobody's, as every press on the bar that writes nothing does (it gave
+  // the text the focus until 2026-11-20, which opened the block at the top
+  // of a document nobody had been in); the focus is given here by hand, and
+  // a caret left at the head of the text would then be in the header and
+  // have its title drawn.
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), false, "the press made a document nobody had been in somebody's");
+  await h.page.evaluate(() => window.__mdm.view.focus());
+  await sleep(100);
+  assert.equal(await h.page.evaluate(() => window.__mdm.view.hasFocus), true, "the text did not take the focus, so nothing was under test");
   assert.ok((await caretLine(h.page)).text.startsWith("This document is ordinary"), "the button put the caret in the header");
+  assert.equal((await head(h.page)).blocks, 0, "the title is drawn under a source the button shows, a caret in the text");
   // It stays: a caret put in it and taken out, a click in the margin.
   await clickLine(h.page, "author: alpelito7");
   await clickLine(h.page, "More prose under it.");

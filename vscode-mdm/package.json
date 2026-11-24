@@ -106,6 +106,16 @@
           "default": "hidden",
           "description": "Whether the outline panel is open. The toolbar button on the left of the bar writes it, so a document reopens with the panel it was left with."
         },
+        "mdm.favorites": {
+          "type": "string",
+          "enum": ["hidden", "shown"],
+          "enumDescriptions": [
+            "Only the words of the bar, with the outline's button at their head.",
+            "A row of buttons under the words for what is used on every page: the outline, undo and redo, the heading levels, bold, italic and link, the three lists, equation, table, picture and music symbol, the face and the zoom."
+          ],
+          "default": "shown",
+          "description": "Whether the row of favorite buttons stands under the words of the bar. The Favorites row of the Page menu writes it. Each button is a row of one of the menus, and names the row's key in its tip."
+        },
         "mdm.outlineWidth": {
           "type": "number",
           "minimum": 140,
@@ -171,7 +181,7 @@
             "The interface font of the system, which is what the rest of VS Code is set in and what Markdown is usually written in."
           ],
           "default": "roman",
-          "description": "The face the text of the document is set in. Code, the numbers in the margin and the toolbar are not affected: they keep the monospace and the sans they have. The LaTeX font row of the Page menu writes it, and an export from the toolbar carries it to the page and to the paper."
+          "description": "The face the text of the document is set in. Code, the numbers in the margin and the toolbar are not affected: they keep the monospace and the sans they have. The Font row of the Page menu and the A of the row of favorites write it, and an export from the toolbar carries it to the page and to the paper."
         },
         "mdm.textAlign": {
           "type": "string",

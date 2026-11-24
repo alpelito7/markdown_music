@@ -1603,8 +1603,8 @@ test("a word opens its menu on a press, and with one open the pointer on another
   await h.close();
 });
 
-// Two rows of the Page menu lead to more, the themes and the languages, and
-// say so with the arrowhead at their far edge. The submenu opens beside its
+// Rows of the Page menu lead to more, the themes and the languages among
+// them, and say so with the arrowhead at their far edge. The submenu opens beside its
 // row when the pointer comes to the row, and on a press; it stays up while
 // the pointer crosses the rows under its own on the way to it, which is a
 // diagonal, and goes when the pointer has stayed on another row. A press on
@@ -1617,6 +1617,9 @@ test("a row that leads to more opens its submenu beside it, and the pointer may 
       return { x: b.x + b.width / 2, y: b.y + b.height / 2, left: b.left, right: b.right, top: b.top, bottom: b.bottom };
     }, name);
   // Two of the rows of the Page menu that lead to more, each with its
+  // submenu: the themes and the languages. The zoom's (above them) and the
+  // faces' (between them, since the face became a list, 2026-11-16) open
+  // the same way and are named below.
   const subs = () =>
     h.page.evaluate(() =>
       [...document.querySelectorAll('#app .mdm-toolbar button[data-type="menu-page"] + .mdm-menu > .mdm-menu__group')]
@@ -1643,6 +1646,7 @@ test("a row that leads to more opens its submenu beside it, and the pointer may 
     await h.page.evaluate(() =>
       [...document.querySelectorAll('#app .mdm-toolbar button[data-type="menu-page"] + .mdm-menu > .mdm-menu__group > button')].map((b) => b.getAttribute("data-type"))
     ),
+    ["mdm-zoom", "mdm-theme", "mdm-text-font", "mdm-hyphenation"]
   );
   let seen = await subs();
   assert.deepEqual(seen.map((s) => [s.name, s.more, s.shown]), [["mdm-theme", true, false], ["mdm-hyphenation", true, false]]);
@@ -1701,7 +1705,11 @@ test("a row that leads to more opens its submenu beside it, and the pointer may 
   await h.page.mouse.move(theme.x, theme.y);
   await sleep(80);
   assert.deepEqual((await subs()).map((s) => s.shown), [true, false]);
-  await h.page.mouse.move(font.x, font.y);
+  // A row that leads nowhere, Justified text: the faces' row under Theme
+  // leads to a submenu of its own since the face became a list (2026-11-16),
+  // and the pointer staying on it opens the faces, as it opens the languages.
+  const align = await center("mdm-text-align");
+  await h.page.mouse.move(align.x, align.y);
   await h.page.waitForFunction(() => !document.querySelector("#app .mdm-menu__group--open"), { timeout: 3000 });
   const hyph = await center("mdm-hyphenation");
   await h.page.mouse.move(theme.x, theme.y);
@@ -6185,6 +6193,9 @@ test("a drawn block is numbered by its first line, and by every line once a care
 // And at the end of the row, the reading of the zoom (drawn only while the
 // zoom is not 100), a word over the zoom's rows as the Zoom row of the Page
 // menu leads to them.
+// Under them the row of favorites, a line of its own (webview-favorites.test.js
+// holds what is in it; the harness opens with it put away).
+const BAR = ["outline", "|", "menu-edit", "menu-format", "menu-paragraph", "menu-insert", "menu-page", "menu-score", "menu-export", "zoom-reading", "favorites"];
 
 const ZOOM_ROWS = ["zoom-in", "zoom-out", "zoom-actual", "|", "zoom-50", "zoom-67", "zoom-75", "zoom-80", "zoom-90", "zoom-100", "zoom-110", "zoom-125", "zoom-150", "zoom-175", "zoom-200", "zoom-250", "zoom-300"];
 
@@ -6228,10 +6239,11 @@ const MENUS = {
   "menu-insert": ["insert-equation", "insert-equation-block", "insert-table", "insert-picture", "insert-footnote", "insert-rule", "|", ["insert-symbol", "glyphs"]],
   "menu-page": [
     "page-outline",
+    "page-favorites",
     ["mdm-zoom", ZOOM_ROWS],
     "|",
     ["mdm-theme", ["mdm-theme-0", "mdm-theme-1", "mdm-theme-2", "mdm-theme-3"]],
-    "mdm-text-font",
+    ["mdm-text-font", ["font-roman", "font-sans"]],
     "mdm-text-align",
     [
       "mdm-hyphenation",
@@ -6324,6 +6336,10 @@ test("the bar is grouped by what a control is about, and so is the menu under ea
         bar.push("|");
         continue;
       }
+      if (el.classList.contains("mdm-favorites")) {
+        bar.push("favorites");
+        continue;
+      }
       const button = el.querySelector(":scope > button");
       bar.push(button.getAttribute("data-type"));
       if (button.classList.contains("mdm-word")) menus[button.getAttribute("data-type")] = rows(el.querySelector(":scope > .mdm-menu"));
@@ -6340,8 +6356,8 @@ test("the bar is grouped by what a control is about, and so is the menu under ea
 // the keyboard, written as VS Code writes one on the platform in use. The
 // names of the rows that were buttons are the names their tips had; a row
 // that is a switch is named for what it turns on, since the tick beside it
-// says whether it is on (LaTeX font, Justified text, YAML header, Match
-// inside words, and of the music Follow the playhead, Ink staff lines and
+// says whether it is on (Justified text, YAML header, Match inside words,
+// Favorites, and of the music Follow the playhead, Ink staff lines and
 // Scores at the left), where its button's tip named what the press would
 // lead to. A row with a glyph wears the one its button wore, and the glyph
 // of a family that was one button stands on the first row of the family.
@@ -6392,9 +6408,10 @@ const ROWS = [
   ["insert-rule", "Horizontal rule", null, null, true],
   ["insert-symbol", "Music symbol", null, null, true],
   ["page-outline", "Outline", null, null, true],
+  ["page-favorites", "Favorites", null, null, false],
   ["mdm-zoom", "Zoom", null, null, true],
   ["mdm-theme", "Theme", null, null, true],
-  ["mdm-text-font", "LaTeX font", null, null, true],
+  ["mdm-text-font", "Font", null, null, true],
   ["mdm-text-align", "Justified text", null, null, true],
   ["mdm-hyphenation", "Hyphenation", null, null, true],
   ["mdm-front-matter", "YAML header", null, null, true],
@@ -6521,8 +6538,10 @@ test("the rows under Notes, Bars and Move and select name the keys of the score 
       assert.equal(s.under, "menu-score", row[0]);
       assert.equal(s.kind, row[5] === "legend" ? "legend" : "row", row[0]);
       // A legend names no one key: nothing for a screen reader to announce
-      // as the shortcut of a control, which it is not.
-      assert.equal(s.keys === null, row[5] === "legend", row[0] + " and aria-keyshortcuts");
+      // as the shortcut of a control, which it is not. Nor does Natural,
+      // whose two arrows held together no shortcut of ARIA can name
+      // (keyAria).
+      assert.equal(s.keys === null, row[5] === "legend" || row[0] === "score-natural", row[0] + " and aria-keyshortcuts");
       said.push([row[0], s.name, s.key, s.glyph !== ""]);
       if (s.glyph) glyphs.set(row[0], s.glyph);
       // The same thing on the panel's Buttons face: a key of the pad, with

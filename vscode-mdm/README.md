@@ -45,16 +45,19 @@ With the pointer on a score, two arrows at the end of each line send its last ba
 
 ## The toolbar
 
-One row. The button at its left opens the outline of the headings, and seven words each open a menu. A row of a menu names its key where it has one, and a row that is a switch is ticked while it is on.
+Two rows: seven words that each open a menu, and under them a row of favorite buttons. A row of a menu names its key where it has one, and a row that is a switch is ticked while it is on. The zoom is read beside the magnifier of the row; with the row put away, it stands at the right end of the words while the page is zoomed, and says 100% for a moment as you zoom back to it. A button with nothing to do is greyed and still names itself under the pointer.
 
 - **Edit**: undo and redo, find and replace, the carets and the lines. `Ctrl+D` adds the next match of the selection, whole words only unless **Match inside words** is ticked. `Alt+click` adds a caret.
+The row of favorites holds what is used on every page: the outline of the headings, undo and redo, the zoom with its figure beside it, the font, the heading levels, bold, italic and link, the three lists and the code block, equation, table and picture. Each button is a row of one of the menus and names its key in its tip. A pane too narrow for the row gathers its last groups into a **»**. **Page → Favorites** puts the row away, and the outline's button goes back to the head of the words.
+
 - **Format**: the marks on words, from bold to a link and inline code.
 - **Paragraph**: the heading levels, the code block, the lists and the quote.
 - **Insert**: an equation, a table, a picture, a footnote, a rule, a music symbol.
 - **Page**: settings shared by every document, except the hyphenation, which each file keeps.
+  - **Favorites**: the row of favorite buttons under the words, on unless you turn it off.
   - **Zoom**: the size the page is drawn at, from 50% to 300%, 100% being the size an export prints it. `Ctrl++` and `Ctrl+-` (`Cmd` on a Mac) step it, as `Ctrl` with the mouse wheel does, and `Ctrl+NumPad0` (`Cmd+NumPad0`) brings it back to 100%. The words, the equations, the scores, the pictures and the width of the text grow together, so a line ends on the same word at any zoom; the toolbar, its menus and the numbers in the margin keep their size, and nothing of an export changes.
   - **Theme**: follows VS Code by default; MDM Light, MDM Dark and MDM White are the editor's own.
-  - **LaTeX font**: Latin Modern Roman, the face of a LaTeX document, which comes with the extension; turned off, the system's sans. Code keeps its monospace.
+  - **Font**: Latin Modern Roman, the face of a LaTeX document, which comes with the extension, or the system's sans. Code keeps its monospace.
   - **Justified text**: paragraphs justified, or ragged on the right. The lines break on the same words either way.
   - **Hyphenation**: words stay whole until a language is chosen here. It is written into the YAML header as `lang:`, in a new, hidden header if the file had none; the hyphen is only drawn, never saved.
   - **YAML header**: a header with a title, an author or an abstract is drawn as the page's title block, and a click on the block opens its YAML, as a table opens. This row shows the YAML in place of the block, in every document, until it is unticked.

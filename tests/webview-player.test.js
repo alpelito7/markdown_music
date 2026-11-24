@@ -4274,7 +4274,7 @@ test("the tune can be scrubbed without closing the score that is open", { skip }
   await h.close();
 });
 
-test("the outline leads the toolbar, and undo and redo lead the Edit menu in the rotate arrows", { skip }, async () => {
+test("the outline leads the toolbar, and undo and redo lead the Edit menu in the U-turn arrows", { skip }, async () => {
   const h = await open({});
   const bar = await h.page.evaluate(() => {
     const types = Array.from(
@@ -4289,8 +4289,10 @@ test("the outline leads the toolbar, and undo and redo lead the Edit menu in the
     const row = document.querySelector('#app .mdm-toolbar button[data-type="undo"]');
     return {
       first: types.slice(0, 4),
-      // The rotate arrows: an open ring whose arc starts at these exact
-      // coordinates.
+      // The U-turn arrows, the owner's pick of 2026-11-20 (B of
+      // design-row-icons.html, in place of the rotate arrows): a stroke
+      // along the top that starts at these exact coordinates. What makes
+      // the drawing a U-turn is read in webview-favorites.test.js (FV15).
       undoPath: undo ? undo.getAttribute("d").slice(0, 5) : null,
       redoPath: redo ? redo.getAttribute("d").slice(0, 5) : null,
       // Greyed out on a fresh document: nothing to undo yet.
@@ -4319,8 +4321,8 @@ test("the outline leads the toolbar, and undo and redo lead the Edit menu in the
     "mdm-export-midi",
     "mdm-export-wav",
   ]);
-  assert.equal(bar.undoPath, "M3.32");
-  assert.equal(bar.redoPath, "M12.6");
+  assert.equal(bar.undoPath, "M5 4.");
+  assert.equal(bar.redoPath, "M11 4");
   assert.equal(bar.undoDisabled, true);
   assert.deepEqual(h.errors, []);
   await h.close();

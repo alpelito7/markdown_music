@@ -604,6 +604,7 @@ function settingsMessage(overrides) {
         outlineWidth: 250,
         scorePanel: "hidden",
         scorePanelFace: "buttons",
+        favorites: "hidden",
         multicursorMatch: "word",
         followPlayhead: "follow",
         textFont: "roman",
@@ -685,6 +686,14 @@ function barState(page, name) {
       .join("");
     const item = el.closest(".mdm-toolbar__item");
     const style = getComputedStyle(el);
+    // Greyed: a row or a word at the weight of a control with nothing to
+    // do, the pointer kept off it; a button, which keeps the pointer for
+    // its tip since 2026-11-20 (style.css), by its glyph at that weight.
+    const greyed = (el, style) => {
+      if (style.pointerEvents === "none" && Number(style.opacity) < 1) return true;
+      const glyph = el.classList.contains("mdm-btn") && el.querySelector(":scope > svg");
+      return !!glyph && Number(getComputedStyle(glyph).opacity) < 1;
+    };
     return {
       kind: legend ? "legend" : row ? "row" : el.classList.contains("mdm-word") ? "word" : "button",
       under: row ? item.querySelector(":scope > button").getAttribute("data-type") : null,
@@ -692,7 +701,7 @@ function barState(page, name) {
       key: key ? key.textContent : null,
       keys: el.getAttribute("aria-keyshortcuts"),
       on: row ? !!el.querySelector(".mdm-swatch__tick") : el.classList.contains("mdm-btn--on"),
-      off: style.pointerEvents === "none" && Number(style.opacity) < 1,
+      off: greyed(el, style),
       glyph: ((row ? el.querySelector(".mdm-menu__icon svg") : el.querySelector("svg")) || { outerHTML: "" }).outerHTML,
     };
   }, name);
@@ -724,13 +733,20 @@ function panelState(page, name) {
       .map((n) => n.textContent)
       .join("");
     const style = getComputedStyle(el);
+    // As barState reads it: a key or a switch by its glyph, which is what
+    // greys while the button keeps the pointer (style.css).
+    const greyed = (el, style) => {
+      if (style.pointerEvents === "none" && Number(style.opacity) < 1) return true;
+      const glyph = el.classList.contains("mdm-btn") && el.querySelector(":scope > svg");
+      return !!glyph && Number(getComputedStyle(glyph).opacity) < 1;
+    };
     return {
       kind: pad ? "key" : lit ? "switch" : el.classList.contains("mdm-menu__legend") ? "legend" : "row",
       name: lit ? el.getAttribute("aria-label") : text,
       key: key ? key.textContent : null,
       keys: el.getAttribute("aria-keyshortcuts"),
       on: lit ? el.classList.contains("mdm-btn--on") : !!el.querySelector(".mdm-swatch__tick"),
-      off: style.pointerEvents === "none" && Number(style.opacity) < 1,
+      off: greyed(el, style),
       glyph: ((lit ? el.querySelector("svg") : el.querySelector(".mdm-menu__icon svg")) || { outerHTML: "" }).outerHTML,
     };
   }, name);

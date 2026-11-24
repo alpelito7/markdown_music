@@ -1050,7 +1050,8 @@ body {
 #app .mdm-word:focus-visible {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mdm-ink) 30%, transparent);
 }
-#app .mdm-toolbar__item--open > .mdm-word {
+#app .mdm-toolbar__item--open > .mdm-word,
+#app .mdm-favorites .mdm-toolbar__item--open > .mdm-btn {
   background: color-mix(in srgb, var(--mdm-play-accent) 22%, transparent);
 }
 /* The reading of the zoom (buildToolbar), a word like the seven at the right
@@ -1067,6 +1068,13 @@ body {
 #app:not(.mdm-zoomed):not(.mdm-zoom-linger) .mdm-toolbar__item--end {
   display: none;
 }
+/* Nor while the row of favorites shows the glass with its own reading
+   beside it (markZoomInRow in main.js), lingering or not: the glass says
+   the figure at every zoom, 100 included. It comes back with the row put
+   away or the glass gathered into the row's ». */
+#app.mdm-favorites--zoom .mdm-toolbar__item--end {
+  display: none;
+}
 #app .mdm-toolbar__item--end > .mdm-word {
   font-variant-numeric: tabular-nums;
 }
@@ -1075,6 +1083,47 @@ body {
 #app .mdm-toolbar__item--end > .mdm-menu {
   left: auto;
   right: 0;
+}
+/* The row of favorites (buildToolbar in main.js; design-favorites.html, the
+   owner's picks of 2026-11-16): a line of its own in the bar under the words,
+   as the player's row is, and full-bleed the same way. Its buttons are the
+   bar's (.mdm-btn), one height with the words, so the bar is 64px with it and
+   35 without. No rule between the two rows: one bar, closed by the line under
+   it; the player's row, which comes and goes, is the one with a line of its
+   own. Never wrapped: what has no room goes into its » (fitFavorites). */
+#app .mdm-favorites {
+  flex: 0 1 auto;
+  width: calc(100% + 16px);
+  box-sizing: border-box;
+  margin: 0 -8px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 1px;
+}
+#app:not(.mdm-favorites--shown) .mdm-favorites {
+  display: none;
+}
+/* A button with a reading beside its glyph (the zoom's "100%", the owner's
+   ask of 2026-11-20): as wide as the two, the figure in the words' type, of
+   one width as the words' own reading is, so the button keeps its width
+   from 110% to 250% and the row does not shift as the zoom is stepped. */
+#app .mdm-btn.mdm-btn--reading {
+  width: auto;
+  gap: 4px;
+  padding: 0 7px 0 6px;
+}
+#app .mdm-btn__reading {
+  font: 600 13px var(--mdm-sans);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A menu of the words hangs over the row, and a tip of the row would be drawn
+   over the menu (z-index 10 against 5): the rule the player's row has below,
+   one row higher. */
+#app .mdm-toolbar:has(.mdm-toolbar__item--open) .mdm-favorites .mdm-tip::after {
+  display: none;
 }
 /* Every glyph of the chrome is brass, at rest and under the pointer alike:
    the buttons of this bar, the round pair on a block, the transport of the
@@ -1121,13 +1170,35 @@ body {
    one, the Audio rows of the export panel in a document with no score, and
    whatever writes into the text while the score mode freezes it (scoreMode
    in main.js), a button, a row, or a word with nothing but such rows under
-   it. One declaration for all of them, so that a row of a menu greys out at
+   it. One weight for all of them, so that a row of a menu greys out at
    exactly the weight a button of the bar does. */
-#app .mdm-btn--off,
 #app .mdm-menu__item--off,
-#app.mdm--score-mode .mdm-btn--edit {
+#app.mdm--score-mode .mdm-btn--edit:not(.mdm-btn) {
   opacity: 0.35;
   pointer-events: none;
+}
+/* A greyed button keeps the pointer, so that its tip is drawn and says what
+   it is (the owner, 2026-11-20: "cuando pongo el cursor encima de un icono
+   desactivado no sale cartel, creo que siempre debería salir cartel"); with
+   the pointer off it, :hover never matched and no tip came. What greys is
+   what it shows, at the weight above, and the ground stays bare under the
+   pointer: no wash says it can be pressed, and a press does nothing (the
+   button is disabled, or the score mode's guard in toolbarButton stops it).
+   The pair at a score's line's end greys the same way (.mdm-score-edit--off
+   below), and a key of the score panel, named in the panel's line under the
+   pointer, with it. A row of a menu and a word have no tip and keep the
+   pointer off. */
+#app .mdm-btn.mdm-btn--off,
+#app.mdm--score-mode .mdm-btn.mdm-btn--edit {
+  cursor: default;
+}
+#app .mdm-btn.mdm-btn--off > *,
+#app.mdm--score-mode .mdm-btn.mdm-btn--edit > * {
+  opacity: 0.35;
+}
+#app .mdm-btn.mdm-btn--off:hover,
+#app.mdm--score-mode .mdm-btn.mdm-btn--edit:hover {
+  background: none;
 }
 #app .mdm-btn svg {
   width: 15px;
@@ -1392,13 +1463,15 @@ body {
    the bar covers nothing of a row (256px for 250, measured in the real
    window). */
 #app .mdm-word + .mdm-menu,
+#app .mdm-favorites .mdm-btn + .mdm-menu,
 #app .mdm-menu--sub:not(.mdm-menu--long) {
   scrollbar-gutter: auto;
 }
 /* A panel that scrolls cuts off whatever hangs outside it, and a submenu
    hangs outside: the panel that holds one gives up the scrolling, which its
    few rows never needed, and the submenu keeps its own. */
-#app .mdm-word + .mdm-menu--nest {
+#app .mdm-word + .mdm-menu--nest,
+#app .mdm-favorites .mdm-btn + .mdm-menu--nest {
   max-height: none;
   overflow: visible;
 }

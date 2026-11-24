@@ -610,11 +610,19 @@ What it does:
   `Ctrl+Shift+U` is the desktop's on Linux before it is any editor's, where
   fcitx5's unicode addon opens its `U+` prompt on it. Strikethrough, small
   caps, the superscript and subscript pair and the seven of the Insert menu
-  have none either. The bar is one row: the outline, then seven words that
-  are each a menu (Edit, Format, Paragraph, Insert, Page, Score and
-  Export), where a row names its key at its far edge and a row that is a
-  switch is ticked while it is on. Page is the editor's own: the outline,
-  the theme, the font, the alignment, the hyphenation and the YAML header;
+  have none either. The bar is two rows: seven words that are each a menu
+  (Edit, Format, Paragraph, Insert, Page, Score and Export), where a row
+  names its key at its far edge and a row that is a switch is ticked while
+  it is on, and under them a row of favorite buttons, each the row of a
+  menu with its key in its tip, greyed with nothing to do and naming
+  itself under the pointer all the same: the outline, undo and redo, the
+  zoom with its figure beside it, the font, the heading levels, bold,
+  italic and link, the three lists and the code block, equation, table and picture
+  (`mdm.favorites`; put away, the outline's button leads the
+  words again and the zoom's figure stands at their right end, and a pane
+  too narrow for the row gathers its last groups into a »). Page is the editor's own: the
+  outline, the row of favorites, the zoom, the theme, the font (a list of
+  the faces), the alignment, the hyphenation and the YAML header;
   the multicursor's switch is in Edit; and Score is the music's: the score
   mode and the panel that keeps its keys at the side, what those keys do,
   the playhead, and the fill, the staff lines and the place of the scores.
@@ -841,8 +849,8 @@ What it does:
   (191 KB). Nothing is installed for it and no LaTeX is involved: the equations
   beside it were already drawn in those shapes, KaTeX's own faces being
   Computer Modern, so the words and the maths of a page are one design rather
-  than two. A switch of the Page menu (`mdm.textFont`) hands the text back to the
-  interface sans of the system. Only the text moves: the toolbar, the menus and
+  than two. The Font row of the Page menu, and the A of the row of favorites,
+  hand the text back to the interface sans of the system (`mdm.textFont`). Only the text moves: the toolbar, the menus and
   the outline panel stay in the sans, and code, the numbers in the margin and
   the source of an open block keep their monospace.
 
@@ -891,7 +899,8 @@ What it does:
   cell can hold a short list (`- [ ] x`, `- y`, a `<br>` between two items),
   drawn as boxes and bullets, and a click on a task's box there ticks it
   where a click on the rest of the table opens the source.
-- **Outline panel**: the button leading the bar opens a column down the left
+- **Outline panel**: the button leading the row of favorites (or the words,
+  with that row put away) opens a column down the left
   edge with the headings of the whole document, however long, indented by
   level, the section the caret is in marked and every row a jump to it. A row
   reads as the editor draws the heading: marks off, a link as its label,
