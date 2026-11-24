@@ -1035,7 +1035,10 @@ body {
 #app .mdm-math--block:has(> .mdm-chrome--open)::selection,
 #app .mdm-math--block:has(> .mdm-chrome--open) ::selection,
 #app .mdm-table:has(> .mdm-chrome--open)::selection,
-#app .mdm-table:has(> .mdm-chrome--open) ::selection {
+#app .mdm-table:has(> .mdm-chrome--open) ::selection,
+#app .mdm-figure--open::selection,
+#app .mdm-figure--open ::selection,
+#app .mdm-image--preview::selection {
   background: transparent;
 }
 #app.mdm--dark .cm-selectionLayer {
@@ -2609,6 +2612,14 @@ body {
   vertical-align: middle;
   border-radius: 3px;
   cursor: pointer;
+}
+/* A picture in a line whose source is open stands after the source, the
+   preview of what is typed there, set off from it as the preview of an
+   equation in a line is (.mdm-math--preview), with the same unfold as it
+   comes. A click on it puts the source away, so it keeps the pointer. */
+#app .mdm-image--preview {
+  margin: 0 0.15em 0 0.5em;
+  animation: mdm-math-unfold 0.15s ease-out;
 }
 #app .cm-line.mdm-quote {
   color: color-mix(in srgb, var(--mdm-ink) 72%, transparent);

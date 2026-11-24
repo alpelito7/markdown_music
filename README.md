@@ -566,9 +566,22 @@ What it does:
   `Ctrl+Enter` leaves the block the caret is in (a fence, an equation, a
   list, a quote, a callout, a heading) into a fresh paragraph below it. A
   click out in the dead margin puts away what was open, and so does a second
-  click on the drawing itself, a table, an equation, a score or the title
-  block, which stays under the pointer while its source goes. Scrolling
-  puts nothing away, by the wheel or by the scrollbar's handle.
+  click on the drawing itself, a table, an equation, a score, a picture or
+  the title block, which stays under the pointer while its source goes. A
+  picture open stays drawn under its source, or after it in a line, as an
+  equation and a table do. Scrolling puts nothing away, by the wheel or by
+  the scrollbar's handle.
+- **Several sources at once.** `Shift+click` on a drawing (a score, a
+  table, an equation in its block or in a line, a picture or the title
+  block) opens every drawing from the one the caret is in to the one
+  clicked, and `Ctrl+click`
+  (`Cmd+click` on a Mac) opens one more, or puts away one that is open.
+  Each gets a caret where a click on it alone would put one, and the
+  carets already down stay, so what is typed goes into all of them at
+  once. They stay open through clicks inside any of their sources and
+  through the arrow keys; a plain click on the drawing of one of them puts
+  that one away alone, and a click anywhere outside them (the text, the
+  margin, the bar) puts them all away.
 - **Multicursor**, as in VS Code's own editor: `Alt+click` adds a caret (or
   `Ctrl+click`, following the `editor.multiCursorModifier` setting),
   `Shift+Alt+drag` selects a column, `Ctrl+D` the next occurrence of the

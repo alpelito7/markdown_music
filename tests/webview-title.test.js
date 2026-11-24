@@ -322,7 +322,12 @@ test("an edit still held back goes to the host ahead of the request", { skip }, 
   await h.close();
 });
 
-test("only one plain click opens the title: a double click asks once and a modifier asks nothing", { skip }, async () => {
+// Shift and Ctrl did nothing on the title until 2026-11-21, when the owner
+// asked for both to show a drawing beside the others open (Ctrl choosing one,
+// Shift a run of them): that is held in webview-held-open.test.js, the title
+// with the score, the table and the equation. Alt, which adds a caret, has no
+// text under the title to add one to.
+test("only one plain click opens the title: a double click asks once and Alt asks nothing", { skip }, async () => {
   const h = await editor(TITLED, false);
   // The second press of a double click lands on the same drawing, the host
   // not having answered between the two: one request, not two.
@@ -331,12 +336,10 @@ test("only one plain click opens the title: a double click asks once and a modif
   await h.page.evaluate(() => {
     window.__posts.length = 0;
   });
-  for (const key of ["Alt", "Shift", "Control"]) {
-    await h.page.keyboard.down(key);
-    await clickOn(h.page, "#app .mdm-subtitle");
-    await h.page.keyboard.up(key);
-  }
-  assert.deepEqual(await headerPosts(h.page), [], "a click with a modifier down opened the header");
+  await h.page.keyboard.down("Alt");
+  await clickOn(h.page, "#app .mdm-subtitle");
+  await h.page.keyboard.up("Alt");
+  assert.deepEqual(await headerPosts(h.page), [], "a click with Alt down opened the header");
   assert.equal(await h.page.evaluate(() => window.__mdm.view.state.selection.ranges.length), 1, "a caret was added");
   assert.deepEqual(h.errors, []);
   await h.close();

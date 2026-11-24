@@ -3518,15 +3518,16 @@ test("a click on the label of an open figure, equation or table puts the caret i
       for (const line of source) assert.ok(now.lines.includes(line), name + ": " + JSON.stringify(line) + " is not on screen after the click");
       assert.equal(now.differ, null, name);
       // The one picture of the document is drawn while its source is shut,
-      // and not in place of its source while the caret is in its braces.
-      assert.equal(now.pictures, name === "fig-picture" ? 0 : 1, name);
+      // and under its source, not in place of it, while the caret is in its
+      // braces (the source line is on show, above): one picture either way.
+      assert.equal(now.pictures, 1, name);
       // Typed, a letter goes into the label and the source stays.
       await h.page.keyboard.type("z");
       await sleep(250);
       const typed = await docText(h.page);
       assert.equal(typed, text.slice(0, head) + "z" + text.slice(head), name);
       now = await seen();
-      assert.equal(now.pictures, name === "fig-picture" ? 0 : 1, name + ", typed");
+      assert.equal(now.pictures, 1, name + ", typed");
       assert.equal(now.differ, null, name + ", typed");
       await h.page.keyboard.press("Backspace");
       await sleep(250);

@@ -47,9 +47,9 @@ With the pointer on a score, two arrows at the end of each line send its last ba
 
 Two rows: seven words that each open a menu, and under them a row of favorite buttons. A row of a menu names its key where it has one, and a row that is a switch is ticked while it is on. The zoom is read beside the magnifier of the row; with the row put away, it stands at the right end of the words while the page is zoomed, and says 100% for a moment as you zoom back to it. A button with nothing to do is greyed and still names itself under the pointer.
 
-- **Edit**: undo and redo, find and replace, the carets and the lines. `Ctrl+D` adds the next match of the selection, whole words only unless **Match inside words** is ticked. `Alt+click` adds a caret.
 The row of favorites holds what is used on every page: the outline of the headings, undo and redo, the zoom with its figure beside it, the font, the heading levels, bold, italic and link, the three lists and the code block, equation, table and picture. Each button is a row of one of the menus and names its key in its tip. A pane too narrow for the row gathers its last groups into a **»**. **Page → Favorites** puts the row away, and the outline's button goes back to the head of the words.
 
+- **Edit**: undo and redo, find and replace, the carets and the lines. `Ctrl+D` adds the next match of the selection, whole words only unless **Match inside words** is ticked. `Alt+click` adds a caret. `Shift+click` on a score, a table, an equation or a picture opens every one from the caret's to it, and `Ctrl+click` (`Cmd+click` on a Mac) one more, so that several sources are edited side by side with a caret in each.
 - **Format**: the marks on words, from bold to a link and inline code.
 - **Paragraph**: the heading levels, the code block, the lists and the quote.
 - **Insert**: an equation, a table, a picture, a footnote, a rule, a music symbol.

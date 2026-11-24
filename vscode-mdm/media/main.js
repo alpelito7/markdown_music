@@ -1198,19 +1198,26 @@
   // away. The header is the very top of the document, so the answer takes
   // the editor there. The caret is left alone.
   let headerCaret = null;
+  // The click that asked was a Shift or a Ctrl one, which shows the header's
+  // source beside the sources already showing (heldField): its caret is
+  // added to theirs, and the header is held open with them.
+  let headerJoins = false;
   function pinHeader(on) {
     if (headerText === "" && !editorFrontMatter) return;
     headerCaret = null;
+    headerJoins = false;
     scrollToTop = true;
     askHeader(!!on, false);
   }
 
   // A click on the drawn title: the source opened over the drawing. `key`
   // is the key of the header the click landed on, where the caret goes once
-  // its line is in the text.
-  function openHeader(key) {
+  // its line is in the text; `joins`, that the click shows it beside the
+  // sources already showing.
+  function openHeader(key, joins) {
     if (headerText === "") return;
     headerCaret = key || "title";
+    headerJoins = !!joins;
     scrollToTop = true;
     askHeader(true, true);
   }
@@ -1321,11 +1328,18 @@
   // source a click opened goes away when they have all left it. Only the
   // leaving: a source with no caret in it yet is left open, which is the
   // moment between the host's answer and the caret the click asked for.
+  // A header held open with other sources by a Shift or a Ctrl click
+  // (heldField) stays while the carets are elsewhere, as they are.
   let caretInHeader = false;
   function watchHeaderCaret(state) {
     const was = caretInHeader;
-    caretInHeader = inHeader(state);
+    caretInHeader = inHeader(state) || headerHeld(state);
     if (was && !caretInHeader) leaveHeader(true);
+  }
+  function headerHeld(state) {
+    const end = headerEnd(state);
+    const held = state.field(heldField, false) || NO_HELD;
+    return end >= 0 && held.length > 0 && touchedBy(held, 0, end);
   }
 
   // The caret at the end of what a key of the header says, once a click on
@@ -1346,8 +1360,36 @@
   // YAML allows around a key) leaves the caret at the end of the header's
   // first line under its fence: in the source either way, since the source
   // is open for as long as a caret is in it and no longer (watchHeaderCaret).
-  function caretAtHeaderKey(key) {
+  // With `joins` (openHeader) the caret is added to the ones standing in the
+  // sources already showing, and the header is held open with them.
+  function caretAtHeaderKey(key, joins) {
     if (!view || !editorFrontMatter || !headerText) return;
+    const end = headerKeyAt(key);
+    if (!joins) {
+      view.focus();
+      view.dispatch({ selection: { anchor: end }, userEvent: "select.pointer" });
+      return;
+    }
+    // Whether anybody was in the document before the focus is asked for:
+    // the carets of one nobody was in are none the reader can see.
+    const state = view.state;
+    const inside = !!state.field(focusField, false);
+    const ranges = (inside ? state.selection.ranges : []).concat([CM.EditorSelection.cursor(end)]);
+    // The header's stretch off the tree where the parse has reached it, and
+    // off its length where it has not yet (above).
+    const known = headerEnd(state);
+    const to = known >= 0 ? known : Math.min(headerText.replace(/\n+$/, "").length, state.doc.length);
+    const held = (inside ? state.field(heldField, false) || NO_HELD : NO_HELD).concat([{ from: 0, to: to }]);
+    view.focus();
+    view.dispatch({
+      selection: CM.EditorSelection.create(ranges, ranges.length - 1),
+      effects: setHeld.of(held),
+      userEvent: "select.pointer",
+    });
+  }
+
+  // Where the caret goes for a key of the header in the text (caretAtHeaderKey).
+  function headerKeyAt(key) {
     const names = key === "author" ? "authors?" : key.replace(/[^A-Za-z0-9_-]/g, "");
     const head = view.state.doc.sliceString(0, headerText.length);
     const at = new RegExp("^" + names + "[ \\t]*:.*$", "m").exec(head);
@@ -1374,8 +1416,7 @@
       const first = head.indexOf("\n", fence + 1);
       end = first === -1 ? Math.max(0, fence) : first;
     }
-    view.focus();
-    view.dispatch({ selection: { anchor: end }, userEvent: "select.pointer" });
+    return end;
   }
 
   function updateFillMenu() {
@@ -4490,6 +4531,72 @@
     },
   });
 
+  // ---- Drawn blocks held open ----
+  //
+  // A Shift+click or a Ctrl+click (Cmd+click on a Mac) on a drawing shows its
+  // source beside the ones already showing, so that several tunes, tables or
+  // equations are read and edited side by side, with a caret in each for
+  // what is typed in all of them at once (the owner, 2026-11-21: with Shift
+  // a click on score 1 and one on score 3 show the code of the three, to be
+  // edited with a multicursor; with Ctrl each click chooses one; a click
+  // outside puts them all away, and a click on one's drawing that one
+  // alone). A source a caret opened is open only while a caret is in it,
+  // and the first click into one of these, to put the caret where the edit
+  // goes, would have put the rest away: so these are held open on their
+  // own, by place, until a click in the text puts no caret in any of them,
+  // the dead margin or the bar is pressed, a click on one's drawing puts
+  // that one away, or nobody is in the document any more. The keyboard lets
+  // go of none of them: the arrows walk out of a source and back with the
+  // others still showing, as scrolling leaves them standing.
+  //
+  // Each is the stretch a caret opens the block by (drawnBlocks), followed
+  // through the edits. An edit at its very edge is left outside it, so that
+  // the header's lines coming in over a held block at the head of the text
+  // do not become part of it, and a stretch that an edit takes away
+  // entirely is dropped with its block.
+  const setHeld = CM.StateEffect.define();
+  const NO_HELD = [];
+  const heldField = StateField.define({
+    create: function () {
+      return NO_HELD;
+    },
+    update: function (value, tr) {
+      if (value.length && tr.docChanged) {
+        const mapped = [];
+        value.forEach(function (r) {
+          const from = tr.changes.mapPos(r.from, 1);
+          const to = tr.changes.mapPos(r.to, -1);
+          if (to > from) mapped.push({ from: from, to: to });
+        });
+        value = mapped.length ? mapped : NO_HELD;
+      }
+      for (let i = 0; i < tr.effects.length; i++) {
+        const e = tr.effects[i];
+        if (e.is(setHeld)) value = e.value.length ? e.value : NO_HELD;
+        else if (e.is(setFocused) && !e.value) value = NO_HELD;
+      }
+      // A click in the text that leaves no caret in any of them is a click
+      // outside them, which puts them all away as it puts away a source a
+      // caret opened. A click inside one, and a caret added anywhere while
+      // another stays in one, keep them.
+      if (
+        value.length && tr.selection && tr.isUserEvent("select.pointer") &&
+        !tr.newSelection.ranges.some(function (r) {
+          return touchedBy(value, r.from, r.to);
+        })
+      ) {
+        value = NO_HELD;
+      }
+      return value;
+    },
+  });
+
+  // The blocks held open that the rendering answers to: none while the
+  // document is nobody's, as with the carets (activeRanges).
+  function heldNow(state) {
+    return state.field(focusField, false) ? state.field(heldField, false) || NO_HELD : NO_HELD;
+  }
+
   // While a mouse button is down, what is drawn does not change. A press
   // puts the caret in a construct and CodeMirror reads the pointer twice in
   // the same gesture, once when it lands and once when it is released (and
@@ -6778,6 +6885,9 @@
       // Its caption over the picture (`fig-cap-location: top`) and not
       // under it.
       this.top = !!top;
+      // Drawn under its open source, the preview of what is typed there,
+      // and not in place of it (buildDecorations).
+      this.open = !!open;
       // What the caption of a numbered figure opens with, "Figure 1: "
       // (figureIndex), or null for a figure with no label.
       this.lead = lead || null;
@@ -6807,8 +6917,22 @@
         other.align === this.align &&
         other.top === this.top &&
         other.tip === this.tip &&
+        other.open === this.open &&
         frameKey(other.frame) === frameKey(this.frame)
       );
+    }
+    // The same picture whose source came or went keeps its element, as a
+    // table does (TableWidget.updateDOM): it is what stays under the
+    // pointer while the source over it goes (putAwayDrawing), and the
+    // picture is not loaded again.
+    updateDOM(dom, view, from) {
+      if (
+        !from || from.src !== this.src || from.key !== this.key || from.lead !== this.lead ||
+        from.cited !== this.cited || from.width !== this.width || from.align !== this.align ||
+        from.top !== this.top || from.tip !== this.tip || frameKey(from.frame) !== frameKey(this.frame)
+      ) return false;
+      unframed(dom).classList.toggle("mdm-figure--open", this.open);
+      return true;
     }
     toDOM(view) {
       const fig = document.createElement("div");
@@ -6936,19 +7060,23 @@
     });
   }
 
+  // A picture in a line of text, drawn in place of its source while the
+  // source is shut, and after it while it is open (`preview`), as the
+  // drawing of an equation in a line is.
   class ImageWidget extends WidgetType {
-    constructor(src, alt, width) {
+    constructor(src, alt, width, preview) {
       super();
       this.src = src;
       this.alt = alt;
       this.width = width || null;
+      this.preview = !!preview;
     }
     eq(other) {
-      return other.src === this.src && other.alt === this.alt && other.width === this.width;
+      return other.src === this.src && other.alt === this.alt && other.width === this.width && other.preview === this.preview;
     }
     toDOM(view) {
       const img = document.createElement("img");
-      img.className = "mdm-image";
+      img.className = this.preview ? "mdm-image mdm-image--preview" : "mdm-image";
       pictureAtZoom(img, this.width);
       // The picture arrives after the line was measured, and CodeMirror
       // has no way of knowing: its height map kept the line at one row of
@@ -6972,6 +7100,11 @@
       img.title = this.alt;
       return img;
     }
+    // A plain press on it shut is CodeMirror's, which puts the caret beside
+    // it, the side the press was on, and opens it: by the click the picture
+    // has gone from under the pointer. The presses the editor answers (on a
+    // preview, with Shift or Ctrl) it takes before CodeMirror hears them
+    // (handleMouseDown).
     ignoreEvent() {
       return false;
     }
@@ -8535,6 +8668,13 @@
     const touched = function (from, to) {
       return touchedBy(ranges, from, to);
     };
+    // A drawn block held open (heldField) shows its source as a caret in it
+    // would, and that is all it does: the marks on its lines are drawn by
+    // where the carets are, as in a source a caret opened.
+    const held = heldNow(state);
+    const shown = function (from, to) {
+      return touched(from, to) || (held.length > 0 && touchedBy(held, from, to));
+    };
     // ---- The frame a line stands in ----
     //
     // A line inside a quote or a callout is drawn inside it: a bar for every
@@ -8805,6 +8945,7 @@
           // Shut, the table's branch puts its lines away with the table's,
           // under the one cover that carries the number of the block's
           // first line, the caption's where it is written over the table.
+          if (!shown(captions.groupFrom, captions.groupTo)) return false;
           // Open, the braces it ends on are the table's label and none of
           // the caption's words: small and faint, as a picture's are and
           // an equation's (the owner, 2026-10-12: `{#tbl-durations}` in the
@@ -8887,7 +9028,7 @@
           const closeLine = marks.length > 1 ? doc.lineAt(marks[1].from) : null;
           const blockFrom = openLine.from;
           const blockTo = scoreEnd(doc, node, n.to);
-          const open = touched(blockFrom, blockTo);
+          const open = shown(blockFrom, blockTo);
           const active = open && holdsMainHead(state, blockFrom, blockTo);
           if (open) delim(node, "CodeMark");
           // The options at the head of the block (blockOptionsOf): put away
@@ -9048,7 +9189,7 @@
           const blockFrom = doc.lineAt(n.from).from;
           const blockTo = doc.lineAt(n.to).to;
           const out = renderTex(tex, true);
-          const open = touched(blockFrom, blockTo);
+          const open = shown(blockFrom, blockTo);
           const active = open && holdsMainHead(state, blockFrom, blockTo);
           // The rest of the closing line past its `$$`, a paragraph of its
           // own on that line (math.js), drawn under the equation by the
@@ -9110,7 +9251,7 @@
           // page prints it (equationIndex); editing either shows both.
           const numbered = display ? eqNow.byMath.get(n.from) || null : null;
           const end = numbered ? numbered.labelTo : n.to;
-          if (!touched(n.from, end) && out.html) {
+          if (!shown(n.from, end) && out.html) {
             decos.push(
               Decoration.replace({
                 widget: new MathWidget(tex, display, false, false, false, false, null, null,
@@ -9384,6 +9525,7 @@
           // are one card while open (the paragraph's branch above).
           const groupFrom = numbered ? numbered.groupFrom : blockFrom;
           const groupTo = numbered ? numbered.groupTo : blockTo;
+          const open = shown(groupFrom, groupTo);
           const active = open && holdsMainHead(state, groupFrom, groupTo);
           const over = numbered
             ? {
@@ -9600,38 +9742,40 @@
           // the click was on, and the label could not be edited (the owner,
           // 2026-10-12).
           const end = attr && attr.from === n.to ? attr.to : n.to;
-          if (src && !touched(n.from, end)) {
-            const marks = node.getChildren("LinkMark");
-            // The alt is the figure's caption and the picture's own text,
-            // and the page prints both with their punctuation set (G015)
-            // and with their marks read: it is inline content, drawn by the
-            // same reader a table's cell is drawn by. The source between
-            // the brackets is what tells two figures apart.
-            const caption = cellParts(node, text, LINK_SKIP, smartMarks(node, marks.length > 1 ? marks[1].from : n.to, text), refs);
-            const alt = partsText(caption);
-            const key = marks.length > 1 ? text(marks[0].to, marks[1].from) : "";
-            // Alone in its paragraph, the image is a figure with the alt as
-            // its caption, drawn in place of the paragraph.
-            const para = node.parent;
-            if (
-              para &&
-              para.name === "Paragraph" &&
-              para.from === doc.lineAt(para.from).from &&
-              isBlank(text(para.from, n.from)) &&
-              isBlank(text(attr ? attr.to : n.to, para.to)) &&
-              !touched(para.from, para.to)
-            ) {
-              const blockFrom = doc.lineAt(para.from).from;
-              const blockTo = doc.lineAt(para.to).to;
-              decos.push(
-                Decoration.widget({
-                  widget: new FigureWidget(
-                    src, caption, key, frameOf(doc.lineAt(blockFrom).number), width,
-                  ),
-                  block: true,
-                  side: 1,
-                }).range(blockTo)
-              );
+          if (!src) {
+            if (touched(n.from, end)) linkAddress(node, text, decos);
+            return true;
+          }
+          const marks = node.getChildren("LinkMark");
+          // The alt is the figure's caption and the picture's own text,
+          // and the page prints both with their punctuation set (G015)
+          // and with their marks read: it is inline content, drawn by the
+          // same reader a table's cell is drawn by. The source between
+          // the brackets is what tells two figures apart.
+          const caption = cellParts(node, text, LINK_SKIP, smartMarks(node, marks.length > 1 ? marks[1].from : n.to, text), refs);
+          const alt = partsText(caption);
+          const key = marks.length > 1 ? text(marks[0].to, marks[1].from) : "";
+          // Alone in its paragraph, the image is a figure with the alt as
+          // its caption, drawn in place of the paragraph while it is shut
+          // and under it while it is open, the preview of what is typed, as
+          // a table is drawn under its rows (the owner, 2026-11-21: what a
+          // click on a drawing does is done to a picture too, and a click
+          // on the picture under an open source puts it away).
+          const para = drawnFigureParagraph(doc, node);
+          if (para) {
+            const blockFrom = doc.lineAt(para.from).from;
+            const blockTo = doc.lineAt(para.to).to;
+            const open = shown(para.from, para.to);
+            const numbered = figNow.byImage.get(n.from) || null;
+            // Where it stands across the column: its own `fig-align`, the
+            // header's, or the middle (MDM_CROSSREF.figureAlignOf). Only
+            // a figure is placed so, a picture with words in its brackets
+            // or a label, which is what Pandoc and Quarto make one of; one
+            // with neither is a picture in a paragraph on the page, and
+            // stands where the paragraph's text starts.
+            const align = numbered || !isBlank(key)
+              ? window.MDM_CROSSREF.figureAlignOf(attr ? attributeValue(text(attr.from, attr.to), "fig-align") : null, figNow.look.align)
+              : "left";
             // Its caption over it or under it, by Quarto's
             // `fig-cap-location`: a labelled figure's own word, else the
             // header's, else under it. A figure with no label takes the
@@ -9639,15 +9783,32 @@
             // nothing there, measured on 1.11.9, 2026-11-21).
             const own = numbered && attr ? window.MDM_CROSSREF.capWord(attributeValue(text(attr.from, attr.to), "fig-cap-location")) : null;
             const top = (numbered || !isBlank(key)) && (own || figNow.look.cap || "bottom") === "top";
+            decos.push(
+              Decoration.widget({
+                widget: new FigureWidget(
+                  src, caption, key, frameOf(doc.lineAt(blockFrom).number), width,
                   numbered ? numbered.lead : null, align, open, top
+                ),
+                block: true,
+                side: 1,
+              }).range(blockTo)
+            );
+            if (!open) {
               hideBlock(blockFrom, blockTo);
               return false;
             }
+            linkAddress(node, text, decos);
+            return true;
+          }
+          if (!shown(n.from, end)) {
             decos.push(Decoration.replace({ widget: new ImageWidget(src, alt, width) }).range(n.from, n.to));
             return false;
           }
-          // Open, its address is set as a link's.
-          if (touched(n.from, end)) linkAddress(node, text, decos);
+          // Open, its address is set as a link's, and the picture stands
+          // after its source as the preview of what is typed, as an
+          // equation's in a line does.
+          linkAddress(node, text, decos);
+          decos.push(Decoration.widget({ widget: new ImageWidget(src, alt, width, true), side: 1 }).range(end));
           return true;
         }
 
@@ -10012,7 +10173,7 @@
     // when the carets leave (the owner, 2026-10-05).
     const fm = editorFrontMatter ? tree.topNode.getChild("FrontMatter") : null;
     const titleAt = fm ? doc.lineAt(Math.max(fm.from, fm.to - 1)).to : 0;
-    const asYaml = headerShown() && !(fm && touched(fm.from, titleAt));
+    const asYaml = headerShown() && !(fm && shown(fm.from, titleAt));
     const titled = asYaml ? null : titleOf(fm ? doc.sliceString(fm.from, fm.to) : editorFrontMatter ? "" : headerText);
     if (titled) {
       if (!region || (titleAt >= region.from && titleAt <= region.to)) {
@@ -10084,9 +10245,15 @@
   const rebuilds = { whole: 0, part: 0 };
   function remember(set, state) {
     builtFrom.set(set, {
-      ranges: activeRanges(state).map(function (r) {
-        return { from: r.from, to: r.to };
-      }),
+      // The blocks held open as well, which open a source as a caret does,
+      // so that one let go is drawn again where it stood. One that comes to
+      // be held comes with a caret in it (chooseDrawing, rangeOf,
+      // caretAtHeaderKey), whose span the rebuild takes already.
+      ranges: activeRanges(state)
+        .map(function (r) {
+          return { from: r.from, to: r.to };
+        })
+        .concat(heldNow(state)),
       tree: CM.syntaxTree(state),
       hidden: state.field(hiddenLinesField, false) || 0,
       header: state.field(headerField, false) || "",
@@ -10339,7 +10506,8 @@
       // pointerDragged). The text changing, or the tree, or the count the
       // host keeps back, is drawn at once whatever the button.
       const byGesture =
-        tr.selection || tr.state.field(focusField) !== tr.startState.field(focusField);
+        tr.selection || tr.state.field(focusField) !== tr.startState.field(focusField) ||
+        tr.state.field(heldField) !== tr.startState.field(heldField);
       const byContent =
         tr.docChanged ||
         tr.state.field(hiddenLinesField) !== tr.startState.field(hiddenLinesField) ||
@@ -13423,6 +13591,24 @@
     return multiCursorModifier === "ctrlCmd" ? e.ctrlKey || e.metaKey : e.altKey;
   }
 
+  // The click on a drawing that shows its source beside the ones already
+  // showing, or puts it away from among them (chooseDrawing): Ctrl+click,
+  // whatever editor.multiCursorModifier says, since that is the key the
+  // owner named (2026-11-21), and under ctrlCmd it adds the caret it would
+  // add anyway. On a Mac Cmd+click, the key he left to be chosen: Ctrl+click
+  // there is the right button's, and Cmd is the key a Mac adds one item to
+  // a selection with, in the Finder and in every list of its own.
+  function choosesDrawing(e) {
+    if (e.altKey || e.shiftKey) return false;
+    return /Mac/.test(navigator.platform) ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  }
+
+  // Shift+click on a drawing, which shows every drawing from the one the
+  // main caret is in to the one clicked (showRange).
+  function rangesDrawing(e) {
+    return e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
+  }
+
   // Alt+click has to reach this editor the way it reaches VS Code's own: the
   // first press was being eaten by the menu bar.
   //
@@ -13851,7 +14037,8 @@
   function drawingAt(target) {
     return (
       target.closest(".mdm-score, .mdm-math--block, .mdm-table, .mdm-figure, .mdm-title-block") ||
-      target.closest(".mdm-math")
+      target.closest(".mdm-math") ||
+      target.closest("img.mdm-image")
     );
   }
 
@@ -13862,7 +14049,11 @@
   function openDrawing(target) {
     const drawing = drawingAt(target);
     if (!drawing) return null;
-    if (drawing.classList.contains("mdm-math--preview")) return drawing;
+    if (drawing.classList.contains("mdm-math--preview") || drawing.classList.contains("mdm-image--preview")) return drawing;
+    // A figure has no rail, and says it is open itself (FigureWidget).
+    if (drawing.classList.contains("mdm-figure")) {
+      return drawing.classList.contains("mdm-figure--open") ? drawing : null;
+    }
     // The title block has no rail, and says so itself (TitleWidget).
     if (drawing.classList.contains("mdm-title-block")) {
       return drawing.classList.contains("mdm-title-block--open") ? drawing : null;
@@ -13925,13 +14116,21 @@
   // Not the second press of a double click, which says "edit this" and must
   // not shut what the first one opened, and not one with a modifier, which
   // adds a caret or follows a link: either forgets what the press before it
-  // noted, so a press dragged off the drawing leaves nothing for them.
+  // noted, so a press dragged off the drawing leaves nothing for them. The
+  // Ctrl+click that chooses a drawing among several (choosesDrawing) is
+  // noted as a plain one is, since on an open drawing it puts it away.
+  // A press that shows a drawing beside others, with Ctrl or with Shift, is
+  // held on a drawing that is shut as well: the browser would carry the
+  // native selection to it, out from the text with Shift, and the click
+  // reads the carets as the press found them.
   function handleMouseDown(e) {
     if (!e.target.closest) return;
     const plain = e.detail === 1 && !(e.shiftKey || e.altKey || e.ctrlKey || e.metaKey);
-    closingDrawing = plain ? openDrawing(e.target) : null;
+    const chooses = e.detail === 1 && choosesDrawing(e);
+    closingDrawing = plain || chooses ? openDrawing(e.target) : null;
     pressedFollow = null;
     if (closingDrawing) e.preventDefault();
+    else if ((chooses || rangesDrawing(e)) && e.button === 0 && holdsOpen(drawingAt(e.target))) e.preventDefault();
     // A press on the title block is held whether its source is open or not
     // (its click is answered in handleChromeClick): the block stands on no
     // line of the text, so the press has no caret to place, and left to the
@@ -15308,12 +15507,16 @@
       moved = true;
       return CM.EditorSelection.cursor(at);
     });
-    if (!moved) return;
+    // And the blocks a Shift or a Ctrl click held open (heldField), with no
+    // caret in them to take out.
+    const held = state.field(heldField, false) || NO_HELD;
+    if (!moved && !held.length) return;
     // No focus of its own: the click was prevented, so whatever had the focus
     // keeps it, and what the source hangs on is the selection, not the focus.
-    view.dispatch({
-      selection: CM.EditorSelection.create(ranges, sel.mainIndex),
-    });
+    const spec = {};
+    if (moved) spec.selection = CM.EditorSelection.create(ranges, sel.mainIndex);
+    if (held.length) spec.effects = setHeld.of(NO_HELD);
+    view.dispatch(spec);
   }
 
   // The release of a press that went down to follow something
@@ -15434,14 +15637,24 @@
       // source is open puts the source away, as the second click on a table
       // does (the owner, 2026-10-03). The host does both (openHeader,
       // leaveHeader), since the header put away is not in the text. One
-      // plain click: the second press of a double click and a click with a
-      // modifier down do nothing, there being no text under the drawing to
-      // select or to add a caret to.
+      // click: the second press of a double click does nothing, and nor does
+      // Alt, there being no text under the drawing to add a caret to. Shift
+      // and Ctrl show the header beside the sources already showing, as
+      // they show any drawing (showRange, chooseDrawing).
       e.preventDefault();
       const open = closingDrawing;
       closingDrawing = null;
-      if (e.detail > 1 || e.button !== 0 || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
-      if (open === drawing) {
+      if (e.detail > 1 || e.button !== 0) return;
+      const chooses = choosesDrawing(e);
+      const ranges = rangesDrawing(e);
+      if (!chooses && !ranges && (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey)) return;
+      const part = e.target.closest("[data-mdm-key]");
+      const key = part ? part.getAttribute("data-mdm-key") : "title";
+      const blocks = drawnBlocks(view.state);
+      const header = blocks.length && blocks[0].header ? blocks[0] : null;
+      if (open === drawing && !ranges) {
+        // With other drawings open, this one alone goes (putAwayOne).
+        if (header && putAwayOne(drawing, header)) return;
         // The drawing is what stays put as its source goes (readerPlace).
         holdDrawing = true;
         leaveHeader(false);
@@ -15450,28 +15663,62 @@
         if (view.state.field(focusField, false)) view.dispatch({ effects: setFocused.of(false) });
         return;
       }
+      if (ranges && header) {
+        showRange(header, headerKeyAt(key), e.clientY);
+        return;
+      }
+      if (ranges) {
+        // The header is not in the text yet: the drawings down to the one
+        // the caret is in are held open now, and the header joins them once
+        // the host has put it in (caretAtHeaderKey).
+        const span = rangeOf(view.state, { from: 0, to: 0 });
+        if (span.ranges.length) {
+          view.dispatch({
+            selection: CM.EditorSelection.create(span.ranges, view.state.selection.mainIndex),
+            effects: setHeld.of(span.held),
+          });
+        }
+        openHeader(key, true);
+        return;
+      }
       if (drawing.classList.contains("mdm-title-block--open")) return;
-      const part = e.target.closest("[data-mdm-key]");
-      openHeader(part ? part.getAttribute("data-mdm-key") : "title");
+      openHeader(key, chooses);
       return;
     }
     if (drawing) {
       e.preventDefault();
-      // Pressed while its source was open: the click puts it away, the
-      // second click on the hand undoing the first (the owner, 2026-10-02).
       const open = closingDrawing;
       closingDrawing = null;
-      if (open === drawing) {
-        putAwayDrawing(drawing);
-        return;
-      }
       // A table says where in its source the click was: the cell it landed
       // on, as an offset from the head of the table (TableWidget).
       const cell = e.target.closest("[data-mdm-at]");
-      revealBlock(
-        drawing, addsCaret(e), cell ? Number(cell.dataset.mdmAt) : null, e.clientY,
-        !!cell && cell.classList.contains("mdm-table-caption")
-      );
+      const into = cell ? Number(cell.dataset.mdmAt) : null;
+      const beside = !!cell && cell.classList.contains("mdm-table-caption");
+      // Shift and Ctrl show the drawing beside the ones already showing, and
+      // Ctrl on one that is open puts it away from among them. The second
+      // press of a double click with either does nothing more: the first
+      // has done what was asked.
+      if (holdsOpen(drawing) && e.button === 0 && (choosesDrawing(e) || rangesDrawing(e))) {
+        if (e.detail > 1) return;
+        const found = drawnBlockOf(drawing, into, beside);
+        if (found && rangesDrawing(e)) {
+          showRange(found.block, found.at, e.clientY);
+          return;
+        }
+        if (found && open !== drawing) {
+          chooseDrawing(found.block, found.at, e.clientY);
+          return;
+        }
+      }
+      // Pressed while its source was open: the click puts it away, the
+      // second click on the hand undoing the first (the owner, 2026-10-02).
+      // With other drawings open beside it, it alone (the owner, 2026-11-21).
+      if (open === drawing) {
+        const found = drawnBlockOf(drawing, into, beside);
+        if (!found || !putAwayOne(drawing, found.block)) putAwayDrawing(drawing);
+        return;
+      }
+      revealBlock(drawing, addsCaret(e), into, e.clientY, beside);
     }
   }
 
@@ -15501,9 +15748,26 @@
   // else in the document: this is a click like any other, and replacing the
   // selection here wiped every caret that was already out in the prose.
   // `held` is the height on the screen the click was at, which the caret's
-  // line is put back to once the source has opened (see the measure below).
+  // line is put back to once the source has opened (see openPlaces). A plain
+  // click shows this drawing's source and no other: the blocks a Shift or a
+  // Ctrl click held open beside one another go (heldField). One that adds a
+  // caret leaves them as they are.
   function revealBlock(el, adds, into, held, beside) {
     if (!view) return;
+    const at = drawingPlace(el, into, beside).at;
+    const sel = view.state.selection;
+    openPlaces(
+      adds
+        ? CM.EditorSelection.create(sel.ranges.concat([CM.EditorSelection.cursor(at)]), sel.ranges.length)
+        : CM.EditorSelection.single(at),
+      adds ? null : NO_HELD,
+      held
+    );
+  }
+
+  // The node of the text a drawing stands for, and where a click on it puts
+  // the caret (revealBlock): `into` and `beside` as there.
+  function drawingPlace(el, into, beside) {
     const pos = view.posAtDOM(el);
     const tree = CM.syntaxTree(view.state);
     // A block widget sits at the end of its block; the node is the one that
@@ -15538,16 +15802,16 @@
         at = beside ? Math.max(0, Math.min(node.from + into, view.state.doc.length)) : Math.min(node.from + into, node.to);
       }
     }
-    const sel = view.state.selection;
-    view.dispatch({
-      selection: adds
-        ? CM.EditorSelection.create(
-            sel.ranges.concat([CM.EditorSelection.cursor(at)]),
-            sel.ranges.length
-          )
-        : { anchor: at },
-      scrollIntoView: true,
-    });
+    return { node: node, at: at };
+  }
+
+  // The carets a click on a drawing asks for, put down, with the blocks held
+  // open that go with them (`keep`, left as they are when null), and the
+  // line of the main caret held at the height `held` the click was at.
+  function openPlaces(selection, keep, held) {
+    const spec = { selection: selection, scrollIntoView: true };
+    if (keep) spec.effects = setHeld.of(keep);
+    view.dispatch(spec);
     // The source that opens is line after line of text the drawing did not
     // take: the block grows by that much, everything under it moves down and
     // the document seems to have scrolled away by itself. The click is held
@@ -15595,6 +15859,12 @@
     // a second of a press (leftByHand), and the press of a slow click is
     // further back than that by its release.
     if (view.state.field(focusField, false)) view.dispatch({ effects: setFocused.of(false) });
+    keepDrawingAt(el, top);
+  }
+
+  // The drawing put back where it stood, `top`, once the lines of its source
+  // that stood over it have gone.
+  function keepDrawingAt(el, top) {
     view.requestMeasure({
       read: function () {
         return el.isConnected ? Math.round(el.getBoundingClientRect().top - top) : 0;
@@ -15603,6 +15873,268 @@
         if (moved) v.scrollDOM.scrollTop += moved;
       },
     });
+  }
+
+  // ---- Several drawings open at once ----
+  //
+  // Shift+click and Ctrl+click (Cmd+click on a Mac) on a drawing show its
+  // source beside the ones already showing, and hold them all open
+  // (heldField): with Shift every drawing from the one the main caret is in
+  // to the one clicked, with Ctrl the one clicked, which Ctrl on a drawing
+  // that is open puts away again (the owner, 2026-11-21). Each drawing
+  // shown gets a caret where a click on it alone puts one, the one clicked
+  // the main caret, and the carets already down stay, as the carets of a
+  // multicursor stay when one is added: what is typed then goes into every
+  // source at once. A plain click on the drawing of one of them puts that
+  // one away and leaves the rest, and a click outside them all puts them
+  // all away, as either puts away a single source.
+  //
+  // The drawings these are, every one that stands for its source
+  // (drawingAt): a score, an equation in its block or in a line, a table, a
+  // picture alone in its paragraph or in a line, and the title block
+  // (CLAUDE.md, "One behaviour for every drawn block"; the equations in a
+  // line and the pictures joined on the owner's word the same day, "haz lo
+  // mismo con las ecuaciones, las tablas y las imágenes").
+  function holdsOpen(drawing) {
+    return !!drawing;
+  }
+
+  // The paragraph an image stands alone in, which the editor draws it as a
+  // figure for (the Image branch of buildDecorations), or null: at the head
+  // of its line, with nothing but blanks around it and its attributes. Not
+  // figureParagraph, the figures' count, which also takes a picture alone in
+  // a link and reads the state.
+  function drawnFigureParagraph(doc, node) {
+    const para = node.parent;
+    if (!para || para.name !== "Paragraph" || para.from !== doc.lineAt(para.from).from) return null;
+    const attr = node.nextSibling && node.nextSibling.name === "Attribute" ? node.nextSibling : null;
+    if (!isBlank(doc.sliceString(para.from, node.from))) return null;
+    if (!isBlank(doc.sliceString(attr ? attr.to : node.to, para.to))) return null;
+    return para;
+  }
+
+  // The drawings of the text in their order, each as the stretch a caret
+  // opens it by (the decorations' own reading, buildDecorations) and the
+  // place a caret goes to in it when it is shown without being clicked: a
+  // score and an equation at the head of their source, as a click puts it
+  // there, a table at its first row, with the caption written beside it, a
+  // picture at its `![`, and the header, while its lines are in the text,
+  // under its fence. An equation or a picture inside another drawing (a
+  // table's caption, the line an equation's `$$` closes) is that drawing's.
+  function drawnBlocks(state) {
+    const doc = state.doc;
+    const out = [];
+    const inline = [];
+    const equations = equationIndex(state);
+    const end = headerEnd(state);
+    if (end >= 0) {
+      out.push({ from: 0, to: end, at: doc.lines > 1 ? Math.min(doc.line(2).from, end) : 0, header: true });
+    }
+    const tables = tableIndex(state);
+    CM.syntaxTree(state).iterate({
+      enter: function (n) {
+        if (n.name === "FrontMatter") return false;
+        if (n.name === "FencedCode") {
+          const info = n.node.getChild("CodeInfo");
+          if (info && isAbcInfo(doc.sliceString(info.from, info.to))) {
+            const body = n.node.getChild("CodeText");
+            out.push({ from: doc.lineAt(n.from).from, to: scoreEnd(doc, n.node, n.to), at: body ? body.from : n.from });
+          }
+          return false;
+        }
+        if (n.name === "BlockMath") {
+          const content = n.node.getChild("BlockMathContent");
+          out.push({ from: doc.lineAt(n.from).from, to: doc.lineAt(n.to).to, at: content ? content.from : n.from });
+          return false;
+        }
+        if (n.name === "Table") {
+          const entry = tables.byTable.get(n.from);
+          out.push({
+            from: entry ? entry.groupFrom : doc.lineAt(n.from).from,
+            to: entry ? entry.groupTo : doc.lineAt(n.to).to,
+            at: n.from,
+          });
+          return false;
+        }
+        if (n.name === "InlineMath" || n.name === "InlineBlockMath") {
+          const content = n.node.getChild(n.name === "InlineMath" ? "InlineMathContent" : "InlineBlockMathContent");
+          const numbered = n.name === "InlineBlockMath" ? equations.byMath.get(n.from) : null;
+          inline.push({ from: n.from, to: numbered ? numbered.labelTo : n.to, at: content ? content.from : n.from });
+          return false;
+        }
+        if (n.name === "Image") {
+          const para = drawnFigureParagraph(doc, n.node);
+          if (para) {
+            out.push({ from: doc.lineAt(para.from).from, to: doc.lineAt(para.to).to, at: para.from });
+          } else {
+            const attr = n.node.nextSibling && n.node.nextSibling.name === "Attribute" ? n.node.nextSibling : null;
+            inline.push({ from: n.from, to: attr && attr.from === n.to ? attr.to : n.to, at: n.from });
+          }
+          return false;
+        }
+        return true;
+      },
+    });
+    if (!inline.length) return out;
+    const all = out.slice();
+    inline.forEach(function (b) {
+      const within = out.some(function (o) {
+        return o.from <= b.from && b.to <= o.to;
+      });
+      if (!within) all.push(b);
+    });
+    return all.sort(function (a, b) {
+      return a.from - b.from;
+    });
+  }
+
+  // The block a drawing on the screen stands for (drawnBlocks), and where a
+  // click on it puts the caret: where a click puts it (drawingPlace), and
+  // for a picture in a line, which CodeMirror answers a plain click on, at
+  // its `![`. The preview of an equation or of a picture in a line stands
+  // after its source, at the end of it.
+  function drawnBlockOf(el, into, beside) {
+    const state = view.state;
+    let node = null;
+    let at = null;
+    const preview = el.classList.contains("mdm-math--preview") || el.classList.contains("mdm-image--preview");
+    if (preview || (el.matches("img.mdm-image") && !el.closest(".mdm-figure"))) {
+      const pos = view.posAtDOM(el);
+      const names = /^(InlineMath|InlineBlockMath|Image)$/;
+      for (let n = CM.syntaxTree(state).resolveInner(pos, preview ? -1 : 1); n && !node; n = n.parent) {
+        if (names.test(n.name)) node = n;
+      }
+    } else {
+      const place = drawingPlace(el, into, beside);
+      node = place.node;
+      at = place.at;
+    }
+    if (!node) return null;
+    const blocks = drawnBlocks(state);
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
+      if (!b.header && b.from <= node.from && node.to <= b.to) return { block: b, at: at != null ? at : b.at };
+    }
+    return null;
+  }
+
+  // The drawings whose source is open: the ones held open and the ones a
+  // caret is in. None in a document nobody is in.
+  function openDrawn(state) {
+    if (!state.field(focusField, false)) return [];
+    const held = state.field(heldField, false) || NO_HELD;
+    const ranges = state.selection.ranges;
+    return drawnBlocks(state).filter(function (b) {
+      return touchedBy(ranges, b.from, b.to) || touchedBy(held, b.from, b.to);
+    });
+  }
+
+  // Ctrl+click (Cmd on a Mac) on a drawing that is shut: shown with a caret
+  // where a click on it puts one, added to the carets, and held open with
+  // the others. In a document nobody is in, the selection it carries is not
+  // one the reader sees, and goes, as a plain click replaces it.
+  function chooseDrawing(block, at, y) {
+    const state = view.state;
+    const inside = !!state.field(focusField, false);
+    const ranges = (inside ? state.selection.ranges : []).concat([CM.EditorSelection.cursor(at)]);
+    const held = (inside ? state.field(heldField, false) || NO_HELD : NO_HELD).concat([{ from: block.from, to: block.to }]);
+    openPlaces(CM.EditorSelection.create(ranges, ranges.length - 1), held, y);
+  }
+
+  // Shift+click on a drawing: every drawing from the one the main caret is
+  // in to this one shown and held open (rangeOf), the caret this one holds
+  // made the main one, or a caret put where the click puts it.
+  function showRange(block, at, y) {
+    const span = rangeOf(view.state, block);
+    const meets = function (r) {
+      return r.from <= block.to && r.to >= block.from;
+    };
+    let main = -1;
+    for (let i = 0; i < span.ranges.length; i++) {
+      if (meets(span.ranges[i])) main = i;
+    }
+    if (main < 0) {
+      span.ranges.push(CM.EditorSelection.cursor(at));
+      main = span.ranges.length - 1;
+    }
+    openPlaces(CM.EditorSelection.create(span.ranges, main), span.held, y);
+  }
+
+  // The carets and the blocks held open once every drawing between the one
+  // the main caret is in and `block` is shown: each that has no caret in it
+  // gets one (`block` itself aside, which showRange places), and all of
+  // them are held. With the main caret in no drawing, or nobody in the
+  // document, the range is `block` alone. `block` may stand at 0 for the
+  // header that is not in the text yet, which reaches every drawing down to
+  // the caret's.
+  function rangeOf(state, block) {
+    const blocks = drawnBlocks(state);
+    const inside = !!state.field(focusField, false);
+    const head = state.selection.main.head;
+    let anchor = null;
+    if (inside) {
+      for (let i = 0; i < blocks.length && !anchor; i++) {
+        if (blocks[i].from <= head && head <= blocks[i].to) anchor = blocks[i];
+      }
+    }
+    const from = anchor ? Math.min(anchor.from, block.from) : block.from;
+    const to = anchor ? Math.max(anchor.to, block.to) : block.to;
+    const ranges = inside ? state.selection.ranges.slice() : [];
+    const held = inside ? (state.field(heldField, false) || NO_HELD).slice() : [];
+    blocks.forEach(function (b) {
+      if (b.from < from || b.to > to) return;
+      if (!touchedBy(held, b.from, b.to)) held.push({ from: b.from, to: b.to });
+      if (b.from !== block.from && !touchedBy(ranges, b.from, b.to)) ranges.push(CM.EditorSelection.cursor(b.at));
+    });
+    return { ranges: ranges, held: held };
+  }
+
+  // One drawing put away from among several open: the carets in it go and
+  // the rest stay where they are, and it is held open no longer. Where it
+  // held the only carets, one goes to the nearest drawing still open, at the
+  // head of its source, so that nothing is written where nothing is shown.
+  // The document keeps the focus, the others being open in it, and the
+  // drawing stays under the pointer as its source goes (keepDrawingAt; the
+  // title block by the host's answer, readerPlace). False with nothing else
+  // open, when it is the whole put-away of the second click that is meant
+  // (putAwayDrawing).
+  function putAwayOne(el, block) {
+    const state = view.state;
+    const meets = function (r) {
+      return r.from <= block.to && r.to >= block.from;
+    };
+    const others = openDrawn(state).filter(function (b) {
+      return !meets(b);
+    });
+    if (!others.length) return false;
+    const sel = state.selection;
+    const ranges = [];
+    let main = -1;
+    sel.ranges.forEach(function (r, i) {
+      if (meets(r)) return;
+      if (i === sel.mainIndex) main = ranges.length;
+      ranges.push(r);
+    });
+    if (!ranges.length) {
+      let near = others[0];
+      others.forEach(function (b) {
+        if (Math.abs(b.from - block.from) < Math.abs(near.from - block.from)) near = b;
+      });
+      ranges.push(CM.EditorSelection.cursor(near.at));
+    }
+    if (main < 0) main = ranges.length - 1;
+    const held = (state.field(heldField, false) || NO_HELD).filter(function (r) {
+      return !meets(r);
+    });
+    const title = el.classList.contains("mdm-title-block");
+    // The header's lines leave on the host's answer (watchHeaderCaret asks
+    // for it), and that answer holds the drawing; the source the setting
+    // keeps in view does not leave.
+    if (title && !headerPinned) holdDrawing = true;
+    const top = el.getBoundingClientRect().top;
+    view.dispatch({ selection: CM.EditorSelection.create(ranges, main), effects: setHeld.of(held) });
+    if (!title) keepDrawingAt(el, top);
+    return true;
   }
 
   // The source of the block a piece of chrome belongs to: a score, a display
@@ -21882,6 +22414,7 @@
         // Before renderField, which reads it: a field only sees the fields
         // configured ahead of it already updated.
         focusField,
+        heldField,
         hiddenLinesField,
         headerField,
         citesField,
@@ -25208,8 +25741,10 @@
     // and the header starts at the top).
     if (headerCaret !== null) {
       const key = headerCaret;
+      const joins = headerJoins;
       headerCaret = null;
-      caretAtHeaderKey(key);
+      headerJoins = false;
+      caretAtHeaderKey(key, joins);
     } else if (editorFrontMatter && !headerPinned && !wasPeeked && !inHeader(view.state)) {
       // A header the host has just opened as a click would have, with no
       // click behind it: one typed into a file that had none, which is the

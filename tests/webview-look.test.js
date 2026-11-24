@@ -5601,14 +5601,24 @@ test("a figure carries the pointer, and a click on it opens its source", { skip 
   });
   await h.page.mouse.click(box.x, box.y);
   await sleep(300);
-  const opened = await h.page.evaluate(() => ({
-    drawn: !!document.querySelector("#app img.mdm-image"),
-    head: window.__mdm.view.state.selection.main.head,
-    line: window.__mdm.view.state.doc
-      .lineAt(window.__mdm.view.state.selection.main.head)
-      .text.slice(0, 13),
-  }));
-  assert.equal(opened.drawn, false, "the figure stayed drawn with a caret in it");
+  const opened = await h.page.evaluate(() => {
+    const fig = document.querySelector("#app .mdm-figure--open");
+    const source = Array.from(document.querySelectorAll("#app .cm-line")).find((l) => l.textContent.startsWith("![A figure.]("));
+    return {
+      drawn: !!fig && !!fig.querySelector("img.mdm-image"),
+      under: !!fig && !!source && source.getBoundingClientRect().bottom <= fig.getBoundingClientRect().top + 1,
+      head: window.__mdm.view.state.selection.main.head,
+      line: window.__mdm.view.state.doc
+        .lineAt(window.__mdm.view.state.selection.main.head)
+        .text.slice(0, 13),
+    };
+  });
+  // The figure stays drawn under its open source, the preview of what is
+  // typed, as a table stays under its rows; not in place of the source,
+  // which is what the caret is in (the owner, 2026-11-21: a picture does
+  // what every drawing does; until then an open figure was not drawn).
+  assert.equal(opened.drawn, true, "the figure was not drawn under its open source");
+  assert.equal(opened.under, true, "the figure does not stand under its source");
   assert.equal(opened.line, "![A figure.](", "the caret is not in the source of the figure");
   // At the head of the source, the `![`, as a click on a table lands at the
   // head of its source; not at the end of the line the block stands after.
