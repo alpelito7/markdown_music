@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.8.1
+
+- The page has a zoom, from 50% to 300%: the Zoom row of the Page menu and
+  its steps, Ctrl with + and - or with the mouse wheel (Cmd on a Mac), and
+  Ctrl+NumPad0 for 100% (`mdm.zoom`). The words, the equations, the scores
+  and the pictures grow and shrink together, and the toolbar stays. 100% is
+  the size an export prints the page at, a little smaller than the editor
+  drew it until now: what 90% would have drawn. The exported page is set at
+  the same size, and the PDF printed from it lays that page out on the sheet.
+- A row of favorite buttons stands under the words of the bar: the outline,
+  undo and redo, the zoom with its figure beside the magnifier, the font,
+  the heading levels, bold, italic and link, the three lists and the code
+  block, equation, table and picture. Each is a row of a menu, its key in
+  its tip, and a pane too narrow for the row gathers the last of them into a
+  ». The Favorites row of the Page menu puts it away (`mdm.favorites`). The
+  font is a list under the Page menu, Latin Modern Roman or the system's
+  sans.
+- In Score navigation, Ctrl+B puts a barline in before the cursor's note and
+  Alt+B after it; at the edge of a bar they add an empty bar beside it, and
+  with a selection a bar before it or after it, in its parts. Ctrl with Left
+  and Right go back to VS Code. The + under a barline adds an empty bar, two
+  barlines with no rest, which the cursor walks into and a figure's key
+  writes in, drawn as a double barline while the cursor is out of it. An
+  empty bar in one part beside music in the others is a place of its own,
+  and a paste fills each part's.
+- `.` puts a dot on the cursor's note, rest or chord, Shift+Up a sharp on its
+  note, Shift+Down a flat and both arrows together a natural; the same key
+  again takes each off.
+- On a Mac, Control is the key for the left and Option the one for the right
+  in Score navigation, with the figures' keys, 0 and B, and the keys are
+  named as a Mac keyboard prints them: Delete, fn Delete, Return and Esc.
+- A note put in beside another under a verse goes in with nothing under it,
+  and every other note keeps its syllable, where it was refused before.
+- Shift+click on a drawing opens every drawing from the one the caret is in
+  to the one clicked, and Ctrl+click (Cmd+click on a Mac) opens one more or
+  puts one away: scores, tables, equations, pictures and the title block,
+  each with a caret, so that what is typed goes into all of them. A picture
+  open is drawn under its source.
+- A figure stands where Quarto's `fig-align` asks, in the middle by default,
+  its caption under it on the same side, or over it with
+  `fig-cap-location: top`. A table's caption is drawn where it is written,
+  over the table or under it, and MDM's `tbl-align` places a table at the
+  left or the right. A score or a block of code takes a label, a caption and
+  a place from lines at its head, `%|` in a score and `#|` in Python, as a
+  Quarto cell takes its options: a score with a `fig-` label is a numbered
+  figure, and a block of code with an `lst-` label and an `lst-cap` a
+  listing. In the editor, on the exported page and in the printed PDF alike.
+- A copy from a block's button pulses its source while the source is open:
+  the card of the code, the equation, the table, the score or the header.
+- The notes, rests and accidentals of the text are drawn in Noto Music, which
+  comes with the extension, in the editor, on the exported page and in the
+  PDF printed from it, whatever fonts the machine has.
+- A press on the toolbar no longer opens the block at the top of a document
+  nobody has clicked in yet.
+
 ## 0.8.0
 
 - Score navigation, the first row of the new Score menu, freezes the text
