@@ -381,7 +381,7 @@ test("the README shows the score mode's clip at the head of Score navigation, af
     .join(" ")
     .split(/\s+/)
     .filter((w) => /[A-Za-z0-9]/.test(w)).length;
-  assert.ok(words <= 277, `Score navigation has ${words} words; it was written with 230 on 2026-10-05, the keys of its table among them, had 235 once the drag of a line's end was named, 250 with Ctrl+B and Alt+B, a barline and a bar beside a selection (2026-11-08 and 2026-11-22), and has 277 since the dot and the signs (2026-11-16)`);
+  assert.ok(words <= 294, `Score navigation has ${words} words; it was written with 230 on 2026-10-05, the keys of its table among them, had 235 once the drag of a line's end was named, 250 with Ctrl+B and Alt+B, a barline and a bar beside a selection (2026-11-08 and 2026-11-22), 277 with the dot and the signs (2026-11-16), and has 294 since the Mac's keys for the left and the right (2026-11-21)`);
 });
 
 // The table under the clip names the keys the mode answers to, and is not
@@ -416,6 +416,18 @@ test("the README's table of Score navigation names the dot's key and the signs',
   assert.match(signs[0], /A dot .*a sharp or a flat .*a natural with both arrows held\. Pressed again, taken off\. \|$/);
 });
 
+// The keys of the barline, the owner's asks of 2026-11-08 and 2026-11-22:
+// Ctrl+B and Alt+B put a barline in before the cursor's note or after it,
+// and with a selection a bar beside it in the parts it is drawn out over.
+// And on a Mac, Control for the left and Option for the right (2026-11-21).
+test("the README names B with a selection for a bar beside it, in the row of the barline, and the Mac's keys for the left and the right", () => {
+  const mode = readmeSection(read(EXT, "README.md"), "Score navigation");
+  assert.ok(mode, "the README has no Score navigation section");
+  const bar = mode.text.split("\n").filter((l) => /^\| `Ctrl\+B` `Alt\+B` \|/.test(l));
+  assert.equal(bar.length, 1);
+  assert.match(bar[0], /, or after it\. With a selection, a bar before it or after it, in its parts\. \|$/);
+  assert.match(mode.text, /On a Mac, `Control` is the key for the left and `Option` the one for the right\./);
+});
 
 // The takes, as tools/demo-clips/clips.js holds them, whether the README
 // shows them or not: the test above reads only the alt texts the README

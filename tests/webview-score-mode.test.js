@@ -3859,6 +3859,7 @@ test("Ctrl+B and Alt+B put a barline in just before the cursor's place or just a
     await event("keyUp", mod.key, mod.code, mod.vk, 0);
   };
   for (const [what, key, code, vk, alt, after] of [
+    ["Alt+B writing the integral sign, as Option+B does on a Mac's US layout", String.fromCharCode(0x222b), "KeyB", 66, true, right],
     ["Ctrl+B on a Russian layout", String.fromCharCode(0x438), "KeyB", 66, false, left],
     ["Alt+B on Dvorak", "b", "KeyN", 66, true, right],
     ["Ctrl+B on Dvorak", "b", "KeyN", 66, false, left],
@@ -7915,10 +7916,6 @@ test("a stretch over several voices takes in the note of each that is still soun
 test("Ctrl+B and Alt+B with a stretch chosen add a bar with nothing in it before or after it, in the voice it is chosen in or in every voice it is drawn out over, the cursor going into the bar; Ctrl+Z gives the stretch back (SM103)", { skip }, async () => {
   const t = await open({ text: TRIO, scores: 1 });
   await pressMode(t.page);
-  await t.page.keyboard.press("ArrowRight");
-  await chord(t.page, ["Shift"], "ArrowRight");
-  await chord(t.page, ["Shift"], "ArrowRight");
-  assert.deepEqual([await ends2(t.page), (await stretch(t.page)).voices], [[1, 2], null]);
   const lines = async () => (await staged(t.page)).split("\n").filter((l) => /\|/.test(l));
   const was = await lines();
   // The cursor's voice, the top one: d and e of its first bar chosen.
@@ -9143,7 +9140,7 @@ function rosterState(page) {
 // there). The panel is up in all three, so the score is drawn at one width
 // and a click finds the same head.
 async function rosterRun(one, way) {
-  const h = await open({ text: one.text || ROSTER, scores: 1, clipboard: true, seed: { settings: { scorePanel: "shown" } } });
+  const h = await open({ text: one.text || ROSTER, scores: 1, clipboard: true, platform: one.platform, seed: { settings: { scorePanel: "shown" } } });
   await pressMode(h.page);
   const hs = await heads(h.page, 0);
   // The cursor on the D of the first bar, by a click on its head.
@@ -9193,6 +9190,9 @@ const WRITES = [1, 2, 3, 4, 5, 6, 7]
     { name: "score-rest", what: "under a verse", text: ROSTER_SUNG, key: (page) => page.keyboard.press("0") },
     { name: "score-chord", setup: up(2), key: (page) => page.keyboard.press("Enter") },
     { name: "score-take-out", key: (page) => page.keyboard.press("Delete") },
+    // On a Mac the row and the pad's key are Take out and move left, whose
+    // key is the one that reads "delete" there (2026-11-22).
+    { name: "score-take-back", what: "on a Mac", platform: "MacIntel", key: (page) => page.keyboard.press("Backspace") },
     // On the D the cursor stands on: a dot, and the three signs on its head.
     { name: "score-dot", key: (page) => page.keyboard.press(".") },
     { name: "score-sharp", key: (page) => chord(page, ["Shift"], "ArrowUp") },
@@ -9785,24 +9785,33 @@ test("the score panel has two faces, Buttons and Keys, chosen by the two words a
 // chosen the walk over the parts and the pick of one. A rest to the left is
 // Ctrl+Shift on a Mac, whose system takes Cmd+Shift+3, 4 and 5. Each line:
 // its name, what it says, its key on a PC and on a Mac, and whether it has
-// a glyph.
+// a glyph, and the platform a line is on where it is one's alone. A Mac's
+// keys are the names its keyboard prints, Delete for the key a page hears
+// as Backspace, fn Delete for the PC's Delete, Return and Esc (keyName); and
+// there Take out and move left is the row, with the glyph, and Take out the
+// line under it, where a PC has them the other way round (the owner's calls
+// of 2026-11-22). The two sides of a barline are one line, as a note's are
+// (his ask of the same day), where the menu has a row for each.
 const KEYS_FACE = [
   "# Notes",
   ["score-keys-note", "Note of given length", "1\u20267", "1\u20267", true],
   ["score-rest", "Rest", "0", "0", true],
   ["score-keys-rest", "Rest of given length", "Shift+1\u20267", "\u21e71\u20267", true],
   "|",
-  ["score-keys-sides", "Note to the left/right", "Ctrl/Alt+1\u20267", "\u2318/\u23251\u20267", false],
+  ["score-keys-sides", "Note to the left/right", "Ctrl/Alt+1\u20267", "\u2303/\u23251\u20267", false],
   ["score-keys-rest-sides", "Rest to the left/right", "Ctrl/Alt+Shift+1\u20267", "\u2303/\u2325\u21e71\u20267", false],
-  ["score-chord", "A note more in the chord", "Enter", "Enter", true],
-  ["score-take-out", "Take out", "Delete", "Delete", true],
-  ["score-keys-back", "Take out and move left", "Backspace", "Backspace", false],
+  ["score-chord", "A note more in the chord", "Enter", "Return", true],
+  ["score-take-out", "Take out", "Delete", null, true, "pc"],
+  ["score-keys-back", "Take out and move left", "Backspace", null, false, "pc"],
+  ["score-take-back", "Take out and move left", null, "Delete", true, "mac"],
+  ["score-keys-take-out", "Take out", null, "fn Delete", false, "mac"],
   "|",
   ["score-dot", "Dot", ".", ".", true],
   ["score-sharp", "Sharp", "Shift+\u2191", "\u21e7\u2191", true],
   ["score-flat", "Flat", "Shift+\u2193", "\u21e7\u2193", true],
   ["score-natural", "Natural", "Shift+\u2191+\u2193", "\u21e7\u2191+\u2193", true],
   "# Bars",
+  ["score-keys-bars", "Add bar to the left/right", "Ctrl/Alt+B", "\u2303/\u2325B", false],
   "# Move",
   ["score-keys-across", "Move left/right", "\u2190 \u2192", "\u2190 \u2192", false],
   ["score-keys-step", "Step up/down", "\u2191 \u2193", "\u2191 \u2193", false],
@@ -9818,7 +9827,7 @@ const KEYS_FACE = [
   ["score-copy", "Copy", "Ctrl+C", "\u2318C", false],
   ["score-cut", "Cut", "Ctrl+X", "\u2318X", false],
   ["score-paste", "Paste", "Ctrl+V", "\u2318V", false],
-  ["score-let-go", "Let go", "Escape", "Escape", false],
+  ["score-let-go", "Let go", "Escape", "Esc", false],
   "|",
   ["score-play", "Play/pause", "Space", "Space", true],
   ["score-keys-undo", "Undo", "Ctrl+Z", "\u2318Z", true],
@@ -9830,7 +9839,8 @@ const KEYS_FACE = [
 // have them; and a line that is a row says what the row says, its glyph
 // included: a row of the Score menu, or for Undo and Redo the Edit menu's,
 // whose binding the two lines read. Every row of the Score menu's three
-// lists is a line of it, but for the seven figures, which are the one line.
+// lists is a line of it, but for the seven figures, which are the one line,
+// and the two sides of a barline, one line.
 test("the Keys face names every key of the mode as the bar writes it, and a key that has a row says what its row says (SM119)", { skip }, async () => {
   for (const [platform, column] of [
     [undefined, 2],
@@ -9841,9 +9851,10 @@ test("the Keys face names every key of the mode as the bar writes it, and a key 
     await pressMode(h.page);
     assert.deepEqual((await panelFace(h.page)).shown, ["keys"], where);
     const lines = await keyLines(h.page);
+    const face = KEYS_FACE.filter((l) => typeof l === "string" || !l[5] || l[5] === (platform ? "mac" : "pc"));
     assert.deepEqual(
       lines.map((l) => (typeof l === "string" ? l : [l.line, l.name, l.key, l.glyph !== ""])),
-      KEYS_FACE.map((l) => (typeof l === "string" ? l : [l[0], l[1], l[column], l[4]])),
+      face.map((l) => (typeof l === "string" ? l : [l[0], l[1], l[column], l[4]])),
       where + ": the Keys face"
     );
     const said = lines.filter((l) => typeof l !== "string");
@@ -9855,7 +9866,9 @@ test("the Keys face names every key of the mode as the bar writes it, and a key 
       assert.deepEqual([l.name, l.key, l.glyph], [s.name, s.key, s.glyph], where + ": " + l.line + " does not say on the Keys face what its row says");
     }
     // The lines that are rows: every one of the Score menu's lists but the
-    // figures, the play, and the two of the Edit menu.
+    // figures and the two sides of a barline, the play, and the two of the
+    // Edit menu.
+    assert.equal(twins, 29 - 7 - 2 + 1 + 2, where + ": the lines that are rows");
     // The line of the seven figures wears the quarter note's glyph, the very
     // one of the quarter's row.
     assert.equal(said.find((l) => l.line === "score-keys-note").glyph, (await barState(h.page, "score-note-3")).glyph, where + ": the line of the figures does not wear the quarter note");
@@ -9866,8 +9879,8 @@ test("the Keys face names every key of the mode as the bar writes it, and a key 
     const named = said.map((l) => l.line);
     assert.deepEqual(
       rows.filter((r) => named.indexOf(r) < 0),
-      [1, 2, 3, 4, 5, 6, 7].map((n) => "score-note-" + n),
-      where + ": a row of the Score menu is not on the Keys face, or a figure is a line of its own"
+      [1, 2, 3, 4, 5, 6, 7].map((n) => "score-note-" + n).concat(["score-bar-before", "score-bar-after"]),
+      where + ": a row of the Score menu is not on the Keys face, or a figure or a side of a pair is a line of its own"
     );
     assert.deepEqual(h.errors, []);
     await h.close();
@@ -9889,7 +9902,7 @@ test("a line of the Keys face is read and not pressed: a press on every one chan
   const before = await rosterState(h.page);
   const asked = (await setSettingPosts(h.page)).length;
   const names = (await keyLines(h.page)).filter((l) => typeof l !== "string").map((l) => l.line);
-  assert.equal(names.length, KEYS_FACE.filter((l) => typeof l !== "string").length);
+  assert.equal(names.length, KEYS_FACE.filter((l) => typeof l !== "string" && l[5] !== "mac").length);
   for (const name of names) {
     const at = '#app .mdm-score-panel [data-line="' + name + '"]';
     const look = await h.page.$eval(at, (el) => ({ tag: el.tagName, role: el.getAttribute("role"), cursor: getComputedStyle(el).cursor, focus: el.tabIndex }));
@@ -10549,6 +10562,52 @@ test("the natural's two arrows are one change and one step of the history; the a
   assert.deepEqual(h.errors, []);
   await h.close();
 });
+
+// On a Mac the left is Control and the right Option (the owner's call of
+// 2026-11-21, sideOf in main.js), for the figures' keys, 0 and B, and Cmd is
+// the key of everything else as Ctrl is on a PC: no side there.
+test("on a Mac Control puts a note, a rest and a barline to the left and Option to the right, and Cmd puts nothing (SM137)", { skip }, async () => {
+  const source = ["X:1", "M:4/4", "L:1/4", "K:C", "A B c d | e f g a |]"].join("\n");
+  const h = await open({ text: ["Mac.", "", "```abc", source, "```", ""].join("\n"), scores: 1, platform: "MacIntel" });
+  await pressMode(h.page);
+  const tune = async () => (await staged(h.page)).split("\n")[4];
+  const plain = "A B c d | e f g a |]";
+  const back = async (what, times) => {
+    for (let i = 0; i < (times || 1); i++) await chord(h.page, ["Meta"], "z");
+    await sleep(120);
+    assert.equal(await tune(), plain, what + ": Cmd+Z");
+  };
+  // On the B, at the C's step (the cursor keeps the A's step as it walks
+  // onto the B, two steps under the C): a note put in is a C, which tells
+  // its side.
+  await press(h.page, "ArrowRight");
+  await press(h.page, "ArrowUp", 2);
+  assert.equal(await placeText(h.page), "B");
+  for (const [mods, key, want, what] of [
+    [["Control"], "3", "A c B c d | e f g a |]", "Control+3, a quarter to the left"],
+    [["Alt"], "3", "A B c c d | e f g a |]", "Option+3, a quarter to the right"],
+    [["Control", "Shift"], "3", "A z B c d | e f g a |]", "Control+Shift+3, a quarter rest to the left"],
+    [["Alt", "Shift"], "3", "A B z c d | e f g a |]", "Option+Shift+3, a quarter rest to the right"],
+    [["Control"], "b", "A | B c d | e f g a |]", "Control+B, a barline to the left"],
+    [["Alt"], "b", "A B | c d | e f g a |]", "Option+B, a barline to the right"],
+  ]) {
+    assert.equal(await placeText(h.page), "B", what + ": the cursor is not on the B");
+    await chord(h.page, mods, key);
+    await sleep(120);
+    assert.equal(await tune(), want, what);
+    await back(what);
+  }
+  // Cmd is no side there: nothing written, with B or a figure's key.
+  for (const key of ["b", "3"]) {
+    await chord(h.page, ["Meta"], key);
+    await sleep(80);
+    assert.equal(await tune(), plain, "Cmd+" + key);
+  }
+  assert.deepEqual(h.errors, []);
+  await h.close();
+});
+
+
 // A bar with nothing in it inside an ending is drawn tight as anywhere else
 // (the owner's report of 2026-11-22, "después de poner el 1 en el indicador
 // de repetición, se pierde la opción de squeeze la doble barra"), and the

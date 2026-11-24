@@ -3869,6 +3869,25 @@ test("the search is a row under the toolbar that counts its matches and keeps it
   await h.close();
 });
 
+// The tips of the row's arrows and of its close name their keys as the
+// rows of the menus do (keyLabel), and so on a Mac as its keyboard prints
+// them: they were written out as a PC's, Shift+Enter and Escape, where a
+// Mac reads \u21e7Return and Esc (2026-11-22).
+test("the search row's tips name its keys as the platform writes them", { skip }, async () => {
+  for (const [platform, want] of [
+    [undefined, ["Previous match (Shift+Enter)", "Next match (Enter)", "Close (Escape)"]],
+    ["MacIntel", ["Previous match (\u21e7Return)", "Next match (Return)", "Close (Esc)"]],
+  ]) {
+    const h = await open({ text: "A word.\n", scores: 0, platform });
+    await pressBar(h.page, "find");
+    await h.page.waitForSelector("#app .mdm-search");
+    const tips = await h.page.$$eval('#app .mdm-search [name="prev"], #app .mdm-search [name="next"], #app .mdm-search [name="close"]', (els) => els.map((el) => el.getAttribute("aria-label")));
+    assert.deepEqual(tips, want, platform || "a PC");
+    assert.deepEqual(h.errors, []);
+    await h.close();
+  }
+});
+
 // The row is under the toolbar's drop-downs and over the text. CodeMirror's
 // base theme stacks its panels at 300, and the theme menu, which hung from
 // the toolbar (z-index 2), opened under the search row (seen 2026-09-19);
@@ -6504,8 +6523,8 @@ const ROWS = [
   ["ordered-list", "Ordered list", null, null, true],
   ["task-list", "Task list", "Ctrl+Shift+T", "\u2325\u2318T", true],
   ["quote", "Quote", null, null, true],
-  ["line-break", "Line break", "Shift+Enter", "\u21e7Enter", false],
-  ["leave-block", "Out of the block", "Ctrl+Enter", "\u2318Enter", false],
+  ["line-break", "Line break", "Shift+Enter", "\u21e7Return", false],
+  ["leave-block", "Out of the block", "Ctrl+Enter", "\u2318Return", false],
   ["insert-equation", "Equation", null, null, true],
   ["insert-equation-block", "Equation block", null, null, true],
   ["insert-table", "Table", null, null, true],
@@ -6594,11 +6613,15 @@ test("every row says its name, and the key it shares with the keyboard as the pl
 // the chord and what takes out as keys of its pad, and the rest as the rows
 // they are in the menu; the legends are not there, being a help and no
 // buttons. On Keys, every one of them as a line, but the seven figures,
-// which are one line there (SM119 holds that face whole). Whatever stands in
+// which are one line there, as the two sides of a barline are (SM119
+// holds that face whole). Whatever stands in
 // two places says the same in both.
 const SCORE_ROWS = [
   // name, what it says, its keys on a PC and on a Mac, whether it has a
-  // glyph, and what it is: a command, a key of the panel's pad, or a legend
+  // glyph, and what it is: a command, a key of the panel's pad, or a legend;
+  // and the platform it is on where it is one's alone: what takes out with
+  // the glyph of the key is Take out on a PC and Take out and move left on
+  // a Mac (2026-11-22)
   ["score-note-1", "Whole note", "1", "1", true, "pad"],
   ["score-note-2", "Half note", "2", "2", true, "pad"],
   ["score-note-3", "Quarter note", "3", "3", true, "pad"],
@@ -6608,13 +6631,15 @@ const SCORE_ROWS = [
   ["score-note-7", "64th note", "7", "7", true, "pad"],
   ["score-rest", "Rest", "0", "0", true, "pad"],
   ["score-keys-rest", "Rest of given length", "Shift+1\u20267", "\u21e71\u20267", true, "legend"],
-  ["score-keys-sides", "Note to the left/right", "Ctrl/Alt+1\u20267", "\u2318/\u23251\u20267", false, "legend"],
-  ["score-chord", "A note more in the chord", "Enter", "Enter", true, "pad"],
-  ["score-take-out", "Take out", "Delete", "Delete", true, "pad"],
+  ["score-keys-sides", "Note to the left/right", "Ctrl/Alt+1\u20267", "\u2303/\u23251\u20267", false, "legend"],
+  ["score-chord", "A note more in the chord", "Enter", "Return", true, "pad"],
+  ["score-take-out", "Take out", "Delete", null, true, "pad", "pc"],
+  ["score-take-back", "Take out and move left", null, "Delete", true, "pad", "mac"],
   ["score-dot", "Dot", ".", ".", true, "pad"],
   ["score-sharp", "Sharp", "Shift+\u2191", "\u21e7\u2191", true, "pad"],
   ["score-flat", "Flat", "Shift+\u2193", "\u21e7\u2193", true, "pad"],
   ["score-natural", "Natural", "Shift+\u2191+\u2193", "\u21e7\u2191+\u2193", true, "pad"],
+  ["score-bar-before", "Add bar to the left", "Ctrl+B", "\u2303B", true, "command"],
   ["score-bar-after", "Add bar to the right", "Alt+B", "\u2325B", true, "command"],
   ["score-keys-across", "Move left/right", "\u2190 \u2192", "\u2190 \u2192", false, "legend"],
   ["score-keys-step", "Step up/down", "\u2191 \u2193", "\u2191 \u2193", false, "legend"],
@@ -6626,7 +6651,7 @@ const SCORE_ROWS = [
   ["score-copy", "Copy", "Ctrl+C", "\u2318C", false, "command"],
   ["score-cut", "Cut", "Ctrl+X", "\u2318X", false, "command"],
   ["score-paste", "Paste", "Ctrl+V", "\u2318V", false, "command"],
-  ["score-let-go", "Let go", "Escape", "Escape", false, "command"],
+  ["score-let-go", "Let go", "Escape", "Esc", false, "command"],
 ];
 
 test("the rows under Notes, Bars and Move and select name the keys of the score mode, a legend its pair or its run, and the score panel says the same", { skip }, async () => {
@@ -6638,7 +6663,8 @@ test("the rows under Notes, Bars and Move and select name the keys of the score 
     const said = [];
     const glyphs = new Map();
     const lines = (await keyLines(h.page)).filter((l) => typeof l !== "string");
-    for (const row of SCORE_ROWS) {
+    const rows = SCORE_ROWS.filter((row) => !row[6] || row[6] === (platform ? "mac" : "pc"));
+    for (const row of rows) {
       const s = await barState(h.page, row[0]);
       assert.ok(s, row[0] + " is not under the Score menu");
       assert.equal(s.under, "menu-score", row[0]);
@@ -6662,13 +6688,15 @@ test("the rows under Notes, Bars and Move and select name the keys of the score 
       }
       // And on its Keys face, a line that says the same, but a figure's.
       const line = lines.find((l) => l.line === row[0]);
-      if (/^score-note-/.test(row[0])) assert.equal(line, undefined, row[0] + " is a line of its own on the Keys face");
+      // The figures are one line there, and the two sides of a barline one
+      // line (SM119 reads those).
+      if (/^score-(note|bar)-/.test(row[0])) assert.equal(line, undefined, row[0] + " is a line of its own on the Keys face");
       else {
         assert.ok(line, row[0] + " is not on the Keys face");
         assert.deepEqual([line.name, line.key, line.glyph], [s.name, s.key, s.glyph], row[0] + " does not say on the Keys face what it says in the menu");
       }
     }
-    assert.deepEqual(said, SCORE_ROWS.map((row) => [row[0], row[1], row[column], row[4]]), platform || "a PC");
+    assert.deepEqual(said, rows.map((row) => [row[0], row[1], row[column], row[4]]), platform || "a PC");
     // Every row of the three submenus is in that list, and so is every
     // control of the panel but its three switches (the two at its head and
     // the playhead's), the two words over its faces and the play: the
@@ -6678,11 +6706,11 @@ test("the rows under Notes, Bars and Move and select name the keys of the score 
       '#app .mdm-toolbar [data-type="score-notes"] + .mdm-menu > [data-type], #app .mdm-toolbar [data-type="score-bars"] + .mdm-menu > [data-type], #app .mdm-toolbar [data-type="score-moves"] + .mdm-menu > [data-type]',
       (els) => els.map((el) => el.getAttribute("data-type"))
     );
-    assert.deepEqual(under, SCORE_ROWS.map((row) => row[0]), platform || "a PC");
+    assert.deepEqual(under, rows.map((row) => row[0]), platform || "a PC");
     const onPanel = await h.page.$$eval("#app .mdm-score-panel [data-type]", (els) => els.map((el) => el.getAttribute("data-type")));
     assert.deepEqual(
       onPanel.slice().sort(),
-      SCORE_ROWS.filter((row) => row[5] !== "legend")
+      rows.filter((row) => row[5] !== "legend")
         .map((row) => row[0])
         .concat(["mdm-score-navigation", "mdm-score-panel", "score-face-buttons", "score-face-keys", "score-play", "mdm-follow"])
         .sort(),

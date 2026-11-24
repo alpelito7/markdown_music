@@ -15323,7 +15323,9 @@
         command(view);
       };
     };
-    const close = button("close", "Close (Escape)", SEARCH_ICONS.close, function () {
+    // The keys in a tip as the rows of the menus write them (keyLabel), so
+    // that a Mac reads Esc and Return here as well (2026-11-22).
+    const close = button("close", "Close (" + keyLabel({ key: "Escape" }) + ")", SEARCH_ICONS.close, function () {
       CM.closeSearchPanel(view);
       view.focus();
     });
@@ -15335,8 +15337,8 @@
       group([
         findBox,
         count,
-        button("prev", "Previous match (Shift+Enter)", SEARCH_ICONS.prev, act(CM.findPrevious)),
-        button("next", "Next match (Enter)", SEARCH_ICONS.next, act(CM.findNext)),
+        button("prev", "Previous match (" + keyLabel({ key: "Shift-Enter" }) + ")", SEARCH_ICONS.prev, act(CM.findPrevious)),
+        button("next", "Next match (" + keyLabel({ key: "Enter" }) + ")", SEARCH_ICONS.next, act(CM.findNext)),
         button("select", "Select all matches", SEARCH_ICONS.select, act(CM.selectMatches)),
       ])
     );
@@ -21031,6 +21033,8 @@
   //                     (Ctrl) or just after it (Alt), in its voice; with
   //                     a stretch chosen, a bar beside it in its voices
   //                     (addScoreBarBeside). On a Mac the left is Control and
+  //                     the right Option, here and with the figures' keys
+  //                     (sideOf)
   //   Ctrl+1 to 7       a note of that figure at the cursor's step, put in
   //   Alt+1 to 7        before the cursor's place (Ctrl) or after it (Alt)
   //   Ctrl+0, Alt+0     the same with a rest, as long as the cursor's place
@@ -21518,6 +21522,32 @@
     return /^Numpad[0-9]$/.test(e.code || "") && !/^[0-9]$/.test(e.key) && keyState(e, "NumLock");
   }
 
+  // Which side a key of the pairs puts something on, for the figures' keys,
+  // 0 and B: "before", "after", or "" for neither or both. The owner's rule
+  // of 2026-10-03 on a PC, Ctrl for the left and Alt for the right, as the
+  // two stand on its keyboard. On a Mac Control for the left and Option for
+  // the right, which stand there in that order, left of the space bar, and
+  // Cmd the key of everything else (copy, paste, undo, the staves) as Ctrl
+  // is on a PC: his call of 2026-11-21, "aplica control/option para todos
+  // los atajos que tengan izquierda/derecha". Until that day a Mac read Cmd
+  // as Ctrl here, the left, and Option as the right, Cmd standing right of
+  // Option there; and for an hour that afternoon Option and Cmd were the
+  // two, until Cmd+Shift with 3, 4 and 5, the rests of a quarter, an eighth
+  // and a sixteenth to the right, turned out to be macOS's screenshots,
+  // which a page never hears. Cmd with B or a digit is no side, and goes on
+  // to VS Code.
+  function sideOf(e) {
+    if (/Mac/.test(navigator.platform)) {
+      if (e.ctrlKey && !e.altKey && !e.metaKey) return "before";
+      if (e.altKey && !e.ctrlKey && !e.metaKey) return "after";
+      return "";
+    }
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && !e.altKey) return "before";
+    if (e.altKey && !ctrl) return "after";
+    return "";
+  }
+
   function scoreKeys(e) {
     if (!scoreMode) return;
     const active = document.activeElement;
@@ -21639,10 +21669,12 @@
     // is VS Code's build task), nor with Ctrl and Alt together, which is no
     // side, nor with AltGr, which makes it another key, as for the figures'
     // keys.
-    if (letterKey(e, "b") && !e.shiftKey && ctrl !== e.altKey && !keyState(e, "AltGraph")) {
+    // On a Mac, Control+B to the left and Option+B to the right (sideOf).
+    const barSide = letterKey(e, "b") && !e.shiftKey && !keyState(e, "AltGraph") ? sideOf(e) : "";
+    if (barSide) {
       takeScoreKey(e);
       // A barline put in is one press, as a note written is.
-      if (!e.repeat) scoreAddsBarline(e.altKey ? "after" : "before");
+      if (!e.repeat) scoreAddsBarline(barSide);
       return;
     }
     // Ctrl with Up and Down (the owner's asks of 2026-10-02, the third
@@ -21685,7 +21717,8 @@
     const code = e.code || "";
     const digit = /^Digit([0-7])$/.exec(code) || (pad || /^[0-9]$/.test(e.key) ? /^Numpad([0-7])$/.exec(code) : null);
     const figured = digit ? FIGURE_KEYS[digit[1]] : 0;
-    const side = ctrl === e.altKey ? "" : e.altKey ? "after" : "before";
+    // On a Mac Control and Option, the left and the right (sideOf).
+    const side = sideOf(e);
     const shift = e.shiftKey || pad;
     if (digit && !keyState(e, "AltGraph") && (shift ? figured && (side || bare) : side)) {
       takeScoreKey(e);
@@ -23479,8 +23512,24 @@
       })
       .join("");
   }
+  // The key itself, past its modifiers. On a Mac, under the name its
+  // keyboard prints on it, the owner's ask of 2026-11-22: the key that reads
+  // "delete" there is the one a page hears as Backspace, the PC's Delete is
+  // fn with it (a MacBook has no key of its own for it), Enter is the key
+  // that reads "return" and Escape the one that reads "esc". VS Code writes
+  // the four as a PC does on a Mac as well, and the Keys face read
+  // "Backspace" for a key no Mac keyboard has and "Delete" for the other
+  // one. fn is a word with a space after it, as the owner wrote it, and no
+  // plus: no other key of the panel shows one after a modifier.
+  const MAC_KEY_NAMES = { Backspace: "Delete", Delete: "fn Delete", Enter: "Return", Escape: "Esc" };
+  function keyName(name, mac) {
+    return KEY_SIGNS[name] || (mac && MAC_KEY_NAMES[name]) || name;
+  }
   function keyLabel(bind) {
     const k = keyParts(bind);
+    // A key held with another, `with`, as the natural's two arrows are: the
+    // two with a plus between, Shift+↑+↓.
+    return modsLabel(k) + keyName(k.key, k.mac) + (bind.with ? "+" + keyName(bind.with, k.mac) : "");
   }
 
   // Two keys that differ in their modifiers alone, written as one the way
@@ -23504,7 +23553,7 @@
     const shared = modsLabel(x, function (m) {
       return y[m];
     });
-    return apart(x, y).replace(/\+$/, "") + "/" + apart(y, x) + shared + (KEY_SIGNS[x.key] || x.key);
+    return apart(x, y).replace(/\+$/, "") + "/" + apart(y, x) + shared + keyName(x.key, x.mac);
   }
 
   // And as aria-keyshortcuts wants it, for whoever reads the bar without
@@ -23628,6 +23677,8 @@
   function keysLabel(keys) {
     const first = keys.or ? eitherLabel(keys.first, keys.or) : keyLabel(keys.first);
     if (keys.to) return first + "\u2026" + keys.to;
+    // Two sides and no more, Ctrl/Alt+B (the Keys face's pairs).
+    if (!keys.then) return first;
     return first + " " + (KEY_SIGNS[keys.then] || keys.then);
   }
 
@@ -23870,6 +23921,8 @@
   let scoreRows = null;
   function scoreRoster() {
     if (scoreRows) return scoreRows;
+    // A Mac's, read as keyParts reads it (CodeMirror's own test for Mod).
+    const mac = /Mac/.test(navigator.platform);
     const off = function () {
       return !scoreMode;
     };
@@ -23975,7 +24028,8 @@
         // From 1: Ctrl or Alt with 0 puts in a rest, as long as the
         // cursor's place (scoreWrites), and no note (the owner's catch of
         // 2026-10-15: the run had started at 0).
-        { name: "score-keys-sides", tip: "Note to the left/right", keys: { first: { key: "Mod-1" }, or: { key: "Alt-1" }, to: "7" } },
+        // On a Mac Control for the left and Option for the right (sideOf).
+        { name: "score-keys-sides", tip: "Note to the left/right", keys: { first: { key: "Mod-1", mac: "Ctrl-1" }, or: { key: "Alt-1" }, to: "7" } },
         pad(
           command(
             "score-chord",
@@ -23985,18 +24039,38 @@
               scoreWrites("head");
             },
             CHORD_ICON
-          )
+          ),
+          1
         ),
+        // What takes out, a row here and a key of the pad, with the glyph
+        // of the key that takes out: Take out (Delete) on a PC, and on a Mac
+        // Take out and move left, whose key is the one that reads "delete"
+        // there and that a page hears as Backspace (keyName), the owner's
+        // call of 2026-11-22 ("el ícono debería estar en Take out and move
+        // left"). The other of the two is a line of the Keys face alone
+        // (scoreKeysFace), as Take out and move left was on every platform
+        // until then.
         pad(
-          command(
-            "score-take-out",
-            "Take out",
-            "Delete",
-            function () {
-              scoreWrites("out");
-            },
-            TAKE_OUT_ICON
-          )
+          mac
+            ? command(
+                "score-take-back",
+                "Take out and move left",
+                "Backspace",
+                function () {
+                  scoreWrites("back");
+                },
+                TAKE_OUT_ICON
+              )
+            : command(
+                "score-take-out",
+                "Take out",
+                "Delete",
+                function () {
+                  scoreWrites("out");
+                },
+                TAKE_OUT_ICON
+              ),
+          1
         ),
         "|",
         // The dot and the three signs, the owner's ask of 2026-11-16
@@ -24018,26 +24092,33 @@
         pad(signEntry("score-natural", "Natural", "=", { key: "Shift-ArrowUp", with: "ArrowDown" }, NATURAL_ICON), 2),
       ]),
       // Ctrl+B and Alt+B: a barline to the left and to the right of the
-      // cursor's place, as for a note (scoreKeys). The names are the ones the
-      // owner gave the bar of rest these rows added until 2026-11-08.
+      // cursor's place, as for a note (scoreKeys), and on a Mac Control+B and
+      // Option+B (sideOf). The names are the ones the owner gave the bar of rest
+      // these rows added until 2026-11-08.
       bars: [
-        command(
-          "score-bar-before",
-          "Add bar to the left",
-          "Mod-b",
-          function () {
-            scoreAddsBarline("before");
-          },
-          BAR_BEFORE_ICON
+        Object.assign(
+          command(
+            "score-bar-before",
+            "Add bar to the left",
+            "Mod-b",
+            function () {
+              scoreAddsBarline("before");
+            },
+            BAR_BEFORE_ICON
+          ),
+          { bind: { key: "Mod-b", mac: "Ctrl-b" } }
         ),
-        command(
-          "score-bar-after",
-          "Add bar to the right",
-          "Alt-b",
-          function () {
-            scoreAddsBarline("after");
-          },
-          BAR_AFTER_ICON
+        Object.assign(
+          command(
+            "score-bar-after",
+            "Add bar to the right",
+            "Alt-b",
+            function () {
+              scoreAddsBarline("after");
+            },
+            BAR_AFTER_ICON
+          ),
+          { bind: { key: "Alt-b" } }
         ),
       ],
       moves: [
@@ -24126,6 +24207,26 @@
       if (!named[name]) console.error("scoreKeysFace: no row of the mode is named " + name);
       return named[name] || null;
     };
+    // Two rows whose keys differ in their modifiers alone, the left and the
+    // right of a thing, on one line as the two sides of a note are, their
+    // keys read off the rows so that the line cannot name others: the
+    // owner's ask of 2026-11-22 ("compacta ... Tie to the left/right, Add
+    // bar to the left/right"). Here only: in the menu and on the Buttons
+    // face each side is a control of its own. No glyph, as the note's and
+    // the rest's lines have none, where each of the two rows wears its own.
+    const pair = function (name, tip, left, right) {
+      const a = row(left);
+      const b = row(right);
+      return a && b ? { name: name, tip: tip, keys: { first: a.bind, or: b.bind } } : null;
+    };
+    // The two that take out, the row with its glyph first and the other
+    // under it: on a PC Take out and then Take out and move left, as they
+    // stood, and on a Mac the other way round, the owner's order of
+    // 2026-11-22, where the key that reads "delete" moves left and Take out
+    // takes fn with it (keyName).
+    const takeOut = /Mac/.test(navigator.platform)
+      ? [row("score-take-back"), { name: "score-keys-take-out", tip: "Take out", bind: { key: "Delete" } }]
+      : [row("score-take-out"), { name: "score-keys-back", tip: "Take out and move left", bind: { key: "Backspace" } }];
     scoreKeyLines = [
       { title: "Notes" },
       // With the quarter note's glyph, the owner's ask of 2026-10-14
@@ -24137,23 +24238,22 @@
       "|",
       row("score-keys-sides"),
       // Its twin, on one line as it is: Ctrl for the left and Alt for the
-      // right, with Shift. The left with Ctrl on a Mac as well, and not
-      // Cmd: the system takes Cmd+Shift+3, 4 and 5 for its screenshots
-      // (BLOCK_MOD), which are the quarter, the eighth and the sixteenth,
-      // and the mode answers to Ctrl there as well (scoreKeys). Found by a
-      // second reading of the code, 2026-10-14.
+      // right, with Shift, and on a Mac Control and Option (sideOf). Not Cmd
+      // there: macOS takes Cmd+Shift+3, 4 and 5 for its screenshots
+      // (BLOCK_MOD) before the page hears them, which are the quarter, the
+      // eighth and the sixteenth (found by a second reading of the code,
+      // 2026-10-14, and met again on 2026-11-21).
       { name: "score-keys-rest-sides", tip: "Rest to the left/right", keys: { first: { key: "Mod-Shift-1", mac: "Ctrl-Shift-1" }, or: { key: "Shift-Alt-1" }, to: "7" } },
       row("score-chord"),
-      row("score-take-out"),
-      { name: "score-keys-back", tip: "Take out and move left", bind: { key: "Backspace" } },
+      takeOut[0],
+      takeOut[1],
       "|",
       row("score-dot"),
       row("score-sharp"),
       row("score-flat"),
       row("score-natural"),
       { title: "Bars" },
-      row("score-bar-before"),
-      row("score-bar-after"),
+      pair("score-keys-bars", "Add bar to the left/right", "score-bar-before", "score-bar-after"),
       { title: "Move" },
       row("score-keys-across"),
       row("score-keys-step"),

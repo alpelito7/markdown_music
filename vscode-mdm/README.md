@@ -41,6 +41,8 @@ The text is the file, and the editor reads it as the export does: Pandoc's Markd
 | `Space` | Play from the cursor, or the selection alone. |
 | `Ctrl+B` `Alt+B` | Put a barline in before the cursor's note, or after it. With a selection, a bar before it or after it, in its parts. |
 
+On a Mac, `Control` is the key for the left and `Option` the one for the right.
+
 With the pointer on a score, two arrows at the end of each line send its last bar down or bring the next one up, or drag to any barline, and a `+` under a barline adds a bar.
 
 ## The toolbar
